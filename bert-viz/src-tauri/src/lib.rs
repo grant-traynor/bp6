@@ -150,29 +150,111 @@ fn create_bead(new_bead: Bead) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Project {
+    pub name: String,
+    pub path: String,
+}
+
+fn get_favorites_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let dir = PathBuf::from(home).join(".bert-viz");
+    if !dir.exists() {
+        std::fs::create_dir_all(&dir).unwrap();
+    }
+    dir.join("favorites.jsonl")
+}
+
+#[tauri::command]
+fn get_favorite_projects() -> Result<Vec<Project>, String> {
+    let path = get_favorites_path();
+    if !path.exists() { return Ok(Vec::new()); }
+    
+    let file = File::open(path).map_err(|e| e.to_string())?;
+    let reader = BufReader::new(file);
+    let mut projects = Vec::new();
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        if line.trim().is_empty() { continue; }
+        let project: Project = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+        projects.push(project);
+    }
+    Ok(projects)
+}
+
+#[tauri::command]
+fn add_favorite_project(project: Project) -> Result<(), String> {
+    let path = get_favorites_path();
+    let mut file = OpenOptions::new().append(true).create(true).open(path).map_err(|e| e.to_string())?;
+    let line = serde_json::to_string(&project).map_err(|e| e.to_string())?;
+    writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_favorite_project(name: String) -> Result<(), String> {
+    let path = get_favorites_path();
+    let projects = get_favorite_projects()?;
+    let filtered: Vec<Project> = projects.into_iter().filter(|p| p.name != name).collect();
+    
+    let mut file = File::create(path).map_err(|e| e.to_string())?;
+    for p in filtered {
+        let line = serde_json::to_string(&p).map_err(|e| e.to_string())?;
+        writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn open_project(path: String) -> Result<(), String> {
+    std::env::set_current_dir(&path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_current_dir() -> Result<String, String> {
+    std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_beads, update_bead, create_bead])
+        .invoke_handler(tauri::generate_handler![
+            get_beads, update_bead, create_bead, 
+            get_favorite_projects, add_favorite_project, remove_favorite_project, open_project,
+            get_current_dir
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
-            let path = find_beads_file().expect("Failed to find beads file during setup");
-            let parent_path = path.parent().unwrap().to_path_buf();
+            let fav_handle = app.handle().clone();
+            
+            // Watch beads file
+            if let Some(path) = find_beads_file() {
+                let parent_path = path.parent().unwrap().to_path_buf();
+                let mut watcher = notify::RecommendedWatcher::new(move |res| {
+                    match res {
+                        Ok(_) => { let _ = handle.emit("beads-updated", ()); },
+                        Err(e) => println!("watch error: {:?}", e),
+                    }
+                }, Config::default()).unwrap();
+                watcher.watch(&parent_path, RecursiveMode::Recursive).unwrap();
+                std::mem::forget(watcher);
+            }
 
-            let mut watcher = notify::RecommendedWatcher::new(move |res| {
+            // Watch favorites file
+            let fav_path = get_favorites_path();
+            let mut fav_watcher = notify::RecommendedWatcher::new(move |res| {
                 match res {
-                    Ok(_) => {
-                        let _ = handle.emit("beads-updated", ());
-                    },
+                    Ok(_) => { let _ = fav_handle.emit("favorites-updated", ()); },
                     Err(e) => println!("watch error: {:?}", e),
                 }
             }, Config::default()).unwrap();
-
-            watcher.watch(&parent_path, RecursiveMode::Recursive).unwrap();
-            
-            // Keep watcher alive by moving it to app state or just leaking it for simplicity in this small app
-            std::mem::forget(watcher);
+            fav_watcher.watch(&fav_path.parent().unwrap(), RecursiveMode::Recursive).unwrap();
+            std::mem::forget(fav_watcher);
 
             Ok(())
         })

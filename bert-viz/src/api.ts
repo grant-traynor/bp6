@@ -36,6 +36,32 @@ export interface WBSNode extends Bead {
   isCritical?: boolean;
 }
 
+export interface Project {
+  name: string;
+  path: string;
+}
+
+export async function fetchProjects(): Promise<Project[]> {
+  try {
+    return await invoke<Project[]>("get_favorite_projects");
+  } catch (error) {
+    console.error("Failed to fetch projects:", error);
+    return [];
+  }
+}
+
+export async function addProject(project: Project): Promise<void> {
+  await invoke("add_favorite_project", { project });
+}
+
+export async function removeProject(name: string): Promise<void> {
+  await invoke("remove_favorite_project", { name });
+}
+
+export async function openProject(path: string): Promise<void> {
+  await invoke("open_project", { path });
+}
+
 export async function fetchBeads(): Promise<Bead[]> {
   try {
     return await invoke<Bead[]>("get_beads");

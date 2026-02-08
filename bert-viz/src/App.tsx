@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { ListTree, Settings, ChevronRight, ChevronDown, Package, CheckCircle2, Circle, Clock, X, User, Tag, Save, Edit3, Trash2, Plus, Flame, Star, Sun, Moon } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { ListTree, Settings, ChevronRight, ChevronDown, Package, CheckCircle2, Circle, Clock, X, User, Tag, Save, Edit3, Trash2, Plus, Flame, Star, Sun, Moon, FolderOpen } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 import { clsx, type ClassValue } from "clsx";
-import { fetchBeads, buildWBSTree, calculateGanttLayout, updateBead, createBead, type WBSNode, type Bead, type GanttItem, type GanttLayout } from "./api";
+import { fetchBeads, buildWBSTree, calculateGanttLayout, updateBead, createBead, type WBSNode, type Bead, type GanttItem, type GanttLayout, type Project, fetchProjects, addProject, removeProject, openProject } from "./api";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -167,6 +168,8 @@ const WBSTreeList = ({ nodes, depth = 0, onToggle, onClick }: { nodes: WBSNode[]
 
 function App() {
   const [beads, setBeads] = useState<Bead[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
   const [tree, setTree] = useState<WBSNode[]>([]);
   const [ganttLayout, setGanttLayout] = useState<GanttLayout>({ items: [], connectors: [], rowCount: 0 });
   const [loading, setLoading] = useState(true);
@@ -189,6 +192,26 @@ function App() {
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
+
+  const loadProjects = useCallback(async () => {
+    const data = await fetchProjects();
+    setProjects(data);
+  }, []);
+
+  const handleOpenProject = async (path: string) => {
+    await openProject(path);
+    setCurrentProjectPath(path);
+    loadData();
+  };
+
+  const handleAddCurrentProject = async () => {
+    const name = prompt("Project Name:");
+    if (name) {
+      const path = await invoke<string>("get_current_dir");
+      await addProject({ name, path });
+      loadProjects();
+    }
+  };
 
   const loadData = useCallback(async () => {
     try {
@@ -221,20 +244,16 @@ function App() {
 
   useEffect(() => {
     loadData();
+    loadProjects();
 
-    // Listen for backend file changes
-    const unlisten = listen("beads-updated", () => {
-      loadData();
-    });
-
-    // Periodic refresh every 10s
-    const interval = setInterval(loadData, 10000);
+    const unlistenBeads = listen("beads-updated", () => loadData());
+    const unlistenFavs = listen("favorites-updated", () => loadProjects());
 
     return () => {
-      unlisten.then(f => f());
-      clearInterval(interval);
+      unlistenBeads.then(f => f());
+      unlistenFavs.then(f => f());
     };
-  }, [loadData]);
+  }, [loadData, loadProjects]);
 
   const toggleNode = useCallback((id: string) => {
     setTree(prevTree => {
@@ -376,8 +395,12 @@ function App() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
       <nav className="w-16 flex flex-col items-center py-6 border-r border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950 z-30">
-        <div className="flex flex-col gap-2 flex-1">
-          <button className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-indigo-400 transition-all"><ListTree size={22} /></button>
+        <div className="flex flex-col gap-4 flex-1">
+          <button className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-indigo-400 transition-all border border-transparent hover:border-indigo-500/20"><ListTree size={22} /></button>
+          <div className="h-px w-8 bg-zinc-200 dark:bg-zinc-800 mx-auto" />
+          <button onClick={handleAddCurrentProject} className="p-3 rounded-xl text-zinc-400 hover:text-amber-500 transition-all">
+            <Star size={22} />
+          </button>
         </div>
         <div className="mt-auto border-t border-zinc-200 dark:border-zinc-900 pt-4"><Settings size={20} className="text-zinc-600 p-3" /></div>
       </nav>
@@ -484,15 +507,52 @@ function App() {
           </div>
 
           <div className="flex-1 flex overflow-hidden">
-            {/* WBS Side */}
-            <div 
-              ref={scrollRefWBS}
-              onScroll={handleScroll}
-              onMouseEnter={handleMouseEnter}
-              className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-zinc-950/30 min-w-[420px] overflow-y-auto custom-scrollbar"
-            >
-              <div className="p-0">
-                {loading ? <div className="p-8 animate-pulse text-zinc-700 text-sm">Syncing Schedule...</div> : (
+                      {/* WBS Side */}
+                      <div 
+                        ref={scrollRefWBS}
+                        onScroll={handleScroll}
+                        onMouseEnter={handleMouseEnter}
+                        className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-zinc-950/30 min-w-[420px] overflow-y-auto custom-scrollbar"
+                      >
+                        <div className="p-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-col gap-3 bg-zinc-50/50 dark:bg-zinc-900/20">
+                          <button 
+                            className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 text-sm font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm"
+                            onClick={() => { /* Open Directory Dialog logic could go here */ }}
+                          >
+                            <FolderOpen size={16} /> Select Project
+                          </button>
+            
+                          {projects.length > 0 && (
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center justify-between px-2 py-1">
+                                <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Favorites ({projects.length})</span>
+                              </div>
+                              {projects.map(p => (
+                                <div 
+                                  key={p.name}
+                                  className={cn(
+                                    "group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all border",
+                                    currentProjectPath === p.path 
+                                      ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20" 
+                                      : "bg-transparent border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400"
+                                  )}
+                                  onClick={() => handleOpenProject(p.path)}
+                                >
+                                  <Star size={14} className={cn("shrink-0", currentProjectPath === p.path ? "fill-current text-white" : "text-amber-500")} />
+                                  <span className="text-sm font-bold truncate flex-1">{p.name}</span>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); removeProject(p.name); loadProjects(); }}
+                                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+            
+                        <div className="p-0">                {loading ? <div className="p-8 animate-pulse text-zinc-700 text-sm">Syncing Schedule...</div> : (
                   <div className="flex flex-col">
                     <WBSTreeList nodes={tree} onToggle={toggleNode} onClick={handleBeadClick} />
                   </div>
