@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -38,6 +38,10 @@ pub struct Bead {
     pub closed_at: Option<String>,
     pub close_reason: Option<String>,
     pub is_favorite: Option<bool>,
+    pub parent: Option<String>,
+    pub external_reference: Option<String>,
+    pub design_notes: Option<String>,
+    pub working_notes: Option<String>,
     #[serde(flatten)]
     pub extra_metadata: serde_json::Map<String, serde_json::Value>,
 }
@@ -86,6 +90,26 @@ fn get_sync_branch_name(repo_path: &std::path::Path) -> Option<String> {
         }
     }
     None
+}
+
+fn find_repo_root() -> Option<PathBuf> {
+    let mut curr = std::env::current_dir().ok()?;
+    loop {
+        if curr.join(".beads").exists() {
+            return Some(curr);
+        }
+        if !curr.pop() {
+            break;
+        }
+    }
+    None
+}
+
+fn check_bd_available() -> Result<(), String> {
+    if std::process::Command::new("bd").arg("--version").output().is_err() {
+        return Err("The 'bd' CLI is not found in the PATH. Please ensure it is installed and available.".to_string());
+    }
+    Ok(())
 }
 
 fn find_beads_file() -> Option<PathBuf> {
@@ -201,58 +225,144 @@ fn get_beads() -> Result<Vec<Bead>, String> {
 
 #[tauri::command]
 fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
-    let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl".to_string())?;
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
     
-    let file = File::open(&path).map_err(|e| e.to_string())?;
-    let reader = BufReader::new(file);
-    let mut lines = Vec::new();
-    let mut found = false;
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("update")
+        .arg(&updated_bead.id)
+        .arg("--title").arg(&updated_bead.title)
+        .arg("--status").arg(&updated_bead.status)
+        .arg("--priority").arg(updated_bead.priority.to_string())
+        .arg("--type").arg(&updated_bead.issue_type);
 
-    for line in reader.lines() {
-        let line = line.map_err(|e| e.to_string())?;
-        if line.trim().is_empty() { continue; }
-        
-        let mut bead: serde_json::Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
-        if bead["id"] == updated_bead.id {
-            bead = serde_json::to_value(&updated_bead).map_err(|e| e.to_string())?;
-            found = true;
+    if let Some(desc) = &updated_bead.description {
+        cmd.arg("--description").arg(desc);
+    }
+    if let Some(est) = updated_bead.estimate {
+        cmd.arg("--estimate").arg(est.to_string());
+    }
+    if let Some(owner) = &updated_bead.owner {
+        cmd.arg("--assignee").arg(owner);
+    }
+    if let Some(labels) = &updated_bead.labels {
+        if !labels.is_empty() {
+            cmd.arg("--set-labels").arg(labels.join(","));
         }
-        lines.push(serde_json::to_string(&bead).map_err(|e| e.to_string())?);
     }
-
-    if !found {
-        return Err(format!("Bead with id {} not found", updated_bead.id));
-    }
-
-    // Atomic write using a temporary file
-    let tmp_path = path.with_extension("jsonl.tmp");
-    {
-        let mut file = File::create(&tmp_path).map_err(|e| e.to_string())?;
-        for line in lines {
-            writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+    if let Some(ac) = &updated_bead.acceptance_criteria {
+        if !ac.is_empty() {
+            cmd.arg("--acceptance").arg(ac.join("\n"));
         }
-        file.sync_all().map_err(|e| e.to_string())?;
     }
-    std::fs::rename(tmp_path, path).map_err(|e| e.to_string())?;
+    if let Some(parent) = &updated_bead.parent {
+        cmd.arg("--parent").arg(parent);
+    }
+    if let Some(ext_ref) = &updated_bead.external_reference {
+        cmd.arg("--external-ref").arg(ext_ref);
+    }
+    if let Some(design) = &updated_bead.design_notes {
+        cmd.arg("--design").arg(design);
+    }
+    if let Some(working) = &updated_bead.working_notes {
+        cmd.arg("--notes").arg(working);
+    }
+
+    // Pass everything also to --metadata to ensure extra_metadata is preserved
+    // and fields that don't have explicit flags are updated.
+    let metadata_json = serde_json::to_string(&updated_bead).map_err(|e| e.to_string())?;
+    cmd.arg("--metadata").arg(metadata_json);
+
+    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
 
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
 
 #[tauri::command]
-fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
-    let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl".to_string())?;
+fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> {
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
     
-    let mut file = OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|e| e.to_string())?;
+    // 1. Create with minimal flags to get ID
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("create")
+        .arg(&new_bead.title)
+        .arg("--priority").arg(new_bead.priority.to_string())
+        .arg("--type").arg(&new_bead.issue_type)
+        .arg("--silent");
 
-    let line = serde_json::to_string(&new_bead).map_err(|e| e.to_string())?;
-    writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+    if let Some(desc) = &new_bead.description {
+        cmd.arg("--description").arg(desc);
+    }
+    if let Some(est) = new_bead.estimate {
+        cmd.arg("--estimate").arg(est.to_string());
+    }
+    if let Some(owner) = &new_bead.owner {
+        cmd.arg("--assignee").arg(owner);
+    }
+    if let Some(labels) = &new_bead.labels {
+        if !labels.is_empty() {
+            cmd.arg("--labels").arg(labels.join(","));
+        }
+    }
+    if let Some(ac) = &new_bead.acceptance_criteria {
+        if !ac.is_empty() {
+            cmd.arg("--acceptance").arg(ac.join("\n"));
+        }
+    }
+    if let Some(parent) = &new_bead.parent {
+        cmd.arg("--parent").arg(parent);
+    }
+    if let Some(ext_ref) = &new_bead.external_reference {
+        cmd.arg("--external-ref").arg(ext_ref);
+    }
+    if let Some(design) = &new_bead.design_notes {
+        cmd.arg("--design").arg(design);
+    }
+    if let Some(working) = &new_bead.working_notes {
+        cmd.arg("--notes").arg(working);
+    }
+
+    let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("CLI Create Error: {}", stderr));
+    }
+
+    // Capture the generated ID
+    let new_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if new_id.is_empty() {
+        return Err("Create command succeeded but returned no ID".to_string());
+    }
+
+    // 2. Immediately update to set fields that create doesn't support (like status and metadata)
+    let mut update_cmd = std::process::Command::new("bd");
+    update_cmd.arg("update")
+        .arg(&new_id)
+        .arg("--status").arg(&new_bead.status);
+
+    let metadata_json = serde_json::to_string(&new_bead).map_err(|e| e.to_string())?;
+    update_cmd.arg("--metadata").arg(metadata_json);
+
+    let update_output = update_cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
+
+    if !update_output.status.success() {
+        let stderr = String::from_utf8_lossy(&update_output.stderr);
+        return Err(format!(
+            "Bead created as {} but initial update failed: {}", 
+            new_id, 
+            stderr
+        ));
+    }
 
     let _ = app_handle.emit("beads-updated", ());
-    Ok(())
+    Ok(new_id)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -26,6 +26,10 @@ export interface Bead {
   closed_at?: string;
   close_reason?: string;
   is_favorite?: boolean;
+  parent?: string;
+  external_reference?: string;
+  design_notes?: string;
+  working_notes?: string;
   [key: string]: any;
 }
 
@@ -80,16 +84,16 @@ export async function fetchBeads(): Promise<Bead[]> {
 
 export async function updateBead(bead: Bead): Promise<void> {
   try {
-    await invoke("update_bead", { updatedBead: bead });
+    await invoke("update_bead", { updated_bead: bead });
   } catch (error) {
     console.error("Failed to update bead:", error);
     throw error;
   }
 }
 
-export async function createBead(bead: Bead): Promise<void> {
+export async function createBead(bead: Bead): Promise<string> {
   try {
-    await invoke("create_bead", { newBead: bead });
+    return await invoke<string>("create_bead", { new_bead: bead });
   } catch (error) {
     console.error("Failed to create bead:", error);
     throw error;
@@ -135,7 +139,92 @@ export function buildWBSTree(beads: Bead[]): WBSNode[] {
     }
   });
 
-  return roots;
+  // Helper to topologically sort sibling nodes based on "blocks" dependencies
+  const sortSiblings = (nodes: WBSNode[]): WBSNode[] => {
+    if (nodes.length <= 1) return nodes;
+
+    const nodeParams = new Map(nodes.map(n => [n.id, n]));
+    const inDegree = new Map<string, number>();
+    const graph = new Map<string, string[]>();
+
+    // Initialize graph
+    nodes.forEach(node => {
+      inDegree.set(node.id, 0);
+      graph.set(node.id, []);
+    });
+
+    // Build dependency graph (only considering dependencies between siblings)
+    nodes.forEach(node => {
+      // Find dependencies where this node is BLOCKED BY another sibling
+      // If node A is blocked by node B, B must come FIRST.
+      // Edge: B -> A
+      const blockers = (node.dependencies || []).filter(d => d.type === "blocks");
+      
+      blockers.forEach(d => {
+        const blockerId = d.depends_on_id;
+        // Only consider if the blocker is essentially a sibling (in the list of nodes passed)
+        if (nodeParams.has(blockerId)) {
+          graph.get(blockerId)?.push(node.id);
+          inDegree.set(node.id, (inDegree.get(node.id) || 0) + 1);
+        }
+      });
+    });
+
+    // Kahn's Algorithm
+    const queue: string[] = [];
+    
+    // Sort initial queue by priority (higher priority first) to have some deterministic secondary sort
+    const initialNodes = nodes.filter(n => (inDegree.get(n.id) || 0) === 0);
+    initialNodes.sort((a, b) => a.priority - b.priority); // Ascending priority (1 is high)
+    
+    initialNodes.forEach(n => queue.push(n.id));
+
+    const result: WBSNode[] = [];
+    
+    while (queue.length > 0) {
+      const u = queue.shift()!;
+      const node = nodeParams.get(u);
+      if (node) result.push(node);
+
+      const neighbors = graph.get(u) || [];
+      // Sort neighbors to ensure deterministic order if multiple become available
+      // neighbors.sort(); 
+
+      neighbors.forEach(v => {
+        inDegree.set(v, (inDegree.get(v) || 0) - 1);
+        if (inDegree.get(v) === 0) {
+          queue.push(v);
+        }
+      });
+    }
+
+    // Handle circular dependencies or disconnected components (append any remaining nodes)
+    if (result.length !== nodes.length) {
+      const addedIds = new Set(result.map(n => n.id));
+      const remaining = nodes.filter(n => !addedIds.has(n.id));
+      // Append remaining nodes, sorted by priority
+      remaining.sort((a, b) => a.priority - b.priority);
+      result.push(...remaining);
+    }
+
+    return result;
+  };
+
+  // Recursively sort the tree
+  const processedRoots = sortSiblings(roots);
+  
+  const sortRecursive = (nodes: WBSNode[]) => {
+    nodes.forEach(node => {
+      if (node.children.length > 0) {
+        node.children = sortSiblings(node.children);
+        sortRecursive(node.children);
+      }
+    });
+  };
+
+  sortRecursive(processedRoots);
+
+  return processedRoots;
 }
 
 export interface GanttItem {
@@ -159,6 +248,60 @@ export interface GanttLayout {
   connectors: GanttConnector[];
   rowCount: number;
   rowDepths: number[];
+}
+
+export interface BucketDistribution {
+  open: number;
+  inProgress: number;
+  blocked: number;
+  closed: number;
+}
+
+export function calculateStateDistribution(items: GanttItem[], zoom: number): BucketDistribution[] {
+  if (items.length === 0) return [];
+
+  // Find the total width in pre-zoom coordinates
+  let maxRight = 0;
+  items.forEach(item => {
+    const right = (item.x / zoom); // item.x is already zoomed
+    const width = (item.width / zoom);
+    maxRight = Math.max(maxRight, right + width);
+  });
+
+  // Buckets are 100 units wide (pre-zoom)
+  const numBuckets = Math.ceil(maxRight / 100);
+  const distributions: BucketDistribution[] = Array.from({ length: numBuckets }, () => ({
+    open: 0,
+    inProgress: 0,
+    blocked: 0,
+    closed: 0
+  }));
+
+  items.forEach(item => {
+    // Skip epics and features for the count? 
+    // Usually we only count tasks.
+    if (item.bead.issue_type === 'epic' || item.bead.issue_type === 'feature') return;
+
+    const left = (item.x / zoom);
+    const right = (item.x + item.width) / zoom;
+    const status = item.bead.status;
+    const isBlocked = item.isBlocked;
+
+    // A bead is active in bucket i if it overlaps with [i*100, (i+1)*100]
+    for (let i = 0; i < numBuckets; i++) {
+        const bLeft = i * 100;
+        const bRight = (i + 1) * 100;
+
+        if (Math.max(left, bLeft) < Math.min(right, bRight)) {
+            if (status === 'closed') distributions[i].closed++;
+            else if (isBlocked) distributions[i].blocked++;
+            else if (status === 'in_progress') distributions[i].inProgress++;
+            else distributions[i].open++;
+        }
+    }
+  });
+
+  return distributions;
 }
 
 export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: number = 1): GanttLayout {

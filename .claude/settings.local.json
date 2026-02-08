@@ -17,7 +17,9 @@
       "Bash(bd --no-daemon export:*)",
       "Bash(md5:*)",
       "Bash(bd init:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(bd --no-daemon list:*)",
+      "Bash(git push:*)"
     ]
   }
 }

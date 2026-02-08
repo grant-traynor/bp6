@@ -16,6 +16,19 @@
   --level-3: rgba(0, 0, 0, 0.06);
   --level-4: rgba(0, 0, 0, 0.08);
 
+  /* Shadow Scale - Brutalist Design */
+  --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-panel: 0 0 60px rgba(0, 0, 0, 0.15);
+  --shadow-glow-accent: 0 0 20px rgba(79, 70, 229, 0.3);
+
+  /* Border Scale */
+  --border-thin: 1px;
+  --border-thick: 2px;
+
   --status-open: #10b981;
   --status-active: #f59e0b;
   --status-blocked: #f43f5e;
@@ -40,6 +53,19 @@
   --level-3: rgba(255, 255, 255, 0.045);
   --level-4: rgba(255, 255, 255, 0.06);
 
+  /* Shadow Scale - Brutalist Design (Dark Mode) */
+  --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --shadow-panel: 0 0 60px rgba(0, 0, 0, 0.4);
+  --shadow-glow-accent: 0 0 20px rgba(99, 102, 241, 0.4);
+
+  /* Border Scale */
+  --border-thin: 1px;
+  --border-thick: 2px;
+
   --status-open: #34d399;
   --status-active: #fbbf24;
   --status-blocked: #fb7185;
@@ -49,9 +75,28 @@
 }
 
 @theme {
+  --color-background-primary: var(--background-primary);
+  --color-background-secondary: var(--background-secondary);
+  --color-background-tertiary: var(--background-tertiary);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
   --color-border-primary: var(--border-primary);
-  --color-bg-zen: var(--background-primary);
-  --color-bg-zen-deep: var(--background-secondary);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-secondary: var(--accent-secondary);
+  --color-status-open: var(--status-open);
+  --color-status-active: var(--status-active);
+  --color-status-blocked: var(--status-blocked);
+  --color-status-done: var(--status-done);
+  
+  /* Shadow utilities */
+  --shadow-brutalist-sm: var(--shadow-sm);
+  --shadow-brutalist-md: var(--shadow-md);
+  --shadow-brutalist-lg: var(--shadow-lg);
+  --shadow-brutalist-xl: var(--shadow-xl);
+  --shadow-brutalist-panel: var(--shadow-panel);
+  --shadow-brutalist-glow: var(--shadow-glow-accent);
+  --shadow-brutalist-inset: var(--shadow-inset);
 }
 
 :root {
@@ -93,4 +138,91 @@ body {
 
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* =====================================================
+   MICRO-ANIMATIONS
+   ===================================================== */
+
+/* Theme transition - smooth color changes when switching themes */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Disable transitions for layout properties to prevent janky animations */
+.no-theme-transition {
+  transition: none !important;
+}
+
+/* Button press feedback with spring effect */
+@keyframes button-press {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+
+.animate-press:active {
+  animation: button-press 150ms ease-out;
+}
+
+/* Subtle pulse for focus states */
+@keyframes focus-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2); }
+}
+
+.focus-ring:focus {
+  animation: focus-pulse 1.5s ease-in-out infinite;
+}
+
+/* Hover lift effect for interactive cards */
+.hover-lift {
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+/* Stagger animation for list items */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-stagger > * {
+  animation: fade-in-up 300ms ease-out backwards;
+}
+
+.animate-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.animate-stagger > *:nth-child(2) { animation-delay: 50ms; }
+.animate-stagger > *:nth-child(3) { animation-delay: 100ms; }
+.animate-stagger > *:nth-child(4) { animation-delay: 150ms; }
+.animate-stagger > *:nth-child(5) { animation-delay: 200ms; }
+
+/* Icon rotation for interactive elements */
+.icon-rotate {
+  transition: transform 200ms ease;
+}
+
+.icon-rotate:hover {
+  transform: rotate(15deg);
+}
+
+/* Glow pulse for status indicators */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.animate-glow {
+  animation: glow-pulse 2s ease-in-out infinite;
 }

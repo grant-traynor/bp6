@@ -1,0 +1,2 @@
+- When performing a task, I should check if there are any available skills (like those in .gemini/skills/) that are relevant to the given task and consider using them. 
+- Always enable skills in .gemini/skills/ at startup

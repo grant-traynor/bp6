@@ -12,7 +12,7 @@ export const getChipStyles = (label: string) => {
 };
 
 export const Chip = ({ label }: { label: string }) => (
-  <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border transition-all", getChipStyles(label))}>
+  <span className={cn("px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-widest border transition-all", getChipStyles(label))}>
     {label}
   </span>
 );
