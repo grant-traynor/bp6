@@ -5,7 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { ListTree, Settings, ChevronRight, ChevronDown, Package, CheckCircle2, Circle, Clock, X, User, Tag, Save, Edit3, Trash2, Plus, Flame, Star, Sun, Moon, FolderOpen } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 import { clsx, type ClassValue } from "clsx";
-import { fetchBeads, buildWBSTree, calculateGanttLayout, updateBead, createBead, type WBSNode, type Bead, type GanttItem, type GanttLayout, type Project, fetchProjects, addProject, removeProject, openProject } from "./api";
+import { fetchBeads, buildWBSTree, calculateGanttLayout, updateBead, createBead, type WBSNode, type Bead, type GanttItem, type GanttLayout, type Project, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -30,11 +30,11 @@ const Chip = ({ label }: { label: string }) => (
   </span>
 );
 
-const StatusIcon = ({ status, size = 14 }: { status: string; size?: number }) => {
+const StatusIcon = ({ status, size = 14, className }: { status: string; size?: number; className?: string }) => {
   switch (status) {
-    case 'closed': return <CheckCircle2 size={size} className="text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />;
-    case 'in_progress': return <Clock size={size} className="text-amber-600 dark:text-amber-400 stroke-[2.5]" />;
-    default: return <Circle size={size} className="text-[var(--text-secondary)] stroke-[2]" />;
+    case 'closed': return <CheckCircle2 size={size} className={cn("text-emerald-600 dark:text-emerald-400 stroke-[2.5]", className)} />;
+    case 'in_progress': return <Clock size={size} className={cn("text-amber-600 dark:text-amber-400 stroke-[2.5]", className)} />;
+    default: return <Circle size={size} className={cn("text-[var(--text-secondary)] stroke-[2]", className)} />;
   }
 };
 
@@ -44,11 +44,11 @@ const GanttBar = ({ item, onClick }: { item: GanttItem; onClick: (bead: Bead) =>
   const isMilestone = bead.estimate === 0;
 
   const getStatusColor = () => {
-    if (isEpic) return "bg-zinc-500 dark:bg-zinc-500 border-zinc-600 dark:border-zinc-400";
+    if (isEpic) return "bg-zinc-500 dark:bg-zinc-600 border-zinc-600 dark:border-zinc-400";
     if (isMilestone) return "bg-indigo-700 dark:bg-indigo-400 border-indigo-800 rotate-45";
     if (bead.status === 'closed') return "bg-indigo-600 dark:bg-indigo-500 border-indigo-700 opacity-50";
     if (isCritical) return "bg-rose-600 dark:bg-rose-500 border-rose-700 shadow-[0_0_12px_rgba(225,29,72,0.4)]";
-    if (isBlocked) return "bg-amber-600 dark:bg-amber-500 border-amber-700";
+    if (isBlocked) return "bg-amber-600 dark:bg-amber-500 border-amber-400";
     if (bead.status === 'in_progress') return "bg-emerald-600 dark:bg-emerald-500 border-emerald-700 shadow-[0_0_12px_rgba(16,185,129,0.3)]";
     return "bg-indigo-600 dark:bg-indigo-500 border-indigo-700";
   };
@@ -216,27 +216,6 @@ function App() {
     setCurrentProjectPath(path);
     loadData();
   };
-
-  const handleAddCurrentProject = async () => {
-    const path = await invoke<string>("get_current_dir");
-    const existing = projects.find(p => p.path === path);
-    
-    if (existing) {
-      await toggleFavoriteProject(path);
-    } else {
-      const parts = path.split(/[/\\]/);
-      const dirName = parts[parts.length - 1] || "Project";
-      const name = prompt("Project Name:", dirName);
-      if (name) {
-        await addProject({ name, path, is_favorite: true });
-      }
-    }
-    loadProjects();
-  };
-
-  const isCurrentProjectFavorite = useMemo(() => {
-    return projects.some(p => p.path === currentProjectPath && p.is_favorite);
-  }, [projects, currentProjectPath]);
 
   const loadData = useCallback(async () => {
     try {
@@ -965,7 +944,7 @@ function App() {
                       ))}
                       <button 
                         onClick={() => setEditForm({...editForm, acceptance_criteria: [...(editForm.acceptance_criteria || []), ""]})}
-                        className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 self-start flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/10 active:scale-95 uppercase tracking-widest"
+                        className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 self-start flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/20 active:scale-95 uppercase tracking-widest"
                       >
                         <Plus size={16} strokeWidth={3} /> ADD CRITERION
                       </button>
@@ -1045,7 +1024,7 @@ function App() {
                           setEditForm({...editForm, dependencies: newDeps as any});
                         }
                       }}
-                      className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/10 active:scale-95 uppercase tracking-widest"
+                      className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/20 active:scale-95 uppercase tracking-widest"
                     >
                       <Plus size={16} strokeWidth={3} /> ADD
                     </button>
@@ -1095,57 +1074,6 @@ function App() {
                 </>
               ) : (
                 <button onClick={handleStartEdit} className="w-full py-4 rounded-2xl bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-black transition-all shadow-xl shadow-indigo-700/30 flex items-center justify-center gap-3 active:scale-95 border-2 border-indigo-800 uppercase tracking-widest"><Edit3 size={20} strokeWidth={3} /> Edit Bead</button>
-              )}
-            </div>
-          </div>
-        )}
-                    </button>
-                  )}
-                </div>
-                <div className="flex flex-col gap-3">
-                  {(isCreating ? editForm.dependencies : selectedBead?.dependencies)?.map((d, i) => (
-                    <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-primary)] group hover:border-indigo-500/30 transition-all">
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-3">
-                           <span className="text-[10px] font-mono text-indigo-500 font-bold bg-indigo-500/5 px-2 py-0.5 rounded border border-indigo-500/10">{d.depends_on_id}</span>
-                           <span className="text-[9px] uppercase font-black text-[var(--text-muted)] tracking-widest">{d.type}</span>
-                        </div>
-                        {d.metadata && Object.keys(d.metadata).length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            {Object.entries(d.metadata).map(([k, v]) => (
-                              <span key={k} className="text-[8px] bg-[var(--background-tertiary)] px-2 py-0.5 rounded text-[var(--text-muted)] border border-[var(--border-primary)]/50 font-mono">
-                                {k}: {String(v)}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                      {(isEditing || isCreating) && (
-                        <button 
-                          onClick={() => {
-                            const currentDeps = editForm.dependencies || [];
-                            const newDeps = currentDeps.filter((_, index) => index !== i);
-                            setEditForm({...editForm, dependencies: newDeps});
-                          }}
-                          className="text-[var(--text-muted)] hover:text-rose-500 p-2 opacity-0 group-hover:opacity-100 transition-all"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  )) || <div className="text-xs text-[var(--text-muted)] italic">None</div>}
-                </div>
-              </section>
-            </div>
-            
-            <div className="p-6 border-t border-[var(--border-primary)] bg-[var(--background-secondary)]/50 flex gap-4 backdrop-blur-md">
-              {(isEditing || isCreating) ? (
-                <>
-                  <button onClick={() => { setIsEditing(false); setIsCreating(false); }} className="flex-1 py-3 rounded-xl bg-[var(--background-tertiary)] hover:bg-[var(--border-primary)] text-[var(--text-secondary)] text-xs font-bold transition-all border border-[var(--border-primary)] active:scale-95">Cancel</button>
-                  <button onClick={isCreating ? handleSaveCreate : handleSaveEdit} className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-95 border border-emerald-500/20"><Save size={16} /> {isCreating ? "Create Bead" : "Save Changes"}</button>
-                </>
-              ) : (
-                <button onClick={handleStartEdit} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 border border-indigo-500/20"><Edit3 size={16} /> Edit Bead</button>
               )}
             </div>
           </div>
