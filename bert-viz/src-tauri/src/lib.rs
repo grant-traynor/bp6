@@ -497,11 +497,19 @@ pub fn run() {
                 let last_checksum = Arc::new(Mutex::new(0u64));
 
                 let watch_target = path.clone();
+                eprintln!("🔍 Watching target: {}", watch_target.display());
                 let mut watcher = notify::RecommendedWatcher::new(move |res: std::result::Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(event) => {
+                            eprintln!("📁 Event received: {:?}", event.kind);
+                            for p in &event.paths {
+                                eprintln!("  Path: {}", p.display());
+                            }
+                            eprintln!("  Target: {}", watch_target.display());
+
                             // Check if event affects the specific target file (full path comparison)
                             let affects_target = event.paths.iter().any(|p| p == &watch_target);
+                            eprintln!("  Affects target: {}", affects_target);
 
                             if affects_target {
                                 // Single non-blocking read attempt
@@ -512,6 +520,7 @@ pub fn run() {
                                     let new_checksum = hasher.finish();
 
                                     let mut last_hash = last_checksum.lock().unwrap();
+                                    eprintln!("  Checksum: old={}, new={}", *last_hash, new_checksum);
 
                                     // Only update if content has actually changed
                                     if *last_hash != new_checksum {
@@ -520,11 +529,20 @@ pub fn run() {
                                         // Debounce: only emit if at least 250ms have passed since last emit
                                         let mut last = last_emit.lock().unwrap();
                                         let now = Instant::now();
+                                        let elapsed = now.duration_since(*last).as_millis();
+                                        eprintln!("  Debounce: elapsed={}ms, threshold=250ms", elapsed);
                                         if now.duration_since(*last) >= Duration::from_millis(250) {
                                             *last = now;
+                                            eprintln!("  ✅ EMITTING beads-updated event!");
                                             let _ = handle.emit("beads-updated", ());
+                                        } else {
+                                            eprintln!("  ⏱️  Debounced (too soon)");
                                         }
+                                    } else {
+                                        eprintln!("  ⏭️  Skipped (same checksum)");
                                     }
+                                } else {
+                                    eprintln!("  ❌ Failed to read file");
                                 }
                                 // If read fails, frontend get_beads() will retry - no problem
                             }
