@@ -180,9 +180,9 @@ function App() {
 
   useEffect(() => {
     if (isDark) {
-      document.documentElement.classList.remove('light');
+      document.documentElement.classList.add('dark');
     } else {
-      document.documentElement.classList.add('light');
+      document.documentElement.classList.remove('dark');
     }
   }, [isDark]);
 
@@ -357,23 +357,23 @@ function App() {
                <div className="w-6 h-6 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-xs shadow-lg text-white">B</div>
                <h1 className="text-sm font-black tracking-tighter uppercase">BERT <span className="text-indigo-400 font-mono">bp6</span></h1>
             </div>
-            <div className="h-4 w-px bg-zinc-800" />
+            <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-800" />
             <div className="flex items-center gap-3">
                <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
-                  <span className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Live</span>
+                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Live</span>
                </div>
-               <span className="text-xs text-zinc-600 font-medium">/ Workspace / <span className="text-zinc-300">Default</span></span>
+               <span className="text-xs text-zinc-500 dark:text-zinc-600 font-medium">/ Workspace / <span className="text-zinc-900 dark:text-zinc-300">Default</span></span>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={() => setIsDark(!isDark)} className="h-8 w-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 rounded-md border border-zinc-800 flex items-center justify-center transition-all">
+            <button onClick={() => setIsDark(!isDark)} className="h-8 w-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-md border border-zinc-300 dark:border-zinc-800 flex items-center justify-center transition-all">
               {isDark ? <Sun size={14} /> : <Moon size={14} />}
             </button>
             <button onClick={handleStartCreate} className="h-8 bg-indigo-600 hover:bg-indigo-500 text-white px-3 rounded-md text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/10">
               <Plus size={12} /> New Bead
             </button>
-            <button onClick={loadData} className="h-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-800 text-zinc-300 px-3 rounded-md text-xs font-bold border border-zinc-800 flex items-center gap-2 transition-all">
+            <button onClick={loadData} className="h-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 rounded-md text-xs font-bold border border-zinc-300 dark:border-zinc-800 flex items-center gap-2 transition-all">
               <Package size={12} className="text-indigo-400" /> Sync
             </button>
           </div>
@@ -417,7 +417,7 @@ function App() {
             </div>
 
             {/* Gantt Header Area (Metrics + Controls) */}
-            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-[#09090b]">
+            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-zinc-50 dark:bg-[#09090b]">
                <div className="flex items-center gap-6 mb-1">
                   <div className="flex flex-col">
                      <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total</span>
@@ -473,7 +473,7 @@ function App() {
               ref={scrollRefBERT}
               onScroll={handleScroll}
               onMouseEnter={handleMouseEnter}
-              className="flex-1 relative bg-[#09090b] overflow-auto custom-scrollbar"
+              className="flex-1 relative bg-zinc-50 dark:bg-[#09090b] overflow-auto custom-scrollbar"
             >
               <div className="relative" style={{ height: ganttLayout.rowCount * 40, width: 5000 * zoom }}>
                  {/* Grid */}
