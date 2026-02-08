@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { ListTree, Settings, ChevronRight, ChevronDown, Package, CheckCircle2, Circle, Clock, X, User, Tag, Save, Edit3, Trash2, Plus, Flame, Star, Sun, Moon, FolderOpen } from "lucide-react";
 import { twMerge } from "tailwind-merge";
 import { clsx, type ClassValue } from "clsx";
@@ -193,6 +194,17 @@ function App() {
   const scrollRefBERT = useRef<HTMLDivElement>(null);
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
 
+  const handleSelectProject = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Select BERT Project Directory"
+    });
+    if (selected && typeof selected === 'string') {
+      await handleOpenProject(selected);
+    }
+  };
+
   const loadProjects = useCallback(async () => {
     const data = await fetchProjects();
     setProjects(data);
@@ -205,13 +217,25 @@ function App() {
   };
 
   const handleAddCurrentProject = async () => {
-    const name = prompt("Project Name:");
-    if (name) {
-      const path = await invoke<string>("get_current_dir");
-      await addProject({ name, path });
-      loadProjects();
+    const path = await invoke<string>("get_current_dir");
+    const existing = projects.find(p => p.path === path);
+    
+    if (existing) {
+      await removeProject(existing.name);
+    } else {
+      const parts = path.split(/[/\\]/);
+      const dirName = parts[parts.length - 1] || "Project";
+      const name = prompt("Project Name:", dirName);
+      if (name) {
+        await addProject({ name, path });
+      }
     }
+    loadProjects();
   };
+
+  const isCurrentProjectFavorite = useMemo(() => {
+    return projects.some(p => p.path === currentProjectPath);
+  }, [projects, currentProjectPath]);
 
   const loadData = useCallback(async () => {
     try {
@@ -243,6 +267,11 @@ function App() {
   }, [filterText, zoom]);
 
   useEffect(() => {
+    const init = async () => {
+      const path = await invoke<string>("get_current_dir");
+      setCurrentProjectPath(path);
+    };
+    init();
     loadData();
     loadProjects();
 
@@ -399,7 +428,7 @@ function App() {
           <button className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-indigo-400 transition-all border border-transparent hover:border-indigo-500/20"><ListTree size={22} /></button>
           <div className="h-px w-8 bg-zinc-200 dark:bg-zinc-800 mx-auto" />
           <button onClick={handleAddCurrentProject} className="p-3 rounded-xl text-zinc-400 hover:text-amber-500 transition-all">
-            <Star size={22} />
+            <Star size={22} className={cn(isCurrentProjectFavorite && "fill-current text-amber-500")} />
           </button>
         </div>
         <div className="mt-auto border-t border-zinc-200 dark:border-zinc-900 pt-4"><Settings size={20} className="text-zinc-600 p-3" /></div>
@@ -515,13 +544,12 @@ function App() {
                         className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-zinc-950/30 min-w-[420px] overflow-y-auto custom-scrollbar"
                       >
                         <div className="p-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-col gap-3 bg-zinc-50/50 dark:bg-zinc-900/20">
-                          <button 
-                            className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 text-sm font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm"
-                            onClick={() => { /* Open Directory Dialog logic could go here */ }}
-                          >
-                            <FolderOpen size={16} /> Select Project
-                          </button>
-            
+                                        <button 
+                                          className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 text-sm font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm"
+                                          onClick={handleSelectProject}
+                                        >
+                                          <FolderOpen size={16} /> Select Project
+                                        </button>            
                           {projects.length > 0 && (
                             <div className="flex flex-col gap-1">
                               <div className="flex items-center justify-between px-2 py-1">
