@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use notify::{Watcher, RecursiveMode, Config};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Dependency {
@@ -187,7 +187,7 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn add_project(mut project: Project) -> Result<(), String> {
+fn add_project(project: Project) -> Result<(), String> {
     let mut projects = get_projects()?;
     // Check if project with same path exists
     if let Some(existing) = projects.iter_mut().find(|p| p.path == project.path) {
@@ -217,7 +217,7 @@ fn open_project(path: String) -> Result<(), String> {
         project.last_opened = Some(chrono::Utc::now().to_rfc3339());
     } else {
         // If not in projects list, maybe add it as a recent?
-        let parts = path.split(/[/\\]/).collect::<Vec<_>>();
+        let parts = path.split(|c| c == '/' || c == '\\').collect::<Vec<_>>();
         let name = parts.last().unwrap_or(&"Project").to_string();
         projects.push(Project {
             name,
