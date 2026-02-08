@@ -191,24 +191,32 @@ function App() {
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
 
   const loadData = useCallback(async () => {
-    const data = await fetchBeads();
-    setBeads(data);
-    
-    const filtered = data.filter(b => {
-      const search = filterText.toLowerCase();
-      if (!search) return true;
-      return (
-        b.title.toLowerCase().includes(search) ||
-        b.id.toLowerCase().includes(search) ||
-        b.owner?.toLowerCase().includes(search) ||
-        b.labels?.some(l => l.toLowerCase().includes(search))
-      );
-    });
+    try {
+      console.log("Fetching beads...");
+      const data = await fetchBeads();
+      console.log(`Fetched ${data.length} beads`);
+      setBeads(data);
+      
+      const filtered = data.filter(b => {
+        const search = filterText.toLowerCase();
+        if (!search) return true;
+        return (
+          b.title.toLowerCase().includes(search) ||
+          b.id.toLowerCase().includes(search) ||
+          b.owner?.toLowerCase().includes(search) ||
+          b.labels?.some(l => l.toLowerCase().includes(search))
+        );
+      });
 
-    const wbsTree = buildWBSTree(filtered);
-    setTree(wbsTree);
-    setGanttLayout(calculateGanttLayout(data, wbsTree, zoom));
-    setLoading(false);
+      console.log(`Filtered to ${filtered.length} beads`);
+      const wbsTree = buildWBSTree(filtered);
+      setTree(wbsTree);
+      setGanttLayout(calculateGanttLayout(data, wbsTree, zoom));
+    } catch (error) {
+      console.error("Error in loadData:", error);
+    } finally {
+      setLoading(false);
+    }
   }, [filterText, zoom]);
 
   useEffect(() => {
@@ -322,7 +330,8 @@ function App() {
     // Simple blocked calculation for stats: has a 'blocks' dependency that is NOT closed
     const blocked = beads.filter(b => {
       if (b.status === 'closed') return false;
-      return b.dependencies?.some(d => {
+      const deps = b.dependencies || [];
+      return deps.some(d => {
         if (d.type !== 'blocks') return false;
         const pred = beads.find(p => p.id === d.depends_on_id);
         return pred && pred.status !== 'closed';

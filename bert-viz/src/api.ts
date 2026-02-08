@@ -5,6 +5,7 @@ export interface Dependency {
   depends_on_id: string;
   type: string;
   metadata?: Record<string, any>;
+  [key: string]: any;
 }
 
 export interface Bead {
@@ -25,6 +26,7 @@ export interface Bead {
   closed_at?: string;
   close_reason?: string;
   is_favorite?: boolean;
+  [key: string]: any;
 }
 
 export interface WBSNode extends Bead {
@@ -71,7 +73,8 @@ export function buildWBSTree(beads: Bead[]): WBSNode[] {
 
   beads.forEach(bead => {
     const node = nodeMap.get(bead.id)!;
-    const parentDep = bead.dependencies?.find(d => d.type === "parent-child");
+    const deps = bead.dependencies || [];
+    const parentDep = deps.find(d => d.type === "parent-child");
     
     if (parentDep) {
       const parent = nodeMap.get(parentDep.depends_on_id);
@@ -132,7 +135,7 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
   const successorsMap = new Map<string, string[]>(); // predecessor -> [successors]
   
   beads.forEach(bead => {
-    const deps = bead.dependencies?.filter(d => d.type === "blocks") || [];
+    const deps = (bead.dependencies || []).filter(d => d.type === "blocks");
     deps.forEach(d => {
       const preds = blocksMap.get(bead.id) || [];
       preds.push(d.depends_on_id);
@@ -213,7 +216,7 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
   }
 
   const isBlocked = (bead: Bead, allBeads: Bead[]): boolean => {
-    const deps = bead.dependencies?.filter(d => d.type === "blocks") || [];
+    const deps = (bead.dependencies || []).filter(d => d.type === "blocks");
     return deps.some(d => {
       const pred = allBeads.find(b => b.id === d.depends_on_id);
       return pred && pred.status !== 'closed';
@@ -236,7 +239,7 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
       isBlocked: isBlocked(bead, beads)
     });
 
-    const deps = bead.dependencies?.filter(d => d.type === "blocks") || [];
+    const deps = (bead.dependencies || []).filter(d => d.type === "blocks");
     deps.forEach(d => {
       const predRow = rowMap.get(d.depends_on_id);
       if (predRow === undefined) return;

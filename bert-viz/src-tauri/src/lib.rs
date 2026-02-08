@@ -10,6 +10,7 @@ pub struct Dependency {
     pub issue_id: String,
     pub depends_on_id: String,
     pub r#type: String,
+    #[serde(flatten)]
     pub metadata: Option<serde_json::Value>,
 }
 
@@ -30,10 +31,40 @@ pub struct Bead {
     pub created_by: Option<String>,
     pub updated_at: Option<String>,
     pub labels: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_acceptance_criteria")]
     pub acceptance_criteria: Option<Vec<String>>,
     pub closed_at: Option<String>,
     pub close_reason: Option<String>,
     pub is_favorite: Option<bool>,
+    #[serde(flatten)]
+    pub extra_metadata: serde_json::Map<String, serde_json::Value>,
+}
+
+fn deserialize_acceptance_criteria<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<serde_json::Value> = serde::Deserialize::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(serde_json::Value::String(s)) => {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()))
+            }
+        }
+        Some(serde_json::Value::Array(arr)) => {
+            let mut result = Vec::new();
+            for val in arr {
+                if let serde_json::Value::String(s) = val {
+                    result.push(s);
+                }
+            }
+            Ok(Some(result))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn find_beads_file() -> Option<PathBuf> {
