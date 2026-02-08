@@ -379,30 +379,6 @@ function App() {
           </div>
         </header>
 
-        {/* Dashboard Status Cards */}
-        <div className="px-8 py-6 grid grid-cols-5 gap-4 bg-white dark:bg-zinc-950/50 border-b border-zinc-200 dark:border-zinc-900">
-           <div className="bg-zinc-100 dark:bg-zinc-900/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-900/50 flex flex-col gap-1">
-              <span className="text-xs font-black text-zinc-500 uppercase tracking-widest">Total Beads</span>
-              <span className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{stats.total}</span>
-           </div>
-           <div className="bg-zinc-100 dark:bg-zinc-900/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-900/50 flex flex-col gap-1">
-              <span className="text-xs font-black text-emerald-500 uppercase tracking-widest">Open</span>
-              <span className="text-2xl font-bold text-emerald-400">{stats.open}</span>
-           </div>
-           <div className="bg-zinc-100 dark:bg-zinc-900/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-900/50 flex flex-col gap-1">
-              <span className="text-xs font-black text-amber-500 uppercase tracking-widest">In Progress</span>
-              <span className="text-2xl font-bold text-amber-400">{stats.inProgress}</span>
-           </div>
-           <div className="bg-zinc-100 dark:bg-zinc-900/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-900/50 flex flex-col gap-1">
-              <span className="text-xs font-black text-rose-500 uppercase tracking-widest">Blocked</span>
-              <span className="text-2xl font-bold text-rose-400">{stats.blocked}</span>
-           </div>
-           <div className="bg-zinc-100 dark:bg-zinc-900/40 p-4 rounded-xl border border-zinc-200 dark:border-zinc-900/50 flex flex-col gap-1">
-              <span className="text-xs font-black text-zinc-500 uppercase tracking-widest">Completed</span>
-              <span className="text-2xl font-bold text-zinc-400">{stats.closed}</span>
-           </div>
-        </div>
-
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Shared Header Row for WBS and Gantt */}
           <div className="flex shrink-0 border-b border-zinc-200 dark:border-zinc-900 bg-zinc-100/90 dark:bg-zinc-900/90 backdrop-blur-md z-20">
@@ -440,8 +416,31 @@ function App() {
               </div>
             </div>
 
-            {/* Gantt Header Area (Spacer + Controls) */}
-            <div className="flex-1 flex items-end justify-end px-6 py-2 bg-[#09090b]">
+            {/* Gantt Header Area (Metrics + Controls) */}
+            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-[#09090b]">
+               <div className="flex items-center gap-6 mb-1">
+                  <div className="flex flex-col">
+                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total</span>
+                     <span className="text-sm font-bold text-zinc-100">{stats.total}</span>
+                  </div>
+                  <div className="flex flex-col">
+                     <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Open</span>
+                     <span className="text-sm font-bold text-emerald-400">{stats.open}</span>
+                  </div>
+                  <div className="flex flex-col">
+                     <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Active</span>
+                     <span className="text-sm font-bold text-amber-400">{stats.inProgress}</span>
+                  </div>
+                  <div className="flex flex-col">
+                     <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest">Blocked</span>
+                     <span className="text-sm font-bold text-rose-400">{stats.blocked}</span>
+                  </div>
+                  <div className="flex flex-col">
+                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Done</span>
+                     <span className="text-sm font-bold text-zinc-400">{stats.closed}</span>
+                  </div>
+               </div>
+
                <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-800 shadow-xl mb-1">
                   <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold px-2">-</button>
                   <span className="text-xs font-mono font-bold text-zinc-500 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
