@@ -403,83 +403,91 @@ function App() {
            </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden">
-          {/* WBS Side */}
-          <div 
-            ref={scrollRefWBS}
-            onScroll={handleScroll}
-            onMouseEnter={handleMouseEnter}
-            className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-zinc-950/30 min-w-[420px] overflow-y-auto custom-scrollbar"
-          >
-            <div className="sticky top-0 z-20 bg-zinc-100 dark:bg-zinc-900/90 backdrop-blur-md">
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Shared Header Row for WBS and Gantt */}
+          <div className="flex shrink-0 border-b border-zinc-200 dark:border-zinc-900 bg-zinc-100/90 dark:bg-zinc-900/90 backdrop-blur-md z-20">
+            {/* WBS Header Area */}
+            <div className="w-1/3 min-w-[420px] border-r border-zinc-200 dark:border-zinc-900 flex flex-col">
+              <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-900">
+                <h2 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">Task Breakdown</h2>
+              </div>
               {favorites.length > 0 && (
-                <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-900 bg-indigo-500/5">
-                  <h2 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-3"><Star size={10} className="fill-current" /> Favorites</h2>
-                  <div className="flex flex-col gap-1">
+                <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-900 bg-indigo-500/5">
+                  <h2 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><Star size={10} className="fill-current" /> Favorites</h2>
+                  <div className="flex flex-wrap gap-1.5">
                     {favorites.map(f => (
-                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2 py-1.5 rounded bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-800 hover:border-indigo-500/50 cursor-pointer transition-all">
+                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-800 hover:border-indigo-500/50 cursor-pointer transition-all">
                         <span className="font-mono text-[8px] font-bold text-zinc-500">{f.id}</span>
-                        <span className="text-xs font-medium text-zinc-300 truncate">{f.title}</span>
+                        <span className="text-[10px] font-medium text-zinc-300 truncate max-w-[120px]">{f.title}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-900">
-                <h2 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">Task Breakdown</h2>
-              </div>
-              <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/20">
+              <div className="px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/20">
                 <input 
                   type="text"
                   placeholder="Filter by title, ID, owner, or label..."
-                  className="w-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 text-sm text-zinc-300 focus:border-indigo-500 outline-none transition-all"
                   value={filterText}
                   onChange={e => setFilterText(e.target.value)}
                 />
               </div>
-              <div className="flex items-center px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/50 text-xs font-black text-zinc-600 uppercase tracking-widest">
+              <div className="flex items-center px-4 py-2 bg-white dark:bg-zinc-950/50 text-xs font-black text-zinc-600 uppercase tracking-widest mt-auto">
                 <div className="w-8 shrink-0" />
                 <div className="w-24 shrink-0 px-2 border-r border-zinc-200 dark:border-zinc-900/50">ID</div>
                 <div className="flex-1 px-3">Name</div>
               </div>
             </div>
-            <div className="p-0">
-              {loading ? <div className="p-8 animate-pulse text-zinc-700 text-sm">Syncing Schedule...</div> : (
-                <div className="flex flex-col">
-                   <WBSTreeList nodes={tree} onToggle={toggleNode} onClick={handleBeadClick} />
-                </div>
-              )}
+
+            {/* Gantt Header Area (Spacer + Controls) */}
+            <div className="flex-1 flex items-end justify-end px-6 py-2 bg-[#09090b]">
+               <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-800 shadow-xl mb-1">
+                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold px-2">-</button>
+                  <span className="text-xs font-mono font-bold text-zinc-500 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
+                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold px-2">+</button>
+                  <div className="w-px h-4 bg-zinc-800 mx-1" />
+                  <button onClick={() => setZoom(1)} className="px-2 py-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold uppercase tracking-tighter">Reset</button>
+               </div>
             </div>
           </div>
 
-          {/* Gantt Side */}
-          <div 
-            ref={scrollRefBERT}
-            onScroll={handleScroll}
-            onMouseEnter={handleMouseEnter}
-            className="flex-1 relative bg-[#09090b] overflow-auto custom-scrollbar"
-          >
-            {/* Zoom Controls */}
-            <div className="absolute top-4 right-4 z-30 flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-800 shadow-xl">
-               <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold px-2">-</button>
-               <span className="text-xs font-mono font-bold text-zinc-500 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
-               <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1.5 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold px-2">+</button>
-               <div className="w-px h-4 bg-zinc-800 mx-1" />
-               <button onClick={() => setZoom(1)} className="px-2 py-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold uppercase tracking-tighter">Reset</button>
+          <div className="flex-1 flex overflow-hidden">
+            {/* WBS Side */}
+            <div 
+              ref={scrollRefWBS}
+              onScroll={handleScroll}
+              onMouseEnter={handleMouseEnter}
+              className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-zinc-950/30 min-w-[420px] overflow-y-auto custom-scrollbar"
+            >
+              <div className="p-0">
+                {loading ? <div className="p-8 animate-pulse text-zinc-700 text-sm">Syncing Schedule...</div> : (
+                  <div className="flex flex-col">
+                    <WBSTreeList nodes={tree} onToggle={toggleNode} onClick={handleBeadClick} />
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="relative" style={{ height: ganttLayout.rowCount * 40, width: 5000 * zoom }}>
-               {/* Grid */}
-               <div className="absolute inset-0 pointer-events-none">
-                  {Array.from({ length: ganttLayout.rowCount }).map((_, i) => (
-                    <div key={i} className="w-full border-b border-zinc-200 dark:border-zinc-900/50" style={{ height: '40px' }} />
-                  ))}
-                  <div className="absolute inset-0 flex">
-                    {Array.from({ length: Math.ceil(50 * zoom) }).map((_, i) => (
-                      <div key={i} className="h-full border-r border-zinc-200 dark:border-zinc-900/30" style={{ width: 100 * zoom }} />
+            {/* Gantt Side */}
+            <div 
+              ref={scrollRefBERT}
+              onScroll={handleScroll}
+              onMouseEnter={handleMouseEnter}
+              className="flex-1 relative bg-[#09090b] overflow-auto custom-scrollbar"
+            >
+              <div className="relative" style={{ height: ganttLayout.rowCount * 40, width: 5000 * zoom }}>
+                 {/* Grid */}
+                 <div className="absolute inset-0 pointer-events-none">
+                    {Array.from({ length: ganttLayout.rowCount }).map((_, i) => (
+                      <div key={i} className="w-full border-b border-zinc-200 dark:border-zinc-900/50" style={{ height: '40px' }} />
                     ))}
-                  </div>
-               </div>
+                    <div className="absolute inset-0 flex">
+                      {Array.from({ length: Math.ceil(50 * zoom) }).map((_, i) => (
+                        <div key={i} className="h-full border-r border-zinc-200 dark:border-zinc-900/30" style={{ width: 100 * zoom }} />
+                      ))}
+                    </div>
+                 </div>
 
                {/* Connectors (SVG) */}
                <svg className="absolute inset-0 pointer-events-none overflow-visible" style={{ width: '100%', height: '100%' }}>
@@ -505,6 +513,7 @@ function App() {
             </div>
           </div>
         </div>
+      </div>
 
         {/* Sidebar */}
         {(selectedBead || isCreating) && (
