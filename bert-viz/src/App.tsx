@@ -111,11 +111,12 @@ function App() {
           (b.last_opened || "").localeCompare(a.last_opened || "")
         )[0];
         
+        // If we have projects and one is more recent than current, switch to it
         if (mostRecent && mostRecent.path !== currentDir) {
           await handleOpenProject(mostRecent.path);
         } else {
-          setCurrentProjectPath(currentDir);
-          await loadData();
+          // Otherwise, register/open current dir to ensure it's in projects.json
+          await handleOpenProject(currentDir);
         }
       } catch (error) {
         console.error("Initialization failed:", error);
@@ -130,7 +131,7 @@ function App() {
       unlistenBeads.then(f => f());
       unlistenProjs.then(f => f());
     };
-  }, [loadData, loadProjects]);
+  }, []); // Only run on mount
 
   const handleToggleFavoriteProject = async (path: string) => {
     try {
