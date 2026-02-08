@@ -263,7 +263,11 @@ function App() {
 
   const handleStartEdit = () => {
     if (selectedBead) {
-      setEditForm({ ...selectedBead });
+      const parent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'))?.id;
+      setEditForm({ 
+        ...selectedBead,
+        parent // Virtual field for editing
+      });
       setIsEditing(true);
       setIsCreating(false);
     }
@@ -271,9 +275,27 @@ function App() {
 
   const handleSaveEdit = async () => {
     if (selectedBead && editForm) {
-      const updated = { ...selectedBead, ...editForm };
-      await updateBead(updated as Bead);
-      setSelectedBead(updated as Bead);
+      const updated = { ...editForm } as Bead;
+      
+      // Handle parent change
+      const currentParent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'));
+      if (updated.parent !== currentParent?.id) {
+        // Remove old parent-child dependency
+        updated.dependencies = (updated.dependencies || []).filter(d => d.type !== 'parent-child');
+        // Add new one if specified
+        if (updated.parent) {
+          updated.dependencies.push({
+            issue_id: updated.id,
+            depends_on_id: updated.parent,
+            type: 'parent-child'
+          });
+        }
+      }
+      
+      delete (updated as any).parent; // Don't save virtual field
+      
+      await updateBead(updated);
+      setSelectedBead(updated);
       setIsEditing(false);
       loadData();
     }
@@ -288,7 +310,8 @@ function App() {
       priority: 2,
       issue_type: "task",
       dependencies: [],
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      acceptance_criteria: []
     });
     setIsEditing(false);
     setIsCreating(true);
@@ -296,7 +319,16 @@ function App() {
 
   const handleSaveCreate = async () => {
     if (editForm.title) {
-      await createBead(editForm as Bead);
+      const newBead = { ...editForm } as Bead;
+      if (newBead.parent) {
+        newBead.dependencies = [...(newBead.dependencies || []), {
+          issue_id: newBead.id,
+          depends_on_id: newBead.parent,
+          type: 'parent-child'
+        }];
+      }
+      delete (newBead as any).parent;
+      await createBead(newBead);
       setIsCreating(false);
       loadData();
     }
@@ -569,36 +601,56 @@ function App() {
             <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-8 custom-scrollbar">
               <section className="flex flex-col gap-4">
                 {(isEditing || isCreating) ? (
-                  <>
-                    <input 
-                      className="bg-white dark:bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-lg font-bold w-full focus:border-indigo-500 outline-none"
-                      value={editForm.title}
-                      onChange={e => setEditForm({...editForm, title: e.target.value})}
-                      placeholder="Bead Title"
-                      autoFocus
-                    />
-                    <textarea 
-                      className="bg-white dark:bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-sm min-h-[120px] w-full focus:border-indigo-500 outline-none resize-none"
-                      value={editForm.description || ""}
-                      onChange={e => setEditForm({...editForm, description: e.target.value})}
-                      placeholder="Bead Description"
-                    />
-                    {isCreating && (
-                      <div className="flex flex-col gap-1">
-                        <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Type</span>
-                        <select 
-                          value={editForm.issue_type} 
-                          onChange={e => setEditForm({...editForm, issue_type: e.target.value})}
-                          className="bg-white dark:bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-300"
-                        >
-                          <option value="task">Task</option>
-                          <option value="feature">Feature</option>
-                          <option value="bug">Bug</option>
-                          <option value="epic">Epic</option>
-                        </select>
-                      </div>
-                    )}
-                  </>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex gap-2">
+                       <div className="flex-1 flex flex-col gap-1">
+                          <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Type</span>
+                          <select 
+                            value={editForm.issue_type} 
+                            onChange={e => setEditForm({...editForm, issue_type: e.target.value})}
+                            className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                          >
+                            <option value="task">Task</option>
+                            <option value="feature">Feature</option>
+                            <option value="bug">Bug</option>
+                            <option value="epic">Epic</option>
+                          </select>
+                       </div>
+                       <div className="flex-1 flex flex-col gap-1">
+                          <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Parent</span>
+                          <select 
+                            value={editForm.parent || ""} 
+                            onChange={e => setEditForm({...editForm, parent: e.target.value})}
+                            className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                          >
+                            <option value="">None</option>
+                            {beads.filter(b => b.issue_type === 'epic' || b.issue_type === 'feature').map(b => (
+                              <option key={b.id} value={b.id}>{b.id}: {b.title}</option>
+                            ))}
+                          </select>
+                       </div>
+                    </div>
+                    
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Title</span>
+                      <input 
+                        className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-lg font-bold w-full focus:border-indigo-500 outline-none text-zinc-900 dark:text-zinc-100"
+                        value={editForm.title}
+                        onChange={e => setEditForm({...editForm, title: e.target.value})}
+                        placeholder="Bead Title"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Description</span>
+                      <textarea 
+                        className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-sm min-h-[120px] w-full focus:border-indigo-500 outline-none resize-none text-zinc-900 dark:text-zinc-100"
+                        value={editForm.description || ""}
+                        onChange={e => setEditForm({...editForm, description: e.target.value})}
+                        placeholder="Bead Description"
+                      />
+                    </div>
+                  </div>
                 ) : selectedBead && (
                   <>
                     <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 leading-tight">{selectedBead.title}</h2>
@@ -607,36 +659,112 @@ function App() {
                 )}
               </section>
 
-              {(isEditing || isCreating || selectedBead) && (
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><User size={12} /> Owner</span>
-                    <span className="text-sm text-zinc-300 font-medium">{selectedBead?.owner || "Unassigned"}</span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><Tag size={12} /> Priority</span>
-                    {(isEditing || isCreating) ? (
-                      <select 
-                        value={editForm.priority} 
-                        onChange={e => setEditForm({...editForm, priority: parseInt(e.target.value)})}
-                        className="bg-zinc-800 text-sm border-none rounded p-1"
-                      >
-                        {[0,1,2,3,4].map(p => <option key={p} value={p}>P{p}</option>)}
-                      </select>
-                    ) : (
-                      <span className="text-sm text-zinc-300 font-medium">P{selectedBead?.priority}</span>
-                    )}
-                  </div>
+              <div className="grid grid-cols-2 gap-6">
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><User size={12} /> Owner</span>
+                  {(isEditing || isCreating) ? (
+                    <input 
+                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                      value={editForm.owner || ""}
+                      onChange={e => setEditForm({...editForm, owner: e.target.value})}
+                      placeholder="Assignee"
+                    />
+                  ) : (
+                    <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium">{selectedBead?.owner || "Unassigned"}</span>
+                  )}
                 </div>
-              )}
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><Tag size={12} /> Priority</span>
+                  {(isEditing || isCreating) ? (
+                    <select 
+                      value={editForm.priority} 
+                      onChange={e => setEditForm({...editForm, priority: parseInt(e.target.value)})}
+                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                    >
+                      {[0,1,2,3,4].map(p => <option key={p} value={p}>P{p} - {['Critical', 'High', 'Medium', 'Low', 'Trivial'][p]}</option>)}
+                    </select>
+                  ) : (
+                    <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium">P{selectedBead?.priority}</span>
+                  )}
+                </div>
+              </div>
 
               <section className="flex flex-col gap-3">
-                <h3 className="text-xs font-black text-zinc-600 uppercase tracking-[0.2em]">Labels & Type</h3>
+                <h3 className="text-xs font-black text-zinc-600 uppercase tracking-[0.2em]">Labels</h3>
                 <div className="flex flex-wrap gap-2">
-                  {selectedBead && <Chip label={selectedBead.issue_type} />}
-                  {(isCreating ? editForm.labels : selectedBead?.labels)?.map(l => (
-                    <Chip key={l} label={l} />
-                  )) || (!selectedBead?.issue_type && <span className="text-sm text-zinc-700 italic">No labels</span>)}
+                  {(isEditing || isCreating) ? (
+                    <input 
+                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 w-full focus:border-indigo-500 outline-none"
+                      value={(editForm.labels || []).join(", ")}
+                      onChange={e => setEditForm({...editForm, labels: e.target.value.split(",").map(l => l.trim()).filter(l => l)})}
+                      placeholder="Add labels (comma separated)..."
+                    />
+                  ) : (
+                    <>
+                      {selectedBead && <Chip label={selectedBead.issue_type} />}
+                      {selectedBead?.labels?.map(l => (
+                        <Chip key={l} label={l} />
+                      )) || (!selectedBead?.issue_type && <span className="text-sm text-zinc-700 italic">No labels</span>)}
+                    </>
+                  )}
+                </div>
+              </section>
+
+              <section className="flex flex-col gap-3">
+                <h3 className="text-xs font-black text-zinc-600 uppercase tracking-[0.2em]">Notes & References</h3>
+                <div className="flex flex-col gap-4">
+                  {(isEditing || isCreating) ? (
+                    <>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Design Notes</span>
+                        <textarea 
+                          className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
+                          value={editForm.design_notes || ""}
+                          onChange={e => setEditForm({...editForm, design_notes: e.target.value})}
+                          placeholder="Architectural decisions..."
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Working Notes</span>
+                        <textarea 
+                          className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
+                          value={editForm.working_notes || ""}
+                          onChange={e => setEditForm({...editForm, working_notes: e.target.value})}
+                          placeholder="Progress observations..."
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">External Reference</span>
+                        <input 
+                          className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                          value={editForm.external_reference || ""}
+                          onChange={e => setEditForm({...editForm, external_reference: e.target.value})}
+                          placeholder="URLs, IDs, or paths..."
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {selectedBead?.design_notes && (
+                        <div className="flex flex-col gap-1">
+                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Design Notes</span>
+                           <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">{selectedBead.design_notes}</p>
+                        </div>
+                      )}
+                      {selectedBead?.working_notes && (
+                        <div className="flex flex-col gap-1">
+                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Working Notes</span>
+                           <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">{selectedBead.working_notes}</p>
+                        </div>
+                      )}
+                      {selectedBead?.external_reference && (
+                        <div className="flex flex-col gap-1">
+                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">External Reference</span>
+                           <span className="text-xs text-indigo-400 truncate">{selectedBead.external_reference}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </section>
 
@@ -685,23 +813,57 @@ function App() {
                 </div>
               </section>
 
-              {selectedBead?.status === 'closed' && !isEditing && (
-                <section className="flex flex-col gap-4 p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/10">
-                  <h3 className="text-xs font-black text-emerald-500 uppercase tracking-[0.2em]">Closure Info</h3>
-                  <div className="flex flex-col gap-2">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-zinc-500 font-bold uppercase">Closed At</span>
-                      <span className="text-emerald-400 font-mono">{selectedBead.closed_at ? new Date(selectedBead.closed_at).toLocaleString() : "Unknown"}</span>
+              <div className="grid grid-cols-2 gap-6">
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><Clock size={12} /> Estimate</span>
+                  {(isEditing || isCreating) ? (
+                    <input 
+                      type="number"
+                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                      value={editForm.estimate || ""}
+                      onChange={e => setEditForm({...editForm, estimate: parseInt(e.target.value) || 0})}
+                      placeholder="Minutes"
+                    />
+                  ) : (
+                    <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium">{selectedBead?.estimate || 0}m</span>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2">Status</span>
+                  {(isEditing || isCreating) ? (
+                     <select 
+                      value={editForm.status} 
+                      onChange={e => {
+                        const newStatus = e.target.value;
+                        let extra = {};
+                        if (newStatus === 'closed' && editForm.status !== 'closed') {
+                          const reason = prompt("Enter closure reason:");
+                          extra = {
+                            closed_at: new Date().toISOString(),
+                            close_reason: reason || "Completed"
+                          };
+                        } else if (newStatus !== 'closed') {
+                          extra = {
+                            closed_at: undefined,
+                            close_reason: undefined
+                          };
+                        }
+                        setEditForm({...editForm, status: newStatus, ...extra});
+                      }}
+                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                    >
+                      <option value="open">Open</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <StatusIcon status={selectedBead?.status || ""} size={12} />
+                      <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium capitalize">{selectedBead?.status.replace('_', ' ')}</span>
                     </div>
-                    {selectedBead.close_reason && (
-                      <div className="flex flex-col gap-1">
-                        <span className="text-zinc-500 font-bold uppercase text-xs">Reason</span>
-                        <p className="text-sm text-zinc-300 italic">"{selectedBead.close_reason}"</p>
-                      </div>
-                    )}
-                  </div>
-                </section>
-              )}
+                  )}
+                </div>
+              </div>
 
               <section className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
