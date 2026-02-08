@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -492,6 +494,7 @@ pub fn run() {
             if let Some(path) = find_beads_file() {
                 let parent_path = path.parent().unwrap().to_path_buf();
                 let last_emit = Arc::new(Mutex::new(Instant::now()));
+                let last_checksum = Arc::new(Mutex::new(0u64));
 
                 let watch_target = path.clone();
                 let mut watcher = notify::RecommendedWatcher::new(move |res| {
@@ -502,12 +505,26 @@ pub fn run() {
                             );
 
                             if affects_target {
-                                // Debounce: only emit if at least 200ms have passed since last emit
-                                let mut last = last_emit.lock().unwrap();
-                                let now = Instant::now();
-                                if now.duration_since(*last) >= Duration::from_millis(200) {
-                                    *last = now;
-                                    let _ = handle.emit("beads-updated", ());
+                                // Calculate checksum of the file content
+                                if let Ok(bytes) = std::fs::read(&watch_target) {
+                                    let mut hasher = DefaultHasher::new();
+                                    bytes.hash(&mut hasher);
+                                    let new_checksum = hasher.finish();
+
+                                    let mut last_hash = last_checksum.lock().unwrap();
+                                    
+                                    // Only update if content has actually changed
+                                    if *last_hash != new_checksum {
+                                        *last_hash = new_checksum;
+
+                                        // Debounce: only emit if at least 200ms have passed since last emit
+                                        let mut last = last_emit.lock().unwrap();
+                                        let now = Instant::now();
+                                        if now.duration_since(*last) >= Duration::from_millis(200) {
+                                            *last = now;
+                                            let _ = handle.emit("beads-updated", ());
+                                        }
+                                    }
                                 }
                             }
                         },
