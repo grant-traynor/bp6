@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, Config};
 use tauri::{Emitter, AppHandle};
 
@@ -84,22 +86,80 @@ fn find_beads_file() -> Option<PathBuf> {
 #[tauri::command]
 fn get_beads() -> Result<Vec<Bead>, String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
-    
-    let file = File::open(path).map_err(|e| format!("Failed to open issues.jsonl: {}", e))?;
-    let reader = BufReader::new(file);
-    let mut beads = Vec::new();
 
-    for line in reader.lines() {
-        let line = line.map_err(|e| format!("Error reading line: {}", e))?;
-        if line.trim().is_empty() {
-            continue;
+    // Retry opening and reading the file to handle transient locks and partial writes
+    let mut last_error = String::new();
+    for i in 0..5 {
+        match File::open(&path) {
+            Ok(file) => {
+                let metadata = file.metadata().map_err(|e| e.to_string())?;
+
+                // If file size is 0, it might be mid-write, retry
+                if metadata.len() == 0 && i < 4 {
+                    std::thread::sleep(Duration::from_millis(100 * (i + 1)));
+                    continue;
+                }
+
+                // If file size is 0 on last retry, return empty list (legitimate empty state)
+                if metadata.len() == 0 {
+                    return Ok(Vec::new());
+                }
+
+                let reader = BufReader::new(file);
+                let mut beads = Vec::new();
+                let mut had_parse_error = false;
+
+                for (index, line) in reader.lines().enumerate() {
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(e) => {
+                            // IO error reading line - file might be corrupted or mid-write
+                            if i < 4 {
+                                had_parse_error = true;
+                                last_error = format!("IO error reading line {}: {}", index + 1, e);
+                                break;
+                            } else {
+                                return Err(format!("Error reading line {}: {}", index + 1, e));
+                            }
+                        }
+                    };
+
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+
+                    match serde_json::from_str::<Bead>(&line) {
+                        Ok(bead) => beads.push(bead),
+                        Err(e) => {
+                            // Parse error - might be partial write, retry
+                            if i < 4 {
+                                had_parse_error = true;
+                                last_error = format!("Failed to parse bead at line {}: {}", index + 1, e);
+                                break;
+                            } else {
+                                return Err(format!("Failed to parse bead at line {}: {}. Line content: {}", index + 1, e, line));
+                            }
+                        }
+                    }
+                }
+
+                if !had_parse_error {
+                    return Ok(beads);
+                }
+
+                // Had parse error, retry after delay
+                std::thread::sleep(Duration::from_millis(100 * (i + 1)));
+            }
+            Err(e) => {
+                if i == 4 {
+                    return Err(format!("Failed to open issues.jsonl after retries: {}", e));
+                }
+                std::thread::sleep(Duration::from_millis(100 * (i + 1)));
+            }
         }
-        let bead: Bead = serde_json::from_str(&line)
-            .map_err(|e| format!("Failed to parse bead: {} in line: {}", e, line))?;
-        beads.push(bead);
     }
 
-    Ok(beads)
+    Err(format!("Failed to read beads after retries. Last error: {}", last_error))
 }
 
 #[tauri::command]
@@ -127,10 +187,16 @@ fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> 
         return Err(format!("Bead with id {} not found", updated_bead.id));
     }
 
-    let mut file = File::create(path).map_err(|e| e.to_string())?;
-    for line in lines {
-        writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+    // Atomic write using a temporary file
+    let tmp_path = path.with_extension("jsonl.tmp");
+    {
+        let mut file = File::create(&tmp_path).map_err(|e| e.to_string())?;
+        for line in lines {
+            writeln!(file, "{}", line).map_err(|e| e.to_string())?;
+        }
+        file.sync_all().map_err(|e| e.to_string())?;
     }
+    std::fs::rename(tmp_path, path).map_err(|e| e.to_string())?;
 
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
@@ -274,13 +340,23 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let proj_handle = app.handle().clone();
-            
-            // Watch beads file
+
+            // Watch beads file with debouncing
             if let Some(path) = find_beads_file() {
                 let parent_path = path.parent().unwrap().to_path_buf();
+                let last_emit = Arc::new(Mutex::new(Instant::now()));
+
                 let mut watcher = notify::RecommendedWatcher::new(move |res| {
                     match res {
-                        Ok(_) => { let _ = handle.emit("beads-updated", ()); },
+                        Ok(_) => {
+                            // Debounce: only emit if at least 200ms have passed since last emit
+                            let mut last = last_emit.lock().unwrap();
+                            let now = Instant::now();
+                            if now.duration_since(*last) >= Duration::from_millis(200) {
+                                *last = now;
+                                let _ = handle.emit("beads-updated", ());
+                            }
+                        },
                         Err(e) => println!("watch error: {:?}", e),
                     }
                 }, Config::default()).unwrap();
@@ -288,11 +364,20 @@ pub fn run() {
                 std::mem::forget(watcher);
             }
 
-            // Watch projects file
+            // Watch projects file with debouncing
             if let Ok(proj_path) = get_projects_path() {
+                let proj_last_emit = Arc::new(Mutex::new(Instant::now()));
+
                 let mut proj_watcher = notify::RecommendedWatcher::new(move |res| {
                     match res {
-                        Ok(_) => { let _ = proj_handle.emit("projects-updated", ()); },
+                        Ok(_) => {
+                            let mut last = proj_last_emit.lock().unwrap();
+                            let now = Instant::now();
+                            if now.duration_since(*last) >= Duration::from_millis(200) {
+                                *last = now;
+                                let _ = proj_handle.emit("projects-updated", ());
+                            }
+                        },
                         Err(e) => println!("watch error: {:?}", e),
                     }
                 }, Config::default()).unwrap();

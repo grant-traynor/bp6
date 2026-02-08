@@ -48,7 +48,7 @@ function App() {
       setBeads(data);
     } catch (error) {
       console.error("Error in loadData:", error);
-      setBeads([]);
+      // Keep existing beads on error by not updating state
     } finally {
       setLoading(false);
     }
@@ -297,7 +297,7 @@ function App() {
   const handleStartCreate = useCallback(() => {
     setSelectedBead(null);
     setEditForm({
-      id: `bp6-${Math.random().toString(36).substr(2, 3)}`,
+      id: `bp6-${Math.random().toString(36).slice(2, 5)}`,
       title: "",
       status: "open",
       priority: 2,

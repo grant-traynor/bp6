@@ -74,7 +74,7 @@ export async function fetchBeads(): Promise<Bead[]> {
     return await invoke<Bead[]>("get_beads");
   } catch (error) {
     console.error("Failed to fetch beads:", error);
-    return [];
+    throw error;
   }
 }
 

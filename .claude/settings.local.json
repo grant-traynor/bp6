@@ -9,7 +9,15 @@
       "Bash(npm run check:*)",
       "Bash(npm run:*)",
       "Bash(bd list:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(bd doctor:*)",
+      "Bash(bd sync:*)",
+      "Bash(bd export:*)",
+      "Bash(bd daemon stop:*)",
+      "Bash(bd --no-daemon export:*)",
+      "Bash(md5:*)",
+      "Bash(bd init:*)",
+      "Bash(pkill:*)"
     ]
   }
 }
