@@ -1,19 +1,29 @@
 @import "tailwindcss";
 
+@theme {
+  --background-primary: #ffffff;
+  --background-secondary: #f4f4f5;
+  --text-primary: #09090b;
+  --text-secondary: #71717a;
+  --border-primary: #e4e4e7;
+}
+
+@variant dark (&:where(.dark, .dark *)) {
+  --background-primary: #09090b;
+  --background-secondary: #18181b;
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --border-primary: #27272a;
+  color-scheme: dark;
+}
+
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
-  --bg-primary: #ffffff;
-  --bg-secondary: #f4f4f5;
-  --text-primary: #09090b;
-  --text-secondary: #71717a;
-  --border-color: #e4e4e7;
-  color-scheme: light;
-
   color: var(--text-primary);
-  background-color: var(--bg-primary);
+  background-color: var(--background-primary);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -21,20 +31,11 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-.dark {
-  --bg-primary: #09090b;
-  --bg-secondary: #18181b;
-  --text-primary: #fafafa;
-  --text-secondary: #a1a1aa;
-  --border-color: #27272a;
-  color-scheme: dark;
-}
-
 body {
   margin: 0;
   min-width: 100vw;
   min-height: 100vh;
-  background-color: var(--bg-primary);
+  background-color: var(--background-primary);
   color: var(--text-primary);
 }
 

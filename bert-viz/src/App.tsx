@@ -429,8 +429,8 @@ function App() {
   }, [beads]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 font-sans">
-      <nav className="w-16 flex flex-col items-center py-6 border-r border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950 z-30">
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-zinc-900 dark:text-zinc-100 font-sans">
+      <nav className="w-16 flex flex-col items-center py-6 border-r border-zinc-200 dark:border-zinc-900 bg-[var(--background-primary)] z-30">
         <div className="flex flex-col gap-4 flex-1">
           <button className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-indigo-400 transition-all border border-transparent hover:border-indigo-500/20"><ListTree size={22} /></button>
           <div className="h-px w-8 bg-zinc-200 dark:bg-zinc-800 mx-auto" />
@@ -438,8 +438,8 @@ function App() {
         <div className="mt-auto border-t border-zinc-200 dark:border-zinc-900 pt-4"><Settings size={20} className="text-zinc-600 p-3" /></div>
       </nav>
 
-      <main className="flex-1 flex flex-col min-w-0 bg-white dark:bg-zinc-950 relative">
-        <header className="h-12 border-b border-zinc-200 dark:border-zinc-900 flex items-center px-6 justify-between bg-white dark:bg-zinc-950/50 backdrop-blur-md z-20">
+      <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
+        <header className="h-12 border-b border-zinc-200 dark:border-zinc-900 flex items-center px-6 justify-between bg-[var(--background-primary)]/50 backdrop-blur-md z-20">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
                <div className="w-6 h-6 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-xs shadow-lg text-white">B</div>
@@ -476,7 +476,7 @@ function App() {
               </button>
               
               {projectMenuOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl z-[60] py-2 animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute right-0 mt-2 w-72 bg-[var(--background-primary)] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl z-[60] py-2 animate-in fade-in zoom-in-95 duration-100">
                   {favoriteProjects.length > 0 && (
                     <div className="px-2 pb-2 mb-1">
                       <div className="px-3 py-1 text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Favorites</div>
@@ -586,7 +586,7 @@ function App() {
                   </div>
                 </div>
               )}
-              <div className="px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-white dark:bg-zinc-950/20">
+              <div className="px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-[var(--background-primary)] dark:bg-[var(--background-secondary)]/20">
                 <input 
                   type="text"
                   placeholder="Filter by title, ID, owner, or label..."
@@ -595,7 +595,7 @@ function App() {
                   onChange={e => setFilterText(e.target.value)}
                 />
               </div>
-              <div className="flex items-center px-4 py-2 bg-white dark:bg-zinc-950/50 text-xs font-black text-zinc-600 uppercase tracking-widest mt-auto">
+              <div className="flex items-center px-4 py-2 bg-[var(--background-primary)] dark:bg-[var(--background-secondary)]/50 text-xs font-black text-zinc-600 uppercase tracking-widest mt-auto">
                 <div className="w-8 shrink-0" />
                 <div className="w-24 shrink-0 px-2 border-r border-zinc-200 dark:border-zinc-900/50">ID</div>
                 <div className="flex-1 px-3">Name</div>
@@ -627,7 +627,7 @@ function App() {
                   </div>
                </div>
 
-               <div className="flex items-center gap-1 bg-white dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xl mb-1">
+               <div className="flex items-center gap-1 bg-[var(--background-primary)] dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xl mb-1">
                   <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold px-2">-</button>
                   <span className="text-xs font-mono font-bold text-zinc-400 dark:text-zinc-500 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
                   <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold px-2">+</button>
@@ -643,7 +643,7 @@ function App() {
                         ref={scrollRefWBS}
                         onScroll={handleScroll}
                         onMouseEnter={handleMouseEnter}
-                        className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-zinc-950/30 min-w-[420px] overflow-y-auto custom-scrollbar"
+                        className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-[var(--background-primary)] dark:bg-[var(--background-secondary)]/30 min-w-[420px] overflow-y-auto custom-scrollbar"
                       >
                         <div className="p-0">                {loading ? <div className="p-8 animate-pulse text-zinc-700 text-sm">Syncing Schedule...</div> : (
                   <div className="flex flex-col">
@@ -701,7 +701,7 @@ function App() {
 
         {/* Sidebar */}
         {(selectedBead || isCreating) && (
-          <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
+          <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-[var(--background-primary)] dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold">
@@ -761,7 +761,7 @@ function App() {
                           <select 
                             value={editForm.issue_type} 
                             onChange={e => setEditForm({...editForm, issue_type: e.target.value})}
-                            className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                            className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
                           >
                             <option value="task">Task</option>
                             <option value="feature">Feature</option>
@@ -774,7 +774,7 @@ function App() {
                           <select 
                             value={editForm.parent || ""} 
                             onChange={e => setEditForm({...editForm, parent: e.target.value})}
-                            className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                            className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
                           >
                             <option value="">None</option>
                             {beads.filter(b => b.issue_type === 'epic' || b.issue_type === 'feature').map(b => (
@@ -787,7 +787,7 @@ function App() {
                     <div className="flex flex-col gap-1">
                       <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Title</span>
                       <input 
-                        className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-lg font-bold w-full focus:border-indigo-500 outline-none text-zinc-900 dark:text-zinc-100"
+                        className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-lg font-bold w-full focus:border-indigo-500 outline-none text-zinc-900 dark:text-zinc-100"
                         value={editForm.title}
                         onChange={e => setEditForm({...editForm, title: e.target.value})}
                         placeholder="Bead Title"
@@ -797,7 +797,7 @@ function App() {
                     <div className="flex flex-col gap-1">
                       <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Description</span>
                       <textarea 
-                        className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-sm min-h-[120px] w-full focus:border-indigo-500 outline-none resize-none text-zinc-900 dark:text-zinc-100"
+                        className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-sm min-h-[120px] w-full focus:border-indigo-500 outline-none resize-none text-zinc-900 dark:text-zinc-100"
                         value={editForm.description || ""}
                         onChange={e => setEditForm({...editForm, description: e.target.value})}
                         placeholder="Bead Description"
@@ -817,7 +817,7 @@ function App() {
                   <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><User size={12} /> Owner</span>
                   {(isEditing || isCreating) ? (
                     <input 
-                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
                       value={editForm.owner || ""}
                       onChange={e => setEditForm({...editForm, owner: e.target.value})}
                       placeholder="Assignee"
@@ -832,7 +832,7 @@ function App() {
                     <select 
                       value={editForm.priority} 
                       onChange={e => setEditForm({...editForm, priority: parseInt(e.target.value)})}
-                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
                     >
                       {[0,1,2,3,4].map(p => <option key={p} value={p}>P{p} - {['Critical', 'High', 'Medium', 'Low', 'Trivial'][p]}</option>)}
                     </select>
@@ -847,7 +847,7 @@ function App() {
                 <div className="flex flex-wrap gap-2">
                   {(isEditing || isCreating) ? (
                     <input 
-                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 w-full focus:border-indigo-500 outline-none"
+                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 w-full focus:border-indigo-500 outline-none"
                       value={(editForm.labels || []).join(", ")}
                       onChange={e => setEditForm({...editForm, labels: e.target.value.split(",").map(l => l.trim()).filter(l => l)})}
                       placeholder="Add labels (comma separated)..."
@@ -871,7 +871,7 @@ function App() {
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Design Notes</span>
                         <textarea 
-                          className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
+                          className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
                           value={editForm.design_notes || ""}
                           onChange={e => setEditForm({...editForm, design_notes: e.target.value})}
                           placeholder="Architectural decisions..."
@@ -880,7 +880,7 @@ function App() {
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Working Notes</span>
                         <textarea 
-                          className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
+                          className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
                           value={editForm.working_notes || ""}
                           onChange={e => setEditForm({...editForm, working_notes: e.target.value})}
                           placeholder="Progress observations..."
@@ -889,7 +889,7 @@ function App() {
                       <div className="flex flex-col gap-1">
                         <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">External Reference</span>
                         <input 
-                          className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                          className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
                           value={editForm.external_reference || ""}
                           onChange={e => setEditForm({...editForm, external_reference: e.target.value})}
                           placeholder="URLs, IDs, or paths..."
@@ -929,7 +929,7 @@ function App() {
                       {(editForm.acceptance_criteria || []).map((ac, i) => (
                         <div key={i} className="flex gap-2">
                           <input 
-                            className="flex-1 bg-white dark:bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-sm text-zinc-300 focus:border-indigo-500 outline-none"
+                            className="flex-1 bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-800 rounded-lg p-2 text-sm text-zinc-300 focus:border-indigo-500 outline-none"
                             value={ac}
                             onChange={e => {
                               const newAC = [...(editForm.acceptance_criteria || [])];
@@ -972,7 +972,7 @@ function App() {
                   {(isEditing || isCreating) ? (
                     <input 
                       type="number"
-                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
                       value={editForm.estimate || ""}
                       onChange={e => setEditForm({...editForm, estimate: parseInt(e.target.value) || 0})}
                       placeholder="Minutes"
@@ -1003,7 +1003,7 @@ function App() {
                         }
                         setEditForm({...editForm, status: newStatus, ...extra});
                       }}
-                      className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
                     >
                       <option value="open">Open</option>
                       <option value="in_progress">In Progress</option>
@@ -1038,7 +1038,7 @@ function App() {
                 </div>
                 <div className="flex flex-col gap-2">
                   {(isCreating ? editForm.dependencies : selectedBead?.dependencies)?.map((d, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-white dark:bg-zinc-950 border border-zinc-800 group hover:border-zinc-700 transition-all">
+                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-800 group hover:border-zinc-700 transition-all">
                       <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-3">
                            <span className="text-xs font-mono text-zinc-500">{d.depends_on_id}</span>
