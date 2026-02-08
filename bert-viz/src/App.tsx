@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { fetchBeads, buildWBSTree, calculateGanttLayout, updateBead, createBead, type WBSNode, type Bead, type Project, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
@@ -19,11 +20,6 @@ function App() {
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
-  }, [collapsedIds]);
-
   const [selectedBead, setSelectedBead] = useState<Bead | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -32,6 +28,10 @@ function App() {
   const [zoom, setZoom] = useState(1);
   const [isDark, setIsDark] = useState(true);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
+  }, [collapsedIds]);
 
   useEffect(() => {
     if (isDark) {
@@ -50,22 +50,29 @@ function App() {
     setProjects(data);
   }, []);
 
-  const handleOpenProject = async (path: string) => {
-    await openProject(path);
-    setCurrentProjectPath(path);
-    loadData();
-  };
-
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
       const data = await fetchBeads();
       setBeads(data);
     } catch (error) {
       console.error("Error in loadData:", error);
+      setBeads([]);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleOpenProject = async (path: string) => {
+    try {
+      await openProject(path);
+      setCurrentProjectPath(path);
+      await loadData();
+      await loadProjects();
+    } catch (error) {
+      alert(`Failed to open project: ${error}`);
+    }
+  };
 
   const processedData = useMemo(() => {
     const filtered = beads.filter(b => {
@@ -81,7 +88,6 @@ function App() {
 
     const wbsTree = buildWBSTree(filtered);
     
-    // Apply expansion state
     const applyExpansion = (nodes: WBSNode[]) => {
       nodes.forEach(node => {
         node.isExpanded = !collapsedIds.has(node.id);
@@ -96,28 +102,26 @@ function App() {
 
   useEffect(() => {
     const init = async () => {
-      const currentDir = await invoke_get_current_dir();
-      
-      // Load projects to find the most recent one
-      const projs = await fetchProjects();
-      setProjects(projs);
-      
-      const mostRecent = [...projs].sort((a, b) => 
-        (b.last_opened || "").localeCompare(a.last_opened || "")
-      )[0];
-      
-      if (mostRecent && mostRecent.path !== currentDir) {
-        // Only auto-load if we're not already in a specific project dir
-        // (Wait, if we're in a dir with .beads, we should probably stay there)
-        // For now, let's just follow the "Auto-load most recent" requirement.
-        await handleOpenProject(mostRecent.path);
-      } else {
-        setCurrentProjectPath(currentDir);
-        loadData();
+      try {
+        const currentDir = await invoke<string>("get_current_dir");
+        const projs = await fetchProjects();
+        setProjects(projs);
+        
+        const mostRecent = [...projs].sort((a, b) => 
+          (b.last_opened || "").localeCompare(a.last_opened || "")
+        )[0];
+        
+        if (mostRecent && mostRecent.path !== currentDir) {
+          await handleOpenProject(mostRecent.path);
+        } else {
+          setCurrentProjectPath(currentDir);
+          await loadData();
+        }
+      } catch (error) {
+        console.error("Initialization failed:", error);
       }
     };
     init();
-    loadProjects();
 
     const unlistenBeads = listen("beads-updated", () => loadData());
     const unlistenProjs = listen("projects-updated", () => loadProjects());
@@ -128,21 +132,20 @@ function App() {
     };
   }, [loadData, loadProjects]);
 
-  // Helper because we can't import invoke directly into App if we want to stay clean
-  // but for now let's just keep it simple.
-  const invoke_get_current_dir = async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return await invoke<string>("get_current_dir");
-  };
-
   const handleToggleFavoriteProject = async (path: string) => {
-    await toggleFavoriteProject(path);
-    loadProjects();
+    try {
+      await toggleFavoriteProject(path);
+    } catch (error) {
+      alert(`Failed to toggle favorite: ${error}`);
+    }
   };
 
   const handleRemoveProject = async (path: string) => {
-    await removeProject(path);
-    loadProjects();
+    try {
+      await removeProject(path);
+    } catch (error) {
+      alert(`Failed to remove project: ${error}`);
+    }
   };
 
   const toggleNode = useCallback((id: string) => {
@@ -186,7 +189,7 @@ function App() {
       const parent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'))?.id;
       setEditForm({ 
         ...selectedBead,
-        parent // Virtual field for editing
+        parent
       });
       setIsEditing(true);
       setIsCreating(false);
@@ -195,23 +198,27 @@ function App() {
 
   const handleSaveEdit = async () => {
     if (selectedBead && editForm) {
-      const updated = { ...editForm } as Bead;
-      const currentParent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'));
-      if (updated.parent !== currentParent?.id) {
-        updated.dependencies = (updated.dependencies || []).filter(d => d.type !== 'parent-child');
-        if (updated.parent) {
-          updated.dependencies.push({
-            issue_id: updated.id,
-            depends_on_id: updated.parent,
-            type: 'parent-child'
-          });
+      try {
+        const updated = { ...editForm } as Bead;
+        const currentParent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'));
+        if (updated.parent !== currentParent?.id) {
+          updated.dependencies = (updated.dependencies || []).filter(d => d.type !== 'parent-child');
+          if (updated.parent) {
+            updated.dependencies.push({
+              issue_id: updated.id,
+              depends_on_id: updated.parent,
+              type: 'parent-child'
+            });
+          }
         }
+        delete (updated as any).parent;
+        await updateBead(updated);
+        setSelectedBead(updated);
+        setIsEditing(false);
+        await loadData();
+      } catch (error) {
+        alert(`Failed to save bead: ${error}`);
       }
-      delete (updated as any).parent;
-      await updateBead(updated);
-      setSelectedBead(updated);
-      setIsEditing(false);
-      loadData();
     }
   };
 
@@ -233,18 +240,22 @@ function App() {
 
   const handleSaveCreate = async () => {
     if (editForm.title) {
-      const newBead = { ...editForm } as Bead;
-      if (newBead.parent) {
-        newBead.dependencies = [...(newBead.dependencies || []), {
-          issue_id: newBead.id,
-          depends_on_id: newBead.parent,
-          type: 'parent-child'
-        }];
+      try {
+        const newBead = { ...editForm } as Bead;
+        if (newBead.parent) {
+          newBead.dependencies = [...(newBead.dependencies || []), {
+            issue_id: newBead.id,
+            depends_on_id: newBead.parent,
+            type: 'parent-child'
+          }];
+        }
+        delete (newBead as any).parent;
+        await createBead(newBead);
+        setIsCreating(false);
+        await loadData();
+      } catch (error) {
+        alert(`Failed to create bead: ${error}`);
       }
-      delete (newBead as any).parent;
-      await createBead(newBead);
-      setIsCreating(false);
-      loadData();
     }
   };
 
@@ -260,20 +271,28 @@ function App() {
   };
 
   const toggleFavorite = async (bead: Bead) => {
-    const updated = { ...bead, is_favorite: !bead.is_favorite };
-    await updateBead(updated);
-    loadData();
+    try {
+      const updated = { ...bead, is_favorite: !bead.is_favorite };
+      await updateBead(updated);
+      await loadData();
+    } catch (error) {
+      alert(`Failed to toggle favorite: ${error}`);
+    }
   };
 
   const handleSelectProject = async () => {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: "Select BERT Project Directory"
-    });
-    if (selected && typeof selected === 'string') {
-      await handleOpenProject(selected);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select BERT Project Directory"
+      });
+      if (selected && typeof selected === 'string') {
+        await handleOpenProject(selected);
+      }
+    } catch (error) {
+      alert(`Failed to select project: ${error}`);
     }
   };
 
@@ -328,18 +347,10 @@ function App() {
               <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
                 <h2 className="text-[11px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Task Breakdown</h2>
                 <div className="flex items-center gap-1">
-                  <button 
-                    onClick={expandAll}
-                    title="Expand All"
-                    className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"
-                  >
+                  <button onClick={expandAll} title="Expand All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors">
                     <ChevronsDown size={16} strokeWidth={2.5} />
                   </button>
-                  <button 
-                    onClick={collapseAll}
-                    title="Collapse All"
-                    className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"
-                  >
+                  <button onClick={collapseAll} title="Collapse All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors">
                     <ChevronsUp size={16} strokeWidth={2.5} />
                   </button>
                 </div>
@@ -359,13 +370,7 @@ function App() {
               )}
               <div className="px-4 py-3 border-b-2 border-[var(--border-primary)]/50 bg-[var(--background-primary)]">
                 <div className="relative group">
-                  <input 
-                    type="text"
-                    placeholder="Search by title, ID, or label..."
-                    className="w-full bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-inner"
-                    value={filterText}
-                    onChange={e => setFilterText(e.target.value)}
-                  />
+                  <input type="text" placeholder="Search by title, ID, or label..." className="w-full bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-inner" value={filterText} onChange={e => setFilterText(e.target.value)} />
                 </div>
               </div>
               <div className="flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.3em] mt-auto border-t border-[var(--border-primary)]/50">
@@ -410,12 +415,7 @@ function App() {
           </div>
 
           <div className="flex-1 flex overflow-hidden">
-            <div 
-              ref={scrollRefWBS}
-              onScroll={handleScroll}
-              onMouseEnter={handleMouseEnter}
-              className="w-1/3 border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[420px] overflow-y-auto custom-scrollbar"
-            >
+            <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="w-1/3 border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[420px] overflow-y-auto custom-scrollbar">
               <div className="p-0">
                 {loading ? <div className="p-12 animate-pulse text-[var(--text-muted)] text-xs font-medium tracking-widest uppercase">Syncing Schedule...</div> : (
                   <div className="flex flex-col">
@@ -425,12 +425,7 @@ function App() {
               </div>
             </div>
 
-            <div 
-              ref={scrollRefBERT}
-              onScroll={handleScroll}
-              onMouseEnter={handleMouseEnter}
-              className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar"
-            >
+            <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
               <div className="relative" style={{ height: processedData.layout.rowCount * 48, width: 5000 * zoom }}>
                  <div className="absolute inset-0 pointer-events-none">
                     {Array.from({ length: processedData.layout.rowCount }).map((_, i) => (
@@ -445,15 +440,7 @@ function App() {
 
                <svg className="absolute inset-0 pointer-events-none overflow-visible" style={{ width: '100%', height: '100%' }}>
                   {processedData.layout.connectors.map((c: any, i: number) => (
-                    <path
-                      key={i}
-                      d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`}
-                      fill="none"
-                      stroke={c.isCritical ? "#f43f5e" : "var(--text-muted)"}
-                      strokeWidth={c.isCritical ? 2.5 : 1.5}
-                      strokeDasharray={c.isCritical ? "0" : "4 2"}
-                      opacity={0.8}
-                    />
+                    <path key={i} d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`} fill="none" stroke={c.isCritical ? "#f43f5e" : "var(--text-muted)"} strokeWidth={c.isCritical ? 2.5 : 1.5} strokeDasharray={c.isCritical ? "0" : "4 2"} opacity={0.8} />
                   ))}
                </svg>
 

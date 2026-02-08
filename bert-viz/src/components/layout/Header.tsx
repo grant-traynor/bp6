@@ -48,11 +48,13 @@ export const Header = ({
            </div>
            <span className="text-[11px] text-[var(--text-secondary)] font-bold tracking-tight">/ Workspace / <span className="text-indigo-700 dark:text-indigo-400 font-black">
              {(() => {
-               const project = favoriteProjects.find(p => p.path === currentProjectPath) || 
-                              recentProjects.find(p => p.path === currentProjectPath);
+               const normalize = (p: string) => p.replace(/[/\\]$/, "");
+               const current = normalize(currentProjectPath);
+               const project = favoriteProjects.find(p => normalize(p.path) === current) || 
+                              recentProjects.find(p => normalize(p.path) === current);
                if (project) return project.name;
                if (currentProjectPath) {
-                 const parts = currentProjectPath.split(/[/\\]/);
+                 const parts = current.split(/[/\\]/);
                  return parts[parts.length - 1] || "Default";
                }
                return "Default";
@@ -100,7 +102,7 @@ export const Header = ({
                       key={p.path}
                       className={cn(
                         "group flex items-center gap-3 px-4 py-2.5 rounded-xl cursor-pointer transition-all",
-                        currentProjectPath === p.path 
+                        currentProjectPath.replace(/[/\\]$/, "") === p.path.replace(/[/\\]$/, "") 
                           ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" 
                           : "hover:bg-[var(--background-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                       )}
@@ -137,7 +139,7 @@ export const Header = ({
                       key={p.path}
                       className={cn(
                         "group flex items-center gap-3 px-4 py-2.5 rounded-xl cursor-pointer transition-all",
-                        currentProjectPath === p.path 
+                        currentProjectPath.replace(/[/\\]$/, "") === p.path.replace(/[/\\]$/, "") 
                           ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" 
                           : "hover:bg-[var(--background-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                       )}

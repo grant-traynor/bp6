@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use notify::{Watcher, RecursiveMode, Config};
-use tauri::Emitter;
+use tauri::{Emitter, AppHandle};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Dependency {
@@ -103,7 +103,7 @@ fn get_beads() -> Result<Vec<Bead>, String> {
 }
 
 #[tauri::command]
-fn update_bead(updated_bead: Bead) -> Result<(), String> {
+fn update_bead(updated_bead: Bead, app_handle: tauri::AppHandle) -> Result<(), String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl".to_string())?;
     
     let file = File::open(&path).map_err(|e| e.to_string())?;
@@ -132,11 +132,12 @@ fn update_bead(updated_bead: Bead) -> Result<(), String> {
         writeln!(file, "{}", line).map_err(|e| e.to_string())?;
     }
 
+    let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
 
 #[tauri::command]
-fn create_bead(new_bead: Bead) -> Result<(), String> {
+fn create_bead(new_bead: Bead, app_handle: tauri::AppHandle) -> Result<(), String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl".to_string())?;
     
     let mut file = OpenOptions::new()
@@ -147,6 +148,7 @@ fn create_bead(new_bead: Bead) -> Result<(), String> {
     let line = serde_json::to_string(&new_bead).map_err(|e| e.to_string())?;
     writeln!(file, "{}", line).map_err(|e| e.to_string())?;
 
+    let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
 
@@ -195,25 +197,29 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn add_project(project: Project) -> Result<(), String> {
+fn add_project(project: Project, app_handle: tauri::AppHandle) -> Result<(), String> {
     let mut projects = get_projects()?;
     if let Some(existing) = projects.iter_mut().find(|p| p.path == project.path) {
         existing.name = project.name;
     } else {
         projects.push(project);
     }
-    save_projects(projects)
+    save_projects(projects)?;
+    let _ = app_handle.emit("projects-updated", ());
+    Ok(())
 }
 
 #[tauri::command]
-fn remove_project(path: String) -> Result<(), String> {
+fn remove_project(path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
     let projects = get_projects()?;
     let filtered: Vec<Project> = projects.into_iter().filter(|p| p.path != path).collect();
-    save_projects(filtered)
+    save_projects(filtered)?;
+    let _ = app_handle.emit("projects-updated", ());
+    Ok(())
 }
 
 #[tauri::command]
-fn open_project(path: String) -> Result<(), String> {
+fn open_project(path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
     std::env::set_current_dir(&path).map_err(|e| format!("Failed to change directory to {}: {}", path, e))?;
     
     // Update last_opened
@@ -231,17 +237,20 @@ fn open_project(path: String) -> Result<(), String> {
         });
     }
     save_projects(projects)?;
-    
+    let _ = app_handle.emit("projects-updated", ());
+    let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
 
 #[tauri::command]
-fn toggle_favorite(path: String) -> Result<(), String> {
+fn toggle_favorite(path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
     let mut projects = get_projects()?;
     if let Some(project) = projects.iter_mut().find(|p| p.path == path) {
         project.is_favorite = !project.is_favorite;
     }
-    save_projects(projects)
+    save_projects(projects)?;
+    let _ = app_handle.emit("projects-updated", ());
+    Ok(())
 }
 
 #[tauri::command]
