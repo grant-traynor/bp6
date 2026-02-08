@@ -1,20 +1,25 @@
 @import "tailwindcss";
 
-@theme {
+:root {
   --background-primary: #ffffff;
   --background-secondary: #f4f4f5;
   --text-primary: #09090b;
   --text-secondary: #71717a;
   --border-primary: #e4e4e7;
+  color-scheme: light;
 }
 
-@variant dark (&:where(.dark, .dark *)) {
+.dark {
   --background-primary: #09090b;
   --background-secondary: #18181b;
   --text-primary: #fafafa;
   --text-secondary: #a1a1aa;
   --border-primary: #27272a;
   color-scheme: dark;
+}
+
+@theme {
+  --color-border-primary: var(--border-primary);
 }
 
 :root {

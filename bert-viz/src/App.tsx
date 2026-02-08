@@ -21,7 +21,7 @@ const getChipStyles = (label: string) => {
   if (l === 'task') return "bg-blue-500/10 text-blue-400 border-blue-500/20";
   if (l.includes('infra')) return "bg-orange-500/10 text-orange-400 border-orange-500/20";
   if (l.includes('doc')) return "bg-cyan-500/10 text-cyan-400 border-cyan-500/20";
-  return "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
+  return "bg-[var(--background-secondary)]0/10 text-zinc-400 border-zinc-500/20";
 };
 
 const Chip = ({ label }: { label: string }) => (
@@ -603,7 +603,7 @@ function App() {
             </div>
 
             {/* Gantt Header Area (Metrics + Controls) */}
-            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-zinc-50 dark:bg-[#09090b]">
+            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-[var(--background-secondary)] dark:bg-[var(--background-primary)]">
                <div className="flex items-center gap-6 mb-1">
                   <div className="flex flex-col">
                      <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total</span>
@@ -658,7 +658,7 @@ function App() {
               ref={scrollRefBERT}
               onScroll={handleScroll}
               onMouseEnter={handleMouseEnter}
-              className="flex-1 relative bg-zinc-50 dark:bg-[#09090b] overflow-auto custom-scrollbar"
+              className="flex-1 relative bg-[var(--background-secondary)] dark:bg-[var(--background-primary)] overflow-auto custom-scrollbar"
             >
               <div className="relative" style={{ height: ganttLayout.rowCount * 40, width: 5000 * zoom }}>
                  {/* Grid */}
@@ -1072,7 +1072,7 @@ function App() {
               </section>
             </div>
             
-            <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex gap-3">
+            <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 bg-[var(--background-secondary)] dark:bg-zinc-900/50 flex gap-3">
               {(isEditing || isCreating) ? (
                 <>
                   <button onClick={() => { setIsEditing(false); setIsCreating(false); }} className="flex-1 py-2.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 text-sm font-bold transition-all">Cancel</button>
