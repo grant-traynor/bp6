@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Color Scheme</title>
+    <style>
+        :root {
+            color-scheme: light dark;
+        }
+        body {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        .color-card {
+            width: 200px;
+            height: 100px;
+            margin: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        @media (prefers-color-scheme: light) {
+            body {
+                background: white;
+                color: black;
+            }
+            --level1: #6862f6;
+            --text1: black;
+            --level2: #ac70fc;
+            --text2: black;
+            --level3: #d275ff;
+            --text3: black;
+            --level4: #ed91ef;
+            --text4: black;
+            --level5: #f0cde2;
+            --text5: black;
+            --level6: #fefbfc;
+            --text6: black;
+            --level7: #ffffff;
+            --text7: black;
+            --level8: #fefeff;
+            --text8: black;
+            --level9: #fefbef;
+            --text9: black;
+            --level10: #fdfee6;
+            --text10: black;
+        }
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: black;
+                color: white;
+            }
+            --level1: #070455;
+            --text1: white;
+            --level2: #2f026b;
+            --text2: white;
+            --level3: #4f0075;
+            --text3: white;
+            --level4: #6f1071;
+            --text4: white;
+            --level5: #942a68;
+            --text5: white;
+            --level6: #ca3048;
+            --text6: white;
+            --level7: #e65325;
+            --text7: black;
+            --level8: #f88608;
+            --text8: black;
+            --level9: #ebb403;
+            --text9: white;
+            --level10: #d5de07;
+            --text10: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="color-card" style="background: var(--level1); color: var(--text1);">Level 1 #0c0786</div>
+    <div class="color-card" style="background: var(--level2); color: var(--text2);">Level 2 #45039e</div>
+    <div class="color-card" style="background: var(--level3); color: var(--text3);">Level 3 #7200a8</div>
+    <div class="color-card" style="background: var(--level4); color: var(--text4);">Level 4 #9b179e</div>
+    <div class="color-card" style="background: var(--level5); color: var(--text5);">Level 5 #bc3685</div>
+    <div class="color-card" style="background: var(--level6); color: var(--text6);">Level 6 #d7576b</div>
+    <div class="color-card" style="background: var(--level7); color: var(--text7);">Level 7 #ec7853</div>
+    <div class="color-card" style="background: var(--level8); color: var(--text8);">Level 8 #fa9f3a</div>
+    <div class="color-card" style="background: var(--level9); color: var(--text9);">Level 9 #fcc926</div>
+    <div class="color-card" style="background: var(--level10); color: var(--text10);">Level 10 #eff821</div>
+</body>
+</html>

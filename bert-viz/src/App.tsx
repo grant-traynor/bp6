@@ -429,7 +429,7 @@ function App() {
                       <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px' }} />
                     ))}
                     <div className="absolute inset-0 flex">
-                      {Array.from({ length: Math.ceil(50 * zoom) }).map((_, i) => (
+                      {Array.from({ length: 50 }).map((_, i) => (
                         <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
                       ))}
                     </div>
