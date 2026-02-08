@@ -39,11 +39,13 @@ export interface WBSNode extends Bead {
 export interface Project {
   name: string;
   path: string;
+  is_favorite?: boolean;
+  last_opened?: string;
 }
 
 export async function fetchProjects(): Promise<Project[]> {
   try {
-    return await invoke<Project[]>("get_favorite_projects");
+    return await invoke<Project[]>("get_projects");
   } catch (error) {
     console.error("Failed to fetch projects:", error);
     return [];
@@ -51,11 +53,15 @@ export async function fetchProjects(): Promise<Project[]> {
 }
 
 export async function addProject(project: Project): Promise<void> {
-  await invoke("add_favorite_project", { project });
+  await invoke("add_project", { project });
 }
 
-export async function removeProject(name: string): Promise<void> {
-  await invoke("remove_favorite_project", { name });
+export async function removeProject(path: string): Promise<void> {
+  await invoke("remove_project", { path });
+}
+
+export async function toggleFavoriteProject(path: string): Promise<void> {
+  await invoke("toggle_favorite", { path });
 }
 
 export async function openProject(path: string): Promise<void> {

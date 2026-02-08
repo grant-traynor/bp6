@@ -44,13 +44,13 @@ const GanttBar = ({ item, onClick }: { item: GanttItem; onClick: (bead: Bead) =>
   const isMilestone = bead.estimate === 0;
 
   const getStatusColor = () => {
-    if (isEpic) return "bg-zinc-800 border-zinc-700";
-    if (isMilestone) return "bg-zinc-100 border-zinc-400 rotate-45";
+    if (isEpic) return "bg-zinc-200 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700";
+    if (isMilestone) return "bg-zinc-800 dark:bg-zinc-100 border-zinc-700 dark:border-zinc-400 rotate-45";
     if (bead.status === 'closed') return "bg-blue-500 border-blue-400";
     if (isCritical) return "bg-red-500 border-red-400";
     if (isBlocked) return "bg-amber-500 border-amber-400";
     if (bead.status === 'in_progress') return "bg-emerald-500 border-emerald-400";
-    return "bg-zinc-600 border-zinc-500";
+    return "bg-zinc-300 dark:bg-zinc-600 border-zinc-400 dark:border-zinc-500";
   };
 
   return (
@@ -78,7 +78,7 @@ const GanttBar = ({ item, onClick }: { item: GanttItem; onClick: (bead: Bead) =>
         <div className="absolute left-full ml-4 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10">
           <span className={cn(
             "text-sm font-bold tracking-tight",
-            bead.status === 'closed' ? "text-zinc-600" : "text-zinc-300"
+            bead.status === 'closed' ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-900 dark:text-zinc-300"
           )}>{bead.title}</span>
           {isCritical && !isMilestone && <Flame size={10} className="text-red-500 fill-current opacity-60" />}
         </div>
@@ -121,7 +121,7 @@ const WBSTreeItem = ({
         <div className="w-24 shrink-0 px-2 flex items-center h-full border-r border-zinc-200 dark:border-zinc-900/50">
            <span className={cn(
              "font-mono text-xs font-bold px-1.5 py-0.5 rounded tracking-tighter",
-             node.isCritical ? "bg-red-500/20 text-red-400" : "bg-zinc-800 text-zinc-500"
+             node.isCritical ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-500"
            )}>
              {node.id}
            </span>
@@ -134,7 +134,7 @@ const WBSTreeItem = ({
           <StatusIcon status={node.status} size={10} />
           <span className={cn(
             "text-sm truncate font-semibold tracking-tight",
-            node.status === 'closed' ? "text-zinc-600 line-through" : "text-zinc-300"
+            node.status === 'closed' ? "text-zinc-400 dark:text-zinc-600 line-through" : "text-zinc-900 dark:text-zinc-300"
           )}>
             {node.title}
           </span>
@@ -181,6 +181,7 @@ function App() {
   const [filterText, setFilterText] = useState("");
   const [zoom, setZoom] = useState(1);
   const [isDark, setIsDark] = useState(true);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 
   useEffect(() => {
     if (isDark) {
@@ -221,20 +222,20 @@ function App() {
     const existing = projects.find(p => p.path === path);
     
     if (existing) {
-      await removeProject(existing.name);
+      await toggleFavoriteProject(path);
     } else {
       const parts = path.split(/[/\\]/);
       const dirName = parts[parts.length - 1] || "Project";
       const name = prompt("Project Name:", dirName);
       if (name) {
-        await addProject({ name, path });
+        await addProject({ name, path, is_favorite: true });
       }
     }
     loadProjects();
   };
 
   const isCurrentProjectFavorite = useMemo(() => {
-    return projects.some(p => p.path === currentProjectPath);
+    return projects.some(p => p.path === currentProjectPath && p.is_favorite);
   }, [projects, currentProjectPath]);
 
   const loadData = useCallback(async () => {
@@ -276,11 +277,11 @@ function App() {
     loadProjects();
 
     const unlistenBeads = listen("beads-updated", () => loadData());
-    const unlistenFavs = listen("favorites-updated", () => loadProjects());
+    const unlistenProjs = listen("projects-updated", () => loadProjects());
 
     return () => {
       unlistenBeads.then(f => f());
-      unlistenFavs.then(f => f());
+      unlistenProjs.then(f => f());
     };
   }, [loadData, loadProjects]);
 
@@ -399,7 +400,13 @@ function App() {
     loadData();
   };
 
-  const favorites = useMemo(() => beads.filter(b => b.is_favorite), [beads]);
+  const favoriteBeads = useMemo(() => beads.filter(b => b.is_favorite), [beads]);
+  
+  const favoriteProjects = useMemo(() => projects.filter(p => p.is_favorite), [projects]);
+  const recentProjects = useMemo(() => 
+    projects.filter(p => !p.is_favorite)
+    .sort((a, b) => (b.last_opened || "").localeCompare(a.last_opened || ""))
+  , [projects]);
 
   const stats = useMemo(() => {
     const total = beads.length;
@@ -427,9 +434,6 @@ function App() {
         <div className="flex flex-col gap-4 flex-1">
           <button className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-indigo-400 transition-all border border-transparent hover:border-indigo-500/20"><ListTree size={22} /></button>
           <div className="h-px w-8 bg-zinc-200 dark:bg-zinc-800 mx-auto" />
-          <button onClick={handleAddCurrentProject} className="p-3 rounded-xl text-zinc-400 hover:text-amber-500 transition-all">
-            <Star size={22} className={cn(isCurrentProjectFavorite && "fill-current text-amber-500")} />
-          </button>
         </div>
         <div className="mt-auto border-t border-zinc-200 dark:border-zinc-900 pt-4"><Settings size={20} className="text-zinc-600 p-3" /></div>
       </nav>
@@ -460,6 +464,104 @@ function App() {
             <button onClick={loadData} className="h-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 rounded-md text-xs font-bold border border-zinc-300 dark:border-zinc-800 flex items-center gap-2 transition-all">
               <Package size={12} className="text-indigo-400" /> Sync
             </button>
+
+            <div className="relative">
+              <button 
+                onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+                className="h-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 rounded-md text-xs font-bold border border-zinc-300 dark:border-zinc-800 flex items-center gap-2 transition-all"
+              >
+                <FolderOpen size={12} className="text-indigo-400" />
+                <span>Select Project</span>
+                <ChevronDown size={12} className={cn("transition-transform", projectMenuOpen && "rotate-180")} />
+              </button>
+              
+              {projectMenuOpen && (
+                <div className="absolute right-0 mt-2 w-72 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl z-[60] py-2 animate-in fade-in zoom-in-95 duration-100">
+                  {favoriteProjects.length > 0 && (
+                    <div className="px-2 pb-2 mb-1">
+                      <div className="px-3 py-1 text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Favorites</div>
+                      {favoriteProjects.map(p => (
+                        <div 
+                          key={p.path}
+                          className={cn(
+                            "group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all",
+                            currentProjectPath === p.path 
+                              ? "bg-indigo-600/10 text-indigo-500" 
+                              : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400"
+                          )}
+                          onClick={() => { setProjectMenuOpen(false); handleOpenProject(p.path); }}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold truncate">{p.name}</div>
+                            <div className="text-[9px] opacity-60 truncate">{p.path}</div>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); toggleFavoriteProject(p.path); }}
+                              className={cn("p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md transition-all", p.is_favorite ? "text-amber-500 opacity-100" : "text-zinc-500")}
+                            >
+                              <Star size={12} className={cn(p.is_favorite && "fill-current")} />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); removeProject(p.path); }}
+                              className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-md transition-all text-zinc-500"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  {recentProjects.length > 0 && (
+                    <div className="px-2 pb-2 mb-1">
+                      <div className="px-3 py-1 text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Recent</div>
+                      {recentProjects.map(p => (
+                        <div 
+                          key={p.path}
+                          className={cn(
+                            "group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all",
+                            currentProjectPath === p.path 
+                              ? "bg-indigo-600/10 text-indigo-500" 
+                              : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400"
+                          )}
+                          onClick={() => { setProjectMenuOpen(false); handleOpenProject(p.path); }}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold truncate">{p.name}</div>
+                            <div className="text-[9px] opacity-60 truncate">{p.path}</div>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); toggleFavoriteProject(p.path); }}
+                              className={cn("p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md transition-all", p.is_favorite ? "text-amber-500 opacity-100" : "text-zinc-500")}
+                            >
+                              <Star size={12} className={cn(p.is_favorite && "fill-current")} />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); removeProject(p.path); }}
+                              className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-md transition-all text-zinc-500"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  
+                  <div className="px-2 pt-1 border-t border-zinc-100 dark:border-zinc-900">
+                    <button 
+                      onClick={() => { setProjectMenuOpen(false); handleSelectProject(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-all text-left"
+                    >
+                      <Plus size={14} /> Add New Project
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -471,14 +573,14 @@ function App() {
               <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-900">
                 <h2 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">Task Breakdown</h2>
               </div>
-              {favorites.length > 0 && (
+              {favoriteBeads.length > 0 && (
                 <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-900 bg-indigo-500/5">
                   <h2 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><Star size={10} className="fill-current" /> Favorites</h2>
                   <div className="flex flex-wrap gap-1.5">
-                    {favorites.map(f => (
-                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-800 hover:border-indigo-500/50 cursor-pointer transition-all">
+                    {favoriteBeads.map(f => (
+                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 hover:border-indigo-500/50 cursor-pointer transition-all">
                         <span className="font-mono text-[8px] font-bold text-zinc-500">{f.id}</span>
-                        <span className="text-[10px] font-medium text-zinc-300 truncate max-w-[120px]">{f.title}</span>
+                        <span className="text-[10px] font-medium text-zinc-700 dark:text-zinc-300 truncate max-w-[120px]">{f.title}</span>
                       </div>
                     ))}
                   </div>
@@ -488,7 +590,7 @@ function App() {
                 <input 
                   type="text"
                   placeholder="Filter by title, ID, owner, or label..."
-                  className="w-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1 text-sm text-zinc-300 focus:border-indigo-500 outline-none transition-all"
+                  className="w-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none transition-all"
                   value={filterText}
                   onChange={e => setFilterText(e.target.value)}
                 />
@@ -505,32 +607,32 @@ function App() {
                <div className="flex items-center gap-6 mb-1">
                   <div className="flex flex-col">
                      <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total</span>
-                     <span className="text-sm font-bold text-zinc-100">{stats.total}</span>
+                     <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{stats.total}</span>
                   </div>
                   <div className="flex flex-col">
                      <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Open</span>
-                     <span className="text-sm font-bold text-emerald-400">{stats.open}</span>
+                     <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{stats.open}</span>
                   </div>
                   <div className="flex flex-col">
                      <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Active</span>
-                     <span className="text-sm font-bold text-amber-400">{stats.inProgress}</span>
+                     <span className="text-sm font-bold text-amber-600 dark:text-amber-400">{stats.inProgress}</span>
                   </div>
                   <div className="flex flex-col">
                      <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest">Blocked</span>
-                     <span className="text-sm font-bold text-rose-400">{stats.blocked}</span>
+                     <span className="text-sm font-bold text-rose-600 dark:text-rose-400">{stats.blocked}</span>
                   </div>
                   <div className="flex flex-col">
                      <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Done</span>
-                     <span className="text-sm font-bold text-zinc-400">{stats.closed}</span>
+                     <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400">{stats.closed}</span>
                   </div>
                </div>
 
-               <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-800 shadow-xl mb-1">
-                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold px-2">-</button>
-                  <span className="text-xs font-mono font-bold text-zinc-500 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
-                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold px-2">+</button>
-                  <div className="w-px h-4 bg-zinc-800 mx-1" />
-                  <button onClick={() => setZoom(1)} className="px-2 py-1 hover:bg-zinc-800 rounded text-zinc-400 hover:text-zinc-900 dark:text-zinc-100 transition-all text-xs font-bold uppercase tracking-tighter">Reset</button>
+               <div className="flex items-center gap-1 bg-white dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xl mb-1">
+                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold px-2">-</button>
+                  <span className="text-xs font-mono font-bold text-zinc-400 dark:text-zinc-500 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
+                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold px-2">+</button>
+                  <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-800 mx-1" />
+                  <button onClick={() => setZoom(1)} className="px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold uppercase tracking-tighter">Reset</button>
                </div>
             </div>
           </div>
@@ -543,43 +645,6 @@ function App() {
                         onMouseEnter={handleMouseEnter}
                         className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-white dark:bg-zinc-950/30 min-w-[420px] overflow-y-auto custom-scrollbar"
                       >
-                        <div className="p-4 border-b border-zinc-200 dark:border-zinc-900 flex flex-col gap-3 bg-zinc-50/50 dark:bg-zinc-900/20">
-                                        <button 
-                                          className="w-full flex items-center justify-center gap-2 py-2 px-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 text-sm font-bold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-sm"
-                                          onClick={handleSelectProject}
-                                        >
-                                          <FolderOpen size={16} /> Select Project
-                                        </button>            
-                          {projects.length > 0 && (
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center justify-between px-2 py-1">
-                                <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Favorites ({projects.length})</span>
-                              </div>
-                              {projects.map(p => (
-                                <div 
-                                  key={p.name}
-                                  className={cn(
-                                    "group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all border",
-                                    currentProjectPath === p.path 
-                                      ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20" 
-                                      : "bg-transparent border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400"
-                                  )}
-                                  onClick={() => handleOpenProject(p.path)}
-                                >
-                                  <Star size={14} className={cn("shrink-0", currentProjectPath === p.path ? "fill-current text-white" : "text-amber-500")} />
-                                  <span className="text-sm font-bold truncate flex-1">{p.name}</span>
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); removeProject(p.name); loadProjects(); }}
-                                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all"
-                                  >
-                                    <X size={12} />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-            
                         <div className="p-0">                {loading ? <div className="p-8 animate-pulse text-zinc-700 text-sm">Syncing Schedule...</div> : (
                   <div className="flex flex-col">
                     <WBSTreeList nodes={tree} onToggle={toggleNode} onClick={handleBeadClick} />
@@ -636,10 +701,10 @@ function App() {
 
         {/* Sidebar */}
         {(selectedBead || isCreating) && (
-          <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-zinc-100 dark:bg-zinc-900 border-l border-zinc-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
+          <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
+            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-800 text-zinc-400 font-bold">
+                <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold">
                   {isCreating ? "New Bead" : selectedBead?.id}
                 </span>
                 {selectedBead && !isEditing && !isCreating && (
@@ -673,7 +738,7 @@ function App() {
                       }
                       setEditForm({...editForm, status: newStatus, ...extra});
                     }}
-                    className="bg-zinc-800 text-sm border-none rounded p-1 focus:ring-0"
+                    className="bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-300 text-sm border-none rounded p-1 focus:ring-0"
                   >
                     <option value="open">Open</option>
                     <option value="in_progress">In Progress</option>
@@ -681,7 +746,7 @@ function App() {
                   </select>
                 )}
               </div>
-              <button onClick={() => { setSelectedBead(null); setIsCreating(false); }} className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors">
+              <button onClick={() => { setSelectedBead(null); setIsCreating(false); }} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors">
                 <X size={18} />
               </button>
             </div>
@@ -1007,10 +1072,10 @@ function App() {
               </section>
             </div>
             
-            <div className="p-6 border-t border-zinc-800 bg-zinc-100 dark:bg-zinc-900/50 flex gap-3">
+            <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 flex gap-3">
               {(isEditing || isCreating) ? (
                 <>
-                  <button onClick={() => { setIsEditing(false); setIsCreating(false); }} className="flex-1 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-bold transition-all">Cancel</button>
+                  <button onClick={() => { setIsEditing(false); setIsCreating(false); }} className="flex-1 py-2.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 text-sm font-bold transition-all">Cancel</button>
                   <button onClick={isCreating ? handleSaveCreate : handleSaveEdit} className="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-all shadow-lg shadow-emerald-500/10 flex items-center justify-center gap-2"><Save size={14} /> {isCreating ? "Create Bead" : "Save Changes"}</button>
                 </>
               ) : (
