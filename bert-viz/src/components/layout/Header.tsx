@@ -34,7 +34,7 @@ export const Header = ({
   handleSelectProject,
 }: HeaderProps) => {
   return (
-    <header className="h-16 border-b-2 border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/90 backdrop-blur-xl z-20">
+    <header className="h-16 border-b-2 border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/90 backdrop-blur-xl z-30">
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-3">
            <div className="w-8 h-8 bg-indigo-700 rounded-lg flex items-center justify-center font-black text-xs shadow-xl shadow-indigo-700/30 text-white">B</div>
