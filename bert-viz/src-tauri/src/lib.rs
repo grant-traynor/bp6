@@ -69,13 +69,50 @@ where
     }
 }
 
+fn get_sync_branch_name(repo_path: &std::path::Path) -> Option<String> {
+    // Try to read sync.branch from bd config
+    let output = std::process::Command::new("bd")
+        .arg("config")
+        .arg("get")
+        .arg("sync.branch")
+        .current_dir(repo_path)
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() {
+            return Some(branch);
+        }
+    }
+    None
+}
+
 fn find_beads_file() -> Option<PathBuf> {
     let mut curr = std::env::current_dir().ok()?;
     loop {
+        // First check if there's a sync-branch worktree (remote/sync mode)
+        if let Some(sync_branch) = get_sync_branch_name(&curr) {
+            let worktree_path = curr
+                .join(".git")
+                .join("beads-worktrees")
+                .join(&sync_branch)
+                .join(".beads")
+                .join("issues.jsonl");
+
+            if worktree_path.exists() {
+                println!("Using sync-branch worktree: {}", worktree_path.display());
+                return Some(worktree_path);
+            }
+        }
+
+        // Fall back to working tree (local mode)
         let test_path = curr.join(".beads/issues.jsonl");
         if test_path.exists() {
+            println!("Using local working tree: {}", test_path.display());
             return Some(test_path);
         }
+
         if !curr.pop() {
             break;
         }
@@ -357,10 +394,16 @@ pub fn run() {
                                 let _ = handle.emit("beads-updated", ());
                             }
                         },
-                        Err(e) => println!("watch error: {:?}", e),
+                        Err(e) => eprintln!("Beads file watch error: {:?}", e),
                     }
                 }, Config::default()).unwrap();
-                watcher.watch(&parent_path, RecursiveMode::Recursive).unwrap();
+
+                // Watch the parent directory (either .beads or beads-sync/.beads)
+                if let Err(e) = watcher.watch(&parent_path, RecursiveMode::Recursive) {
+                    eprintln!("Failed to watch beads directory {}: {:?}", parent_path.display(), e);
+                } else {
+                    println!("Watching beads file at: {}", path.display());
+                }
                 std::mem::forget(watcher);
             }
 
