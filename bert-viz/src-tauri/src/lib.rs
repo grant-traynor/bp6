@@ -500,9 +500,8 @@ pub fn run() {
                 let mut watcher = notify::RecommendedWatcher::new(move |res: std::result::Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(event) => {
-                            let affects_target = event.paths.iter().any(|p|
-                                p.file_name() == watch_target.file_name()
-                            );
+                            // Check if event affects the specific target file (full path comparison)
+                            let affects_target = event.paths.iter().any(|p| p == &watch_target);
 
                             if affects_target {
                                 // Single non-blocking read attempt
