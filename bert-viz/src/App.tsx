@@ -14,8 +14,16 @@ function App() {
   const [beads, setBeads] = useState<Bead[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem("collapsedIds");
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
+  }, [collapsedIds]);
+
   const [selectedBead, setSelectedBead] = useState<Bead | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);

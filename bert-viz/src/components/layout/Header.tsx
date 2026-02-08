@@ -47,9 +47,16 @@ export const Header = ({
               <span className="text-[11px] font-black text-[var(--text-primary)] uppercase tracking-widest">Live</span>
            </div>
            <span className="text-[11px] text-[var(--text-secondary)] font-bold tracking-tight">/ Workspace / <span className="text-indigo-700 dark:text-indigo-400 font-black">
-             {favoriteProjects.find(p => p.path === currentProjectPath)?.name || 
-              recentProjects.find(p => p.path === currentProjectPath)?.name || 
-              "Default"}
+             {(() => {
+               const project = favoriteProjects.find(p => p.path === currentProjectPath) || 
+                              recentProjects.find(p => p.path === currentProjectPath);
+               if (project) return project.name;
+               if (currentProjectPath) {
+                 const parts = currentProjectPath.split(/[/\\]/);
+                 return parts[parts.length - 1] || "Default";
+               }
+               return "Default";
+             })()}
            </span></span>
         </div>
       </div>

@@ -3,18 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Color Scheme</title>
+    <title>Color Scheme Variants</title>
     <style>
-        :root {
-            color-scheme: light dark;
-        }
         body {
+            margin: 0;
+            padding: 20px;
+            font-family: sans-serif;
+        }
+        .section {
+            margin-bottom: 40px;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .light-section {
+            background: white;
+            color: black;
+        }
+        .dark-section {
+            background: black;
+            color: white;
+        }
+        .color-cards {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            margin: 0;
         }
         .color-card {
             width: 200px;
@@ -25,71 +37,62 @@
             justify-content: center;
             font-weight: bold;
             font-size: 16px;
+            border-radius: 4px;
         }
-        @media (prefers-color-scheme: light) {
-            body {
-                background: white;
-                color: black;
-            }
-            --level1: #6862f6;
-            --text1: black;
-            --level2: #ac70fc;
-            --text2: black;
-            --level3: #d275ff;
-            --text3: black;
-            --level4: #ed91ef;
-            --text4: black;
-            --level5: #f0cde2;
-            --text5: black;
-            --level6: #fefbfc;
-            --text6: black;
-            --level7: #ffffff;
-            --text7: black;
-            --level8: #fefeff;
-            --text8: black;
-            --level9: #fefbef;
-            --text9: black;
-            --level10: #fdfee6;
-            --text10: black;
-        }
-        @media (prefers-color-scheme: dark) {
-            body {
-                background: black;
-                color: white;
-            }
-            --level1: #070455;
-            --text1: white;
-            --level2: #2f026b;
-            --text2: white;
-            --level3: #4f0075;
-            --text3: white;
-            --level4: #6f1071;
-            --text4: white;
-            --level5: #942a68;
-            --text5: white;
-            --level6: #ca3048;
-            --text6: white;
-            --level7: #e65325;
-            --text7: black;
-            --level8: #f88608;
-            --text8: black;
-            --level9: #ebb403;
-            --text9: white;
-            --level10: #d5de07;
-            --text10: white;
-        }
+        /* Light variants */
+        .light-section .level1 { background: #6862f6; color: black; }
+        .light-section .level2 { background: #ac70fc; color: black; }
+        .light-section .level3 { background: #d275ff; color: black; }
+        .light-section .level4 { background: #ed91ef; color: black; }
+        .light-section .level5 { background: #f0cde2; color: black; }
+        .light-section .level6 { background: #fefbfc; color: black; }
+        .light-section .level7 { background: #ffffff; color: black; }
+        .light-section .level8 { background: #fefeff; color: black; }
+        .light-section .level9 { background: #fefbef; color: black; }
+        .light-section .level10 { background: #fdfee6; color: black; }
+        /* Dark variants */
+        .dark-section .level1 { background: #070455; color: white; }
+        .dark-section .level2 { background: #2f026b; color: white; }
+        .dark-section .level3 { background: #4f0075; color: white; }
+        .dark-section .level4 { background: #6f1071; color: white; }
+        .dark-section .level5 { background: #942a68; color: white; }
+        .dark-section .level6 { background: #ca3048; color: white; }
+        .dark-section .level7 { background: #e65325; color: black; }
+        .dark-section .level8 { background: #f88608; color: black; }
+        .dark-section .level9 { background: #ebb403; color: white; } /* Adjusted for contrast */
+        .dark-section .level10 { background: #d5de07; color: black; } /* Better contrast */
     </style>
 </head>
 <body>
-    <div class="color-card" style="background: var(--level1); color: var(--text1);">Level 1 #0c0786</div>
-    <div class="color-card" style="background: var(--level2); color: var(--text2);">Level 2 #45039e</div>
-    <div class="color-card" style="background: var(--level3); color: var(--text3);">Level 3 #7200a8</div>
-    <div class="color-card" style="background: var(--level4); color: var(--text4);">Level 4 #9b179e</div>
-    <div class="color-card" style="background: var(--level5); color: var(--text5);">Level 5 #bc3685</div>
-    <div class="color-card" style="background: var(--level6); color: var(--text6);">Level 6 #d7576b</div>
-    <div class="color-card" style="background: var(--level7); color: var(--text7);">Level 7 #ec7853</div>
-    <div class="color-card" style="background: var(--level8); color: var(--text8);">Level 8 #fa9f3a</div>
-    <div class="color-card" style="background: var(--level9); color: var(--text9);">Level 9 #fcc926</div>
-    <div class="color-card" style="background: var(--level10); color: var(--text10);">Level 10 #eff821</div>
+    <div class="section light-section">
+        <h2>Light Theme</h2>
+        <div class="color-cards">
+            <div class="color-card level1">Level 1</div>
+            <div class="color-card level2">Level 2</div>
+            <div class="color-card level3">Level 3</div>
+            <div class="color-card level4">Level 4</div>
+            <div class="color-card level5">Level 5</div>
+            <div class="color-card level6">Level 6</div>
+            <div class="color-card level7">Level 7</div>
+            <div class="color-card level8">Level 8</div>
+            <div class="color-card level9">Level 9</div>
+            <div class="color-card level10">Level 10</div>
+        </div>
+    </div>
+    <div class="section dark-section">
+        <h2>Dark Theme</h2>
+        <div class="color-cards">
+            <div class="color-card level1">Level 1</div>
+            <div class="color-card level2">Level 2</div>
+            <div class="color-card level3">Level 3</div>
+            <div class="color-card level4">Level 4</div>
+            <div class="color-card level5">Level 5</div>
+            <div class="color-card level6">Level 6</div>
+            <div class="color-card level7">Level 7</div>
+            <div class="color-card level8">Level 8</div>
+            <div class="color-card level9">Level 9</div>
+            <div class="color-card level10">Level 10</div>
+        </div>
+    </div>
 </body>
 </html>
