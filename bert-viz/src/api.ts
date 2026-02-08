@@ -260,7 +260,7 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
     if (row === undefined) return; 
 
     const width = Math.max((bead.estimate || 600) / 10, 40) * zoom;
-    const x = (xMap.get(bead.id) || 0) * (100 * zoom) + 40;
+    const x = (xMap.get(bead.id) || 0) * (100 * zoom) + (40 * zoom);
 
     items.push({
       bead,
@@ -276,7 +276,7 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
       const predRow = rowMap.get(d.depends_on_id);
       if (predRow === undefined) return;
 
-      const predX = (xMap.get(d.depends_on_id) || 0) * (100 * zoom) + 40;
+      const predX = (xMap.get(d.depends_on_id) || 0) * (100 * zoom) + (40 * zoom);
       const predWidth = Math.max((beads.find(b => b.id === d.depends_on_id)?.estimate || 600) / 10, 40) * zoom;
 
       connectors.push({
