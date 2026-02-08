@@ -9,13 +9,13 @@ interface GanttBarProps {
 
 export const GanttBar = ({ item, onClick }: GanttBarProps) => {
   const { bead, isCritical, isBlocked, x, width } = item;
-  const isEpic = bead.issue_type === 'epic';
-  const isMilestone = bead.estimate === 0;
+  const isSummary = bead.issue_type === 'epic' || bead.issue_type === 'feature';
+  const isMilestone = bead.estimate === 0 && !isSummary;
 
   const getStatusColor = () => {
-    if (isEpic) return "bg-zinc-500 dark:bg-zinc-500 border-zinc-600 dark:border-zinc-400";
+    if (isSummary) return bead.status === 'closed' ? "bg-zinc-400 dark:bg-zinc-600 border-zinc-500" : "bg-zinc-600 dark:bg-zinc-400 border-zinc-700 dark:border-zinc-300";
     if (isMilestone) return "bg-indigo-700 dark:bg-indigo-400 border-indigo-800 rotate-45";
-    if (bead.status === 'closed') return "bg-indigo-600 dark:bg-indigo-500 border-indigo-700 opacity-50";
+    if (bead.status === 'closed') return "bg-zinc-200 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400 dark:text-zinc-600";
     if (isCritical) return "bg-rose-600 dark:bg-rose-500 border-rose-700 shadow-[0_0_12px_rgba(225,29,72,0.4)]";
     if (isBlocked) return "bg-amber-600 dark:bg-amber-500 border-amber-700";
     if (bead.status === 'in_progress') return "bg-emerald-600 dark:bg-emerald-500 border-emerald-700 shadow-[0_0_12px_rgba(16,185,129,0.3)]";
@@ -29,10 +29,13 @@ export const GanttBar = ({ item, onClick }: GanttBarProps) => {
       onClick={() => onClick(bead)}
     >
       <div className="flex-1 flex items-center h-full relative">
-        {isEpic ? (
-          <div className="w-full h-3 bg-zinc-300 dark:bg-zinc-700 relative rounded-full overflow-hidden border-2 border-zinc-400 dark:border-zinc-500">
-             <div className="absolute left-0 top-0 bottom-0 w-2 bg-indigo-700 dark:bg-indigo-400" />
-             <div className="absolute right-0 top-0 bottom-0 w-2 bg-indigo-700 dark:bg-indigo-400" />
+        {isSummary ? (
+          <div className={cn(
+            "w-full h-2 relative rounded-sm border-b-2",
+            getStatusColor()
+          )}>
+             <div className={cn("absolute left-0 -bottom-1 top-0 w-1.5 rounded-sm", getStatusColor())} />
+             <div className={cn("absolute right-0 -bottom-1 top-0 w-1.5 rounded-sm", getStatusColor())} />
           </div>
         ) : isMilestone ? (
           <div className={cn("w-3.5 h-3.5 border-2 shadow-md transition-all group-hover:scale-125", getStatusColor())} />
@@ -40,7 +43,7 @@ export const GanttBar = ({ item, onClick }: GanttBarProps) => {
           <div className={cn(
             "h-6 rounded-md border-2 shadow-md transition-all w-full group-hover:shadow-lg group-hover:border-indigo-500",
             getStatusColor(),
-            bead.status === 'closed' ? "opacity-40" : "opacity-100"
+            bead.status === 'closed' ? "opacity-60" : "opacity-100"
           )} />
         )}
 

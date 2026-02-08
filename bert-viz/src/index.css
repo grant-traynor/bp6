@@ -10,6 +10,11 @@
   --border-primary: #ced4da;
   --accent-primary: #364fc7;
   --accent-secondary: #4263eb;
+  --level-0: transparent;
+  --level-1: rgba(0, 0, 0, 0.02);
+  --level-2: rgba(0, 0, 0, 0.04);
+  --level-3: rgba(0, 0, 0, 0.06);
+  --level-4: rgba(0, 0, 0, 0.08);
   color-scheme: light;
 }
 
@@ -23,6 +28,11 @@
   --border-primary: #343a40;
   --accent-primary: #4c6ef5;
   --accent-secondary: #748ffc;
+  --level-0: transparent;
+  --level-1: rgba(255, 255, 255, 0.015);
+  --level-2: rgba(255, 255, 255, 0.03);
+  --level-3: rgba(255, 255, 255, 0.045);
+  --level-4: rgba(255, 255, 255, 0.06);
   color-scheme: dark;
 }
 

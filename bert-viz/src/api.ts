@@ -129,6 +129,7 @@ export interface GanttItem {
   x: number;
   width: number;
   row: number;
+  depth: number;
   isCritical: boolean;
   isBlocked: boolean;
 }
@@ -143,6 +144,7 @@ export interface GanttLayout {
   items: GanttItem[];
   connectors: GanttConnector[];
   rowCount: number;
+  rowDepths: number[];
 }
 
 export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: number = 1): GanttLayout {
@@ -150,10 +152,15 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
   const connectors: GanttConnector[] = [];
   
   const visibleRows: string[] = [];
-  const flatten = (nodes: WBSNode[]) => {
+  const rowDepthMap = new Map<string, number>();
+  const rowDepths: number[] = [];
+  
+  const flatten = (nodes: WBSNode[], depth: number = 0) => {
     nodes.forEach(node => {
       visibleRows.push(node.id);
-      if (node.isExpanded) flatten(node.children);
+      rowDepthMap.set(node.id, depth);
+      rowDepths.push(depth);
+      if (node.isExpanded) flatten(node.children, depth + 1);
     });
   };
   flatten(tree);
@@ -197,6 +204,32 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
   };
 
   beads.forEach(bead => getX(bead.id));
+
+  const rangeMap = new Map<string, { x: number, width: number }>();
+  
+  const calculateNodeRange = (node: WBSNode): { x: number, width: number } => {
+    if (rangeMap.has(node.id)) return rangeMap.get(node.id)!;
+
+    let x: number;
+    let width: number;
+
+    if (node.children.length === 0) {
+      x = ((xMap.get(node.id) || 0) * 100 + 40);
+      width = Math.max((node.estimate || 600) / 10, 40);
+    } else {
+      const childrenRanges = node.children.map(c => calculateNodeRange(c));
+      const minX = Math.min(...childrenRanges.map(r => r.x));
+      const maxX = Math.max(...childrenRanges.map(r => r.x + r.width));
+      x = minX;
+      width = maxX - minX;
+    }
+
+    const res = { x, width };
+    rangeMap.set(node.id, res);
+    return res;
+  };
+
+  tree.forEach(root => calculateNodeRange(root));
 
   // Find Critical Path (Longest Path)
   const criticalPathNodes = new Set<string>();
@@ -259,12 +292,18 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
     const row = rowMap.get(bead.id);
     if (row === undefined) return; 
 
-    const width = Math.max((bead.estimate || 600) / 10, 40) * zoom;
-    const x = ((xMap.get(bead.id) || 0) * 100 + 40) * zoom;
+    const range = rangeMap.get(bead.id) || { 
+      x: ((xMap.get(bead.id) || 0) * 100 + 40),
+      width: Math.max((bead.estimate || 600) / 10, 40)
+    };
+    
+    const x = range.x * zoom;
+    const width = range.width * zoom;
 
     items.push({
       bead,
       row,
+      depth: rowDepthMap.get(bead.id) || 0,
       x,
       width,
       isCritical: criticalPathNodes.has(bead.id),
@@ -276,8 +315,13 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
       const predRow = rowMap.get(d.depends_on_id);
       if (predRow === undefined) return;
 
-      const predX = ((xMap.get(d.depends_on_id) || 0) * 100 + 40) * zoom;
-      const predWidth = Math.max((beads.find(b => b.id === d.depends_on_id)?.estimate || 600) / 10, 40) * zoom;
+      const predRange = rangeMap.get(d.depends_on_id) || {
+        x: ((xMap.get(d.depends_on_id) || 0) * 100 + 40),
+        width: Math.max((beads.find(b => b.id === d.depends_on_id)?.estimate || 600) / 10, 40)
+      };
+
+      const predX = predRange.x * zoom;
+      const predWidth = predRange.width * zoom;
 
       connectors.push({
         from: { x: predX + predWidth, y: predRow * 48 + 24 },
@@ -287,5 +331,5 @@ export function calculateGanttLayout(beads: Bead[], tree: WBSNode[], zoom: numbe
     });
   });
 
-  return { items, connectors, rowCount };
+  return { items, connectors, rowCount, rowDepths };
 }

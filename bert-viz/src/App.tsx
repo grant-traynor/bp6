@@ -25,21 +25,12 @@ function App() {
   const [isCreating, setIsCreating] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Bead>>({});
   const [filterText, setFilterText] = useState("");
+  const [hideClosed, setHideClosed] = useState(false);
+  const [includeHierarchy, setIncludeHierarchy] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [isDark, setIsDark] = useState(true);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-
-  useEffect(() => {
-    localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
-  }, [collapsedIds]);
-
-  useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [isDark]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
@@ -75,16 +66,41 @@ function App() {
   };
 
   const processedData = useMemo(() => {
-    const filtered = beads.filter(b => {
-      const search = filterText.toLowerCase();
-      if (!search) return true;
-      return (
-        b.title.toLowerCase().includes(search) ||
-        b.id.toLowerCase().includes(search) ||
-        b.owner?.toLowerCase().includes(search) ||
-        b.labels?.some(l => l.toLowerCase().includes(search))
-      );
-    });
+    let filtered: Bead[] = [];
+    
+    if (!filterText && !hideClosed) {
+      filtered = beads;
+    } else {
+      const matches = beads.filter(b => {
+        if (hideClosed && b.status === 'closed') return false;
+        if (!filterText) return true;
+        
+        const search = filterText.toLowerCase();
+        return (
+          b.title.toLowerCase().includes(search) ||
+          b.id.toLowerCase().includes(search) ||
+          b.owner?.toLowerCase().includes(search) ||
+          b.labels?.some(l => l.toLowerCase().includes(search))
+        );
+      });
+
+      if (includeHierarchy && filterText) {
+        const includedIds = new Set<string>();
+        const addWithAncestors = (bead: Bead) => {
+          if (includedIds.has(bead.id)) return;
+          includedIds.add(bead.id);
+          const parentDep = bead.dependencies?.find(d => d.type === 'parent-child');
+          if (parentDep) {
+            const parent = beads.find(b => b.id === parentDep.depends_on_id);
+            if (parent) addWithAncestors(parent);
+          }
+        };
+        matches.forEach(addWithAncestors);
+        filtered = beads.filter(b => includedIds.has(b.id));
+      } else {
+        filtered = matches;
+      }
+    }
 
     const wbsTree = buildWBSTree(filtered);
     
@@ -98,7 +114,7 @@ function App() {
 
     const layout = calculateGanttLayout(beads, wbsTree, zoom);
     return { tree: wbsTree, layout };
-  }, [beads, filterText, zoom, collapsedIds]);
+  }, [beads, filterText, zoom, collapsedIds, hideClosed, includeHierarchy]);
 
   useEffect(() => {
     const init = async () => {
@@ -111,11 +127,9 @@ function App() {
           (b.last_opened || "").localeCompare(a.last_opened || "")
         )[0];
         
-        // If we have projects and one is more recent than current, switch to it
         if (mostRecent && mostRecent.path !== currentDir) {
           await handleOpenProject(mostRecent.path);
         } else {
-          // Otherwise, register/open current dir to ensure it's in projects.json
           await handleOpenProject(currentDir);
         }
       } catch (error) {
@@ -131,23 +145,7 @@ function App() {
       unlistenBeads.then(f => f());
       unlistenProjs.then(f => f());
     };
-  }, []); // Only run on mount
-
-  const handleToggleFavoriteProject = async (path: string) => {
-    try {
-      await toggleFavoriteProject(path);
-    } catch (error) {
-      alert(`Failed to toggle favorite: ${error}`);
-    }
-  };
-
-  const handleRemoveProject = async (path: string) => {
-    try {
-      await removeProject(path);
-    } catch (error) {
-      alert(`Failed to remove project: ${error}`);
-    }
-  };
+  }, []);
 
   const toggleNode = useCallback((id: string) => {
     setCollapsedIds(prev => {
@@ -178,6 +176,79 @@ function App() {
     findParents(processedData.tree);
     setCollapsedIds(allParentIds);
   }, [processedData.tree]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          (e.target as HTMLElement).blur();
+        }
+        return;
+      }
+
+      switch (e.key) {
+        case '/':
+          e.preventDefault();
+          searchInputRef.current?.focus();
+          break;
+        case 'Escape':
+          setSelectedBead(null);
+          setIsCreating(false);
+          setIsEditing(false);
+          break;
+        case '+':
+        case '=':
+          e.preventDefault();
+          expandAll();
+          break;
+        case '-':
+        case '_':
+          e.preventDefault();
+          collapseAll();
+          break;
+        case 'n':
+          e.preventDefault();
+          handleStartCreate();
+          break;
+        case 'r':
+          e.preventDefault();
+          loadData();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [expandAll, collapseAll, loadData]); // handleStartCreate omitted from deps if it's not stable or just let it be
+
+  useEffect(() => {
+    localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
+  }, [collapsedIds]);
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDark]);
+
+  const handleToggleFavoriteProject = async (path: string) => {
+    try {
+      await toggleFavoriteProject(path);
+    } catch (error) {
+      alert(`Failed to toggle favorite: ${error}`);
+    }
+  };
+
+  const handleRemoveProject = async (path: string) => {
+    try {
+      await removeProject(path);
+    } catch (error) {
+      alert(`Failed to remove project: ${error}`);
+    }
+  };
 
   const handleBeadClick = (bead: Bead) => {
     setSelectedBead(bead);
@@ -223,7 +294,7 @@ function App() {
     }
   };
 
-  const handleStartCreate = () => {
+  const handleStartCreate = useCallback(() => {
     setSelectedBead(null);
     setEditForm({
       id: `bp6-${Math.random().toString(36).substr(2, 3)}`,
@@ -237,7 +308,7 @@ function App() {
     });
     setIsEditing(false);
     setIsCreating(true);
-  };
+  }, []);
 
   const handleSaveCreate = async () => {
     if (editForm.title) {
@@ -260,11 +331,23 @@ function App() {
     }
   };
 
+  useEffect(() => {
+    if (!loading) {
+      const savedScroll = localStorage.getItem("scrollTop");
+      if (savedScroll) {
+        const top = parseInt(savedScroll);
+        if (scrollRefWBS.current) scrollRefWBS.current.scrollTop = top;
+        if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = top;
+      }
+    }
+  }, [loading]);
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
     if (activeScrollSource.current && activeScrollSource.current !== target) return;
     const other = target === scrollRefWBS.current ? scrollRefBERT.current : scrollRefWBS.current;
     if (other) other.scrollTop = target.scrollTop;
+    localStorage.setItem("scrollTop", target.scrollTop.toString());
   };
 
   const handleMouseEnter = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -370,8 +453,25 @@ function App() {
                 </div>
               )}
               <div className="px-4 py-3 border-b-2 border-[var(--border-primary)]/50 bg-[var(--background-primary)]">
-                <div className="relative group">
-                  <input type="text" placeholder="Search by title, ID, or label..." className="w-full bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-inner" value={filterText} onChange={e => setFilterText(e.target.value)} />
+                <div className="relative group mb-3">
+                  <input 
+                    ref={searchInputRef}
+                    type="text" 
+                    placeholder="Search by title, ID, or label..." 
+                    className="w-full bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-inner" 
+                    value={filterText} 
+                    onChange={e => setFilterText(e.target.value)} 
+                  />
+                </div>
+                <div className="flex items-center gap-4 px-1">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input type="checkbox" checked={hideClosed} onChange={e => setHideClosed(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
+                    <span className="text-[10px] font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hide Closed</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input type="checkbox" checked={includeHierarchy} onChange={e => setIncludeHierarchy(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
+                    <span className="text-[10px] font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hierarchy</span>
+                  </label>
                 </div>
               </div>
               <div className="flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.3em] mt-auto border-t border-[var(--border-primary)]/50">
@@ -429,8 +529,8 @@ function App() {
             <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
               <div className="relative" style={{ height: processedData.layout.rowCount * 48, width: 5000 * zoom }}>
                  <div className="absolute inset-0 pointer-events-none">
-                    {Array.from({ length: processedData.layout.rowCount }).map((_, i) => (
-                      <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px' }} />
+                    {processedData.layout.rowDepths.map((depth, i) => (
+                      <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
                     ))}
                     <div className="absolute inset-0 flex">
                       {Array.from({ length: 50 }).map((_, i) => (
