@@ -159,41 +159,46 @@ pub struct Project {
     pub last_opened: Option<String>,
 }
 
-fn get_projects_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+fn get_projects_path() -> Result<PathBuf, String> {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not locate home directory (neither HOME nor USERPROFILE is set)".to_string())?;
+    
     let dir = PathBuf::from(home).join(".bert-viz");
     if !dir.exists() {
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create directory {}: {}", dir.display(), e))?;
     }
-    dir.join("projects.json")
+    Ok(dir.join("projects.json"))
 }
 
 #[tauri::command]
 fn get_projects() -> Result<Vec<Project>, String> {
-    let path = get_projects_path();
+    let path = get_projects_path()?;
     if !path.exists() { return Ok(Vec::new()); }
     
-    let file = File::open(path).map_err(|e| e.to_string())?;
-    let projects: Vec<Project> = serde_json::from_reader(file).map_err(|e| e.to_string())?;
+    let file = File::open(&path).map_err(|e| format!("Failed to open projects.json: {}", e))?;
+    let reader = BufReader::new(file);
+    
+    // Attempt to parse projects, default to empty if file is empty or invalid
+    let projects: Vec<Project> = serde_json::from_reader(reader)
+        .unwrap_or_else(|_| Vec::new());
+        
     Ok(projects)
 }
 
 #[tauri::command]
 fn save_projects(projects: Vec<Project>) -> Result<(), String> {
-    let path = get_projects_path();
-    let file = File::create(path).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(file, &projects).map_err(|e| e.to_string())?;
+    let path = get_projects_path()?;
+    let file = File::create(path).map_err(|e| format!("Failed to create projects.json: {}", e))?;
+    serde_json::to_writer_pretty(file, &projects).map_err(|e| format!("Failed to write projects: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 fn add_project(project: Project) -> Result<(), String> {
     let mut projects = get_projects()?;
-    // Check if project with same path exists
     if let Some(existing) = projects.iter_mut().find(|p| p.path == project.path) {
         existing.name = project.name;
-        // Keep existing favorite/last_opened unless explicitly provided? 
-        // For now, let's just update.
     } else {
         projects.push(project);
     }
@@ -209,14 +214,13 @@ fn remove_project(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn open_project(path: String) -> Result<(), String> {
-    std::env::set_current_dir(&path).map_err(|e| e.to_string())?;
+    std::env::set_current_dir(&path).map_err(|e| format!("Failed to change directory to {}: {}", path, e))?;
     
     // Update last_opened
     let mut projects = get_projects()?;
     if let Some(project) = projects.iter_mut().find(|p| p.path == path) {
         project.last_opened = Some(chrono::Utc::now().to_rfc3339());
     } else {
-        // If not in projects list, maybe add it as a recent?
         let parts = path.split(|c| c == '/' || c == '\\').collect::<Vec<_>>();
         let name = parts.last().unwrap_or(&"Project").to_string();
         projects.push(Project {
@@ -276,19 +280,23 @@ pub fn run() {
             }
 
             // Watch projects file
-            let proj_path = get_projects_path();
-            let mut proj_watcher = notify::RecommendedWatcher::new(move |res| {
-                match res {
-                    Ok(_) => { let _ = proj_handle.emit("projects-updated", ()); },
-                    Err(e) => println!("watch error: {:?}", e),
+            if let Ok(proj_path) = get_projects_path() {
+                let mut proj_watcher = notify::RecommendedWatcher::new(move |res| {
+                    match res {
+                        Ok(_) => { let _ = proj_handle.emit("projects-updated", ()); },
+                        Err(e) => println!("watch error: {:?}", e),
+                    }
+                }, Config::default()).unwrap();
+                let parent = proj_path.parent().unwrap();
+                // Ensure parent exists (already done in get_projects_path but double check)
+                if !parent.exists() {
+                    let _ = std::fs::create_dir_all(parent);
                 }
-            }, Config::default()).unwrap();
-            let parent = proj_path.parent().unwrap();
-            if !parent.exists() {
-                std::fs::create_dir_all(parent).unwrap();
+                if parent.exists() {
+                    let _ = proj_watcher.watch(parent, RecursiveMode::Recursive);
+                    std::mem::forget(proj_watcher);
+                }
             }
-            proj_watcher.watch(parent, RecursiveMode::Recursive).unwrap();
-            std::mem::forget(proj_watcher);
 
             Ok(())
         })

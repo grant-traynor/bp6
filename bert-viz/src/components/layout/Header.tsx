@@ -46,7 +46,11 @@ export const Header = ({
               <div className="w-2 h-2 rounded-full bg-emerald-600 shadow-[0_0_10px_rgba(5,150,105,0.5)] animate-pulse" />
               <span className="text-[11px] font-black text-[var(--text-primary)] uppercase tracking-widest">Live</span>
            </div>
-           <span className="text-[11px] text-[var(--text-secondary)] font-bold tracking-tight">/ Workspace / <span className="text-indigo-700 dark:text-indigo-400 font-black">Default</span></span>
+           <span className="text-[11px] text-[var(--text-secondary)] font-bold tracking-tight">/ Workspace / <span className="text-indigo-700 dark:text-indigo-400 font-black">
+             {favoriteProjects.find(p => p.path === currentProjectPath)?.name || 
+              recentProjects.find(p => p.path === currentProjectPath)?.name || 
+              "Default"}
+           </span></span>
         </div>
       </div>
       <div className="flex items-center gap-3">

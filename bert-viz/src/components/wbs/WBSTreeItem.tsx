@@ -42,7 +42,7 @@ export const WBSTreeItem = ({
              "font-mono text-[11px] font-black px-2.5 py-1 rounded-md tracking-tighter border-2 shadow-sm",
              node.isCritical ? "bg-rose-500/20 text-rose-900 dark:text-rose-100 border-rose-500/40" : "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]"
            )}>
-             {node.id}
+             {node.id.split('-').pop()}
            </span>
         </div>
 

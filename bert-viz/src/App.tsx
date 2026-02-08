@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Star } from "lucide-react";
-import { fetchBeads, buildWBSTree, calculateGanttLayout, updateBead, createBead, type WBSNode, type Bead, type GanttLayout, type Project, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
+import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
+import { fetchBeads, buildWBSTree, calculateGanttLayout, updateBead, createBead, type WBSNode, type Bead, type Project, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -14,8 +14,7 @@ function App() {
   const [beads, setBeads] = useState<Bead[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
-  const [tree, setTree] = useState<WBSNode[]>([]);
-  const [ganttLayout, setGanttLayout] = useState<GanttLayout>({ items: [], connectors: [], rowCount: 0 });
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [selectedBead, setSelectedBead] = useState<Bead | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -53,35 +52,63 @@ function App() {
     try {
       const data = await fetchBeads();
       setBeads(data);
-      
-      const filtered = data.filter(b => {
-        const search = filterText.toLowerCase();
-        if (!search) return true;
-        return (
-          b.title.toLowerCase().includes(search) ||
-          b.id.toLowerCase().includes(search) ||
-          b.owner?.toLowerCase().includes(search) ||
-          b.labels?.some(l => l.toLowerCase().includes(search))
-        );
-      });
-
-      const wbsTree = buildWBSTree(filtered);
-      setTree(wbsTree);
-      setGanttLayout(calculateGanttLayout(data, wbsTree, zoom));
     } catch (error) {
       console.error("Error in loadData:", error);
     } finally {
       setLoading(false);
     }
-  }, [filterText, zoom]);
+  }, []);
+
+  const processedData = useMemo(() => {
+    const filtered = beads.filter(b => {
+      const search = filterText.toLowerCase();
+      if (!search) return true;
+      return (
+        b.title.toLowerCase().includes(search) ||
+        b.id.toLowerCase().includes(search) ||
+        b.owner?.toLowerCase().includes(search) ||
+        b.labels?.some(l => l.toLowerCase().includes(search))
+      );
+    });
+
+    const wbsTree = buildWBSTree(filtered);
+    
+    // Apply expansion state
+    const applyExpansion = (nodes: WBSNode[]) => {
+      nodes.forEach(node => {
+        node.isExpanded = !collapsedIds.has(node.id);
+        if (node.children) applyExpansion(node.children);
+      });
+    };
+    applyExpansion(wbsTree);
+
+    const layout = calculateGanttLayout(beads, wbsTree, zoom);
+    return { tree: wbsTree, layout };
+  }, [beads, filterText, zoom, collapsedIds]);
 
   useEffect(() => {
     const init = async () => {
-      const path = await invoke_get_current_dir();
-      setCurrentProjectPath(path);
+      const currentDir = await invoke_get_current_dir();
+      
+      // Load projects to find the most recent one
+      const projs = await fetchProjects();
+      setProjects(projs);
+      
+      const mostRecent = [...projs].sort((a, b) => 
+        (b.last_opened || "").localeCompare(a.last_opened || "")
+      )[0];
+      
+      if (mostRecent && mostRecent.path !== currentDir) {
+        // Only auto-load if we're not already in a specific project dir
+        // (Wait, if we're in a dir with .beads, we should probably stay there)
+        // For now, let's just follow the "Auto-load most recent" requirement.
+        await handleOpenProject(mostRecent.path);
+      } else {
+        setCurrentProjectPath(currentDir);
+        loadData();
+      }
     };
     init();
-    loadData();
     loadProjects();
 
     const unlistenBeads = listen("beads-updated", () => loadData());
@@ -100,24 +127,45 @@ function App() {
     return await invoke<string>("get_current_dir");
   };
 
+  const handleToggleFavoriteProject = async (path: string) => {
+    await toggleFavoriteProject(path);
+    loadProjects();
+  };
+
+  const handleRemoveProject = async (path: string) => {
+    await removeProject(path);
+    loadProjects();
+  };
+
   const toggleNode = useCallback((id: string) => {
-    setTree(prevTree => {
-      const newTree = JSON.parse(JSON.stringify(prevTree));
-      const findAndToggle = (nodes: WBSNode[]) => {
-        for (const node of nodes) {
-          if (node.id === id) {
-            node.isExpanded = !node.isExpanded;
-            return true;
-          }
-          if (node.children && findAndToggle(node.children)) return true;
-        }
-        return false;
-      };
-      findAndToggle(newTree);
-      setGanttLayout(calculateGanttLayout(beads, newTree, zoom));
-      return newTree;
+    setCollapsedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
     });
-  }, [beads, zoom]);
+  }, []);
+
+  const expandAll = useCallback(() => {
+    setCollapsedIds(new Set());
+  }, []);
+
+  const collapseAll = useCallback(() => {
+    const allParentIds = new Set<string>();
+    const findParents = (nodes: WBSNode[]) => {
+      nodes.forEach(node => {
+        if (node.children.length > 0) {
+          allParentIds.add(node.id);
+          findParents(node.children);
+        }
+      });
+    };
+    findParents(processedData.tree);
+    setCollapsedIds(allParentIds);
+  }, [processedData.tree]);
 
   const handleBeadClick = (bead: Bead) => {
     setSelectedBead(bead);
@@ -261,16 +309,32 @@ function App() {
           recentProjects={recentProjects}
           currentProjectPath={currentProjectPath}
           handleOpenProject={handleOpenProject}
-          toggleFavoriteProject={toggleFavoriteProject}
-          removeProject={removeProject}
+          toggleFavoriteProject={handleToggleFavoriteProject}
+          removeProject={handleRemoveProject}
           handleSelectProject={handleSelectProject}
         />
 
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
             <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex flex-col">
-              <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50">
+              <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
                 <h2 className="text-[11px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Task Breakdown</h2>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={expandAll}
+                    title="Expand All"
+                    className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"
+                  >
+                    <ChevronsDown size={16} strokeWidth={2.5} />
+                  </button>
+                  <button 
+                    onClick={collapseAll}
+                    title="Collapse All"
+                    className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"
+                  >
+                    <ChevronsUp size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
               </div>
               {favoriteBeads.length > 0 && (
                 <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 bg-indigo-500/10">
@@ -347,7 +411,7 @@ function App() {
               <div className="p-0">
                 {loading ? <div className="p-12 animate-pulse text-[var(--text-muted)] text-xs font-medium tracking-widest uppercase">Syncing Schedule...</div> : (
                   <div className="flex flex-col">
-                    <WBSTreeList nodes={tree} onToggle={toggleNode} onClick={handleBeadClick} />
+                    <WBSTreeList nodes={processedData.tree} onToggle={toggleNode} onClick={handleBeadClick} />
                   </div>
                 )}
               </div>
@@ -359,9 +423,9 @@ function App() {
               onMouseEnter={handleMouseEnter}
               className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar"
             >
-              <div className="relative" style={{ height: ganttLayout.rowCount * 48, width: 5000 * zoom }}>
+              <div className="relative" style={{ height: processedData.layout.rowCount * 48, width: 5000 * zoom }}>
                  <div className="absolute inset-0 pointer-events-none">
-                    {Array.from({ length: ganttLayout.rowCount }).map((_, i) => (
+                    {Array.from({ length: processedData.layout.rowCount }).map((_, i) => (
                       <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px' }} />
                     ))}
                     <div className="absolute inset-0 flex">
@@ -372,7 +436,7 @@ function App() {
                  </div>
 
                <svg className="absolute inset-0 pointer-events-none overflow-visible" style={{ width: '100%', height: '100%' }}>
-                  {ganttLayout.connectors.map((c: any, i: number) => (
+                  {processedData.layout.connectors.map((c: any, i: number) => (
                     <path
                       key={i}
                       d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`}
@@ -385,7 +449,7 @@ function App() {
                   ))}
                </svg>
 
-               {ganttLayout.items.map((item: any, i: number) => (
+               {processedData.layout.items.map((item: any, i: number) => (
                  <div key={i} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
                     <GanttBar item={item} onClick={handleBeadClick} />
                  </div>
