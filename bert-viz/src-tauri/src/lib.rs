@@ -490,42 +490,44 @@ pub fn run() {
             let handle = app.handle().clone();
             let proj_handle = app.handle().clone();
 
-            // Watch beads file with debouncing
+            // Watch beads file with debouncing and content checksumming
             if let Some(path) = find_beads_file() {
                 let parent_path = path.parent().unwrap().to_path_buf();
                 let last_emit = Arc::new(Mutex::new(Instant::now()));
                 let last_checksum = Arc::new(Mutex::new(0u64));
 
                 let watch_target = path.clone();
-                let mut watcher = notify::RecommendedWatcher::new(move |res| {
+                let mut watcher = notify::RecommendedWatcher::new(move |res: std::result::Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(event) => {
-                            let affects_target = event.paths.iter().any(|p| 
+                            let affects_target = event.paths.iter().any(|p|
                                 p.file_name() == watch_target.file_name()
                             );
 
                             if affects_target {
-                                // Calculate checksum of the file content
+                                // Single non-blocking read attempt
                                 if let Ok(bytes) = std::fs::read(&watch_target) {
+                                    // Calculate checksum of the file content
                                     let mut hasher = DefaultHasher::new();
                                     bytes.hash(&mut hasher);
                                     let new_checksum = hasher.finish();
 
                                     let mut last_hash = last_checksum.lock().unwrap();
-                                    
+
                                     // Only update if content has actually changed
                                     if *last_hash != new_checksum {
                                         *last_hash = new_checksum;
 
-                                        // Debounce: only emit if at least 200ms have passed since last emit
+                                        // Debounce: only emit if at least 250ms have passed since last emit
                                         let mut last = last_emit.lock().unwrap();
                                         let now = Instant::now();
-                                        if now.duration_since(*last) >= Duration::from_millis(200) {
+                                        if now.duration_since(*last) >= Duration::from_millis(250) {
                                             *last = now;
                                             let _ = handle.emit("beads-updated", ());
                                         }
                                     }
                                 }
+                                // If read fails, frontend get_beads() will retry - no problem
                             }
                         },
                         Err(e) => eprintln!("Beads file watch error: {:?}", e),
@@ -545,7 +547,7 @@ pub fn run() {
             if let Ok(proj_path) = get_projects_path() {
                 let proj_last_emit = Arc::new(Mutex::new(Instant::now()));
 
-                let mut proj_watcher = notify::RecommendedWatcher::new(move |res| {
+                let mut proj_watcher = notify::RecommendedWatcher::new(move |res: std::result::Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(_) => {
                             let mut last = proj_last_emit.lock().unwrap();
