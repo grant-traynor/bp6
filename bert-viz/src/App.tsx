@@ -15,26 +15,26 @@ function cn(...inputs: ClassValue[]) {
 
 const getChipStyles = (label: string) => {
   const l = label.toLowerCase();
-  if (l === 'epic') return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20";
-  if (l === 'bug') return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20";
-  if (l === 'feature') return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
-  if (l === 'task') return "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20";
-  if (l.includes('infra')) return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
-  if (l.includes('doc')) return "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20";
-  return "bg-[var(--background-tertiary)] text-[var(--text-muted)] border-[var(--border-primary)]";
+  if (l === 'epic') return "bg-purple-500/20 text-purple-800 dark:text-purple-300 border-purple-500/40";
+  if (l === 'bug') return "bg-rose-500/20 text-rose-800 dark:text-rose-300 border-rose-500/40";
+  if (l === 'feature') return "bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40";
+  if (l === 'task') return "bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border-indigo-500/40";
+  if (l.includes('infra')) return "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40";
+  if (l.includes('doc')) return "bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border-cyan-500/40";
+  return "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]";
 };
 
 const Chip = ({ label }: { label: string }) => (
-  <span className={cn("px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border transition-all", getChipStyles(label))}>
+  <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest border transition-all", getChipStyles(label))}>
     {label}
   </span>
 );
 
 const StatusIcon = ({ status, size = 14 }: { status: string; size?: number }) => {
   switch (status) {
-    case 'closed': return <CheckCircle2 size={size} className="text-emerald-500/80" />;
-    case 'in_progress': return <Clock size={size} className="text-amber-500/80" />;
-    default: return <Circle size={size} className="text-[var(--text-muted)]" />;
+    case 'closed': return <CheckCircle2 size={size} className="text-emerald-600 dark:text-emerald-400 stroke-[2.5]" />;
+    case 'in_progress': return <Clock size={size} className="text-amber-600 dark:text-amber-400 stroke-[2.5]" />;
+    default: return <Circle size={size} className="text-[var(--text-secondary)] stroke-[2]" />;
   }
 };
 
@@ -44,13 +44,13 @@ const GanttBar = ({ item, onClick }: { item: GanttItem; onClick: (bead: Bead) =>
   const isMilestone = bead.estimate === 0;
 
   const getStatusColor = () => {
-    if (isEpic) return "bg-[var(--background-tertiary)] border-[var(--border-primary)]";
-    if (isMilestone) return "bg-indigo-500 border-indigo-400 rotate-45";
-    if (bead.status === 'closed') return "bg-indigo-500/30 border-indigo-500/20";
-    if (isCritical) return "bg-rose-500 border-rose-400";
-    if (isBlocked) return "bg-amber-500 border-amber-400";
-    if (bead.status === 'in_progress') return "bg-emerald-500 border-emerald-400";
-    return "bg-[var(--background-secondary)] border-[var(--border-primary)]";
+    if (isEpic) return "bg-zinc-500 dark:bg-zinc-500 border-zinc-600 dark:border-zinc-400";
+    if (isMilestone) return "bg-indigo-700 dark:bg-indigo-400 border-indigo-800 rotate-45";
+    if (bead.status === 'closed') return "bg-indigo-600 dark:bg-indigo-500 border-indigo-700 opacity-50";
+    if (isCritical) return "bg-rose-600 dark:bg-rose-500 border-rose-700 shadow-[0_0_12px_rgba(225,29,72,0.4)]";
+    if (isBlocked) return "bg-amber-600 dark:bg-amber-500 border-amber-700";
+    if (bead.status === 'in_progress') return "bg-emerald-600 dark:bg-emerald-500 border-emerald-700 shadow-[0_0_12px_rgba(16,185,129,0.3)]";
+    return "bg-indigo-600 dark:bg-indigo-500 border-indigo-700";
   };
 
   return (
@@ -61,26 +61,26 @@ const GanttBar = ({ item, onClick }: { item: GanttItem; onClick: (bead: Bead) =>
     >
       <div className="flex-1 flex items-center h-full relative">
         {isEpic ? (
-          <div className="w-full h-2 bg-[var(--text-muted)]/30 relative rounded-full overflow-hidden">
-             <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500" />
-             <div className="absolute right-0 top-0 bottom-0 w-1 bg-indigo-500" />
+          <div className="w-full h-3 bg-zinc-300 dark:bg-zinc-700 relative rounded-full overflow-hidden border-2 border-zinc-400 dark:border-zinc-500">
+             <div className="absolute left-0 top-0 bottom-0 w-2 bg-indigo-700 dark:bg-indigo-400" />
+             <div className="absolute right-0 top-0 bottom-0 w-2 bg-indigo-700 dark:bg-indigo-400" />
           </div>
         ) : isMilestone ? (
-          <div className={cn("w-2.5 h-2.5 border shadow-sm transition-all group-hover:scale-125", getStatusColor())} />
+          <div className={cn("w-3.5 h-3.5 border-2 shadow-md transition-all group-hover:scale-125", getStatusColor())} />
         ) : (
           <div className={cn(
-            "h-4 rounded-md border shadow-sm transition-all w-full group-hover:shadow-md group-hover:border-indigo-500/50",
+            "h-6 rounded-md border-2 shadow-md transition-all w-full group-hover:shadow-lg group-hover:border-indigo-500",
             getStatusColor(),
-            bead.status === 'closed' ? "opacity-30" : "opacity-100"
+            bead.status === 'closed' ? "opacity-40" : "opacity-100"
           )} />
         )}
 
-        <div className="absolute left-full ml-4 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10 opacity-60 group-hover:opacity-100 transition-opacity">
+        <div className="absolute left-full ml-4 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10 opacity-90 group-hover:opacity-100 transition-opacity">
           <span className={cn(
-            "text-[11px] font-bold tracking-tight",
-            bead.status === 'closed' ? "text-[var(--text-muted)] line-through font-normal" : "text-[var(--text-primary)]"
+            "text-[13px] font-black tracking-tight",
+            bead.status === 'closed' ? "text-[var(--text-muted)] line-through font-bold" : "text-[var(--text-primary)] drop-shadow-md"
           )}>{bead.title}</span>
-          {isCritical && !isMilestone && <Flame size={10} className="text-rose-500 fill-current opacity-60" />}
+          {isCritical && !isMilestone && <Flame size={14} className="text-rose-600 dark:text-rose-400 fill-current" />}
         </div>
       </div>
     </div>
@@ -101,46 +101,46 @@ const WBSTreeItem = ({
   const hasChildren = node.children.length > 0;
 
   return (
-    <div className="select-none h-[40px] flex flex-col justify-center border-b border-[var(--border-primary)]/30">
+    <div className="select-none h-[48px] flex flex-col justify-center border-b border-[var(--border-primary)]">
       <div 
         className={cn(
-          "flex items-center hover:bg-[var(--background-primary)]/50 cursor-pointer group transition-all h-full",
-          node.isCritical && "bg-rose-500/[0.02]"
+          "flex items-center hover:bg-[var(--background-primary)] cursor-pointer group transition-all h-full",
+          node.isCritical && "bg-rose-500/[0.08]"
         )}
         onClick={() => onClick(node as Bead)}
       >
         <div 
-          className="w-8 shrink-0 flex items-center justify-center h-full text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" 
+          className="w-10 shrink-0 flex items-center justify-center h-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" 
           onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
         >
           {hasChildren ? (
-            node.isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
+            node.isExpanded ? <ChevronDown size={18} className="stroke-[3]" /> : <ChevronRight size={18} className="stroke-[3]" />
           ) : null}
         </div>
 
-        <div className="w-24 shrink-0 px-2 flex items-center h-full border-r border-[var(--border-primary)]/30">
+        <div className="w-28 shrink-0 px-2 flex items-center h-full border-r border-[var(--border-primary)]">
            <span className={cn(
-             "font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-md tracking-tighter border",
-             node.isCritical ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20" : "bg-[var(--background-tertiary)] text-[var(--text-muted)] border-[var(--border-primary)]/50"
+             "font-mono text-[11px] font-black px-2.5 py-1 rounded-md tracking-tighter border-2 shadow-sm",
+             node.isCritical ? "bg-rose-500/20 text-rose-900 dark:text-rose-100 border-rose-500/40" : "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]"
            )}>
              {node.id}
            </span>
         </div>
 
         <div 
-          className="flex-1 px-3 flex items-center gap-3 truncate h-full"
+          className="flex-1 px-4 flex items-center gap-4 truncate h-full"
           style={{ paddingLeft: `${depth * 0.75 + 0.75}rem` }}
         >
-          <StatusIcon status={node.status} size={12} />
+          <StatusIcon status={node.status} size={16} />
           <span className={cn(
-            "text-[11px] truncate font-semibold tracking-tight",
-            node.status === 'closed' ? "text-[var(--text-muted)] line-through font-normal" : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
+            "text-[13px] truncate font-black tracking-tight",
+            node.status === 'closed' ? "text-[var(--text-muted)] line-through font-bold" : "text-[var(--text-primary)] group-hover:text-indigo-700 dark:group-hover:text-indigo-300"
           )}>
             {node.title}
           </span>
           {node.issue_type !== 'task' && (
             <span className={cn(
-              "text-[7px] font-black px-1.5 py-0.5 rounded-sm uppercase tracking-widest border",
+              "text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-widest border-2 shadow-sm",
               getChipStyles(node.issue_type)
             )}>
               {node.issue_type}
@@ -430,62 +430,62 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
-      <nav className="w-16 flex flex-col items-center py-6 border-r border-[var(--border-primary)] bg-[var(--background-secondary)] z-30">
+      <nav className="w-16 flex flex-col items-center py-6 border-r border-[var(--border-primary)] bg-[var(--background-secondary)] z-30 shadow-xl">
         <div className="flex flex-col gap-4 flex-1">
-          <button className="p-3 rounded-xl bg-[var(--background-primary)] text-indigo-500 transition-all border border-[var(--border-primary)] shadow-sm hover:shadow-md active:scale-95"><ListTree size={22} /></button>
+          <button className="p-3 rounded-xl bg-[var(--background-primary)] text-indigo-700 dark:text-indigo-400 transition-all border-2 border-[var(--border-primary)] shadow-md hover:shadow-lg active:scale-95"><ListTree size={24} strokeWidth={2.5} /></button>
           <div className="h-px w-8 bg-[var(--border-primary)] mx-auto" />
         </div>
         <div className="mt-auto border-t border-[var(--border-primary)] pt-4">
-          <button className="p-3 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-            <Settings size={20} />
+          <button className="p-3 text-[var(--text-primary)] hover:text-indigo-600 transition-colors">
+            <Settings size={22} strokeWidth={2.5} />
           </button>
         </div>
       </nav>
 
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
-        <header className="h-14 border-b border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/80 backdrop-blur-xl z-20">
+        <header className="h-16 border-b-2 border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/90 backdrop-blur-xl z-20">
           <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2.5">
-               <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-[10px] shadow-lg shadow-indigo-600/20 text-white">B</div>
-               <h1 className="text-sm font-black tracking-tighter uppercase text-[var(--text-primary)]">BERT <span className="text-indigo-500 font-mono">BP6</span></h1>
+            <div className="flex items-center gap-3">
+               <div className="w-8 h-8 bg-indigo-700 rounded-lg flex items-center justify-center font-black text-xs shadow-xl shadow-indigo-700/30 text-white">B</div>
+               <h1 className="text-base font-black tracking-tighter uppercase text-[var(--text-primary)]">BERT <span className="text-indigo-700 dark:text-indigo-400 font-mono">BP6</span></h1>
             </div>
-            <div className="h-4 w-px bg-[var(--border-primary)]" />
+            <div className="h-6 w-px bg-[var(--border-primary)]" />
             <div className="flex items-center gap-4">
                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)] animate-pulse" />
-                  <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Live</span>
+                  <div className="w-2 h-2 rounded-full bg-emerald-600 shadow-[0_0_10px_rgba(5,150,105,0.5)] animate-pulse" />
+                  <span className="text-[11px] font-black text-[var(--text-primary)] uppercase tracking-widest">Live</span>
                </div>
-               <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-tight">/ Workspace / <span className="text-[var(--text-primary)] font-bold">Default</span></span>
+               <span className="text-[11px] text-[var(--text-secondary)] font-bold tracking-tight">/ Workspace / <span className="text-indigo-700 dark:text-indigo-400 font-black">Default</span></span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button 
               onClick={() => setIsDark(!isDark)} 
-              className="h-9 w-9 hover:bg-[var(--background-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl flex items-center justify-center transition-all border border-transparent hover:border-[var(--border-primary)] active:scale-90"
+              className="h-10 w-10 hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] rounded-xl flex items-center justify-center transition-all border-2 border-[var(--border-primary)] shadow-sm active:scale-90"
             >
-              {isDark ? <Sun size={16} /> : <Moon size={16} />}
+              {isDark ? <Sun size={18} strokeWidth={2.5} /> : <Moon size={18} strokeWidth={2.5} />}
             </button>
             <button 
               onClick={handleStartCreate} 
-              className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/20 active:scale-95 border border-indigo-500/20"
+              className="h-10 bg-indigo-700 hover:bg-indigo-600 text-white px-5 rounded-xl text-xs font-black flex items-center gap-2 transition-all shadow-xl shadow-indigo-700/20 active:scale-95 border-2 border-indigo-800/20 uppercase tracking-widest"
             >
-              <Plus size={14} /> New Bead
+              <Plus size={16} strokeWidth={3} /> New Bead
             </button>
             <button 
               onClick={loadData} 
-              className="h-9 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-secondary)] px-4 rounded-xl text-xs font-bold border border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95"
+              className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] px-5 rounded-xl text-xs font-black border-2 border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-sm uppercase tracking-widest"
             >
-              <Package size={14} className="text-indigo-500" /> Sync
+              <Package size={16} className="text-indigo-700 dark:text-indigo-400" strokeWidth={2.5} /> Sync
             </button>
 
             <div className="relative">
               <button 
                 onClick={() => setProjectMenuOpen(!projectMenuOpen)}
-                className="h-9 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-secondary)] px-4 rounded-xl text-xs font-bold border border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95"
+                className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] px-5 rounded-xl text-xs font-black border-2 border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-sm uppercase tracking-widest"
               >
-                <FolderOpen size={14} className="text-indigo-500" />
+                <FolderOpen size={16} className="text-indigo-700 dark:text-indigo-400" strokeWidth={2.5} />
                 <span>Select Project</span>
-                <ChevronDown size={14} className={cn("transition-transform opacity-40", projectMenuOpen && "rotate-180")} />
+                <ChevronDown size={16} className={cn("transition-transform opacity-100", projectMenuOpen && "rotate-180")} strokeWidth={3} />
               </button>
               
               {projectMenuOpen && (
@@ -580,74 +580,74 @@ function App() {
 
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Shared Header Row for WBS and Gantt */}
-          <div className="flex shrink-0 border-b border-[var(--border-primary)] bg-[var(--background-secondary)]/80 backdrop-blur-md z-20">
+          <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
             {/* WBS Header Area */}
-            <div className="w-1/3 min-w-[420px] border-r border-[var(--border-primary)] flex flex-col">
-              <div className="px-6 py-3 border-b border-[var(--border-primary)]/50">
-                <h2 className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2">Task Breakdown</h2>
+            <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex flex-col">
+              <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50">
+                <h2 className="text-[11px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Task Breakdown</h2>
               </div>
               {favoriteBeads.length > 0 && (
-                <div className="px-6 py-3 border-b border-[var(--border-primary)]/50 bg-indigo-500/5">
-                  <h2 className="text-[9px] font-black text-indigo-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><Star size={10} className="fill-current" /> Favorites</h2>
-                  <div className="flex flex-wrap gap-1.5">
+                <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 bg-indigo-500/10">
+                  <h2 className="text-[10px] font-black text-indigo-800 dark:text-indigo-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-3"><Star size={12} className="fill-current" /> Favorites</h2>
+                  <div className="flex flex-wrap gap-2">
                     {favoriteBeads.map(f => (
-                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2 py-1 rounded-lg bg-[var(--background-primary)] border border-[var(--border-primary)] hover:border-indigo-500/50 cursor-pointer transition-all active:scale-95">
-                        <span className="font-mono text-[8px] font-bold text-[var(--text-muted)]">{f.id}</span>
-                        <span className="text-[10px] font-medium text-[var(--text-secondary)] truncate max-w-[120px]">{f.title}</span>
+                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[var(--background-primary)] border-2 border-[var(--border-primary)] hover:border-indigo-500 shadow-sm cursor-pointer transition-all active:scale-95">
+                        <span className="font-mono text-[9px] font-black text-indigo-700 dark:text-indigo-400">{f.id}</span>
+                        <span className="text-[11px] font-black text-[var(--text-primary)] truncate max-w-[140px]">{f.title}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              <div className="px-4 py-2.5 border-b border-[var(--border-primary)]/50 bg-[var(--background-primary)]/20">
+              <div className="px-4 py-3 border-b-2 border-[var(--border-primary)]/50 bg-[var(--background-primary)]">
                 <div className="relative group">
                   <input 
                     type="text"
-                    placeholder="Filter by title, ID, owner, or label..."
-                    className="w-full bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl px-3 py-2 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none transition-all placeholder:text-[var(--text-muted)] group-hover:border-[var(--border-primary)] shadow-inner"
+                    placeholder="Search by title, ID, or label..."
+                    className="w-full bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-inner"
                     value={filterText}
                     onChange={e => setFilterText(e.target.value)}
                   />
                 </div>
               </div>
-              <div className="flex items-center px-4 py-2 bg-[var(--background-secondary)]/30 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em] mt-auto">
-                <div className="w-8 shrink-0" />
-                <div className="w-24 shrink-0 px-2 border-r border-[var(--border-primary)]/50">ID</div>
-                <div className="flex-1 px-3">Name</div>
+              <div className="flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.3em] mt-auto border-t border-[var(--border-primary)]/50">
+                <div className="w-10 shrink-0" />
+                <div className="w-28 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">ID</div>
+                <div className="flex-1 px-4">Name</div>
               </div>
             </div>
 
             {/* Gantt Header Area (Metrics + Controls) */}
-            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-[var(--background-primary)]">
-               <div className="flex items-center gap-8 mb-1">
+            <div className="flex-1 flex items-end justify-between px-8 py-3 bg-[var(--background-primary)]">
+               <div className="flex items-center gap-10 mb-1">
                   <div className="flex flex-col">
-                     <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Total</span>
-                     <span className="text-sm font-bold text-[var(--text-primary)]">{stats.total}</span>
+                     <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em] mb-1">Total</span>
+                     <span className="text-base font-black text-[var(--text-primary)]">{stats.total}</span>
                   </div>
-                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4">
-                     <span className="text-[8px] font-black text-emerald-500/80 uppercase tracking-[0.2em]">Open</span>
-                     <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{stats.open}</span>
+                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
+                     <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-[0.25em] mb-1">Open</span>
+                     <span className="text-base font-black text-emerald-700 dark:text-emerald-400">{stats.open}</span>
                   </div>
-                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4">
-                     <span className="text-[8px] font-black text-amber-500/80 uppercase tracking-[0.2em]">Active</span>
-                     <span className="text-sm font-bold text-amber-600 dark:text-amber-400">{stats.inProgress}</span>
+                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
+                     <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-[0.25em] mb-1">Active</span>
+                     <span className="text-base font-black text-amber-700 dark:text-amber-400">{stats.inProgress}</span>
                   </div>
-                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4">
-                     <span className="text-[8px] font-black text-rose-500/80 uppercase tracking-[0.2em]">Blocked</span>
-                     <span className="text-sm font-bold text-rose-600 dark:text-rose-400">{stats.blocked}</span>
+                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
+                     <span className="text-[9px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-[0.25em] mb-1">Blocked</span>
+                     <span className="text-base font-black text-rose-700 dark:text-rose-400">{stats.blocked}</span>
                   </div>
-                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4 pr-4">
-                     <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Done</span>
-                     <span className="text-sm font-bold text-[var(--text-secondary)]">{stats.closed}</span>
+                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
+                     <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] mb-1">Done</span>
+                     <span className="text-base font-black text-[var(--text-secondary)]">{stats.closed}</span>
                   </div>
                </div>
 
-               <div className="flex items-center gap-1 bg-[var(--background-secondary)] p-1 rounded-xl border border-[var(--border-primary)] shadow-sm mb-1">
-                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all text-[10px] font-bold px-3">-</button>
-                  <span className="text-[10px] font-mono font-bold text-[var(--text-muted)] min-w-[45px] text-center">{Math.round(zoom * 100)}%</span>
-                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all text-[10px] font-bold px-3">+</button>
-                  <div className="w-px h-4 bg-[var(--border-primary)] mx-1" />
-                  <button onClick={() => setZoom(1)} className="px-3 py-1.5 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all text-[9px] font-black uppercase tracking-widest">Reset</button>
+               <div className="flex items-center gap-1 bg-[var(--background-secondary)] p-1.5 rounded-2xl border-2 border-[var(--border-primary)] shadow-md mb-1">
+                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">-</button>
+                  <span className="text-[11px] font-mono font-black text-[var(--text-primary)] min-w-[50px] text-center">{Math.round(zoom * 100)}%</span>
+                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">+</button>
+                  <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
+                  <button onClick={() => setZoom(1)} className="px-4 py-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-[10px] font-black uppercase tracking-[0.2em] active:scale-95">Reset</button>
                </div>
             </div>
           </div>
@@ -675,15 +675,15 @@ function App() {
               onMouseEnter={handleMouseEnter}
               className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar"
             >
-              <div className="relative" style={{ height: ganttLayout.rowCount * 40, width: 5000 * zoom }}>
+              <div className="relative" style={{ height: ganttLayout.rowCount * 48, width: 5000 * zoom }}>
                  {/* Grid */}
                  <div className="absolute inset-0 pointer-events-none">
                     {Array.from({ length: ganttLayout.rowCount }).map((_, i) => (
-                      <div key={i} className="w-full border-b border-[var(--border-primary)]/30" style={{ height: '40px' }} />
+                      <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px' }} />
                     ))}
                     <div className="absolute inset-0 flex">
                       {Array.from({ length: Math.ceil(50 * zoom) }).map((_, i) => (
-                        <div key={i} className="h-full border-r border-[var(--border-primary)]/30" style={{ width: 100 * zoom }} />
+                        <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
                       ))}
                     </div>
                  </div>
@@ -695,17 +695,17 @@ function App() {
                       key={i}
                       d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`}
                       fill="none"
-                      stroke={c.isCritical ? "#f87171" : "var(--text-muted)"}
-                      strokeWidth={c.isCritical ? 1.5 : 0.75}
-                      strokeDasharray={c.isCritical ? "0" : "3 3"}
-                      opacity={0.4}
+                      stroke={c.isCritical ? "#f43f5e" : "var(--text-muted)"}
+                      strokeWidth={c.isCritical ? 2.5 : 1.5}
+                      strokeDasharray={c.isCritical ? "0" : "4 2"}
+                      opacity={0.8}
                     />
                   ))}
                </svg>
 
                {/* Items */}
                {ganttLayout.items.map((item: any, i: number) => (
-                 <div key={i} className="absolute w-full" style={{ top: item.row * 40, height: 40 }}>
+                 <div key={i} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
                     <GanttBar item={item} onClick={handleBeadClick} />
                  </div>
                ))}
@@ -716,21 +716,21 @@ function App() {
 
         {/* Sidebar */}
         {(selectedBead || isCreating) && (
-          <div className="absolute right-0 top-0 bottom-0 w-[450px] bg-[var(--background-primary)] border-l border-[var(--border-primary)] shadow-[0_0_50px_rgba(0,0,0,0.1)] z-50 flex flex-col animate-in slide-in-from-right duration-300 backdrop-blur-2xl">
-            <div className="p-6 border-b border-[var(--border-primary)] flex items-center justify-between bg-[var(--background-secondary)]/30">
-              <div className="flex items-center gap-3">
-                <span className="font-mono text-[10px] px-2.5 py-1.5 rounded-lg bg-[var(--background-tertiary)] text-[var(--text-muted)] font-bold border border-[var(--border-primary)]/50 tracking-tighter">
+          <div className="absolute right-0 top-0 bottom-0 w-[480px] bg-[var(--background-primary)] border-l-2 border-[var(--border-primary)] shadow-[0_0_60px_rgba(0,0,0,0.2)] z-50 flex flex-col animate-in slide-in-from-right duration-300 backdrop-blur-2xl">
+            <div className="p-6 border-b-2 border-[var(--border-primary)] flex items-center justify-between bg-[var(--background-secondary)]">
+              <div className="flex items-center gap-4">
+                <span className="font-mono text-[11px] px-3 py-2 rounded-xl bg-indigo-700 dark:bg-indigo-500 text-white font-black border-2 border-indigo-800 shadow-md tracking-widest uppercase">
                   {isCreating ? "NEW BEAD" : selectedBead?.id}
                 </span>
                 {selectedBead && !isEditing && !isCreating && (
                   <button 
                     onClick={() => toggleFavorite(selectedBead)}
                     className={cn(
-                      "p-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-all",
-                      selectedBead.is_favorite ? "text-amber-500" : "text-[var(--text-muted)]"
+                      "p-2.5 rounded-xl hover:bg-[var(--background-tertiary)] border-2 border-transparent hover:border-[var(--border-primary)] transition-all active:scale-90",
+                      selectedBead.is_favorite ? "text-amber-500 bg-amber-500/5 border-amber-500/20" : "text-[var(--text-secondary)]"
                     )}
                   >
-                    <Star size={16} className={cn(selectedBead.is_favorite && "fill-current")} />
+                    <Star size={20} className={cn(selectedBead.is_favorite && "fill-current")} />
                   </button>
                 )}
                 {(isEditing || isCreating) && (
@@ -753,7 +753,7 @@ function App() {
                       }
                       setEditForm({...editForm, status: newStatus, ...extra});
                     }}
-                    className="bg-[var(--background-secondary)] text-xs font-bold text-[var(--text-primary)] border border-[var(--border-primary)] rounded-lg px-2 py-1.5 focus:ring-0 focus:border-indigo-500/50 outline-none uppercase tracking-widest"
+                    className="bg-[var(--background-primary)] text-[11px] font-black text-[var(--text-primary)] border-2 border-[var(--border-primary)] rounded-xl px-4 py-2.5 focus:ring-4 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none uppercase tracking-[0.2em] shadow-sm"
                   >
                     <option value="open">Open</option>
                     <option value="in_progress">In Progress</option>
@@ -761,22 +761,22 @@ function App() {
                   </select>
                 )}
               </div>
-              <button onClick={() => { setSelectedBead(null); setIsCreating(false); }} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all active:scale-90">
-                <X size={20} />
+              <button onClick={() => { setSelectedBead(null); setIsCreating(false); }} className="p-3 hover:bg-rose-500/10 rounded-2xl text-[var(--text-secondary)] hover:text-rose-600 transition-all active:scale-90 border-2 border-transparent hover:border-rose-500/20">
+                <X size={24} strokeWidth={3} />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-10 custom-scrollbar">
-              <section className="flex flex-col gap-5">
+            <div className="flex-1 overflow-y-auto p-10 flex flex-col gap-12 custom-scrollbar">
+              <section className="flex flex-col gap-6">
                 {(isEditing || isCreating) ? (
-                  <div className="flex flex-col gap-5">
-                    <div className="flex gap-3">
-                       <div className="flex-1 flex flex-col gap-2">
-                          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Type</span>
+                  <div className="flex flex-col gap-6">
+                    <div className="flex gap-4">
+                       <div className="flex-1 flex flex-col gap-2.5">
+                          <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] pl-1">Type</span>
                           <select 
                             value={editForm.issue_type} 
                             onChange={e => setEditForm({...editForm, issue_type: e.target.value})}
-                            className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none"
+                            className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                           >
                             <option value="task">Task</option>
                             <option value="feature">Feature</option>
@@ -784,12 +784,12 @@ function App() {
                             <option value="epic">Epic</option>
                           </select>
                        </div>
-                       <div className="flex-1 flex flex-col gap-2">
-                          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Parent</span>
+                       <div className="flex-1 flex flex-col gap-2.5">
+                          <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] pl-1">Parent</span>
                           <select 
                             value={editForm.parent || ""} 
                             onChange={e => setEditForm({...editForm, parent: e.target.value})}
-                            className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none"
+                            className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                           >
                             <option value="">None</option>
                             {beads.filter(b => b.issue_type === 'epic' || b.issue_type === 'feature').map(b => (
@@ -799,70 +799,70 @@ function App() {
                        </div>
                     </div>
                     
-                    <div className="flex flex-col gap-2">
-                      <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Title</span>
+                    <div className="flex flex-col gap-2.5">
+                      <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] pl-1">Title</span>
                       <input 
-                        className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3.5 text-base font-bold w-full focus:border-indigo-500/50 outline-none text-[var(--text-primary)] shadow-inner"
+                        className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-4 text-lg font-black w-full focus:border-indigo-500 outline-none text-[var(--text-primary)] shadow-sm placeholder:text-[var(--text-muted)]"
                         value={editForm.title}
                         onChange={e => setEditForm({...editForm, title: e.target.value})}
-                        placeholder="Bead Title"
+                        placeholder="Enter title..."
                       />
                     </div>
 
-                    <div className="flex flex-col gap-2">
-                      <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Description</span>
+                    <div className="flex flex-col gap-2.5">
+                      <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] pl-1">Description</span>
                       <textarea 
-                        className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3.5 text-xs min-h-[140px] w-full focus:border-indigo-500/50 outline-none resize-none text-[var(--text-primary)] shadow-inner leading-relaxed"
+                        className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-4 text-[13px] font-bold min-h-[160px] w-full focus:border-indigo-500 outline-none resize-none text-[var(--text-primary)] shadow-sm leading-relaxed placeholder:text-[var(--text-muted)]"
                         value={editForm.description || ""}
                         onChange={e => setEditForm({...editForm, description: e.target.value})}
-                        placeholder="Bead Description"
+                        placeholder="Enter description..."
                       />
                     </div>
                   </div>
                 ) : selectedBead && (
                   <>
-                    <h2 className="text-2xl font-bold text-[var(--text-primary)] leading-tight tracking-tight">{selectedBead.title}</h2>
-                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{selectedBead.description || "No description provided."}</p>
+                    <h2 className="text-2xl font-black text-[var(--text-primary)] leading-tight tracking-tight drop-shadow-sm">{selectedBead.title}</h2>
+                    <p className="text-[13px] font-bold text-[var(--text-secondary)] leading-relaxed">{selectedBead.description || "No description provided."}</p>
                   </>
                 )}
               </section>
 
-              <div className="grid grid-cols-2 gap-8">
-                <div className="flex flex-col gap-2">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2"><User size={12} className="text-indigo-500" /> Owner</span>
+              <div className="grid grid-cols-2 gap-10">
+                <div className="flex flex-col gap-3">
+                  <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2"><User size={14} className="text-indigo-600 dark:text-indigo-400 stroke-[3]" /> Owner</span>
                   {(isEditing || isCreating) ? (
                     <input 
-                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
+                      className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                       value={editForm.owner || ""}
                       onChange={e => setEditForm({...editForm, owner: e.target.value})}
                       placeholder="Assignee"
                     />
                   ) : (
-                    <span className="text-xs text-[var(--text-primary)] font-bold tracking-tight">{selectedBead?.owner || "Unassigned"}</span>
+                    <span className="text-[13px] text-[var(--text-primary)] font-black tracking-tight bg-[var(--background-tertiary)] px-4 py-2.5 rounded-xl border-2 border-[var(--border-primary)]/50">{selectedBead?.owner || "Unassigned"}</span>
                   )}
                 </div>
-                <div className="flex flex-col gap-2">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2"><Tag size={12} className="text-indigo-500" /> Priority</span>
+                <div className="flex flex-col gap-3">
+                  <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2"><Tag size={14} className="text-indigo-600 dark:text-indigo-400 stroke-[3]" /> Priority</span>
                   {(isEditing || isCreating) ? (
                     <select 
                       value={editForm.priority} 
                       onChange={e => setEditForm({...editForm, priority: parseInt(e.target.value)})}
-                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none"
+                      className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                     >
                       {[0,1,2,3,4].map(p => <option key={p} value={p}>P{p} - {['Critical', 'High', 'Medium', 'Low', 'Trivial'][p]}</option>)}
                     </select>
                   ) : (
-                    <span className="text-xs text-[var(--text-primary)] font-bold tracking-tight">P{selectedBead?.priority}</span>
+                    <span className="text-[13px] text-[var(--text-primary)] font-black tracking-tight bg-[var(--background-tertiary)] px-4 py-2.5 rounded-xl border-2 border-[var(--border-primary)]/50 text-center">P{selectedBead?.priority}</span>
                   )}
                 </div>
               </div>
 
-              <section className="flex flex-col gap-4">
-                <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Labels</h3>
-                <div className="flex flex-wrap gap-2.5">
+              <section className="flex flex-col gap-5">
+                <h3 className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.3em] pl-1">Labels</h3>
+                <div className="flex flex-wrap gap-3">
                   {(isEditing || isCreating) ? (
                     <input 
-                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] w-full focus:border-indigo-500/50 outline-none shadow-inner"
+                      className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] w-full focus:border-indigo-500 outline-none shadow-sm"
                       value={(editForm.labels || []).join(", ")}
                       onChange={e => setEditForm({...editForm, labels: e.target.value.split(",").map(l => l.trim()).filter(l => l)})}
                       placeholder="Add labels (comma separated)..."
@@ -872,39 +872,39 @@ function App() {
                       {selectedBead && <Chip label={selectedBead.issue_type} />}
                       {selectedBead?.labels?.map(l => (
                         <Chip key={l} label={l} />
-                      )) || (!selectedBead?.issue_type && <span className="text-xs text-[var(--text-muted)] italic">No labels</span>)}
+                      )) || (!selectedBead?.issue_type && <span className="text-[12px] text-[var(--text-muted)] font-black italic">No labels</span>)}
                     </>
                   )}
                 </div>
               </section>
 
-              <section className="flex flex-col gap-4">
-                <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Notes & References</h3>
-                <div className="flex flex-col gap-6">
+              <section className="flex flex-col gap-5">
+                <h3 className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.3em] pl-1">Notes & References</h3>
+                <div className="flex flex-col gap-8">
                   {(isEditing || isCreating) ? (
                     <>
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Design Notes</span>
+                      <div className="flex flex-col gap-2.5">
+                        <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Design Notes</span>
                         <textarea 
-                          className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none min-h-[80px] resize-none shadow-inner leading-relaxed"
+                          className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-4 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[100px] resize-none shadow-sm leading-relaxed"
                           value={editForm.design_notes || ""}
                           onChange={e => setEditForm({...editForm, design_notes: e.target.value})}
                           placeholder="Architectural decisions..."
                         />
                       </div>
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Working Notes</span>
+                      <div className="flex flex-col gap-2.5">
+                        <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Working Notes</span>
                         <textarea 
-                          className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none min-h-[80px] resize-none shadow-inner leading-relaxed"
+                          className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-4 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[100px] resize-none shadow-sm leading-relaxed"
                           value={editForm.working_notes || ""}
                           onChange={e => setEditForm({...editForm, working_notes: e.target.value})}
                           placeholder="Progress observations..."
                         />
                       </div>
-                      <div className="flex flex-col gap-2">
-                        <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">External Reference</span>
+                      <div className="flex flex-col gap-2.5">
+                        <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">External Reference</span>
                         <input 
-                          className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
+                          className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                           value={editForm.external_reference || ""}
                           onChange={e => setEditForm({...editForm, external_reference: e.target.value})}
                           placeholder="URLs, IDs, or paths..."
@@ -914,21 +914,21 @@ function App() {
                   ) : (
                     <>
                       {selectedBead?.design_notes && (
-                        <div className="flex flex-col gap-2">
-                           <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Design Notes</span>
-                           <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)]/50 p-3 rounded-xl border border-[var(--border-primary)]/30">{selectedBead.design_notes}</p>
+                        <div className="flex flex-col gap-3">
+                           <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Design Notes</span>
+                           <p className="text-[13px] font-bold text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)] p-4 rounded-2xl border-2 border-[var(--border-primary)] shadow-sm">{selectedBead.design_notes}</p>
                         </div>
                       )}
                       {selectedBead?.working_notes && (
-                        <div className="flex flex-col gap-2">
-                           <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Working Notes</span>
-                           <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)]/50 p-3 rounded-xl border border-[var(--border-primary)]/30">{selectedBead.working_notes}</p>
+                        <div className="flex flex-col gap-3">
+                           <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Working Notes</span>
+                           <p className="text-[13px] font-bold text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)] p-4 rounded-2xl border-2 border-[var(--border-primary)] shadow-sm">{selectedBead.working_notes}</p>
                         </div>
                       )}
                       {selectedBead?.external_reference && (
-                        <div className="flex flex-col gap-2">
-                           <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">External Reference</span>
-                           <span className="text-xs text-indigo-500 truncate font-mono bg-indigo-500/5 p-2 rounded-lg border border-indigo-500/10">{selectedBead.external_reference}</span>
+                        <div className="flex flex-col gap-3">
+                           <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">External Reference</span>
+                           <span className="text-[12px] text-indigo-700 dark:text-indigo-400 font-black font-mono bg-indigo-500/10 p-3 rounded-xl border-2 border-indigo-500/20 shadow-sm">{selectedBead.external_reference}</span>
                         </div>
                       )}
                     </>
@@ -936,15 +936,15 @@ function App() {
                 </div>
               </section>
 
-              <section className="flex flex-col gap-4">
-                <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Acceptance Criteria</h3>
-                <div className="flex flex-col gap-3">
+              <section className="flex flex-col gap-6">
+                <h3 className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.3em] pl-1">Acceptance Criteria</h3>
+                <div className="flex flex-col gap-4">
                   {(isEditing || isCreating) ? (
                     <>
                       {(editForm.acceptance_criteria || []).map((ac, i) => (
-                        <div key={i} className="flex gap-2">
+                        <div key={i} className="flex gap-3">
                           <input 
-                            className="flex-1 bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
+                            className="flex-1 bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                             value={ac}
                             onChange={e => {
                               const newAC = [...(editForm.acceptance_criteria || [])];
@@ -957,47 +957,47 @@ function App() {
                               const newAC = (editForm.acceptance_criteria || []).filter((_, idx) => idx !== i);
                               setEditForm({...editForm, acceptance_criteria: newAC});
                             }}
-                            className="text-[var(--text-muted)] hover:text-rose-500 p-2 transition-colors"
+                            className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-3 rounded-xl transition-colors border-2 border-transparent hover:border-rose-500/20 active:scale-90"
                           >
-                            <Trash2 size={16} />
+                            <Trash2 size={20} strokeWidth={3} />
                           </button>
                         </div>
                       ))}
                       <button 
                         onClick={() => setEditForm({...editForm, acceptance_criteria: [...(editForm.acceptance_criteria || []), ""]})}
-                        className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 self-start flex items-center gap-2 bg-indigo-500/5 px-3 py-2 rounded-lg border border-indigo-500/10 transition-all hover:bg-indigo-500/10 active:scale-95"
+                        className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 self-start flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/10 active:scale-95 uppercase tracking-widest"
                       >
-                        <Plus size={12} /> ADD CRITERION
+                        <Plus size={16} strokeWidth={3} /> ADD CRITERION
                       </button>
                     </>
                   ) : (
                     (selectedBead?.acceptance_criteria || []).map((ac, i) => (
-                      <div key={i} className="flex gap-3 items-start bg-[var(--background-secondary)]/30 p-3 rounded-xl border border-[var(--border-primary)]/30">
-                        <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />
-                        <span className="text-xs text-[var(--text-secondary)] leading-relaxed">{ac}</span>
+                      <div key={i} className="flex gap-4 items-start bg-[var(--background-secondary)] p-4 rounded-2xl border-2 border-[var(--border-primary)] shadow-sm">
+                        <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5 stroke-[3]" />
+                        <span className="text-[13px] font-bold text-[var(--text-secondary)] leading-relaxed">{ac}</span>
                       </div>
-                    )) || <span className="text-xs text-[var(--text-muted)] italic">None specified</span>
+                    )) || <span className="text-[12px] text-[var(--text-muted)] font-black italic pl-1">None specified</span>
                   )}
                 </div>
               </section>
 
-              <div className="grid grid-cols-2 gap-8">
-                <div className="flex flex-col gap-2">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2"><Clock size={12} className="text-indigo-500" /> Estimate</span>
+              <div className="grid grid-cols-2 gap-10">
+                <div className="flex flex-col gap-3">
+                  <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2"><Clock size={14} className="text-indigo-600 dark:text-indigo-400 stroke-[3]" /> Estimate</span>
                   {(isEditing || isCreating) ? (
                     <input 
                       type="number"
-                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
+                      className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                       value={editForm.estimate || ""}
                       onChange={e => setEditForm({...editForm, estimate: parseInt(e.target.value) || 0})}
                       placeholder="Minutes"
                     />
                   ) : (
-                    <span className="text-xs text-[var(--text-primary)] font-bold tracking-tight">{selectedBead?.estimate || 0}m</span>
+                    <span className="text-[13px] text-[var(--text-primary)] font-black tracking-tight bg-[var(--background-tertiary)] px-4 py-2.5 rounded-xl border-2 border-[var(--border-primary)]/50 text-center">{selectedBead?.estimate || 0}m</span>
                   )}
                 </div>
-                <div className="flex flex-col gap-2">
-                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2">Status</span>
+                <div className="flex flex-col gap-3">
+                  <span className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Status</span>
                   {(isEditing || isCreating) ? (
                      <select 
                       value={editForm.status} 
@@ -1018,24 +1018,24 @@ function App() {
                         }
                         setEditForm({...editForm, status: newStatus, ...extra});
                       }}
-                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none uppercase tracking-widest font-bold"
+                      className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-[12px] font-black text-[var(--text-primary)] focus:border-indigo-500 outline-none uppercase tracking-[0.2em] shadow-sm"
                     >
                       <option value="open">Open</option>
                       <option value="in_progress">In Progress</option>
                       <option value="closed">Closed</option>
                     </select>
                   ) : (
-                    <div className="flex items-center gap-2 bg-[var(--background-tertiary)] px-2.5 py-1.5 rounded-lg border border-[var(--border-primary)]/50 self-start">
-                      <StatusIcon status={selectedBead?.status || ""} size={14} />
-                      <span className="text-[10px] text-[var(--text-primary)] font-black uppercase tracking-widest">{selectedBead?.status.replace('_', ' ')}</span>
+                    <div className="flex items-center gap-3 bg-indigo-700 dark:bg-indigo-500 px-4 py-2.5 rounded-xl border-2 border-indigo-800 dark:border-indigo-400 self-start shadow-md">
+                      <StatusIcon status={selectedBead?.status || ""} size={16} className="text-white" />
+                      <span className="text-[11px] text-white font-black uppercase tracking-widest">{selectedBead?.status.replace('_', ' ')}</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <section className="flex flex-col gap-4">
+              <section className="flex flex-col gap-6 pb-6">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Dependencies</h3>
+                  <h3 className="text-[10px] font-black text-[var(--text-primary)] uppercase tracking-[0.3em] pl-1">Dependencies</h3>
                   {(isEditing || isCreating) && (
                     <button 
                       onClick={() => {
@@ -1045,9 +1045,60 @@ function App() {
                           setEditForm({...editForm, dependencies: newDeps as any});
                         }
                       }}
-                      className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-2 bg-indigo-500/5 px-3 py-2 rounded-lg border border-indigo-500/10 transition-all hover:bg-indigo-500/10 active:scale-95"
+                      className="text-[11px] font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/10 active:scale-95 uppercase tracking-widest"
                     >
-                      <Plus size={12} /> ADD
+                      <Plus size={16} strokeWidth={3} /> ADD
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col gap-4">
+                  {(isCreating ? editForm.dependencies : selectedBead?.dependencies)?.map((d, i) => (
+                    <div key={i} className="flex items-center justify-between p-5 rounded-2xl bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] group hover:border-indigo-500 shadow-sm transition-all">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-4">
+                           <span className="text-[11px] font-black font-mono text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 px-3 py-1 rounded-lg border-2 border-indigo-500/20 shadow-sm">{d.depends_on_id}</span>
+                           <span className="text-[10px] uppercase font-black text-[var(--text-primary)] tracking-[0.2em]">{d.type}</span>
+                        </div>
+                        {d.metadata && Object.keys(d.metadata).length > 0 && (
+                          <div className="flex flex-wrap gap-2 mt-1 pl-1">
+                            {Object.entries(d.metadata).map(([k, v]) => (
+                              <span key={k} className="text-[9px] font-black bg-[var(--background-tertiary)] px-2.5 py-1 rounded-lg text-[var(--text-muted)] border-2 border-[var(--border-primary)]/50 font-mono tracking-tight">
+                                {k}: {String(v)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {(isEditing || isCreating) && (
+                        <button 
+                          onClick={() => {
+                            const currentDeps = editForm.dependencies || [];
+                            const newDeps = currentDeps.filter((_, index) => index !== i);
+                            setEditForm({...editForm, dependencies: newDeps});
+                          }}
+                          className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-3 rounded-xl transition-colors border-2 border-transparent hover:border-rose-500/20 active:scale-90"
+                        >
+                          <Trash2 size={20} strokeWidth={3} />
+                        </button>
+                      )}
+                    </div>
+                  )) || <div className="text-[13px] text-[var(--text-muted)] font-black italic pl-1">None</div>}
+                </div>
+              </section>
+            </div>
+            
+            <div className="p-8 border-t-2 border-[var(--border-primary)] bg-[var(--background-secondary)] flex gap-5 shadow-2xl backdrop-blur-md">
+              {(isEditing || isCreating) ? (
+                <>
+                  <button onClick={() => { setIsEditing(false); setIsCreating(false); }} className="flex-1 py-4 rounded-2xl bg-[var(--background-tertiary)] hover:bg-[var(--border-primary)] text-[var(--text-primary)] text-xs font-black transition-all border-2 border-[var(--border-primary)] active:scale-95 uppercase tracking-widest">Cancel</button>
+                  <button onClick={isCreating ? handleSaveCreate : handleSaveEdit} className="flex-1 py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-all shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-3 active:scale-95 border-2 border-emerald-700 uppercase tracking-widest"><Save size={20} strokeWidth={3} /> {isCreating ? "Create Bead" : "Save Changes"}</button>
+                </>
+              ) : (
+                <button onClick={handleStartEdit} className="w-full py-4 rounded-2xl bg-indigo-700 hover:bg-indigo-600 text-white text-xs font-black transition-all shadow-xl shadow-indigo-700/30 flex items-center justify-center gap-3 active:scale-95 border-2 border-indigo-800 uppercase tracking-widest"><Edit3 size={20} strokeWidth={3} /> Edit Bead</button>
+              )}
+            </div>
+          </div>
+        )}
                     </button>
                   )}
                 </div>
@@ -1102,8 +1153,9 @@ function App() {
       </main>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--text-muted); border-radius: 10px; border: 2px solid var(--background-primary); }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
       `}} />
     </div>
   );
