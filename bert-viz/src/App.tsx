@@ -44,8 +44,8 @@ function App() {
     setProjects(data);
   }, []);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
       const data = await fetchBeads();
       setBeads(data);
@@ -62,7 +62,7 @@ function App() {
     try {
       await openProject(path);
       setCurrentProjectPath(path);
-      await loadData();
+      await loadData(true);
       await loadProjects();
     } catch (error) {
       alert(`Failed to open project: ${error}`);
