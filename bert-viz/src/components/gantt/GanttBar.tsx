@@ -51,7 +51,7 @@ export const GanttBar = ({ item, onClick }: GanttBarProps) => {
         <div className="absolute left-full ml-4 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10 opacity-90 group-hover:opacity-100 transition-opacity">
           <span className={cn(
             "text-[13px] font-black tracking-tight",
-            bead.status === 'closed' ? "text-[var(--text-muted)] line-through font-bold" : "text-[var(--text-primary)] drop-shadow-md"
+            bead.status === 'closed' ? "text-[var(--text-muted)] italic font-bold" : "text-[var(--text-primary)] drop-shadow-md"
           )}>{bead.title}</span>
           {isCritical && !isMilestone && <Flame size={14} className="text-rose-600 dark:text-rose-400 fill-current" />}
         </div>

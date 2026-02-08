@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bd ready:*)",
+      "Bash(bd dep remove:*)",
+      "Bash(bd update --help:*)",
+      "Bash(bd update:*)",
+      "Bash(bd show:*)",
+      "Bash(npm run check:*)",
+      "Bash(npm run:*)",
+      "Bash(bd list:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
