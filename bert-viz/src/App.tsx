@@ -492,7 +492,7 @@ function App() {
                      <span className="text-base font-black text-[var(--status-open)]">{stats.open}</span>
                   </div>
                   <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
-                     <span className="text-[9px] font-black text-[var(--status-active)] uppercase tracking-[0.25em] mb-1">Active</span>
+                     <span className="text-[9px] font-black text-[var(--status-active)] uppercase tracking-[0.25em] mb-1">In Progress</span>
                      <span className="text-base font-black text-[var(--status-active)]">{stats.inProgress}</span>
                   </div>
                   <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
@@ -500,7 +500,7 @@ function App() {
                      <span className="text-base font-black text-[var(--status-blocked)]">{stats.blocked}</span>
                   </div>
                   <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
-                     <span className="text-[9px] font-black text-[var(--status-done)] uppercase tracking-[0.25em] mb-1">Done</span>
+                     <span className="text-[9px] font-black text-[var(--status-done)] uppercase tracking-[0.25em] mb-1">Closed</span>
                      <span className="text-base font-black text-[var(--status-done)]">{stats.closed}</span>
                   </div>
                </div>
