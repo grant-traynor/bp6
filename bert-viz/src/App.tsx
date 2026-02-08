@@ -15,26 +15,26 @@ function cn(...inputs: ClassValue[]) {
 
 const getChipStyles = (label: string) => {
   const l = label.toLowerCase();
-  if (l === 'epic') return "bg-purple-500/10 text-purple-400 border-purple-500/20";
-  if (l === 'bug') return "bg-red-500/10 text-red-400 border-red-500/20";
-  if (l === 'feature') return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-  if (l === 'task') return "bg-blue-500/10 text-blue-400 border-blue-500/20";
-  if (l.includes('infra')) return "bg-orange-500/10 text-orange-400 border-orange-500/20";
-  if (l.includes('doc')) return "bg-cyan-500/10 text-cyan-400 border-cyan-500/20";
-  return "bg-[var(--background-secondary)]0/10 text-zinc-400 border-zinc-500/20";
+  if (l === 'epic') return "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20";
+  if (l === 'bug') return "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20";
+  if (l === 'feature') return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20";
+  if (l === 'task') return "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20";
+  if (l.includes('infra')) return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
+  if (l.includes('doc')) return "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20";
+  return "bg-[var(--background-tertiary)] text-[var(--text-muted)] border-[var(--border-primary)]";
 };
 
 const Chip = ({ label }: { label: string }) => (
-  <span className={cn("px-2 py-0.5 rounded-md text-xs font-bold border transition-colors", getChipStyles(label))}>
+  <span className={cn("px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-widest border transition-all", getChipStyles(label))}>
     {label}
   </span>
 );
 
 const StatusIcon = ({ status, size = 14 }: { status: string; size?: number }) => {
   switch (status) {
-    case 'closed': return <CheckCircle2 size={size} className="text-emerald-500" />;
-    case 'in_progress': return <Clock size={size} className="text-amber-500" />;
-    default: return <Circle size={size} className="text-zinc-500" />;
+    case 'closed': return <CheckCircle2 size={size} className="text-emerald-500/80" />;
+    case 'in_progress': return <Clock size={size} className="text-amber-500/80" />;
+    default: return <Circle size={size} className="text-[var(--text-muted)]" />;
   }
 };
 
@@ -44,13 +44,13 @@ const GanttBar = ({ item, onClick }: { item: GanttItem; onClick: (bead: Bead) =>
   const isMilestone = bead.estimate === 0;
 
   const getStatusColor = () => {
-    if (isEpic) return "bg-zinc-200 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700";
-    if (isMilestone) return "bg-zinc-800 dark:bg-zinc-100 border-zinc-700 dark:border-zinc-400 rotate-45";
-    if (bead.status === 'closed') return "bg-blue-500 border-blue-400";
-    if (isCritical) return "bg-red-500 border-red-400";
+    if (isEpic) return "bg-[var(--background-tertiary)] border-[var(--border-primary)]";
+    if (isMilestone) return "bg-indigo-500 border-indigo-400 rotate-45";
+    if (bead.status === 'closed') return "bg-indigo-500/30 border-indigo-500/20";
+    if (isCritical) return "bg-rose-500 border-rose-400";
     if (isBlocked) return "bg-amber-500 border-amber-400";
     if (bead.status === 'in_progress') return "bg-emerald-500 border-emerald-400";
-    return "bg-zinc-300 dark:bg-zinc-600 border-zinc-400 dark:border-zinc-500";
+    return "bg-[var(--background-secondary)] border-[var(--border-primary)]";
   };
 
   return (
@@ -61,26 +61,26 @@ const GanttBar = ({ item, onClick }: { item: GanttItem; onClick: (bead: Bead) =>
     >
       <div className="flex-1 flex items-center h-full relative">
         {isEpic ? (
-          <div className="w-full h-2 bg-zinc-400 relative">
-             <div className="absolute left-0 -top-1 bottom-[-4px] w-1.5 bg-zinc-400" />
-             <div className="absolute right-0 -top-1 bottom-[-4px] w-1.5 bg-zinc-400" />
+          <div className="w-full h-2 bg-[var(--text-muted)]/30 relative rounded-full overflow-hidden">
+             <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500" />
+             <div className="absolute right-0 top-0 bottom-0 w-1 bg-indigo-500" />
           </div>
         ) : isMilestone ? (
-          <div className={cn("w-3 h-3 border shadow-sm", getStatusColor())} />
+          <div className={cn("w-2.5 h-2.5 border shadow-sm transition-all group-hover:scale-125", getStatusColor())} />
         ) : (
           <div className={cn(
-            "h-4 rounded-sm border shadow-sm transition-all w-full",
+            "h-4 rounded-md border shadow-sm transition-all w-full group-hover:shadow-md group-hover:border-indigo-500/50",
             getStatusColor(),
-            bead.status === 'closed' ? "opacity-40" : "opacity-100"
+            bead.status === 'closed' ? "opacity-30" : "opacity-100"
           )} />
         )}
 
-        <div className="absolute left-full ml-4 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10">
+        <div className="absolute left-full ml-4 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10 opacity-60 group-hover:opacity-100 transition-opacity">
           <span className={cn(
-            "text-sm font-bold tracking-tight",
-            bead.status === 'closed' ? "text-zinc-400 dark:text-zinc-600" : "text-zinc-900 dark:text-zinc-300"
+            "text-[11px] font-bold tracking-tight",
+            bead.status === 'closed' ? "text-[var(--text-muted)] line-through font-normal" : "text-[var(--text-primary)]"
           )}>{bead.title}</span>
-          {isCritical && !isMilestone && <Flame size={10} className="text-red-500 fill-current opacity-60" />}
+          {isCritical && !isMilestone && <Flame size={10} className="text-rose-500 fill-current opacity-60" />}
         </div>
       </div>
     </div>
@@ -101,46 +101,46 @@ const WBSTreeItem = ({
   const hasChildren = node.children.length > 0;
 
   return (
-    <div className="select-none h-[40px] flex flex-col justify-center border-b border-zinc-200 dark:border-zinc-900/30">
+    <div className="select-none h-[40px] flex flex-col justify-center border-b border-[var(--border-primary)]/30">
       <div 
         className={cn(
-          "flex items-center hover:bg-zinc-100 dark:bg-zinc-900/50 cursor-pointer group transition-all h-full",
-          node.isCritical && "bg-red-500/5"
+          "flex items-center hover:bg-[var(--background-primary)]/50 cursor-pointer group transition-all h-full",
+          node.isCritical && "bg-rose-500/[0.02]"
         )}
         onClick={() => onClick(node as Bead)}
       >
         <div 
-          className="w-8 shrink-0 flex items-center justify-center h-full hover:text-zinc-900 dark:text-zinc-100 text-zinc-600 transition-colors" 
+          className="w-8 shrink-0 flex items-center justify-center h-full text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors" 
           onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
         >
           {hasChildren ? (
-            node.isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+            node.isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />
           ) : null}
         </div>
 
-        <div className="w-24 shrink-0 px-2 flex items-center h-full border-r border-zinc-200 dark:border-zinc-900/50">
+        <div className="w-24 shrink-0 px-2 flex items-center h-full border-r border-[var(--border-primary)]/30">
            <span className={cn(
-             "font-mono text-xs font-bold px-1.5 py-0.5 rounded tracking-tighter",
-             node.isCritical ? "bg-red-500/10 dark:bg-red-500/20 text-red-600 dark:text-red-400" : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-500"
+             "font-mono text-[9px] font-bold px-1.5 py-0.5 rounded-md tracking-tighter border",
+             node.isCritical ? "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20" : "bg-[var(--background-tertiary)] text-[var(--text-muted)] border-[var(--border-primary)]/50"
            )}>
              {node.id}
            </span>
         </div>
 
         <div 
-          className="flex-1 px-3 flex items-center gap-2 truncate h-full"
+          className="flex-1 px-3 flex items-center gap-3 truncate h-full"
           style={{ paddingLeft: `${depth * 0.75 + 0.75}rem` }}
         >
-          <StatusIcon status={node.status} size={10} />
+          <StatusIcon status={node.status} size={12} />
           <span className={cn(
-            "text-sm truncate font-semibold tracking-tight",
-            node.status === 'closed' ? "text-zinc-400 dark:text-zinc-600 line-through" : "text-zinc-900 dark:text-zinc-300"
+            "text-[11px] truncate font-semibold tracking-tight",
+            node.status === 'closed' ? "text-[var(--text-muted)] line-through font-normal" : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
           )}>
             {node.title}
           </span>
           {node.issue_type !== 'task' && (
             <span className={cn(
-              "text-[7px] font-black px-1 rounded-sm uppercase tracking-tighter border",
+              "text-[7px] font-black px-1.5 py-0.5 rounded-sm uppercase tracking-widest border",
               getChipStyles(node.issue_type)
             )}>
               {node.issue_type}
@@ -429,84 +429,97 @@ function App() {
   }, [beads]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-zinc-900 dark:text-zinc-100 font-sans">
-      <nav className="w-16 flex flex-col items-center py-6 border-r border-zinc-200 dark:border-zinc-900 bg-[var(--background-primary)] z-30">
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
+      <nav className="w-16 flex flex-col items-center py-6 border-r border-[var(--border-primary)] bg-[var(--background-secondary)] z-30">
         <div className="flex flex-col gap-4 flex-1">
-          <button className="p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 text-indigo-400 transition-all border border-transparent hover:border-indigo-500/20"><ListTree size={22} /></button>
-          <div className="h-px w-8 bg-zinc-200 dark:bg-zinc-800 mx-auto" />
+          <button className="p-3 rounded-xl bg-[var(--background-primary)] text-indigo-500 transition-all border border-[var(--border-primary)] shadow-sm hover:shadow-md active:scale-95"><ListTree size={22} /></button>
+          <div className="h-px w-8 bg-[var(--border-primary)] mx-auto" />
         </div>
-        <div className="mt-auto border-t border-zinc-200 dark:border-zinc-900 pt-4"><Settings size={20} className="text-zinc-600 p-3" /></div>
+        <div className="mt-auto border-t border-[var(--border-primary)] pt-4">
+          <button className="p-3 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+            <Settings size={20} />
+          </button>
+        </div>
       </nav>
 
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
-        <header className="h-12 border-b border-zinc-200 dark:border-zinc-900 flex items-center px-6 justify-between bg-[var(--background-primary)]/50 backdrop-blur-md z-20">
+        <header className="h-14 border-b border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/80 backdrop-blur-xl z-20">
           <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-               <div className="w-6 h-6 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-xs shadow-lg text-white">B</div>
-               <h1 className="text-sm font-black tracking-tighter uppercase">BERT <span className="text-indigo-400 font-mono">bp6</span></h1>
+            <div className="flex items-center gap-2.5">
+               <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center font-black text-[10px] shadow-lg shadow-indigo-600/20 text-white">B</div>
+               <h1 className="text-sm font-black tracking-tighter uppercase text-[var(--text-primary)]">BERT <span className="text-indigo-500 font-mono">BP6</span></h1>
             </div>
-            <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-800" />
-            <div className="flex items-center gap-3">
-               <div className="flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
-                  <span className="text-xs font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Live</span>
+            <div className="h-4 w-px bg-[var(--border-primary)]" />
+            <div className="flex items-center gap-4">
+               <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)] animate-pulse" />
+                  <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest">Live</span>
                </div>
-               <span className="text-xs text-zinc-500 dark:text-zinc-600 font-medium">/ Workspace / <span className="text-zinc-900 dark:text-zinc-300">Default</span></span>
+               <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-tight">/ Workspace / <span className="text-[var(--text-primary)] font-bold">Default</span></span>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={() => setIsDark(!isDark)} className="h-8 w-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 rounded-md border border-zinc-300 dark:border-zinc-800 flex items-center justify-center transition-all">
-              {isDark ? <Sun size={14} /> : <Moon size={14} />}
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setIsDark(!isDark)} 
+              className="h-9 w-9 hover:bg-[var(--background-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl flex items-center justify-center transition-all border border-transparent hover:border-[var(--border-primary)] active:scale-90"
+            >
+              {isDark ? <Sun size={16} /> : <Moon size={16} />}
             </button>
-            <button onClick={handleStartCreate} className="h-8 bg-indigo-600 hover:bg-indigo-500 text-white px-3 rounded-md text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/10">
-              <Plus size={12} /> New Bead
+            <button 
+              onClick={handleStartCreate} 
+              className="h-9 bg-indigo-600 hover:bg-indigo-500 text-white px-4 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/20 active:scale-95 border border-indigo-500/20"
+            >
+              <Plus size={14} /> New Bead
             </button>
-            <button onClick={loadData} className="h-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 rounded-md text-xs font-bold border border-zinc-300 dark:border-zinc-800 flex items-center gap-2 transition-all">
-              <Package size={12} className="text-indigo-400" /> Sync
+            <button 
+              onClick={loadData} 
+              className="h-9 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-secondary)] px-4 rounded-xl text-xs font-bold border border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95"
+            >
+              <Package size={14} className="text-indigo-500" /> Sync
             </button>
 
             <div className="relative">
               <button 
                 onClick={() => setProjectMenuOpen(!projectMenuOpen)}
-                className="h-8 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 px-3 rounded-md text-xs font-bold border border-zinc-300 dark:border-zinc-800 flex items-center gap-2 transition-all"
+                className="h-9 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-secondary)] px-4 rounded-xl text-xs font-bold border border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95"
               >
-                <FolderOpen size={12} className="text-indigo-400" />
+                <FolderOpen size={14} className="text-indigo-500" />
                 <span>Select Project</span>
-                <ChevronDown size={12} className={cn("transition-transform", projectMenuOpen && "rotate-180")} />
+                <ChevronDown size={14} className={cn("transition-transform opacity-40", projectMenuOpen && "rotate-180")} />
               </button>
               
               {projectMenuOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-[var(--background-primary)] border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl z-[60] py-2 animate-in fade-in zoom-in-95 duration-100">
+                <div className="absolute right-0 mt-3 w-80 bg-[var(--background-primary)] border border-[var(--border-primary)] rounded-2xl shadow-2xl z-[60] py-3 animate-in fade-in zoom-in-95 duration-150 backdrop-blur-xl">
                   {favoriteProjects.length > 0 && (
-                    <div className="px-2 pb-2 mb-1">
-                      <div className="px-3 py-1 text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Favorites</div>
+                    <div className="px-2 pb-3 mb-2">
+                      <div className="px-4 py-1.5 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Favorites</div>
                       {favoriteProjects.map(p => (
                         <div 
                           key={p.path}
                           className={cn(
-                            "group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all",
+                            "group flex items-center gap-3 px-4 py-2.5 rounded-xl cursor-pointer transition-all",
                             currentProjectPath === p.path 
-                              ? "bg-indigo-600/10 text-indigo-500" 
-                              : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400"
+                              ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" 
+                              : "hover:bg-[var(--background-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                           )}
                           onClick={() => { setProjectMenuOpen(false); handleOpenProject(p.path); }}
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold truncate">{p.name}</div>
-                            <div className="text-[9px] opacity-60 truncate">{p.path}</div>
+                            <div className="text-[11px] font-bold truncate tracking-tight">{p.name}</div>
+                            <div className="text-[9px] opacity-50 truncate font-mono">{p.path}</div>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
                             <button 
                               onClick={(e) => { e.stopPropagation(); toggleFavoriteProject(p.path); }}
-                              className={cn("p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md transition-all", p.is_favorite ? "text-amber-500 opacity-100" : "text-zinc-500")}
+                              className={cn("p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-all", p.is_favorite ? "text-amber-500" : "text-[var(--text-muted)]")}
                             >
-                              <Star size={12} className={cn(p.is_favorite && "fill-current")} />
+                              <Star size={14} className={cn(p.is_favorite && "fill-current")} />
                             </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); removeProject(p.path); }}
-                              className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-md transition-all text-zinc-500"
+                              className="p-1.5 hover:bg-rose-500/10 hover:text-rose-500 rounded-lg transition-all text-[var(--text-muted)]"
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </div>
@@ -515,35 +528,35 @@ function App() {
                   )}
                   
                   {recentProjects.length > 0 && (
-                    <div className="px-2 pb-2 mb-1">
-                      <div className="px-3 py-1 text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">Recent</div>
+                    <div className="px-2 pb-3 mb-2">
+                      <div className="px-4 py-1.5 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Recent</div>
                       {recentProjects.map(p => (
                         <div 
                           key={p.path}
                           className={cn(
-                            "group flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all",
+                            "group flex items-center gap-3 px-4 py-2.5 rounded-xl cursor-pointer transition-all",
                             currentProjectPath === p.path 
-                              ? "bg-indigo-600/10 text-indigo-500" 
-                              : "hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-600 dark:text-zinc-400"
+                              ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" 
+                              : "hover:bg-[var(--background-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                           )}
                           onClick={() => { setProjectMenuOpen(false); handleOpenProject(p.path); }}
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold truncate">{p.name}</div>
-                            <div className="text-[9px] opacity-60 truncate">{p.path}</div>
+                            <div className="text-[11px] font-bold truncate tracking-tight">{p.name}</div>
+                            <div className="text-[9px] opacity-50 truncate font-mono">{p.path}</div>
                           </div>
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
                             <button 
                               onClick={(e) => { e.stopPropagation(); toggleFavoriteProject(p.path); }}
-                              className={cn("p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md transition-all", p.is_favorite ? "text-amber-500 opacity-100" : "text-zinc-500")}
+                              className={cn("p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-all", p.is_favorite ? "text-amber-500" : "text-[var(--text-muted)]")}
                             >
-                              <Star size={12} className={cn(p.is_favorite && "fill-current")} />
+                              <Star size={14} className={cn(p.is_favorite && "fill-current")} />
                             </button>
                             <button 
                               onClick={(e) => { e.stopPropagation(); removeProject(p.path); }}
-                              className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-md transition-all text-zinc-500"
+                              className="p-1.5 hover:bg-rose-500/10 hover:text-rose-500 rounded-lg transition-all text-[var(--text-muted)]"
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </div>
@@ -551,12 +564,12 @@ function App() {
                     </div>
                   )}
                   
-                  <div className="px-2 pt-1 border-t border-zinc-100 dark:border-zinc-900">
+                  <div className="px-3 pt-2 border-t border-[var(--border-primary)]">
                     <button 
                       onClick={() => { setProjectMenuOpen(false); handleSelectProject(); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-all text-left"
+                      className="w-full flex items-center gap-2 px-4 py-3 text-[11px] font-bold text-indigo-500 hover:bg-indigo-500/10 rounded-xl transition-all text-left"
                     >
-                      <Plus size={14} /> Add New Project
+                      <Plus size={16} /> Add New Project
                     </button>
                   </div>
                 </div>
@@ -567,72 +580,74 @@ function App() {
 
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Shared Header Row for WBS and Gantt */}
-          <div className="flex shrink-0 border-b border-zinc-200 dark:border-zinc-900 bg-zinc-100/90 dark:bg-zinc-900/90 backdrop-blur-md z-20">
+          <div className="flex shrink-0 border-b border-[var(--border-primary)] bg-[var(--background-secondary)]/80 backdrop-blur-md z-20">
             {/* WBS Header Area */}
-            <div className="w-1/3 min-w-[420px] border-r border-zinc-200 dark:border-zinc-900 flex flex-col">
-              <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-900">
-                <h2 className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em] flex items-center gap-2">Task Breakdown</h2>
+            <div className="w-1/3 min-w-[420px] border-r border-[var(--border-primary)] flex flex-col">
+              <div className="px-6 py-3 border-b border-[var(--border-primary)]/50">
+                <h2 className="text-[10px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2">Task Breakdown</h2>
               </div>
               {favoriteBeads.length > 0 && (
-                <div className="px-6 py-3 border-b border-zinc-200 dark:border-zinc-900 bg-indigo-500/5">
-                  <h2 className="text-xs font-black text-indigo-400 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><Star size={10} className="fill-current" /> Favorites</h2>
+                <div className="px-6 py-3 border-b border-[var(--border-primary)]/50 bg-indigo-500/5">
+                  <h2 className="text-[9px] font-black text-indigo-500 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><Star size={10} className="fill-current" /> Favorites</h2>
                   <div className="flex flex-wrap gap-1.5">
                     {favoriteBeads.map(f => (
-                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 hover:border-indigo-500/50 cursor-pointer transition-all">
-                        <span className="font-mono text-[8px] font-bold text-zinc-500">{f.id}</span>
-                        <span className="text-[10px] font-medium text-zinc-700 dark:text-zinc-300 truncate max-w-[120px]">{f.title}</span>
+                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2 py-1 rounded-lg bg-[var(--background-primary)] border border-[var(--border-primary)] hover:border-indigo-500/50 cursor-pointer transition-all active:scale-95">
+                        <span className="font-mono text-[8px] font-bold text-[var(--text-muted)]">{f.id}</span>
+                        <span className="text-[10px] font-medium text-[var(--text-secondary)] truncate max-w-[120px]">{f.title}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-              <div className="px-4 py-2 border-b border-zinc-200 dark:border-zinc-900 bg-[var(--background-primary)] dark:bg-[var(--background-secondary)]/20">
-                <input 
-                  type="text"
-                  placeholder="Filter by title, ID, owner, or label..."
-                  className="w-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none transition-all"
-                  value={filterText}
-                  onChange={e => setFilterText(e.target.value)}
-                />
+              <div className="px-4 py-2.5 border-b border-[var(--border-primary)]/50 bg-[var(--background-primary)]/20">
+                <div className="relative group">
+                  <input 
+                    type="text"
+                    placeholder="Filter by title, ID, owner, or label..."
+                    className="w-full bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl px-3 py-2 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none transition-all placeholder:text-[var(--text-muted)] group-hover:border-[var(--border-primary)] shadow-inner"
+                    value={filterText}
+                    onChange={e => setFilterText(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="flex items-center px-4 py-2 bg-[var(--background-primary)] dark:bg-[var(--background-secondary)]/50 text-xs font-black text-zinc-600 uppercase tracking-widest mt-auto">
+              <div className="flex items-center px-4 py-2 bg-[var(--background-secondary)]/30 text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em] mt-auto">
                 <div className="w-8 shrink-0" />
-                <div className="w-24 shrink-0 px-2 border-r border-zinc-200 dark:border-zinc-900/50">ID</div>
+                <div className="w-24 shrink-0 px-2 border-r border-[var(--border-primary)]/50">ID</div>
                 <div className="flex-1 px-3">Name</div>
               </div>
             </div>
 
             {/* Gantt Header Area (Metrics + Controls) */}
-            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-[var(--background-secondary)] dark:bg-[var(--background-primary)]">
-               <div className="flex items-center gap-6 mb-1">
+            <div className="flex-1 flex items-end justify-between px-6 py-2 bg-[var(--background-primary)]">
+               <div className="flex items-center gap-8 mb-1">
                   <div className="flex flex-col">
-                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total</span>
-                     <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{stats.total}</span>
+                     <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Total</span>
+                     <span className="text-sm font-bold text-[var(--text-primary)]">{stats.total}</span>
                   </div>
-                  <div className="flex flex-col">
-                     <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Open</span>
+                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4">
+                     <span className="text-[8px] font-black text-emerald-500/80 uppercase tracking-[0.2em]">Open</span>
                      <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{stats.open}</span>
                   </div>
-                  <div className="flex flex-col">
-                     <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Active</span>
+                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4">
+                     <span className="text-[8px] font-black text-amber-500/80 uppercase tracking-[0.2em]">Active</span>
                      <span className="text-sm font-bold text-amber-600 dark:text-amber-400">{stats.inProgress}</span>
                   </div>
-                  <div className="flex flex-col">
-                     <span className="text-[9px] font-black text-rose-500 uppercase tracking-widest">Blocked</span>
+                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4">
+                     <span className="text-[8px] font-black text-rose-500/80 uppercase tracking-[0.2em]">Blocked</span>
                      <span className="text-sm font-bold text-rose-600 dark:text-rose-400">{stats.blocked}</span>
                   </div>
-                  <div className="flex flex-col">
-                     <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Done</span>
-                     <span className="text-sm font-bold text-zinc-500 dark:text-zinc-400">{stats.closed}</span>
+                  <div className="flex flex-col border-l border-[var(--border-primary)] pl-4 pr-4">
+                     <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Done</span>
+                     <span className="text-sm font-bold text-[var(--text-secondary)]">{stats.closed}</span>
                   </div>
                </div>
 
-               <div className="flex items-center gap-1 bg-[var(--background-primary)] dark:bg-zinc-900/80 backdrop-blur-md p-1 rounded-lg border border-zinc-200 dark:border-zinc-800 shadow-xl mb-1">
-                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold px-2">-</button>
-                  <span className="text-xs font-mono font-bold text-zinc-400 dark:text-zinc-500 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
-                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold px-2">+</button>
-                  <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-800 mx-1" />
-                  <button onClick={() => setZoom(1)} className="px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-all text-xs font-bold uppercase tracking-tighter">Reset</button>
+               <div className="flex items-center gap-1 bg-[var(--background-secondary)] p-1 rounded-xl border border-[var(--border-primary)] shadow-sm mb-1">
+                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all text-[10px] font-bold px-3">-</button>
+                  <span className="text-[10px] font-mono font-bold text-[var(--text-muted)] min-w-[45px] text-center">{Math.round(zoom * 100)}%</span>
+                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all text-[10px] font-bold px-3">+</button>
+                  <div className="w-px h-4 bg-[var(--border-primary)] mx-1" />
+                  <button onClick={() => setZoom(1)} className="px-3 py-1.5 hover:bg-[var(--background-tertiary)] rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all text-[9px] font-black uppercase tracking-widest">Reset</button>
                </div>
             </div>
           </div>
@@ -643,9 +658,9 @@ function App() {
                         ref={scrollRefWBS}
                         onScroll={handleScroll}
                         onMouseEnter={handleMouseEnter}
-                        className="w-1/3 border-r border-zinc-200 dark:border-zinc-900 flex flex-col bg-[var(--background-primary)] dark:bg-[var(--background-secondary)]/30 min-w-[420px] overflow-y-auto custom-scrollbar"
+                        className="w-1/3 border-r border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[420px] overflow-y-auto custom-scrollbar"
                       >
-                        <div className="p-0">                {loading ? <div className="p-8 animate-pulse text-zinc-700 text-sm">Syncing Schedule...</div> : (
+                        <div className="p-0">                {loading ? <div className="p-12 animate-pulse text-[var(--text-muted)] text-xs font-medium tracking-widest uppercase">Syncing Schedule...</div> : (
                   <div className="flex flex-col">
                     <WBSTreeList nodes={tree} onToggle={toggleNode} onClick={handleBeadClick} />
                   </div>
@@ -658,17 +673,17 @@ function App() {
               ref={scrollRefBERT}
               onScroll={handleScroll}
               onMouseEnter={handleMouseEnter}
-              className="flex-1 relative bg-[var(--background-secondary)] dark:bg-[var(--background-primary)] overflow-auto custom-scrollbar"
+              className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar"
             >
               <div className="relative" style={{ height: ganttLayout.rowCount * 40, width: 5000 * zoom }}>
                  {/* Grid */}
                  <div className="absolute inset-0 pointer-events-none">
                     {Array.from({ length: ganttLayout.rowCount }).map((_, i) => (
-                      <div key={i} className="w-full border-b border-zinc-200 dark:border-zinc-900/50" style={{ height: '40px' }} />
+                      <div key={i} className="w-full border-b border-[var(--border-primary)]/30" style={{ height: '40px' }} />
                     ))}
                     <div className="absolute inset-0 flex">
                       {Array.from({ length: Math.ceil(50 * zoom) }).map((_, i) => (
-                        <div key={i} className="h-full border-r border-zinc-200 dark:border-zinc-900/30" style={{ width: 100 * zoom }} />
+                        <div key={i} className="h-full border-r border-[var(--border-primary)]/30" style={{ width: 100 * zoom }} />
                       ))}
                     </div>
                  </div>
@@ -680,10 +695,10 @@ function App() {
                       key={i}
                       d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`}
                       fill="none"
-                      stroke={c.isCritical ? "#ef4444" : "#3f3f46"}
-                      strokeWidth={c.isCritical ? 2 : 1}
-                      strokeDasharray={c.isCritical ? "0" : "4 2"}
-                      opacity={0.6}
+                      stroke={c.isCritical ? "#f87171" : "var(--text-muted)"}
+                      strokeWidth={c.isCritical ? 1.5 : 0.75}
+                      strokeDasharray={c.isCritical ? "0" : "3 3"}
+                      opacity={0.4}
                     />
                   ))}
                </svg>
@@ -701,21 +716,21 @@ function App() {
 
         {/* Sidebar */}
         {(selectedBead || isCreating) && (
-          <div className="absolute right-0 top-0 bottom-0 w-[400px] bg-[var(--background-primary)] dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="absolute right-0 top-0 bottom-0 w-[450px] bg-[var(--background-primary)] border-l border-[var(--border-primary)] shadow-[0_0_50px_rgba(0,0,0,0.1)] z-50 flex flex-col animate-in slide-in-from-right duration-300 backdrop-blur-2xl">
+            <div className="p-6 border-b border-[var(--border-primary)] flex items-center justify-between bg-[var(--background-secondary)]/30">
               <div className="flex items-center gap-3">
-                <span className="font-mono text-xs px-2 py-1 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-bold">
-                  {isCreating ? "New Bead" : selectedBead?.id}
+                <span className="font-mono text-[10px] px-2.5 py-1.5 rounded-lg bg-[var(--background-tertiary)] text-[var(--text-muted)] font-bold border border-[var(--border-primary)]/50 tracking-tighter">
+                  {isCreating ? "NEW BEAD" : selectedBead?.id}
                 </span>
                 {selectedBead && !isEditing && !isCreating && (
                   <button 
                     onClick={() => toggleFavorite(selectedBead)}
                     className={cn(
-                      "p-1 rounded hover:bg-zinc-800 transition-all",
-                      selectedBead.is_favorite ? "text-amber-500" : "text-zinc-600"
+                      "p-2 rounded-lg hover:bg-[var(--background-tertiary)] transition-all",
+                      selectedBead.is_favorite ? "text-amber-500" : "text-[var(--text-muted)]"
                     )}
                   >
-                    <Star size={14} className={cn(selectedBead.is_favorite && "fill-current")} />
+                    <Star size={16} className={cn(selectedBead.is_favorite && "fill-current")} />
                   </button>
                 )}
                 {(isEditing || isCreating) && (
@@ -738,7 +753,7 @@ function App() {
                       }
                       setEditForm({...editForm, status: newStatus, ...extra});
                     }}
-                    className="bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-300 text-sm border-none rounded p-1 focus:ring-0"
+                    className="bg-[var(--background-secondary)] text-xs font-bold text-[var(--text-primary)] border border-[var(--border-primary)] rounded-lg px-2 py-1.5 focus:ring-0 focus:border-indigo-500/50 outline-none uppercase tracking-widest"
                   >
                     <option value="open">Open</option>
                     <option value="in_progress">In Progress</option>
@@ -746,22 +761,22 @@ function App() {
                   </select>
                 )}
               </div>
-              <button onClick={() => { setSelectedBead(null); setIsCreating(false); }} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-500 hover:text-zinc-200 transition-colors">
-                <X size={18} />
+              <button onClick={() => { setSelectedBead(null); setIsCreating(false); }} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all active:scale-90">
+                <X size={20} />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-8 custom-scrollbar">
-              <section className="flex flex-col gap-4">
+            <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-10 custom-scrollbar">
+              <section className="flex flex-col gap-5">
                 {(isEditing || isCreating) ? (
-                  <div className="flex flex-col gap-4">
-                    <div className="flex gap-2">
-                       <div className="flex-1 flex flex-col gap-1">
-                          <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Type</span>
+                  <div className="flex flex-col gap-5">
+                    <div className="flex gap-3">
+                       <div className="flex-1 flex flex-col gap-2">
+                          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Type</span>
                           <select 
                             value={editForm.issue_type} 
                             onChange={e => setEditForm({...editForm, issue_type: e.target.value})}
-                            className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                            className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none"
                           >
                             <option value="task">Task</option>
                             <option value="feature">Feature</option>
@@ -769,12 +784,12 @@ function App() {
                             <option value="epic">Epic</option>
                           </select>
                        </div>
-                       <div className="flex-1 flex flex-col gap-1">
-                          <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Parent</span>
+                       <div className="flex-1 flex flex-col gap-2">
+                          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Parent</span>
                           <select 
                             value={editForm.parent || ""} 
                             onChange={e => setEditForm({...editForm, parent: e.target.value})}
-                            className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                            className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none"
                           >
                             <option value="">None</option>
                             {beads.filter(b => b.issue_type === 'epic' || b.issue_type === 'feature').map(b => (
@@ -784,20 +799,20 @@ function App() {
                        </div>
                     </div>
                     
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Title</span>
+                    <div className="flex flex-col gap-2">
+                      <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Title</span>
                       <input 
-                        className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-lg font-bold w-full focus:border-indigo-500 outline-none text-zinc-900 dark:text-zinc-100"
+                        className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3.5 text-base font-bold w-full focus:border-indigo-500/50 outline-none text-[var(--text-primary)] shadow-inner"
                         value={editForm.title}
                         onChange={e => setEditForm({...editForm, title: e.target.value})}
                         placeholder="Bead Title"
                       />
                     </div>
 
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs font-black text-zinc-600 uppercase tracking-wider">Description</span>
+                    <div className="flex flex-col gap-2">
+                      <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em]">Description</span>
                       <textarea 
-                        className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-sm min-h-[120px] w-full focus:border-indigo-500 outline-none resize-none text-zinc-900 dark:text-zinc-100"
+                        className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3.5 text-xs min-h-[140px] w-full focus:border-indigo-500/50 outline-none resize-none text-[var(--text-primary)] shadow-inner leading-relaxed"
                         value={editForm.description || ""}
                         onChange={e => setEditForm({...editForm, description: e.target.value})}
                         placeholder="Bead Description"
@@ -806,48 +821,48 @@ function App() {
                   </div>
                 ) : selectedBead && (
                   <>
-                    <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100 leading-tight">{selectedBead.title}</h2>
-                    <p className="text-sm text-zinc-400 leading-relaxed">{selectedBead.description || "No description provided."}</p>
+                    <h2 className="text-2xl font-bold text-[var(--text-primary)] leading-tight tracking-tight">{selectedBead.title}</h2>
+                    <p className="text-xs text-[var(--text-secondary)] leading-relaxed">{selectedBead.description || "No description provided."}</p>
                   </>
                 )}
               </section>
 
-              <div className="grid grid-cols-2 gap-6">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><User size={12} /> Owner</span>
+              <div className="grid grid-cols-2 gap-8">
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2"><User size={12} className="text-indigo-500" /> Owner</span>
                   {(isEditing || isCreating) ? (
                     <input 
-                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
                       value={editForm.owner || ""}
                       onChange={e => setEditForm({...editForm, owner: e.target.value})}
                       placeholder="Assignee"
                     />
                   ) : (
-                    <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium">{selectedBead?.owner || "Unassigned"}</span>
+                    <span className="text-xs text-[var(--text-primary)] font-bold tracking-tight">{selectedBead?.owner || "Unassigned"}</span>
                   )}
                 </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><Tag size={12} /> Priority</span>
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2"><Tag size={12} className="text-indigo-500" /> Priority</span>
                   {(isEditing || isCreating) ? (
                     <select 
                       value={editForm.priority} 
                       onChange={e => setEditForm({...editForm, priority: parseInt(e.target.value)})}
-                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none"
                     >
                       {[0,1,2,3,4].map(p => <option key={p} value={p}>P{p} - {['Critical', 'High', 'Medium', 'Low', 'Trivial'][p]}</option>)}
                     </select>
                   ) : (
-                    <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium">P{selectedBead?.priority}</span>
+                    <span className="text-xs text-[var(--text-primary)] font-bold tracking-tight">P{selectedBead?.priority}</span>
                   )}
                 </div>
               </div>
 
-              <section className="flex flex-col gap-3">
-                <h3 className="text-xs font-black text-zinc-600 uppercase tracking-[0.2em]">Labels</h3>
-                <div className="flex flex-wrap gap-2">
+              <section className="flex flex-col gap-4">
+                <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Labels</h3>
+                <div className="flex flex-wrap gap-2.5">
                   {(isEditing || isCreating) ? (
                     <input 
-                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 w-full focus:border-indigo-500 outline-none"
+                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] w-full focus:border-indigo-500/50 outline-none shadow-inner"
                       value={(editForm.labels || []).join(", ")}
                       onChange={e => setEditForm({...editForm, labels: e.target.value.split(",").map(l => l.trim()).filter(l => l)})}
                       placeholder="Add labels (comma separated)..."
@@ -857,39 +872,39 @@ function App() {
                       {selectedBead && <Chip label={selectedBead.issue_type} />}
                       {selectedBead?.labels?.map(l => (
                         <Chip key={l} label={l} />
-                      )) || (!selectedBead?.issue_type && <span className="text-sm text-zinc-700 italic">No labels</span>)}
+                      )) || (!selectedBead?.issue_type && <span className="text-xs text-[var(--text-muted)] italic">No labels</span>)}
                     </>
                   )}
                 </div>
               </section>
 
-              <section className="flex flex-col gap-3">
-                <h3 className="text-xs font-black text-zinc-600 uppercase tracking-[0.2em]">Notes & References</h3>
-                <div className="flex flex-col gap-4">
+              <section className="flex flex-col gap-4">
+                <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Notes & References</h3>
+                <div className="flex flex-col gap-6">
                   {(isEditing || isCreating) ? (
                     <>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Design Notes</span>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Design Notes</span>
                         <textarea 
-                          className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
+                          className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none min-h-[80px] resize-none shadow-inner leading-relaxed"
                           value={editForm.design_notes || ""}
                           onChange={e => setEditForm({...editForm, design_notes: e.target.value})}
                           placeholder="Architectural decisions..."
                         />
                       </div>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Working Notes</span>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Working Notes</span>
                         <textarea 
-                          className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none min-h-[60px] resize-none"
+                          className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-3 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none min-h-[80px] resize-none shadow-inner leading-relaxed"
                           value={editForm.working_notes || ""}
                           onChange={e => setEditForm({...editForm, working_notes: e.target.value})}
                           placeholder="Progress observations..."
                         />
                       </div>
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">External Reference</span>
+                      <div className="flex flex-col gap-2">
+                        <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">External Reference</span>
                         <input 
-                          className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-xs text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                          className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-[11px] text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
                           value={editForm.external_reference || ""}
                           onChange={e => setEditForm({...editForm, external_reference: e.target.value})}
                           placeholder="URLs, IDs, or paths..."
@@ -899,21 +914,21 @@ function App() {
                   ) : (
                     <>
                       {selectedBead?.design_notes && (
-                        <div className="flex flex-col gap-1">
-                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Design Notes</span>
-                           <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">{selectedBead.design_notes}</p>
+                        <div className="flex flex-col gap-2">
+                           <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Design Notes</span>
+                           <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)]/50 p-3 rounded-xl border border-[var(--border-primary)]/30">{selectedBead.design_notes}</p>
                         </div>
                       )}
                       {selectedBead?.working_notes && (
-                        <div className="flex flex-col gap-1">
-                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Working Notes</span>
-                           <p className="text-xs text-zinc-400 leading-relaxed whitespace-pre-wrap">{selectedBead.working_notes}</p>
+                        <div className="flex flex-col gap-2">
+                           <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">Working Notes</span>
+                           <p className="text-xs text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)]/50 p-3 rounded-xl border border-[var(--border-primary)]/30">{selectedBead.working_notes}</p>
                         </div>
                       )}
                       {selectedBead?.external_reference && (
-                        <div className="flex flex-col gap-1">
-                           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">External Reference</span>
-                           <span className="text-xs text-indigo-400 truncate">{selectedBead.external_reference}</span>
+                        <div className="flex flex-col gap-2">
+                           <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-[0.15em]">External Reference</span>
+                           <span className="text-xs text-indigo-500 truncate font-mono bg-indigo-500/5 p-2 rounded-lg border border-indigo-500/10">{selectedBead.external_reference}</span>
                         </div>
                       )}
                     </>
@@ -921,15 +936,15 @@ function App() {
                 </div>
               </section>
 
-              <section className="flex flex-col gap-3">
-                <h3 className="text-xs font-black text-zinc-600 uppercase tracking-[0.2em]">Acceptance Criteria</h3>
-                <div className="flex flex-col gap-2">
+              <section className="flex flex-col gap-4">
+                <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Acceptance Criteria</h3>
+                <div className="flex flex-col gap-3">
                   {(isEditing || isCreating) ? (
                     <>
                       {(editForm.acceptance_criteria || []).map((ac, i) => (
                         <div key={i} className="flex gap-2">
                           <input 
-                            className="flex-1 bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-800 rounded-lg p-2 text-sm text-zinc-300 focus:border-indigo-500 outline-none"
+                            className="flex-1 bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
                             value={ac}
                             onChange={e => {
                               const newAC = [...(editForm.acceptance_criteria || [])];
@@ -942,47 +957,47 @@ function App() {
                               const newAC = (editForm.acceptance_criteria || []).filter((_, idx) => idx !== i);
                               setEditForm({...editForm, acceptance_criteria: newAC});
                             }}
-                            className="text-zinc-600 hover:text-red-400"
+                            className="text-[var(--text-muted)] hover:text-rose-500 p-2 transition-colors"
                           >
-                            <Trash2 size={12} />
+                            <Trash2 size={16} />
                           </button>
                         </div>
                       ))}
                       <button 
                         onClick={() => setEditForm({...editForm, acceptance_criteria: [...(editForm.acceptance_criteria || []), ""]})}
-                        className="text-xs font-bold text-indigo-400 hover:text-indigo-300 self-start flex items-center gap-1"
+                        className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 self-start flex items-center gap-2 bg-indigo-500/5 px-3 py-2 rounded-lg border border-indigo-500/10 transition-all hover:bg-indigo-500/10 active:scale-95"
                       >
-                        <Plus size={10} /> Add Criterion
+                        <Plus size={12} /> ADD CRITERION
                       </button>
                     </>
                   ) : (
                     (selectedBead?.acceptance_criteria || []).map((ac, i) => (
-                      <div key={i} className="flex gap-2 items-start">
-                        <CheckCircle2 size={12} className="text-zinc-700 shrink-0 mt-0.5" />
-                        <span className="text-sm text-zinc-400">{ac}</span>
+                      <div key={i} className="flex gap-3 items-start bg-[var(--background-secondary)]/30 p-3 rounded-xl border border-[var(--border-primary)]/30">
+                        <CheckCircle2 size={14} className="text-emerald-500 shrink-0 mt-0.5" />
+                        <span className="text-xs text-[var(--text-secondary)] leading-relaxed">{ac}</span>
                       </div>
-                    )) || <span className="text-sm text-zinc-700 italic">None specified</span>
+                    )) || <span className="text-xs text-[var(--text-muted)] italic">None specified</span>
                   )}
                 </div>
               </section>
 
-              <div className="grid grid-cols-2 gap-6">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2"><Clock size={12} /> Estimate</span>
+              <div className="grid grid-cols-2 gap-8">
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2"><Clock size={12} className="text-indigo-500" /> Estimate</span>
                   {(isEditing || isCreating) ? (
                     <input 
                       type="number"
-                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300 focus:border-indigo-500 outline-none"
+                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none shadow-inner"
                       value={editForm.estimate || ""}
                       onChange={e => setEditForm({...editForm, estimate: parseInt(e.target.value) || 0})}
                       placeholder="Minutes"
                     />
                   ) : (
-                    <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium">{selectedBead?.estimate || 0}m</span>
+                    <span className="text-xs text-[var(--text-primary)] font-bold tracking-tight">{selectedBead?.estimate || 0}m</span>
                   )}
                 </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-black text-zinc-600 uppercase tracking-wider flex items-center gap-2">Status</span>
+                <div className="flex flex-col gap-2">
+                  <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.2em] flex items-center gap-2">Status</span>
                   {(isEditing || isCreating) ? (
                      <select 
                       value={editForm.status} 
@@ -1003,24 +1018,24 @@ function App() {
                         }
                         setEditForm({...editForm, status: newStatus, ...extra});
                       }}
-                      className="bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-200 dark:border-zinc-800 rounded-lg p-2 text-sm text-zinc-900 dark:text-zinc-300"
+                      className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-xl p-2.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 outline-none uppercase tracking-widest font-bold"
                     >
                       <option value="open">Open</option>
                       <option value="in_progress">In Progress</option>
                       <option value="closed">Closed</option>
                     </select>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <StatusIcon status={selectedBead?.status || ""} size={12} />
-                      <span className="text-sm text-zinc-900 dark:text-zinc-300 font-medium capitalize">{selectedBead?.status.replace('_', ' ')}</span>
+                    <div className="flex items-center gap-2 bg-[var(--background-tertiary)] px-2.5 py-1.5 rounded-lg border border-[var(--border-primary)]/50 self-start">
+                      <StatusIcon status={selectedBead?.status || ""} size={14} />
+                      <span className="text-[10px] text-[var(--text-primary)] font-black uppercase tracking-widest">{selectedBead?.status.replace('_', ' ')}</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <section className="flex flex-col gap-3">
+              <section className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-black text-zinc-600 uppercase tracking-[0.2em]">Dependencies</h3>
+                  <h3 className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-[0.25em]">Dependencies</h3>
                   {(isEditing || isCreating) && (
                     <button 
                       onClick={() => {
@@ -1030,24 +1045,24 @@ function App() {
                           setEditForm({...editForm, dependencies: newDeps as any});
                         }
                       }}
-                      className="text-xs font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+                      className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 flex items-center gap-2 bg-indigo-500/5 px-3 py-2 rounded-lg border border-indigo-500/10 transition-all hover:bg-indigo-500/10 active:scale-95"
                     >
-                      <Plus size={10} /> Add
+                      <Plus size={12} /> ADD
                     </button>
                   )}
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
                   {(isCreating ? editForm.dependencies : selectedBead?.dependencies)?.map((d, i) => (
-                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-[var(--background-primary)] dark:bg-[var(--background-secondary)] border border-zinc-800 group hover:border-zinc-700 transition-all">
-                      <div className="flex flex-col gap-0.5">
+                    <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-primary)] group hover:border-indigo-500/30 transition-all">
+                      <div className="flex flex-col gap-1.5">
                         <div className="flex items-center gap-3">
-                           <span className="text-xs font-mono text-zinc-500">{d.depends_on_id}</span>
-                           <span className="text-xs uppercase font-black text-zinc-600 tracking-tighter">{d.type}</span>
+                           <span className="text-[10px] font-mono text-indigo-500 font-bold bg-indigo-500/5 px-2 py-0.5 rounded border border-indigo-500/10">{d.depends_on_id}</span>
+                           <span className="text-[9px] uppercase font-black text-[var(--text-muted)] tracking-widest">{d.type}</span>
                         </div>
                         {d.metadata && Object.keys(d.metadata).length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
+                          <div className="flex flex-wrap gap-1.5 mt-1">
                             {Object.entries(d.metadata).map(([k, v]) => (
-                              <span key={k} className="text-[8px] bg-zinc-100 dark:bg-zinc-900 px-1 rounded text-zinc-500 border border-zinc-800">
+                              <span key={k} className="text-[8px] bg-[var(--background-tertiary)] px-2 py-0.5 rounded text-[var(--text-muted)] border border-[var(--border-primary)]/50 font-mono">
                                 {k}: {String(v)}
                               </span>
                             ))}
@@ -1061,25 +1076,25 @@ function App() {
                             const newDeps = currentDeps.filter((_, index) => index !== i);
                             setEditForm({...editForm, dependencies: newDeps});
                           }}
-                          className="text-zinc-600 hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-all"
+                          className="text-[var(--text-muted)] hover:text-rose-500 p-2 opacity-0 group-hover:opacity-100 transition-all"
                         >
-                          <Trash2 size={12} />
+                          <Trash2 size={16} />
                         </button>
                       )}
                     </div>
-                  )) || <div className="text-sm text-zinc-700 italic">None</div>}
+                  )) || <div className="text-xs text-[var(--text-muted)] italic">None</div>}
                 </div>
               </section>
             </div>
             
-            <div className="p-6 border-t border-zinc-200 dark:border-zinc-800 bg-[var(--background-secondary)] dark:bg-zinc-900/50 flex gap-3">
+            <div className="p-6 border-t border-[var(--border-primary)] bg-[var(--background-secondary)]/50 flex gap-4 backdrop-blur-md">
               {(isEditing || isCreating) ? (
                 <>
-                  <button onClick={() => { setIsEditing(false); setIsCreating(false); }} className="flex-1 py-2.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 text-sm font-bold transition-all">Cancel</button>
-                  <button onClick={isCreating ? handleSaveCreate : handleSaveEdit} className="flex-1 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold transition-all shadow-lg shadow-emerald-500/10 flex items-center justify-center gap-2"><Save size={14} /> {isCreating ? "Create Bead" : "Save Changes"}</button>
+                  <button onClick={() => { setIsEditing(false); setIsCreating(false); }} className="flex-1 py-3 rounded-xl bg-[var(--background-tertiary)] hover:bg-[var(--border-primary)] text-[var(--text-secondary)] text-xs font-bold transition-all border border-[var(--border-primary)] active:scale-95">Cancel</button>
+                  <button onClick={isCreating ? handleSaveCreate : handleSaveEdit} className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 active:scale-95 border border-emerald-500/20"><Save size={16} /> {isCreating ? "Create Bead" : "Save Changes"}</button>
                 </>
               ) : (
-                <button onClick={handleStartEdit} className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold transition-all shadow-lg shadow-indigo-500/10 flex items-center justify-center gap-2"><Edit3 size={14} /> Edit Bead</button>
+                <button onClick={handleStartEdit} className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-2 active:scale-95 border border-indigo-500/20"><Edit3 size={16} /> Edit Bead</button>
               )}
             </div>
           </div>

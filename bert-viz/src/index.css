@@ -1,29 +1,39 @@
 @import "tailwindcss";
 
 :root {
-  --background-primary: #ffffff;
-  --background-secondary: #f4f4f5;
-  --text-primary: #09090b;
-  --text-secondary: #71717a;
-  --border-primary: #e4e4e7;
+  --background-primary: #f8f9fa;
+  --background-secondary: #f1f3f5;
+  --background-tertiary: #e9ecef;
+  --text-primary: #212529;
+  --text-secondary: #495057;
+  --text-muted: #868e96;
+  --border-primary: #dee2e6;
+  --accent-primary: #4c6ef5;
+  --accent-secondary: #748ffc;
   color-scheme: light;
 }
 
 .dark {
-  --background-primary: #09090b;
-  --background-secondary: #18181b;
-  --text-primary: #fafafa;
-  --text-secondary: #a1a1aa;
-  --border-primary: #27272a;
+  --background-primary: #0b0e14;
+  --background-secondary: #141820;
+  --background-tertiary: #1c212c;
+  --text-primary: #e9ecef;
+  --text-secondary: #adb5bd;
+  --text-muted: #868e96;
+  --border-primary: #2c3440;
+  --accent-primary: #5c7cfa;
+  --accent-secondary: #748ffc;
   color-scheme: dark;
 }
 
 @theme {
   --color-border-primary: var(--border-primary);
+  --color-bg-zen: var(--background-primary);
+  --color-bg-zen-deep: var(--background-secondary);
 }
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -47,4 +57,18 @@ body {
 #root {
   width: 100vw;
   height: 100vh;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-primary);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
 }
