@@ -15,6 +15,12 @@
   --level-2: rgba(0, 0, 0, 0.04);
   --level-3: rgba(0, 0, 0, 0.06);
   --level-4: rgba(0, 0, 0, 0.08);
+
+  --status-open: #10b981;
+  --status-active: #f59e0b;
+  --status-blocked: #f43f5e;
+  --status-done: #71717a;
+
   color-scheme: light;
 }
 
@@ -33,6 +39,12 @@
   --level-2: rgba(255, 255, 255, 0.03);
   --level-3: rgba(255, 255, 255, 0.045);
   --level-4: rgba(255, 255, 255, 0.06);
+
+  --status-open: #34d399;
+  --status-active: #fbbf24;
+  --status-blocked: #fb7185;
+  --status-done: #52525b;
+
   color-scheme: dark;
 }
 

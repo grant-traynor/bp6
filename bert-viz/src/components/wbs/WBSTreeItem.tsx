@@ -59,7 +59,7 @@ export const WBSTreeItem = ({
         <div 
           className="flex-1 px-4 flex items-center gap-3 truncate h-full"
         >
-          <StatusIcon status={node.status} size={14} />
+          <StatusIcon status={node.status} isBlocked={node.isBlocked} size={14} />
           <span className={cn(
             "text-[12px] truncate font-black tracking-tight",
             node.status === 'closed' ? "text-[var(--text-muted)] line-through font-bold" : "text-[var(--text-primary)] group-hover:text-indigo-700 dark:group-hover:text-indigo-300"

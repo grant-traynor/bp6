@@ -488,20 +488,20 @@ function App() {
                      <span className="text-base font-black text-[var(--text-primary)]">{stats.total}</span>
                   </div>
                   <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
-                     <span className="text-[9px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-[0.25em] mb-1">Open</span>
-                     <span className="text-base font-black text-emerald-700 dark:text-emerald-400">{stats.open}</span>
+                     <span className="text-[9px] font-black text-[var(--status-open)] uppercase tracking-[0.25em] mb-1">Open</span>
+                     <span className="text-base font-black text-[var(--status-open)]">{stats.open}</span>
                   </div>
                   <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
-                     <span className="text-[9px] font-black text-amber-600 dark:text-amber-400 uppercase tracking-[0.25em] mb-1">Active</span>
-                     <span className="text-base font-black text-amber-700 dark:text-amber-400">{stats.inProgress}</span>
+                     <span className="text-[9px] font-black text-[var(--status-active)] uppercase tracking-[0.25em] mb-1">Active</span>
+                     <span className="text-base font-black text-[var(--status-active)]">{stats.inProgress}</span>
                   </div>
                   <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
-                     <span className="text-[9px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-[0.25em] mb-1">Blocked</span>
-                     <span className="text-base font-black text-rose-700 dark:text-rose-400">{stats.blocked}</span>
+                     <span className="text-[9px] font-black text-[var(--status-blocked)] uppercase tracking-[0.25em] mb-1">Blocked</span>
+                     <span className="text-base font-black text-[var(--status-blocked)]">{stats.blocked}</span>
                   </div>
                   <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6">
-                     <span className="text-[9px] font-black text-[var(--text-primary)] uppercase tracking-[0.25em] mb-1">Done</span>
-                     <span className="text-base font-black text-[var(--text-secondary)]">{stats.closed}</span>
+                     <span className="text-[9px] font-black text-[var(--status-done)] uppercase tracking-[0.25em] mb-1">Done</span>
+                     <span className="text-base font-black text-[var(--status-done)]">{stats.closed}</span>
                   </div>
                </div>
 

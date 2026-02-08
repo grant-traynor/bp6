@@ -34,6 +34,7 @@ export interface WBSNode extends Bead {
   parent?: string;
   isExpanded?: boolean;
   isCritical?: boolean;
+  isBlocked?: boolean;
 }
 
 export interface Project {
@@ -99,8 +100,21 @@ export function buildWBSTree(beads: Bead[]): WBSNode[] {
   const nodeMap = new Map<string, WBSNode>();
   const roots: WBSNode[] = [];
 
+  const checkBlocked = (bead: Bead, allBeads: Bead[]): boolean => {
+    const deps = (bead.dependencies || []).filter(d => d.type === "blocks");
+    return deps.some(d => {
+      const pred = allBeads.find(b => b.id === d.depends_on_id);
+      return pred && pred.status !== 'closed';
+    });
+  };
+
   beads.forEach(bead => {
-    nodeMap.set(bead.id, { ...bead, children: [], isExpanded: true });
+    nodeMap.set(bead.id, { 
+      ...bead, 
+      children: [], 
+      isExpanded: true,
+      isBlocked: checkBlocked(bead, beads)
+    });
   });
 
   beads.forEach(bead => {

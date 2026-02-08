@@ -13,13 +13,15 @@ export const GanttBar = ({ item, onClick }: GanttBarProps) => {
   const isMilestone = bead.estimate === 0 && !isSummary;
 
   const getStatusColor = () => {
-    if (isSummary) return bead.status === 'closed' ? "bg-zinc-400 dark:bg-zinc-600 border-zinc-500" : "bg-zinc-600 dark:bg-zinc-400 border-zinc-700 dark:border-zinc-300";
-    if (isMilestone) return "bg-indigo-700 dark:bg-indigo-400 border-indigo-800 rotate-45";
-    if (bead.status === 'closed') return "bg-zinc-200 dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-400 dark:text-zinc-600";
-    if (isCritical) return "bg-rose-600 dark:bg-rose-500 border-rose-700 shadow-[0_0_12px_rgba(225,29,72,0.4)]";
-    if (isBlocked) return "bg-amber-600 dark:bg-amber-500 border-amber-700";
-    if (bead.status === 'in_progress') return "bg-emerald-600 dark:bg-emerald-500 border-emerald-700 shadow-[0_0_12px_rgba(16,185,129,0.3)]";
-    return "bg-indigo-600 dark:bg-indigo-500 border-indigo-700";
+    if (bead.status === 'closed') return "bg-[var(--status-done)] border-[var(--status-done)] opacity-40";
+    if (isBlocked) return "bg-[var(--status-blocked)] border-[var(--status-blocked)]";
+    if (bead.status === 'in_progress') return "bg-[var(--status-active)] border-[var(--status-active)] shadow-[0_0_12px_rgba(245,158,11,0.3)]";
+    return "bg-[var(--status-open)] border-[var(--status-open)]";
+  };
+
+  const getSummaryColor = () => {
+     if (bead.status === 'closed') return "bg-[var(--status-done)] border-[var(--status-done)] opacity-60";
+     return "bg-[var(--text-muted)] border-[var(--text-primary)]";
   };
 
   return (
@@ -32,18 +34,17 @@ export const GanttBar = ({ item, onClick }: GanttBarProps) => {
         {isSummary ? (
           <div className={cn(
             "w-full h-2 relative rounded-sm border-b-2",
-            getStatusColor()
+            getSummaryColor()
           )}>
-             <div className={cn("absolute left-0 -bottom-1 top-0 w-1.5 rounded-sm", getStatusColor())} />
-             <div className={cn("absolute right-0 -bottom-1 top-0 w-1.5 rounded-sm", getStatusColor())} />
+             <div className={cn("absolute left-0 -bottom-1 top-0 w-1.5 rounded-sm", getSummaryColor())} />
+             <div className={cn("absolute right-0 -bottom-1 top-0 w-1.5 rounded-sm", getSummaryColor())} />
           </div>
         ) : isMilestone ? (
           <div className={cn("w-3.5 h-3.5 border-2 shadow-md transition-all group-hover:scale-125", getStatusColor())} />
         ) : (
           <div className={cn(
             "h-6 rounded-md border-2 shadow-md transition-all w-full group-hover:shadow-lg group-hover:border-indigo-500",
-            getStatusColor(),
-            bead.status === 'closed' ? "opacity-60" : "opacity-100"
+            getStatusColor()
           )} />
         )}
 
