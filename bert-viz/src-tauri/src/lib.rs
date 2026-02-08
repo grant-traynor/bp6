@@ -103,7 +103,7 @@ fn get_beads() -> Result<Vec<Bead>, String> {
 }
 
 #[tauri::command]
-fn update_bead(updated_bead: Bead, app_handle: tauri::AppHandle) -> Result<(), String> {
+fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl".to_string())?;
     
     let file = File::open(&path).map_err(|e| e.to_string())?;
@@ -137,7 +137,7 @@ fn update_bead(updated_bead: Bead, app_handle: tauri::AppHandle) -> Result<(), S
 }
 
 #[tauri::command]
-fn create_bead(new_bead: Bead, app_handle: tauri::AppHandle) -> Result<(), String> {
+fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl".to_string())?;
     
     let mut file = OpenOptions::new()
@@ -197,7 +197,7 @@ fn save_projects(projects: Vec<Project>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn add_project(project: Project, app_handle: tauri::AppHandle) -> Result<(), String> {
+fn add_project(project: Project, app_handle: AppHandle) -> Result<(), String> {
     let mut projects = get_projects()?;
     if let Some(existing) = projects.iter_mut().find(|p| p.path == project.path) {
         existing.name = project.name;
@@ -210,7 +210,7 @@ fn add_project(project: Project, app_handle: tauri::AppHandle) -> Result<(), Str
 }
 
 #[tauri::command]
-fn remove_project(path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+fn remove_project(path: String, app_handle: AppHandle) -> Result<(), String> {
     let projects = get_projects()?;
     let filtered: Vec<Project> = projects.into_iter().filter(|p| p.path != path).collect();
     save_projects(filtered)?;
@@ -219,7 +219,7 @@ fn remove_project(path: String, app_handle: tauri::AppHandle) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn open_project(path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
     std::env::set_current_dir(&path).map_err(|e| format!("Failed to change directory to {}: {}", path, e))?;
     
     // Update last_opened
@@ -243,7 +243,7 @@ fn open_project(path: String, app_handle: tauri::AppHandle) -> Result<(), String
 }
 
 #[tauri::command]
-fn toggle_favorite(path: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+fn toggle_favorite(path: String, app_handle: AppHandle) -> Result<(), String> {
     let mut projects = get_projects()?;
     if let Some(project) = projects.iter_mut().find(|p| p.path == path) {
         project.is_favorite = !project.is_favorite;
