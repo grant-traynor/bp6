@@ -1,7 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "../../utils";
 import type { Bead, WBSNode } from "../../api";
-import { StatusIcon } from "../shared/StatusIcon";
 import { getChipStyles } from "../shared/Chip";
 
 interface WBSTreeItemProps {
@@ -59,7 +58,14 @@ export const WBSTreeItem = ({
         <div 
           className="flex-1 px-4 flex items-center gap-3 truncate h-full"
         >
-          <StatusIcon status={node.status} isBlocked={node.isBlocked} size={14} />
+          <span className={cn(
+            "shrink-0 font-mono text-[9px] font-black px-1.5 py-0.5 rounded border shadow-sm",
+            node.priority <= 1 ? "bg-rose-500/20 text-rose-900 dark:text-rose-100 border-rose-500/40" :
+            node.priority === 2 ? "bg-amber-500/20 text-amber-900 dark:text-amber-100 border-amber-500/40" :
+            "bg-[var(--background-tertiary)] text-[var(--text-muted)] border-[var(--border-primary)]"
+          )}>
+            P{node.priority}
+          </span>
           <span className={cn(
             "text-[12px] truncate font-black tracking-tight",
             node.status === 'closed' ? "text-[var(--text-muted)] italic font-bold" : "text-[var(--text-primary)] group-hover:text-indigo-700 dark:group-hover:text-indigo-300"
