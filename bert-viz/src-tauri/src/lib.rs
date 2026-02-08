@@ -493,15 +493,22 @@ pub fn run() {
                 let parent_path = path.parent().unwrap().to_path_buf();
                 let last_emit = Arc::new(Mutex::new(Instant::now()));
 
+                let watch_target = path.clone();
                 let mut watcher = notify::RecommendedWatcher::new(move |res| {
                     match res {
-                        Ok(_) => {
-                            // Debounce: only emit if at least 200ms have passed since last emit
-                            let mut last = last_emit.lock().unwrap();
-                            let now = Instant::now();
-                            if now.duration_since(*last) >= Duration::from_millis(200) {
-                                *last = now;
-                                let _ = handle.emit("beads-updated", ());
+                        Ok(event) => {
+                            let affects_target = event.paths.iter().any(|p| 
+                                p.file_name() == watch_target.file_name()
+                            );
+
+                            if affects_target {
+                                // Debounce: only emit if at least 200ms have passed since last emit
+                                let mut last = last_emit.lock().unwrap();
+                                let now = Instant::now();
+                                if now.duration_since(*last) >= Duration::from_millis(200) {
+                                    *last = now;
+                                    let _ = handle.emit("beads-updated", ());
+                                }
                             }
                         },
                         Err(e) => eprintln!("Beads file watch error: {:?}", e),
