@@ -1003,6 +1003,207 @@ fn calculate_state_distribution(
     buckets
 }
 
+// ============================================================================
+// WBS Tree Building - Build Tree Structure (bp6-07y.2.3)
+// ============================================================================
+
+/// Build hierarchical WBS tree from flat bead list using parent-child dependencies.
+/// Groups beads into root nodes and nested children.
+fn build_wbs_tree(beads: &[Bead]) -> Vec<WBSNode> {
+    let mut node_map: HashMap<String, WBSNode> = HashMap::new();
+    let mut roots: Vec<WBSNode> = Vec::new();
+
+    // Helper to check if a bead is blocked
+    let check_blocked = |bead: &Bead, all_beads: &[Bead]| -> bool {
+        let deps: Vec<&Dependency> = bead
+            .dependencies
+            .iter()
+            .filter(|d| d.r#type == "blocks")
+            .collect();
+
+        deps.iter().any(|d| {
+            all_beads
+                .iter()
+                .find(|b| b.id == d.depends_on_id)
+                .map(|pred| pred.status != "closed")
+                .unwrap_or(false)
+        })
+    };
+
+    // Create WBSNode for each bead
+    for bead in beads {
+        node_map.insert(
+            bead.id.clone(),
+            WBSNode {
+                bead: bead.clone(),
+                children: Vec::new(),
+                is_expanded: true,
+                is_blocked: check_blocked(bead, beads),
+                is_critical: false, // Will be set later during critical path calculation
+            },
+        );
+    }
+
+    // Build tree structure by collecting parent-child relationships first
+    let mut child_to_parent: HashMap<String, String> = HashMap::new();
+
+    for bead in beads {
+        let parent_dep = bead
+            .dependencies
+            .iter()
+            .find(|d| d.r#type == "parent-child");
+
+        if let Some(dep) = parent_dep {
+            child_to_parent.insert(bead.id.clone(), dep.depends_on_id.clone());
+        }
+    }
+
+    // Now assign children to parents and collect roots
+    for bead in beads {
+        if let Some(parent_id) = child_to_parent.get(&bead.id) {
+            // This bead has a parent
+            if node_map.contains_key(parent_id) && node_map.contains_key(&bead.id) {
+                // Both parent and child exist - we'll handle this in a second pass
+                // For now, just note that this is not a root
+            } else {
+                // Parent doesn't exist (orphaned node), add to roots
+                if let Some(node) = node_map.get(&bead.id) {
+                    roots.push(node.clone());
+                }
+            }
+        } else {
+            // No parent dependency, this is a root node
+            if let Some(node) = node_map.get(&bead.id) {
+                roots.push(node.clone());
+            }
+        }
+    }
+
+    // Second pass: build the children relationships
+    for (child_id, parent_id) in child_to_parent.iter() {
+        if let Some(child_node) = node_map.get(child_id).cloned() {
+            if let Some(parent_node) = node_map.get_mut(parent_id) {
+                parent_node.children.push(child_node);
+            }
+        }
+    }
+
+    roots
+}
+
+// ============================================================================
+// Gantt Layout Calculation - Earliest Start Times (bp6-07y.3.1)
+// ============================================================================
+
+/// Calculate earliest start time (X position) for each bead based on blocking dependencies.
+/// Uses memoization to avoid recomputation.
+fn calculate_earliest_start_times(
+    beads: &[Bead],
+    blocks_map: &HashMap<String, Vec<String>>,
+) -> HashMap<String, usize> {
+    let mut x_map: HashMap<String, usize> = HashMap::new();
+
+    fn get_x(
+        id: &str,
+        blocks_map: &HashMap<String, Vec<String>>,
+        x_map: &mut HashMap<String, usize>,
+        visited: &mut HashSet<String>,
+    ) -> usize {
+        // Return memoized result if available
+        if let Some(&x) = x_map.get(id) {
+            return x;
+        }
+
+        // Detect circular dependencies
+        if visited.contains(id) {
+            return 0;
+        }
+
+        visited.insert(id.to_string());
+
+        // Get predecessors (beads that block this one)
+        let preds = blocks_map.get(id).cloned().unwrap_or_default();
+
+        if preds.is_empty() {
+            // No blockers, start at x=0
+            x_map.insert(id.to_string(), 0);
+            return 0;
+        }
+
+        // Calculate x as max(predecessor x values) + 1
+        let max_pred_x = preds
+            .iter()
+            .map(|p| get_x(p, blocks_map, x_map, &mut visited.clone()))
+            .max()
+            .unwrap_or(0);
+
+        let x = max_pred_x + 1;
+        x_map.insert(id.to_string(), x);
+        x
+    }
+
+    // Calculate x position for all beads
+    for bead in beads {
+        let mut visited = HashSet::new();
+        get_x(&bead.id, blocks_map, &mut x_map, &mut visited);
+    }
+
+    x_map
+}
+
+// ============================================================================
+// Filter Parameters (bp6-07y.5.1)
+// ============================================================================
+
+/// FilterParams contains all filter and display parameters passed from frontend.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FilterParams {
+    #[serde(default)]
+    pub filter_text: String,
+
+    #[serde(default)]
+    pub hide_closed: bool,
+
+    #[serde(default)]
+    pub closed_time_filter: ClosedTimeFilter,
+
+    #[serde(default = "default_true")]
+    pub include_hierarchy: bool,
+
+    #[serde(default = "default_zoom")]
+    pub zoom: f64,
+
+    #[serde(default)]
+    pub collapsed_ids: Vec<String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_zoom() -> f64 {
+    1.0
+}
+
+impl Default for FilterParams {
+    fn default() -> Self {
+        FilterParams {
+            filter_text: String::new(),
+            hide_closed: false,
+            closed_time_filter: ClosedTimeFilter::All,
+            include_hierarchy: true,
+            zoom: 1.0,
+            collapsed_ids: Vec::new(),
+        }
+    }
+}
+
+impl Default for ClosedTimeFilter {
+    fn default() -> Self {
+        ClosedTimeFilter::All
+    }
+}
+
 fn get_projects_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
