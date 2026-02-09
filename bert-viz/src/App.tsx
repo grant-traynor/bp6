@@ -13,6 +13,16 @@ import { GanttBar } from "./components/gantt/GanttBar";
 import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
 import { WBSSkeleton, GanttSkeleton } from "./components/shared/Skeleton";
 
+// Time-based filter options for closed tasks
+type ClosedTimeFilter =
+  | 'all'           // Show all closed tasks
+  | '1h'            // Closed within last hour
+  | '6h'            // Closed within last 6 hours
+  | '24h'           // Closed within last 24 hours
+  | '7d'            // Closed within last 7 days
+  | '30d'           // Closed within last 30 days
+  | 'older_than_6h'; // Closed more than 6 hours ago
+
 function App() {
   const [beads, setBeads] = useState<Bead[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -28,6 +38,10 @@ function App() {
   const [editForm, setEditForm] = useState<Partial<Bead>>({});
   const [filterText, setFilterText] = useState("");
   const [hideClosed, setHideClosed] = useState(false);
+  const [closedTimeFilter, setClosedTimeFilter] = useState<ClosedTimeFilter>(() => {
+    const saved = localStorage.getItem("closedTimeFilter");
+    return (saved as ClosedTimeFilter) || 'all';
+  });
   const [includeHierarchy, setIncludeHierarchy] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [isDark, setIsDark] = useState(true);
@@ -189,6 +203,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
   }, [collapsedIds]);
+
+  useEffect(() => {
+    localStorage.setItem("closedTimeFilter", closedTimeFilter);
+  }, [closedTimeFilter]);
 
   useEffect(() => {
     if (isDark) document.documentElement.classList.add('dark');
