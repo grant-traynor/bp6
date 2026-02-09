@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { User, Tag, Clock, Star, Trash2, Plus, CheckCircle2, ArrowRight } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { Bead } from "../../api";
 import { Chip } from "../shared/Chip";
 
@@ -121,7 +123,11 @@ export const Sidebar = ({
           ) : selectedBead && (
             <>
               <h2 className="text-2xl font-black text-[var(--text-primary)] leading-tight tracking-tight drop-shadow-sm">{selectedBead.title}</h2>
-              <p className="text-base font-bold text-[var(--text-secondary)] leading-relaxed">{selectedBead.description || "No description provided."}</p>
+              <div className="text-base font-bold text-[var(--text-secondary)] leading-relaxed prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-1 prose-headings:font-black prose-headings:text-[var(--text-primary)] prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-code:text-indigo-700 dark:prose-code:text-indigo-300 prose-code:bg-indigo-500/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {selectedBead.description || "No description provided."}
+                </ReactMarkdown>
+              </div>
             </>
           )}
         </section>
@@ -274,13 +280,21 @@ export const Sidebar = ({
                 {selectedBead?.design_notes && (
                   <div className="flex flex-col gap-3">
                      <span className="text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Design Notes</span>
-                     <p className="text-base font-bold text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)] p-4 rounded-2xl border-2 border-[var(--border-primary)] shadow-sm">{selectedBead.design_notes}</p>
+                     <div className="text-base font-bold text-[var(--text-secondary)] leading-relaxed bg-[var(--background-secondary)] p-4 rounded-2xl border-2 border-[var(--border-primary)] shadow-sm prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-1 prose-headings:font-black prose-headings:text-[var(--text-primary)] prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-code:text-indigo-700 dark:prose-code:text-indigo-300 prose-code:bg-indigo-500/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded">
+                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                         {selectedBead.design_notes}
+                       </ReactMarkdown>
+                     </div>
                   </div>
                 )}
                 {selectedBead?.working_notes && (
                   <div className="flex flex-col gap-3">
                      <span className="text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Working Notes</span>
-                     <p className="text-base font-bold text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap bg-[var(--background-secondary)] p-4 rounded-2xl border-2 border-[var(--border-primary)] shadow-sm">{selectedBead.working_notes}</p>
+                     <div className="text-base font-bold text-[var(--text-secondary)] leading-relaxed bg-[var(--background-secondary)] p-4 rounded-2xl border-2 border-[var(--border-primary)] shadow-sm prose prose-sm dark:prose-invert max-w-none prose-p:my-2 prose-ul:my-2 prose-li:my-1 prose-headings:font-black prose-headings:text-[var(--text-primary)] prose-a:text-indigo-600 dark:prose-a:text-indigo-400 prose-code:text-indigo-700 dark:prose-code:text-indigo-300 prose-code:bg-indigo-500/10 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded">
+                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                         {selectedBead.working_notes}
+                       </ReactMarkdown>
+                     </div>
                   </div>
                 )}
                 {selectedBead?.external_reference && (
