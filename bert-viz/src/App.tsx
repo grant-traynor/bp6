@@ -245,11 +245,21 @@ function App() {
   }, [beads]);
 
   const handleToggleFavoriteProject = async (path: string) => {
-    try { await toggleFavoriteProject(path); } catch (error) { alert(`Failed to toggle favorite: ${error}`); }
+    try {
+      await toggleFavoriteProject(path);
+      await loadProjects(); // Explicitly refresh projects list
+    } catch (error) {
+      alert(`Failed to toggle favorite: ${error}`);
+    }
   };
 
   const handleRemoveProject = async (path: string) => {
-    try { await removeProject(path); } catch (error) { alert(`Failed to remove project: ${error}`); }
+    try {
+      await removeProject(path);
+      await loadProjects(); // Explicitly refresh projects list
+    } catch (error) {
+      alert(`Failed to remove project: ${error}`);
+    }
   };
 
   const handleBeadClick = (bead: Bead) => {
