@@ -119,7 +119,7 @@ function App() {
               closed_time_filter: closedTimeFilter,
               include_hierarchy: includeHierarchy,
               zoom: zoom,
-              collapsed_ids: Array.from(collapsedIds)
+              collapsed_ids: [] // Don't send to backend, apply on frontend
             }).then(data => {
               const endTime = performance.now();
               console.log(`⏱️  Frontend: IPC call took ${(endTime - startTime).toFixed(2)}ms`);
@@ -140,7 +140,7 @@ function App() {
     }, 150); // 150ms debounce for filter text changes
 
     return () => clearTimeout(debounceTimeout);
-  }, [filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter, currentProjectPath, refetchTrigger]);
+  }, [filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, currentProjectPath, refetchTrigger]);
 
   useEffect(() => {
     // Prevent double initialization (React 19 Strict Mode runs effects twice)
@@ -222,14 +222,14 @@ function App() {
     const findParents = (nodes: WBSNode[]) => {
       nodes.forEach(node => {
         if (node.children.length > 0) {
-          allParentIds.add(node.id);
+          allParentIds.add(node.bead.id);
           findParents(node.children);
         }
       });
     };
-    findParents(processedData.tree);
+    findParents(treeWithCollapsedState);
     setCollapsedIds(allParentIds);
-  }, [processedData.tree]);
+  }, [treeWithCollapsedState]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -483,6 +483,18 @@ function App() {
     } catch (error) { alert(`Failed to select project: ${error}`); }
   };
 
+  // Apply collapsed state to tree on the frontend
+  const treeWithCollapsedState = useMemo(() => {
+    const applyCollapsedState = (nodes: WBSNode[]): WBSNode[] => {
+      return nodes.map(node => ({
+        ...node,
+        isExpanded: !collapsedIds.has(node.bead.id),
+        children: applyCollapsedState(node.children)
+      }));
+    };
+    return applyCollapsedState(processedData.tree);
+  }, [processedData.tree, collapsedIds]);
+
   const favoriteBeads = useMemo(() => beads.filter(b => b.is_favorite), [beads]);
   const favoriteProjects = useMemo(() => projects.filter(p => p.is_favorite), [projects]);
   const recentProjects = useMemo(() => projects.filter(p => !p.is_favorite).sort((a, b) => (b.last_opened || "").localeCompare(a.last_opened || "")), [projects]);
@@ -621,7 +633,7 @@ function App() {
               <div className="p-0">
                 {(loading || processingData) ? <WBSSkeleton /> : (
                   <div className="flex flex-col">
-                    <WBSTreeList nodes={processedData.tree} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
+                    <WBSTreeList nodes={treeWithCollapsedState} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
                   </div>
                 )}
               </div>
