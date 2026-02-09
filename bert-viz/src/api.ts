@@ -121,6 +121,15 @@ export async function reopenBead(beadId: string): Promise<void> {
   }
 }
 
+export async function claimBead(beadId: string): Promise<void> {
+  try {
+    await invoke("claim_bead", { beadId });
+  } catch (error) {
+    console.error("Failed to claim bead:", error);
+    throw error;
+  }
+}
+
 export function buildWBSTree(beads: Bead[]): WBSNode[] {
   const nodeMap = new Map<string, WBSNode>();
   const roots: WBSNode[] = [];

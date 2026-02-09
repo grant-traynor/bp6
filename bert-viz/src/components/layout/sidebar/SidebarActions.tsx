@@ -1,13 +1,14 @@
-import { Save, Edit3, CheckCircle, RotateCcw } from "lucide-react";
+import { Save, Edit3, CheckCircle, RotateCcw, User } from "lucide-react";
 import { cn } from "../../../utils";
 
 interface SidebarActionsProps {
   isEditing: boolean;
   isCreating: boolean;
-  isClosed: boolean;
+  beadStatus?: string;
   onEdit: () => void;
   onCancel: () => void;
   onSave: () => void;
+  onClaim?: () => void;
   onClose?: () => void;
   onReopen?: () => void;
   isValid?: boolean;
@@ -16,10 +17,11 @@ interface SidebarActionsProps {
 export const SidebarActions = ({
   isEditing,
   isCreating,
-  isClosed,
+  beadStatus,
   onEdit,
   onCancel,
   onSave,
+  onClaim,
   onClose,
   onReopen,
   isValid = true
@@ -60,6 +62,16 @@ export const SidebarActions = ({
         <Edit3 size={18} strokeWidth={3} />
         Edit Bead
       </button>
+      {onClaim && (
+        <button
+          onClick={onClaim}
+          className="px-6 py-4 border-2 border-[var(--border-primary)] text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10 rounded-2xl transition-all active:scale-95 border-indigo-500/20 font-black text-xs uppercase tracking-[0.2em] flex items-center gap-2"
+          title="Claim bead (mark as in progress)"
+        >
+          <User size={20} strokeWidth={2.5} />
+          Claim
+        </button>
+      )}
       {onClose && (
         <button
           onClick={onClose}
