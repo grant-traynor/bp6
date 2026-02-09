@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { fetchBeads, fetchProcessedData, updateBead, createBead, closeBead, reopenBead, claimBead, type WBSNode, type Bead, type Project, type ProcessedData, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
@@ -539,7 +538,7 @@ function App() {
           <div className="flex-1 flex overflow-hidden">
             <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="w-1/3 border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[420px] overflow-y-auto custom-scrollbar">
               <div className="p-0">
-                {loading ? <WBSSkeleton /> : (
+                {(loading || processingData) ? <WBSSkeleton /> : (
                   <div className="flex flex-col">
                     <WBSTreeList nodes={processedData.tree} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
                   </div>

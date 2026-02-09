@@ -919,7 +919,7 @@ fn topological_sort(
 /// ClosedTimeFilter enum for filtering closed beads by time.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
-enum ClosedTimeFilter {
+pub enum ClosedTimeFilter {
     All,
     #[serde(rename = "1h")]
     OneHour,
