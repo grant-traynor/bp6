@@ -1182,6 +1182,7 @@ fn build_wbs_tree(beads: &[Bead]) -> Vec<WBSNode> {
 
     // Build tree structure by collecting parent-child relationships first
     let mut child_to_parent: HashMap<String, String> = HashMap::new();
+    let mut root_ids: HashSet<String> = HashSet::new();
 
     for bead in beads {
         let parent_dep = bead
@@ -1191,36 +1192,28 @@ fn build_wbs_tree(beads: &[Bead]) -> Vec<WBSNode> {
 
         if let Some(dep) = parent_dep {
             child_to_parent.insert(bead.id.clone(), dep.depends_on_id.clone());
-        }
-    }
-
-    // Now assign children to parents and collect roots
-    for bead in beads {
-        if let Some(parent_id) = child_to_parent.get(&bead.id) {
-            // This bead has a parent
-            if node_map.contains_key(parent_id) && node_map.contains_key(&bead.id) {
-                // Both parent and child exist - we'll handle this in a second pass
-                // For now, just note that this is not a root
-            } else {
-                // Parent doesn't exist (orphaned node), add to roots
-                if let Some(node) = node_map.get(&bead.id) {
-                    roots.push(node.clone());
-                }
-            }
         } else {
-            // No parent dependency, this is a root node
-            if let Some(node) = node_map.get(&bead.id) {
-                roots.push(node.clone());
-            }
+            // No parent dependency means this is a root node
+            root_ids.insert(bead.id.clone());
         }
     }
 
-    // Second pass: build the children relationships
+    // Build the parent-child relationships in node_map
     for (child_id, parent_id) in child_to_parent.iter() {
         if let Some(child_node) = node_map.get(child_id).cloned() {
             if let Some(parent_node) = node_map.get_mut(parent_id) {
                 parent_node.children.push(child_node);
+            } else {
+                // Parent doesn't exist (orphaned node), treat as root
+                root_ids.insert(child_id.clone());
             }
+        }
+    }
+
+    // Now collect the root nodes (which now have their children populated)
+    for id in root_ids {
+        if let Some(node) = node_map.get(&id) {
+            roots.push(node.clone());
         }
     }
 
