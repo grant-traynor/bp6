@@ -106,6 +106,7 @@ function App() {
     // Debounce filter text to avoid excessive backend calls while typing
     const debounceTimeout = setTimeout(() => {
       const fetchData = async () => {
+        const startTime = performance.now();
         setProcessingData(true);
         try {
           // Use startTransition to maintain UI responsiveness
@@ -118,6 +119,8 @@ function App() {
               zoom: zoom,
               collapsed_ids: Array.from(collapsedIds)
             }).then(data => {
+              const endTime = performance.now();
+              console.log(`⏱️  Frontend: IPC call took ${(endTime - startTime).toFixed(2)}ms`);
               setProcessedData(data);
               setProcessingData(false);
             }).catch(error => {
@@ -132,7 +135,7 @@ function App() {
       };
 
       fetchData();
-    }, 300); // 300ms debounce for filter text changes
+    }, 150); // 150ms debounce for filter text changes
 
     return () => clearTimeout(debounceTimeout);
   }, [filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter]);

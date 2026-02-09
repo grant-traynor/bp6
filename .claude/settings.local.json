@@ -27,7 +27,13 @@
       "Bash(bd reopen:*)",
       "Bash(git checkout:*)",
       "Bash(npm install:*)",
-      "Bash(bd stats:*)"
+      "Bash(bd stats:*)",
+      "Bash(cargo check:*)",
+      "Bash(~/.cargo/bin/cargo check:*)",
+      "Bash(npx tsc:*)",
+      "Bash(~/.cargo/bin/cargo build:*)",
+      "Bash(~/.cargo/bin/cargo fix --lib --allow-dirty)",
+      "Bash(export PATH=\"/Users/gkt/.cargo/bin:$PATH\")"
     ]
   }
 }

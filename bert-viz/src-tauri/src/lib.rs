@@ -5,10 +5,13 @@ use std::hash::{Hash, Hasher};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, Config};
 use tauri::{Emitter, AppHandle, Manager};
+
+// Global cache for beads file path (avoid expensive subprocess calls)
+static BEADS_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 // Shared state for the file watcher
 struct BeadsWatcher {
@@ -244,11 +247,15 @@ fn find_beads_file() -> Option<PathBuf> {
 
 #[tauri::command]
 fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
-    // 1. Load beads from file
-    let beads_path = find_beads_file()
-        .ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
+    let start_time = std::time::Instant::now();
+
+    // 1. Load beads from file (use cached path to avoid expensive subprocess)
+    let beads_path = BEADS_FILE_PATH.get_or_init(|| {
+        find_beads_file().expect("Could not locate .beads/issues.jsonl in any parent directory")
+    });
 
     eprintln!("📖 get_processed_data: Reading from {}", beads_path.display());
+    let load_start = std::time::Instant::now();
 
     let file = File::open(&beads_path).map_err(|e| format!("Failed to open issues.jsonl: {}", e))?;
     let reader = BufReader::new(file);
@@ -266,6 +273,8 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
         beads.push(bead);
     }
 
+    eprintln!("⏱️  File load: {:.2}ms ({} beads)", load_start.elapsed().as_secs_f64() * 1000.0, beads.len());
+
     // 2. Apply filters
     let mut filtered = beads.clone();
 
@@ -280,6 +289,8 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
         filtered = include_hierarchy(filtered, &beads, &params.filter_text, params.include_hierarchy);
     }
 
+    let tree_start = std::time::Instant::now();
+
     // 3. Build dependency graph
     let graph = build_dependency_graph(&filtered);
 
@@ -288,6 +299,9 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
 
     // 5. Sort siblings by dependencies
     tree = sort_wbs_tree_siblings(tree, &graph);
+
+    eprintln!("⏱️  Tree building: {:.2}ms", tree_start.elapsed().as_secs_f64() * 1000.0);
+    let layout_start = std::time::Instant::now();
 
     // Apply collapsed state to tree
     fn apply_collapsed_state(nodes: &mut [WBSNode], collapsed_ids: &[String]) {
@@ -354,10 +368,15 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
         params.zoom,
     );
 
+    eprintln!("⏱️  Layout calculation: {:.2}ms", layout_start.elapsed().as_secs_f64() * 1000.0);
+
     // 12. Calculate state distributions
     let distributions = calculate_state_distribution(&layout.items, params.zoom);
 
     // 13. Return ProcessedData
+    let total_time = start_time.elapsed();
+    eprintln!("⏱️  Total processing time: {:.2}ms", total_time.as_secs_f64() * 1000.0);
+
     Ok(ProcessedData {
         tree,
         layout,
@@ -1390,12 +1409,12 @@ fn calculate_node_ranges(
             let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0);
             let x = (earliest_start * 100 + 40) as f64;
             let estimate = node.bead.estimate.unwrap_or(600);
-            let width = ((estimate as f64 / 10.0).max(40.0));
+            let width = (estimate as f64 / 10.0).max(40.0);
 
             NodeRange { x, width }
         } else {
             // Parent node: spans children's ranges
-            let mut child_ranges: Vec<NodeRange> = node
+            let child_ranges: Vec<NodeRange> = node
                 .children
                 .iter()
                 .map(|child| calc_range(child, x_map, range_cache))
@@ -1625,12 +1644,12 @@ fn generate_gantt_layout(
             let earliest_start = x_map.get(&bead.id).copied().unwrap_or(0);
             let x = (earliest_start * 100 + 40) as f64;
             let estimate = bead.estimate.unwrap_or(600);
-            let width = (estimate as f64 / 10.0).max(40.0);
-            NodeRange { x, width }
+            let _width = (estimate as f64 / 10.0).max(40.0);
+            NodeRange { x, width: _width }
         });
 
         let x = range.x * zoom;
-        let width = range.width * zoom;
+        let _width = range.width * zoom;
 
         // Create connectors for blocking dependencies
         for dep in &bead.dependencies {
