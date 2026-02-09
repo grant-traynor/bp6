@@ -76,11 +76,10 @@ impl BeadsWatcher {
                                             let now = Instant::now();
                                             if now.duration_since(*last) >= Duration::from_millis(250) {
                                                 *last = now;
-                                                if let Err(e) = handle.emit_all("beads-updated", ()) {
-                                                    eprintln!("  ❌ Failed to emit beads-updated: {:?}", e);
-                                                } else {
-                                                    eprintln!("  ✅ Emitted beads-updated to all windows ({})",
-                                                        if matches!(event.kind, notify::EventKind::Create(_)) { "create" } else { "modify" });
+                                                match handle.emit("beads-updated", ()) {
+                                                    Ok(_) => eprintln!("  ✅ Emitted beads-updated ({})",
+                                                        if matches!(event.kind, notify::EventKind::Create(_)) { "create" } else { "modify" }),
+                                                    Err(e) => eprintln!("  ❌ Failed to emit beads-updated: {:?}", e),
                                                 }
                                             }
                                         }
