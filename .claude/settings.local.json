@@ -19,7 +19,14 @@
       "Bash(bd init:*)",
       "Bash(pkill:*)",
       "Bash(bd --no-daemon list:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(bd create:*)",
+      "Bash(bd dep add:*)",
+      "Bash(bd close:*)",
+      "Bash(git add:*)",
+      "Bash(bd reopen:*)",
+      "Bash(git checkout:*)",
+      "Bash(npm install:*)"
     ]
   }
 }
