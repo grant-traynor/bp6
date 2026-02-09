@@ -49,7 +49,11 @@ export const Sidebar = ({
   });
 
   // Local form state for unified always-editable fields
-  const [formData, setFormData] = useState<Partial<Bead>>({});
+  const [formData, setFormData] = useState<Partial<Bead>>(() => {
+    if (isCreating) return editForm;
+    if (selectedBead) return selectedBead;
+    return {};
+  });
 
   // Initialize form data when selectedBead changes or when creating
   useEffect(() => {
@@ -63,25 +67,25 @@ export const Sidebar = ({
   // Detect if form has changes (dirty state)
   const isDirty = useMemo(() => {
     if (isCreating) return false; // Creating mode doesn't have dirty state
-    if (!selectedBead) return false;
+    if (!selectedBead || !formData) return false;
 
     const original = selectedBead;
     const current = formData;
 
-    // Compare key fields
+    // Compare key fields with safe null checks
     return (
-      original.title !== current.title ||
-      original.description !== current.description ||
-      original.owner !== current.owner ||
-      original.priority !== current.priority ||
-      original.estimate !== current.estimate ||
-      original.issue_type !== current.issue_type ||
-      original.parent !== current.parent ||
-      original.design_notes !== current.design_notes ||
-      original.working_notes !== current.working_notes ||
-      original.external_reference !== current.external_reference ||
-      JSON.stringify(original.labels) !== JSON.stringify(current.labels) ||
-      JSON.stringify(original.acceptance_criteria) !== JSON.stringify(current.acceptance_criteria)
+      (original.title || '') !== (current.title || '') ||
+      (original.description || '') !== (current.description || '') ||
+      (original.owner || '') !== (current.owner || '') ||
+      (original.priority || 0) !== (current.priority || 0) ||
+      (original.estimate || 0) !== (current.estimate || 0) ||
+      (original.issue_type || '') !== (current.issue_type || '') ||
+      (original.parent || '') !== (current.parent || '') ||
+      (original.design_notes || '') !== (current.design_notes || '') ||
+      (original.working_notes || '') !== (current.working_notes || '') ||
+      (original.external_reference || '') !== (current.external_reference || '') ||
+      JSON.stringify(original.labels || []) !== JSON.stringify(current.labels || []) ||
+      JSON.stringify(original.acceptance_criteria || []) !== JSON.stringify(current.acceptance_criteria || [])
     );
   }, [formData, selectedBead, isCreating]);
 
@@ -114,6 +118,7 @@ export const Sidebar = ({
   };
 
   if (!selectedBead && !isCreating) return null;
+  if (!formData || Object.keys(formData).length === 0) return null;
 
   const displayBead = formData;
 
