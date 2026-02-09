@@ -382,6 +382,32 @@ fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn close_bead(bead_id: String, reason: Option<String>, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("🔒 close_bead: Called for bead '{}'", bead_id);
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
+    eprintln!("🔒 close_bead: Using repo_path = {}", repo_path.display());
+
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("close").arg(&bead_id);
+
+    if let Some(r) = reason {
+        cmd.arg("--reason").arg(r);
+    }
+
+    eprintln!("🔒 close_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("🔒 close_bead: Command: {:?}", cmd);
+    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let _ = app_handle.emit("beads-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
 fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> {
     eprintln!("🆕 create_bead: Called for bead '{}'", new_bead.title);
     check_bd_available()?;
@@ -597,7 +623,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            get_beads, update_bead, create_bead, 
+            get_beads, update_bead, create_bead, close_bead,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir
         ])

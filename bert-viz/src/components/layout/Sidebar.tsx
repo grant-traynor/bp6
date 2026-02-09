@@ -24,6 +24,7 @@ interface SidebarProps {
   handleSaveEdit: () => Promise<void>;
   handleSaveCreate: () => Promise<void>;
   handleStartEdit: () => void;
+  handleCloseBead: (beadId: string) => Promise<void>;
   toggleFavorite: (bead: Bead) => Promise<void>;
 }
 
@@ -40,6 +41,7 @@ export const Sidebar = ({
   handleSaveEdit,
   handleSaveCreate,
   handleStartEdit,
+  handleCloseBead,
   toggleFavorite,
 }: SidebarProps) => {
   // Collapsible section state
@@ -426,7 +428,7 @@ export const Sidebar = ({
           if (!selectedBead) setSelectedBead(null);
         }}
         onSave={isCreating ? handleSaveCreate : handleSaveEdit}
-        onDelete={selectedBead ? () => {} : undefined} 
+        onDelete={selectedBead && !isCreating ? () => handleCloseBead(selectedBead.id) : undefined} 
       />
     </div>
   );
