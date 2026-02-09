@@ -138,7 +138,7 @@ function App() {
     }, 150); // 150ms debounce for filter text changes
 
     return () => clearTimeout(debounceTimeout);
-  }, [filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter]);
+  }, [filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter, currentProjectPath]);
 
   useEffect(() => {
     // Prevent double initialization (React 19 Strict Mode runs effects twice)
