@@ -254,6 +254,16 @@ function App() {
     else document.documentElement.classList.remove('dark');
   }, [isDark]);
 
+  // Keep selectedBead synchronized with the latest bead data
+  useEffect(() => {
+    if (selectedBead && beads.length > 0) {
+      const updatedBead = beads.find(b => b.id === selectedBead.id);
+      if (updatedBead) {
+        setSelectedBead(updatedBead);
+      }
+    }
+  }, [beads]);
+
   const handleToggleFavoriteProject = async (path: string) => {
     try { await toggleFavoriteProject(path); } catch (error) { alert(`Failed to toggle favorite: ${error}`); }
   };
