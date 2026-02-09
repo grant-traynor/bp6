@@ -7,7 +7,89 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, Config};
-use tauri::{Emitter, AppHandle};
+use tauri::{Emitter, AppHandle, Manager};
+
+// Shared state for the file watcher
+struct BeadsWatcher {
+    watcher: notify::RecommendedWatcher,
+    current_path: Option<PathBuf>,
+    last_checksum: Arc<Mutex<u64>>,
+    last_emit: Arc<Mutex<Instant>>,
+}
+
+impl BeadsWatcher {
+    fn new(handle: AppHandle) -> Result<Self, String> {
+        let last_checksum = Arc::new(Mutex::new(0u64));
+        let last_emit = Arc::new(Mutex::new(Instant::now()));
+
+        let checksum_clone = Arc::clone(&last_checksum);
+        let emit_clone = Arc::clone(&last_emit);
+
+        let watcher = notify::RecommendedWatcher::new(
+            move |res: std::result::Result<notify::Event, notify::Error>| {
+                match res {
+                    Ok(event) => {
+                        eprintln!("📁 Event: {:?}", event.kind);
+
+                        // Get first path from event
+                        if let Some(path) = event.paths.first() {
+                            if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                                if let Ok(bytes) = std::fs::read(path) {
+                                    let mut hasher = DefaultHasher::new();
+                                    bytes.hash(&mut hasher);
+                                    let new_checksum = hasher.finish();
+
+                                    let mut last_hash = checksum_clone.lock().unwrap();
+
+                                    if *last_hash != new_checksum {
+                                        *last_hash = new_checksum;
+
+                                        let mut last = emit_clone.lock().unwrap();
+                                        let now = Instant::now();
+                                        if now.duration_since(*last) >= Duration::from_millis(250) {
+                                            *last = now;
+                                            let _ = handle.emit("beads-updated", ());
+                                            eprintln!("  ✅ Emitted beads-updated");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => eprintln!("Watch error: {:?}", e),
+                }
+            },
+            Config::default(),
+        ).map_err(|e| e.to_string())?;
+
+        Ok(BeadsWatcher {
+            watcher,
+            current_path: None,
+            last_checksum,
+            last_emit,
+        })
+    }
+
+    fn watch_beads_file(&mut self, path: PathBuf) -> Result<(), String> {
+        // Unwatch old path if exists
+        if let Some(old_path) = &self.current_path {
+            if let Some(old_parent) = old_path.parent() {
+                let _ = self.watcher.unwatch(old_parent);
+                eprintln!("🔓 Unwatched: {}", old_parent.display());
+            }
+        }
+
+        // Watch new path's parent directory
+        if let Some(parent) = path.parent() {
+            self.watcher.watch(parent, RecursiveMode::Recursive)
+                .map_err(|e| format!("Failed to watch {}: {}", parent.display(), e))?;
+            eprintln!("🔍 Now watching: {}", parent.display());
+            self.current_path = Some(path);
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Dependency {
@@ -436,7 +518,7 @@ fn remove_project(path: String, app_handle: AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
     std::env::set_current_dir(&path).map_err(|e| format!("Failed to change directory to {}: {}", path, e))?;
-    
+
     // Update last_opened
     let mut projects = get_projects()?;
     if let Some(project) = projects.iter_mut().find(|p| p.path == path) {
@@ -452,6 +534,14 @@ fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
         });
     }
     save_projects(projects)?;
+
+    // Update watcher to monitor new project's beads file
+    if let Some(new_beads_path) = find_beads_file() {
+        let watcher_state = app_handle.state::<Arc<Mutex<BeadsWatcher>>>();
+        let mut watcher = watcher_state.lock().unwrap();
+        watcher.watch_beads_file(new_beads_path)?;
+    }
+
     let _ = app_handle.emit("projects-updated", ());
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
@@ -490,31 +580,18 @@ pub fn run() {
             let handle = app.handle().clone();
             let proj_handle = app.handle().clone();
 
-            // Poll beads file periodically for changes (works across project switches)
-            let last_checksum = Arc::new(Mutex::new(0u64));
-            let poll_handle = handle.clone();
+            // Initialize file watcher
+            let mut beads_watcher = BeadsWatcher::new(handle.clone())
+                .expect("Failed to create beads watcher");
 
-            std::thread::spawn(move || {
-                loop {
-                    std::thread::sleep(Duration::from_millis(500)); // Poll every 500ms
+            // Watch initial beads file if exists
+            if let Some(initial_path) = find_beads_file() {
+                beads_watcher.watch_beads_file(initial_path)
+                    .expect("Failed to watch initial beads file");
+            }
 
-                    if let Some(current_path) = find_beads_file() {
-                        if let Ok(bytes) = std::fs::read(&current_path) {
-                            let mut hasher = DefaultHasher::new();
-                            bytes.hash(&mut hasher);
-                            let new_checksum = hasher.finish();
-
-                            let mut last_hash = last_checksum.lock().unwrap();
-
-                            if *last_hash != new_checksum {
-                                *last_hash = new_checksum;
-                                let _ = poll_handle.emit("beads-updated", ());
-                                eprintln!("📊 Beads file changed (polling), emitting update");
-                            }
-                        }
-                    }
-                }
-            });
+            // Store watcher in managed state so commands can access it
+            app.manage(Arc::new(Mutex::new(beads_watcher)));
 
             // Watch projects file with debouncing
             if let Ok(proj_path) = get_projects_path() {
