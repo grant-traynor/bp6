@@ -313,20 +313,30 @@ function App() {
   }, []);
 
   const handleSaveCreate = async () => {
+    console.log('🆕 handleSaveCreate called', { editForm });
     if (editForm.title) {
+      console.log('🆕 Title exists, proceeding with create');
       try {
         const newBead = { ...editForm } as Bead;
+        console.log('🆕 newBead prepared:', newBead);
         if (newBead.parent) {
           newBead.dependencies = [...(newBead.dependencies || []), { issue_id: newBead.id, depends_on_id: newBead.parent, type: 'parent-child' }];
         }
+        console.log('🆕 Calling createBead...');
         const createdId = await createBead(newBead);
+        console.log('🆕 Created bead ID:', createdId);
         setIsCreating(false);
         const freshBeads = await loadData();
         const createdBead = freshBeads.find(b => b.id === createdId);
         if (createdBead) {
           setSelectedBead(createdBead);
         }
-      } catch (error) { alert(`Failed to create bead: ${error}`); }
+      } catch (error) {
+        console.error('🆕 Error creating bead:', error);
+        alert(`Failed to create bead: ${error}`);
+      }
+    } else {
+      console.log('🆕 No title, skipping create');
     }
   };
 

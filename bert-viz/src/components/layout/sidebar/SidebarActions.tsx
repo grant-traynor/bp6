@@ -29,8 +29,11 @@ export const SidebarActions = ({
         >
           Cancel
         </button>
-        <button 
-          onClick={onSave}
+        <button
+          onClick={() => {
+            console.log('💾 SidebarActions: Save/Create button clicked', { isCreating, isValid });
+            onSave();
+          }}
           disabled={!isValid}
           className={cn(
             "flex-1 px-4 py-3 rounded-xl font-black text-xs uppercase tracking-widest text-white shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2",

@@ -93,9 +93,12 @@ export async function updateBead(bead: Bead): Promise<void> {
 
 export async function createBead(bead: Bead): Promise<string> {
   try {
-    return await invoke<string>("create_bead", { new_bead: bead });
+    console.log('🔧 api.createBead: Invoking Tauri command with bead:', bead);
+    const result = await invoke<string>("create_bead", { new_bead: bead });
+    console.log('🔧 api.createBead: Tauri returned ID:', result);
+    return result;
   } catch (error) {
-    console.error("Failed to create bead:", error);
+    console.error("🔧 api.createBead: Failed to create bead:", error);
     throw error;
   }
 }
