@@ -1204,6 +1204,189 @@ impl Default for ClosedTimeFilter {
     }
 }
 
+// ============================================================================
+// WBS Tree Building - Sort Siblings by Dependencies (bp6-07y.2.4)
+// ============================================================================
+
+/// Recursively sort sibling nodes using topological sort based on blocking dependencies.
+fn sort_wbs_tree_siblings(mut tree: Vec<WBSNode>, graph: &DependencyGraph) -> Vec<WBSNode> {
+    // Sort the current level of siblings
+    let sibling_ids: HashSet<String> = tree.iter().map(|n| n.bead.id.clone()).collect();
+
+    // If only one node, no sorting needed, but still recurse on children
+    if tree.len() > 1 {
+        tree = topological_sort(tree, &sibling_ids, graph);
+    }
+
+    // Recursively sort children
+    for node in &mut tree {
+        if !node.children.is_empty() {
+            node.children = sort_wbs_tree_siblings(node.children.clone(), graph);
+        }
+    }
+
+    tree
+}
+
+// ============================================================================
+// Gantt Layout - Calculate Node Ranges (bp6-07y.3.2)
+// ============================================================================
+
+/// NodeRange represents the calculated position and width of a node in the Gantt chart.
+#[derive(Debug, Clone)]
+struct NodeRange {
+    x: f64,
+    width: f64,
+}
+
+/// Calculate position and width for each node in the tree.
+/// Leaf nodes use estimate-based width, parent nodes span their children's ranges.
+fn calculate_node_ranges(
+    tree: &[WBSNode],
+    x_map: &HashMap<String, usize>,
+    range_cache: &mut HashMap<String, NodeRange>,
+) {
+    fn calc_range(
+        node: &WBSNode,
+        x_map: &HashMap<String, usize>,
+        range_cache: &mut HashMap<String, NodeRange>,
+    ) -> NodeRange {
+        // Return cached result if available
+        if let Some(range) = range_cache.get(&node.bead.id) {
+            return range.clone();
+        }
+
+        let range = if node.children.is_empty() {
+            // Leaf node: x = earliest_start * 100 + 40, width = max(estimate/10, 40)
+            let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0);
+            let x = (earliest_start * 100 + 40) as f64;
+            let estimate = node.bead.estimate.unwrap_or(600);
+            let width = ((estimate as f64 / 10.0).max(40.0));
+
+            NodeRange { x, width }
+        } else {
+            // Parent node: spans children's ranges
+            let mut child_ranges: Vec<NodeRange> = node
+                .children
+                .iter()
+                .map(|child| calc_range(child, x_map, range_cache))
+                .collect();
+
+            if child_ranges.is_empty() {
+                // Fallback if somehow no children (shouldn't happen)
+                let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0);
+                let x = (earliest_start * 100 + 40) as f64;
+                NodeRange { x, width: 40.0 }
+            } else {
+                let min_x = child_ranges.iter().map(|r| r.x).fold(f64::INFINITY, f64::min);
+                let max_x = child_ranges
+                    .iter()
+                    .map(|r| r.x + r.width)
+                    .fold(f64::NEG_INFINITY, f64::max);
+
+                NodeRange {
+                    x: min_x,
+                    width: max_x - min_x,
+                }
+            }
+        };
+
+        range_cache.insert(node.bead.id.clone(), range.clone());
+        range
+    }
+
+    // Calculate ranges for all root nodes
+    for node in tree {
+        calc_range(node, x_map, range_cache);
+    }
+}
+
+// ============================================================================
+// Gantt Layout - Find Critical Path (bp6-07y.3.3)
+// ============================================================================
+
+/// Find critical path using longest path algorithm.
+/// Returns a set of node IDs that are on the critical path.
+fn find_critical_path(
+    beads: &[Bead],
+    successors_map: &HashMap<String, Vec<String>>,
+) -> HashSet<String> {
+    if beads.is_empty() {
+        return HashSet::new();
+    }
+
+    let mut max_dist_map: HashMap<String, usize> = HashMap::new();
+    let mut next_in_path: HashMap<String, String> = HashMap::new();
+
+    /// Recursively find maximum distance to furthest successor.
+    fn find_max_dist(
+        id: &str,
+        successors_map: &HashMap<String, Vec<String>>,
+        max_dist_map: &mut HashMap<String, usize>,
+        next_in_path: &mut HashMap<String, String>,
+    ) -> usize {
+        // Return memoized result if available
+        if let Some(&dist) = max_dist_map.get(id) {
+            return dist;
+        }
+
+        let succs = successors_map.get(id).cloned().unwrap_or_default();
+
+        if succs.is_empty() {
+            // No successors, distance is 0
+            max_dist_map.insert(id.to_string(), 0);
+            return 0;
+        }
+
+        let mut max_val = 0;
+        let mut best_succ = String::new();
+
+        for s in &succs {
+            let d = find_max_dist(s, successors_map, max_dist_map, next_in_path);
+            if d > max_val {
+                max_val = d;
+                best_succ = s.clone();
+            }
+        }
+
+        let dist = max_val + 1;
+        max_dist_map.insert(id.to_string(), dist);
+        if !best_succ.is_empty() {
+            next_in_path.insert(id.to_string(), best_succ);
+        }
+
+        dist
+    }
+
+    // Find the global maximum distance (start of critical path)
+    let mut global_max = 0;
+    let mut start_node = String::new();
+
+    for bead in beads {
+        let d = find_max_dist(
+            &bead.id,
+            successors_map,
+            &mut max_dist_map,
+            &mut next_in_path,
+        );
+        if d > global_max {
+            global_max = d;
+            start_node = bead.id.clone();
+        }
+    }
+
+    // Reconstruct critical path
+    let mut critical_path_nodes: HashSet<String> = HashSet::new();
+    let mut curr = Some(start_node);
+
+    while let Some(node_id) = curr {
+        critical_path_nodes.insert(node_id.clone());
+        curr = next_in_path.get(&node_id).cloned();
+    }
+
+    critical_path_nodes
+}
+
 fn get_projects_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
