@@ -179,15 +179,22 @@ fn get_sync_branch_name(repo_path: &std::path::Path) -> Option<String> {
 }
 
 fn find_repo_root() -> Option<PathBuf> {
-    let mut curr = std::env::current_dir().ok()?;
+    let curr_dir = std::env::current_dir().ok()?;
+    eprintln!("🔍 find_repo_root: Starting from current_dir = {}", curr_dir.display());
+
+    let mut curr = curr_dir.clone();
     loop {
-        if curr.join(".beads").exists() {
+        let beads_path = curr.join(".beads");
+        eprintln!("🔍 find_repo_root: Checking {}", beads_path.display());
+        if beads_path.exists() {
+            eprintln!("✅ find_repo_root: Found repo root at {}", curr.display());
             return Some(curr);
         }
         if !curr.pop() {
             break;
         }
     }
+    eprintln!("❌ find_repo_root: No .beads found in any parent directory");
     None
 }
 
@@ -233,6 +240,7 @@ fn find_beads_file() -> Option<PathBuf> {
 #[tauri::command]
 fn get_beads() -> Result<Vec<Bead>, String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
+    eprintln!("📖 get_beads: Reading from {}", path.display());
 
     // Retry opening and reading the file to handle transient locks and partial writes
     let mut last_error = String::new();
@@ -311,9 +319,11 @@ fn get_beads() -> Result<Vec<Bead>, String> {
 
 #[tauri::command]
 fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("📝 update_bead: Called for bead '{}' ({})", updated_bead.title, updated_bead.id);
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
-    
+    eprintln!("📝 update_bead: Using repo_path = {}", repo_path.display());
+
     let mut cmd = std::process::Command::new("bd");
     cmd.arg("update")
         .arg(&updated_bead.id)
@@ -359,6 +369,8 @@ fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> 
     let metadata_json = serde_json::to_string(&updated_bead).map_err(|e| e.to_string())?;
     cmd.arg("--metadata").arg(metadata_json);
 
+    eprintln!("📝 update_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("📝 update_bead: Command: {:?}", cmd);
     let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
 
     if !output.status.success() {
@@ -371,9 +383,11 @@ fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> 
 
 #[tauri::command]
 fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> {
+    eprintln!("🆕 create_bead: Called for bead '{}'", new_bead.title);
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
-    
+    eprintln!("🆕 create_bead: Using repo_path = {}", repo_path.display());
+
     // 1. Create with minimal flags to get ID
     let mut cmd = std::process::Command::new("bd");
     cmd.arg("create")
@@ -414,6 +428,8 @@ fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> 
         cmd.arg("--notes").arg(working);
     }
 
+    eprintln!("🆕 create_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("🆕 create_bead: Command: {:?}", cmd);
     let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
 
     if !output.status.success() {
@@ -426,6 +442,7 @@ fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> 
     if new_id.is_empty() {
         return Err("Create command succeeded but returned no ID".to_string());
     }
+    eprintln!("🆕 create_bead: Created bead with ID: {}", new_id);
 
     // 2. Immediately update to set fields that create doesn't support (like status and metadata)
     let mut update_cmd = std::process::Command::new("bd");
@@ -436,6 +453,8 @@ fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> 
     let metadata_json = serde_json::to_string(&new_bead).map_err(|e| e.to_string())?;
     update_cmd.arg("--metadata").arg(metadata_json);
 
+    eprintln!("🆕 create_bead: Executing follow-up bd update in directory: {}", repo_path.display());
+    eprintln!("🆕 create_bead: Update command: {:?}", update_cmd);
     let update_output = update_cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
 
     if !update_output.status.success() {
@@ -519,7 +538,11 @@ fn remove_project(path: String, app_handle: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("📂 open_project: Attempting to set current_dir to: {}", path);
     std::env::set_current_dir(&path).map_err(|e| format!("Failed to change directory to {}: {}", path, e))?;
+
+    let new_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    eprintln!("✅ open_project: Successfully set current_dir to: {}", new_dir.display());
 
     // Update last_opened
     let mut projects = get_projects()?;
