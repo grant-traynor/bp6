@@ -687,7 +687,7 @@ function App() {
           <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
             <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em]">
               <div className="w-10 shrink-0" />
-              <div className="w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">Priority</div>
+              <div className="w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">P</div>
               <div className="flex-1 px-4 border-r-2 border-[var(--border-primary)]/50">Name</div>
               <div className="w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">Type</div>
               <div className="w-24 shrink-0 px-2">ID</div>
