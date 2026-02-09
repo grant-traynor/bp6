@@ -130,6 +130,15 @@ export async function claimBead(beadId: string): Promise<void> {
   }
 }
 
+export async function fetchProcessedData(params: FilterParams): Promise<ProcessedData> {
+  try {
+    return await invoke<ProcessedData>("get_processed_data", { params });
+  } catch (error) {
+    console.error("Failed to fetch processed data:", error);
+    throw error;
+  }
+}
+
 export function buildWBSTree(beads: Bead[]): WBSNode[] {
   const nodeMap = new Map<string, WBSNode>();
   const roots: WBSNode[] = [];

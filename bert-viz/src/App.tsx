@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { fetchBeads, buildWBSTree, calculateGanttLayout, calculateStateDistribution, updateBead, createBead, closeBead, reopenBead, claimBead, type WBSNode, type Bead, type Project, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
+import { fetchBeads, fetchProcessedData, updateBead, createBead, closeBead, reopenBead, claimBead, type WBSNode, type Bead, type Project, type ProcessedData, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -27,6 +27,7 @@ function App() {
   const [beads, setBeads] = useState<Bead[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
+  const [hasProject, setHasProject] = useState(false);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => {
     const saved = localStorage.getItem("collapsedIds");
     return saved ? new Set(JSON.parse(saved)) : new Set();
@@ -52,6 +53,7 @@ function App() {
   const scrollRefBERT = useRef<HTMLDivElement>(null);
   const scrollRefGanttHeader = useRef<HTMLDivElement>(null);
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
+  const hasInitialized = useRef(false);
 
   const loadProjects = useCallback(async () => {
     const data = await fetchProjects();
@@ -72,118 +74,94 @@ function App() {
     }
   }, []);
 
-  const handleOpenProject = async (path: string) => {
+  const handleOpenProject = useCallback(async (path: string) => {
     try {
+      setLoading(true);
       await openProject(path);
       setCurrentProjectPath(path);
-      await loadData(true);
-      await loadProjects();
+      setHasProject(true);
+
+      // Use startTransition to keep UI responsive during heavy computation
+      startTransition(() => {
+        loadData(false).then(() => {
+          loadProjects();
+          setLoading(false);
+        });
+      });
     } catch (error) {
       alert(`Failed to open project: ${error}`);
+      setLoading(false);
     }
-  };
+  }, [loadData, loadProjects]);
 
-  const processedData = useMemo(() => {
-    // Helper: Check if bead passes time-based filter for closed tasks
-    const passesClosedTimeFilter = (bead: Bead): boolean => {
-      // Only filter closed tasks
-      if (bead.status !== 'closed') return true;
+  // ProcessedData state (computed in Rust backend)
+  const [processedData, setProcessedData] = useState<ProcessedData>({
+    tree: [],
+    layout: { items: [], connectors: [], rowCount: 0, rowDepths: [] },
+    distributions: []
+  });
+  const [processingData, setProcessingData] = useState(false);
 
-      // 'all' filter shows all closed tasks
-      if (closedTimeFilter === 'all') return true;
-
-      // If no closed_at timestamp, include it (benefit of the doubt)
-      if (!bead.closed_at) return true;
-
-      try {
-        const closedDate = new Date(bead.closed_at);
-        const now = new Date();
-
-        // Check for invalid dates
-        if (isNaN(closedDate.getTime())) return true;
-
-        const hoursAgo = (now.getTime() - closedDate.getTime()) / (1000 * 60 * 60);
-
-        switch (closedTimeFilter) {
-          case '1h': return hoursAgo <= 1;
-          case '6h': return hoursAgo <= 6;
-          case '24h': return hoursAgo <= 24;
-          case '7d': return hoursAgo <= 168; // 7 * 24
-          case '30d': return hoursAgo <= 720; // 30 * 24
-          case 'older_than_6h': return hoursAgo > 6;
-          default: return true;
+  // Fetch processed data from Rust backend when filters change
+  useEffect(() => {
+    // Debounce filter text to avoid excessive backend calls while typing
+    const debounceTimeout = setTimeout(() => {
+      const fetchData = async () => {
+        setProcessingData(true);
+        try {
+          // Use startTransition to maintain UI responsiveness
+          startTransition(() => {
+            fetchProcessedData({
+              filter_text: filterText,
+              hide_closed: hideClosed,
+              closed_time_filter: closedTimeFilter,
+              include_hierarchy: includeHierarchy,
+              zoom: zoom,
+              collapsed_ids: Array.from(collapsedIds)
+            }).then(data => {
+              setProcessedData(data);
+              setProcessingData(false);
+            }).catch(error => {
+              console.error("Failed to fetch processed data:", error);
+              setProcessingData(false);
+            });
+          });
+        } catch (error) {
+          console.error("Failed to fetch processed data:", error);
+          setProcessingData(false);
         }
-      } catch (e) {
-        // If date parsing fails, include the bead
-        return true;
-      }
-    };
+      };
 
-    let filtered: Bead[] = [];
-    if (!filterText && !hideClosed && closedTimeFilter === 'all') {
-      filtered = beads;
-    } else {
-      const matches = beads.filter(b => {
-        // Apply hideClosed filter
-        if (hideClosed && b.status === 'closed') return false;
+      fetchData();
+    }, 300); // 300ms debounce for filter text changes
 
-        // Apply time-based filter for closed tasks
-        if (!passesClosedTimeFilter(b)) return false;
-
-        // Apply text search filter
-        if (!filterText) return true;
-        const search = filterText.toLowerCase();
-        return (
-          b.title.toLowerCase().includes(search) ||
-          b.id.toLowerCase().includes(search) ||
-          b.owner?.toLowerCase().includes(search) ||
-          b.labels?.some(l => l.toLowerCase().includes(search))
-        );
-      });
-      if (includeHierarchy && filterText) {
-        const includedIds = new Set<string>();
-        const addWithAncestors = (bead: Bead) => {
-          if (includedIds.has(bead.id)) return;
-          includedIds.add(bead.id);
-          const parentDep = bead.dependencies?.find(d => d.type === 'parent-child');
-          if (parentDep) {
-            const parent = beads.find(b => b.id === parentDep.depends_on_id);
-            if (parent) addWithAncestors(parent);
-          }
-        };
-        matches.forEach(addWithAncestors);
-        filtered = beads.filter(b => includedIds.has(b.id));
-      } else {
-        filtered = matches;
-      }
-    }
-    const wbsTree = buildWBSTree(filtered);
-    const applyExpansion = (nodes: WBSNode[]) => {
-      nodes.forEach(node => {
-        node.isExpanded = !collapsedIds.has(node.id);
-        if (node.children) applyExpansion(node.children);
-      });
-    };
-    applyExpansion(wbsTree);
-    const layout = calculateGanttLayout(beads, wbsTree, zoom);
-    const distributions = calculateStateDistribution(layout.items, zoom);
-    return { tree: wbsTree, layout, distributions };
-  }, [beads, filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter]);
+    return () => clearTimeout(debounceTimeout);
+  }, [filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter]);
 
   useEffect(() => {
+    // Prevent double initialization (React 19 Strict Mode runs effects twice)
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+
     const init = async () => {
       try {
-        const currentDir = await invoke<string>("get_current_dir");
+        // Load projects list from ~/.bert-viz/projects.json
         const projs = await fetchProjects();
         setProjects(projs);
+
+        // Auto-open most recent project if it exists
         const mostRecent = [...projs].sort((a, b) => (b.last_opened || "").localeCompare(a.last_opened || ""))[0];
-        if (mostRecent && mostRecent.path !== currentDir) {
+        if (mostRecent) {
           await handleOpenProject(mostRecent.path);
         } else {
-          await handleOpenProject(currentDir);
+          // No projects - show welcome screen
+          setHasProject(false);
         }
       } catch (error) {
         console.error("Initialization failed:", error);
+        setHasProject(false);
+      } finally {
+        setLoading(false);
       }
     };
     init();
@@ -193,7 +171,7 @@ function App() {
       unlistenBeads.then(f => f());
       unlistenProjs.then(f => f());
     };
-  }, []);
+  }, [handleOpenProject, loadData, loadProjects]);
 
   const toggleNode = useCallback((id: string) => {
     setCollapsedIds(prev => {
@@ -451,7 +429,28 @@ function App() {
       <Navigation />
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
         <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} />
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {!hasProject ? (
+          <div className="flex-1 flex items-center justify-center">
+            {loading ? (
+              <div className="text-center">
+                <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-indigo-600 border-r-transparent mb-4"></div>
+                <p className="text-lg text-[var(--text-muted)] font-medium">Loading project...</p>
+              </div>
+            ) : (
+              <div className="text-center max-w-md px-8">
+                <h1 className="text-4xl font-black text-[var(--text-primary)] mb-4 tracking-tight">Welcome to BERT</h1>
+                <p className="text-lg text-[var(--text-muted)] mb-8 font-medium">Get started by loading a project directory with a .beads folder</p>
+                <button
+                  onClick={handleSelectProject}
+                  className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-95 text-lg uppercase tracking-wider"
+                >
+                  Load Project
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
             <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex flex-col">
               <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
@@ -574,7 +573,8 @@ function App() {
           </div>
         </div>
       </div>
-      <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} />
+        )}
+      {hasProject && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} />}
       </main>
     </div>
   );
