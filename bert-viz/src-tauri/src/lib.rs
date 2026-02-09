@@ -559,9 +559,12 @@ pub struct WBSNode {
     // Tree structure
     pub children: Vec<WBSNode>,
 
-    // UI state flags
+    // UI state flags (use camelCase for TypeScript compatibility)
+    #[serde(rename = "isExpanded")]
     pub is_expanded: bool,
+    #[serde(rename = "isBlocked")]
     pub is_blocked: bool,
+    #[serde(rename = "isCritical")]
     pub is_critical: bool,
 }
 
@@ -580,7 +583,9 @@ pub struct GanttItem {
     pub width: f64,
     pub row: usize,
     pub depth: usize,
+    #[serde(rename = "isCritical")]
     pub is_critical: bool,
+    #[serde(rename = "isBlocked")]
     pub is_blocked: bool,
 }
 
@@ -589,6 +594,7 @@ pub struct GanttItem {
 pub struct GanttConnector {
     pub from: Point,
     pub to: Point,
+    #[serde(rename = "isCritical")]
     pub is_critical: bool,
 }
 
@@ -597,7 +603,9 @@ pub struct GanttConnector {
 pub struct GanttLayout {
     pub items: Vec<GanttItem>,
     pub connectors: Vec<GanttConnector>,
+    #[serde(rename = "rowCount")]
     pub row_count: usize,
+    #[serde(rename = "rowDepths")]
     pub row_depths: Vec<usize>,
 }
 
@@ -605,6 +613,7 @@ pub struct GanttLayout {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BucketDistribution {
     pub open: usize,
+    #[serde(rename = "inProgress")]
     pub in_progress: usize,
     pub blocked: usize,
     pub closed: usize,
@@ -1385,6 +1394,168 @@ fn find_critical_path(
     }
 
     critical_path_nodes
+}
+
+// ============================================================================
+// Gantt Layout - Generate Gantt Items and Connectors (bp6-07y.3.4)
+// ============================================================================
+
+/// Generate GanttItems and GanttConnectors from the WBS tree and computed data.
+fn generate_gantt_layout(
+    beads: &[Bead],
+    tree: &[WBSNode],
+    x_map: &HashMap<String, usize>,
+    range_cache: &HashMap<String, NodeRange>,
+    critical_path: &HashSet<String>,
+    zoom: f64,
+) -> GanttLayout {
+    let mut items: Vec<GanttItem> = Vec::new();
+    let mut connectors: Vec<GanttConnector> = Vec::new();
+
+    // Flatten tree to get visible rows and depths
+    let mut visible_rows: Vec<String> = Vec::new();
+    let mut row_depths: Vec<usize> = Vec::new();
+
+    fn flatten_tree(
+        nodes: &[WBSNode],
+        depth: usize,
+        visible_rows: &mut Vec<String>,
+        row_depths: &mut Vec<usize>,
+    ) {
+        for node in nodes {
+            visible_rows.push(node.bead.id.clone());
+            row_depths.push(depth);
+            if node.is_expanded {
+                flatten_tree(&node.children, depth + 1, visible_rows, row_depths);
+            }
+        }
+    }
+
+    flatten_tree(tree, 0, &mut visible_rows, &mut row_depths);
+
+    let row_count = visible_rows.len();
+
+    // Create row map for quick lookup
+    let row_map: HashMap<String, usize> = visible_rows
+        .iter()
+        .enumerate()
+        .map(|(idx, id)| (id.clone(), idx))
+        .collect();
+
+    // Create depth map
+    let depth_map: HashMap<String, usize> = visible_rows
+        .iter()
+        .zip(row_depths.iter())
+        .map(|(id, &depth)| (id.clone(), depth))
+        .collect();
+
+    // Helper to check if a bead is blocked
+    let is_blocked = |bead: &Bead| -> bool {
+        bead.dependencies
+            .iter()
+            .filter(|d| d.r#type == "blocks")
+            .any(|d| {
+                beads
+                    .iter()
+                    .find(|b| b.id == d.depends_on_id)
+                    .map(|pred| pred.status != "closed")
+                    .unwrap_or(false)
+            })
+    };
+
+    // Generate GanttItems
+    for bead in beads {
+        let row = match row_map.get(&bead.id) {
+            Some(&r) => r,
+            None => continue, // Bead not visible in tree
+        };
+
+        // Get range from cache or calculate fallback
+        let range = range_cache.get(&bead.id).cloned().unwrap_or_else(|| {
+            let earliest_start = x_map.get(&bead.id).copied().unwrap_or(0);
+            let x = (earliest_start * 100 + 40) as f64;
+            let estimate = bead.estimate.unwrap_or(600);
+            let width = (estimate as f64 / 10.0).max(40.0);
+            NodeRange { x, width }
+        });
+
+        // Apply zoom factor
+        let x = range.x * zoom;
+        let width = range.width * zoom;
+
+        items.push(GanttItem {
+            bead: bead.clone(),
+            x,
+            width,
+            row,
+            depth: *depth_map.get(&bead.id).unwrap_or(&0),
+            is_critical: critical_path.contains(&bead.id),
+            is_blocked: is_blocked(bead),
+        });
+    }
+
+    // Generate GanttConnectors
+    for bead in beads {
+        let row = match row_map.get(&bead.id) {
+            Some(&r) => r,
+            None => continue,
+        };
+
+        let range = range_cache.get(&bead.id).cloned().unwrap_or_else(|| {
+            let earliest_start = x_map.get(&bead.id).copied().unwrap_or(0);
+            let x = (earliest_start * 100 + 40) as f64;
+            let estimate = bead.estimate.unwrap_or(600);
+            let width = (estimate as f64 / 10.0).max(40.0);
+            NodeRange { x, width }
+        });
+
+        let x = range.x * zoom;
+        let width = range.width * zoom;
+
+        // Create connectors for blocking dependencies
+        for dep in &bead.dependencies {
+            if dep.r#type != "blocks" {
+                continue;
+            }
+
+            let pred_id = &dep.depends_on_id;
+            let pred_row = match row_map.get(pred_id) {
+                Some(&r) => r,
+                None => continue,
+            };
+
+            let pred_range = range_cache.get(pred_id).cloned().unwrap_or_else(|| {
+                let earliest_start = x_map.get(pred_id).copied().unwrap_or(0);
+                let x = (earliest_start * 100 + 40) as f64;
+                let pred_bead = beads.iter().find(|b| &b.id == pred_id);
+                let estimate = pred_bead.and_then(|b| b.estimate).unwrap_or(600);
+                let width = (estimate as f64 / 10.0).max(40.0);
+                NodeRange { x, width }
+            });
+
+            let pred_x = pred_range.x * zoom;
+            let pred_width = pred_range.width * zoom;
+
+            connectors.push(GanttConnector {
+                from: Point {
+                    x: pred_x + pred_width,
+                    y: (pred_row * 48 + 24) as f64,
+                },
+                to: Point {
+                    x,
+                    y: (row * 48 + 24) as f64,
+                },
+                is_critical: critical_path.contains(&bead.id) && critical_path.contains(pred_id),
+            });
+        }
+    }
+
+    GanttLayout {
+        items,
+        connectors,
+        row_count,
+        row_depths,
+    }
 }
 
 fn get_projects_path() -> Result<PathBuf, String> {

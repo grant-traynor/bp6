@@ -287,6 +287,21 @@ export interface BucketDistribution {
   closed: number;
 }
 
+export interface ProcessedData {
+  tree: WBSNode[];
+  layout: GanttLayout;
+  distributions: BucketDistribution[];
+}
+
+export interface FilterParams {
+  filter_text?: string;
+  hide_closed?: boolean;
+  closed_time_filter?: 'all' | '1h' | '6h' | '24h' | '7d' | '30d' | 'older_than_6h';
+  include_hierarchy?: boolean;
+  zoom?: number;
+  collapsed_ids?: string[];
+}
+
 export function calculateStateDistribution(items: GanttItem[], zoom: number): BucketDistribution[] {
   if (items.length === 0) return [];
 
