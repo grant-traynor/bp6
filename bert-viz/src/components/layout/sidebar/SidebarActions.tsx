@@ -1,23 +1,27 @@
-import { Save, Edit3, CheckCircle } from "lucide-react";
+import { Save, Edit3, CheckCircle, RotateCcw } from "lucide-react";
 import { cn } from "../../../utils";
 
 interface SidebarActionsProps {
   isEditing: boolean;
   isCreating: boolean;
+  isClosed: boolean;
   onEdit: () => void;
   onCancel: () => void;
   onSave: () => void;
-  onDelete?: () => void;  // TODO: Rename to onClose for clarity
+  onClose?: () => void;
+  onReopen?: () => void;
   isValid?: boolean;
 }
 
 export const SidebarActions = ({
   isEditing,
   isCreating,
+  isClosed,
   onEdit,
   onCancel,
   onSave,
-  onDelete,
+  onClose,
+  onReopen,
   isValid = true
 }: SidebarActionsProps) => {
   if (isEditing || isCreating) {
@@ -56,14 +60,24 @@ export const SidebarActions = ({
         <Edit3 size={18} strokeWidth={3} />
         Edit Bead
       </button>
-      {onDelete && (
+      {onClose && (
         <button
-          onClick={onDelete}
+          onClick={onClose}
           className="px-6 py-4 border-2 border-[var(--border-primary)] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-2xl transition-all active:scale-95 border-emerald-500/20 font-black text-xs uppercase tracking-[0.2em] flex items-center gap-2"
           title="Close bead (mark as complete)"
         >
           <CheckCircle size={20} strokeWidth={2.5} />
           Close
+        </button>
+      )}
+      {onReopen && (
+        <button
+          onClick={onReopen}
+          className="px-6 py-4 border-2 border-[var(--border-primary)] text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 rounded-2xl transition-all active:scale-95 border-amber-500/20 font-black text-xs uppercase tracking-[0.2em] flex items-center gap-2"
+          title="Reopen bead"
+        >
+          <RotateCcw size={20} strokeWidth={2.5} />
+          Reopen
         </button>
       )}
     </div>

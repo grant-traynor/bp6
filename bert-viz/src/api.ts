@@ -112,6 +112,15 @@ export async function closeBead(beadId: string, reason?: string): Promise<void> 
   }
 }
 
+export async function reopenBead(beadId: string): Promise<void> {
+  try {
+    await invoke("reopen_bead", { beadId });
+  } catch (error) {
+    console.error("Failed to reopen bead:", error);
+    throw error;
+  }
+}
+
 export function buildWBSTree(beads: Bead[]): WBSNode[] {
   const nodeMap = new Map<string, WBSNode>();
   const roots: WBSNode[] = [];

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { fetchBeads, buildWBSTree, calculateGanttLayout, calculateStateDistribution, updateBead, createBead, closeBead, type WBSNode, type Bead, type Project, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
+import { fetchBeads, buildWBSTree, calculateGanttLayout, calculateStateDistribution, updateBead, createBead, closeBead, reopenBead, type WBSNode, type Bead, type Project, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -350,6 +350,15 @@ function App() {
     }
   };
 
+  const handleReopenBead = async (beadId: string) => {
+    try {
+      await reopenBead(beadId);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to reopen bead:', error);
+    }
+  };
+
   useEffect(() => {
     if (!loading) {
       const savedScroll = localStorage.getItem("scrollTop");
@@ -546,7 +555,7 @@ function App() {
           </div>
         </div>
       </div>
-      <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} toggleFavorite={toggleFavorite} />
+      <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} toggleFavorite={toggleFavorite} />
       </main>
     </div>
   );
