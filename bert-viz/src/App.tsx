@@ -115,27 +115,73 @@ function App() {
     return applyCollapsedState(processedData.tree);
   }, [processedData.tree, collapsedIds]);
 
-  // Filter Gantt layout to only show visible nodes based on collapsed state
+  // Rebuild Gantt layout for visible nodes with correct row numbering
   const visibleGanttLayout = useMemo(() => {
-    const getVisibleIds = (nodes: WBSNode[]): Set<string> => {
-      const ids = new Set<string>();
+    // Build a map of visible node IDs to their sequential row numbers
+    const visibleRowMap = new Map<string, number>();
+    const visibleDepths: number[] = [];
+    let rowIndex = 0;
+
+    const buildRowMap = (nodes: WBSNode[], depth: number = 0) => {
       nodes.forEach(node => {
-        ids.add(node.id);
+        visibleRowMap.set(node.id, rowIndex);
+        visibleDepths.push(depth);
+        rowIndex++;
         if (node.isExpanded && node.children.length > 0) {
-          getVisibleIds(node.children).forEach(id => ids.add(id));
+          buildRowMap(node.children, depth + 1);
         }
       });
-      return ids;
     };
 
-    const visibleIds = getVisibleIds(treeWithCollapsedState);
-    const visibleItems = processedData.layout.items.filter(item => visibleIds.has(item.bead.id));
-    const visibleConnectors = processedData.layout.connectors; // Keep all connectors for now
+    buildRowMap(treeWithCollapsedState);
+
+    // Filter and renumber items
+    const visibleItems = processedData.layout.items
+      .filter(item => visibleRowMap.has(item.bead.id))
+      .map(item => ({
+        ...item,
+        row: visibleRowMap.get(item.bead.id)!,
+        depth: visibleDepths[visibleRowMap.get(item.bead.id)!]
+      }));
+
+    // Filter and adjust connectors
+    const visibleConnectors = processedData.layout.connectors
+      .filter(conn => {
+        // Only show connectors where both endpoints are visible
+        const fromItem = processedData.layout.items.find(item =>
+          Math.abs(item.x + item.width - conn.from.x) < 1 && Math.abs(item.row * 48 + 24 - conn.from.y) < 1
+        );
+        const toItem = processedData.layout.items.find(item =>
+          Math.abs(item.x - conn.to.x) < 1 && Math.abs(item.row * 48 + 24 - conn.to.y) < 1
+        );
+        return fromItem && toItem && visibleRowMap.has(fromItem.bead.id) && visibleRowMap.has(toItem.bead.id);
+      })
+      .map(conn => {
+        // Adjust connector positions for new row numbers
+        const fromItem = processedData.layout.items.find(item =>
+          Math.abs(item.x + item.width - conn.from.x) < 1 && Math.abs(item.row * 48 + 24 - conn.from.y) < 1
+        );
+        const toItem = processedData.layout.items.find(item =>
+          Math.abs(item.x - conn.to.x) < 1 && Math.abs(item.row * 48 + 24 - conn.to.y) < 1
+        );
+
+        if (fromItem && toItem) {
+          const newFromRow = visibleRowMap.get(fromItem.bead.id)!;
+          const newToRow = visibleRowMap.get(toItem.bead.id)!;
+          return {
+            ...conn,
+            from: { ...conn.from, y: newFromRow * 48 + 24 },
+            to: { ...conn.to, y: newToRow * 48 + 24 }
+          };
+        }
+        return conn;
+      });
 
     return {
-      ...processedData.layout,
       items: visibleItems,
-      connectors: visibleConnectors
+      connectors: visibleConnectors,
+      rowCount: rowIndex,
+      rowDepths: visibleDepths
     };
   }, [processedData.layout, treeWithCollapsedState]);
 
