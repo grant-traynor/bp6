@@ -43,9 +43,14 @@ impl BeadsWatcher {
                             if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
                                 // Handle file deletion (beads daemon deletes and recreates the file)
                                 if matches!(event.kind, notify::EventKind::Remove(_)) {
-                                    eprintln!("  🗑️  File removed, clearing checksum cache");
+                                    eprintln!("  🗑️  File removed, clearing caches");
                                     let mut last_hash = checksum_clone.lock().unwrap();
                                     *last_hash = 0; // Reset checksum so next create triggers update
+
+                                    // Clear the beads file path cache so get_processed_data reads the new file
+                                    let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
+                                    *cache = None;
+                                    eprintln!("  🗑️  Cleared beads file path cache");
                                     return;
                                 }
 
