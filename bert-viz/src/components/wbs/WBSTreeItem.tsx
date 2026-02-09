@@ -45,8 +45,8 @@ export const WBSTreeItem = ({
         style={{ paddingLeft: `${depth * 1.5}rem` }}
         onClick={() => onClick(node as Bead)}
       >
-        <div 
-          className="w-10 shrink-0 flex items-center justify-center h-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" 
+        <div
+          className="w-10 shrink-0 flex items-center justify-center h-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
           onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
         >
           {hasChildren ? (
@@ -54,19 +54,7 @@ export const WBSTreeItem = ({
           ) : null}
         </div>
 
-        <div className="w-24 shrink-0 px-2 flex items-center h-full">
-           <span className={cn(
-             "font-mono text-xs font-black px-2 py-0.5 rounded-md tracking-tighter border-2 shadow-sm transition-all",
-             isSelected ? "bg-[var(--accent-primary)] text-white border-[var(--accent-secondary)] shadow-md scale-105" :
-             node.isCritical ? "bg-[var(--status-blocked)]/20 text-[var(--status-blocked)] border-[var(--status-blocked)]/40" : "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]"
-           )}>
-             {node.id.split('-').pop()}
-           </span>
-        </div>
-
-        <div 
-          className="flex-1 px-4 flex items-center gap-3 truncate h-full"
-        >
+        <div className="w-16 shrink-0 px-2 flex items-center justify-center h-full">
           <span className={cn(
             "shrink-0 font-mono text-xs font-black px-1.5 py-0.5 rounded border shadow-sm transition-colors",
             isSelected ? "bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] border-[var(--accent-primary)]/40" :
@@ -76,6 +64,11 @@ export const WBSTreeItem = ({
           )}>
             P{node.priority}
           </span>
+        </div>
+
+        <div
+          className="flex-1 px-4 flex items-center truncate h-full"
+        >
           <span className={cn(
             "text-sm truncate font-black tracking-tight transition-colors",
             isSelected ? "text-[var(--accent-primary)]" :
@@ -83,6 +76,9 @@ export const WBSTreeItem = ({
           )}>
             {node.title}
           </span>
+        </div>
+
+        <div className="w-20 shrink-0 px-2 flex items-center justify-center h-full">
           {node.issue_type !== 'task' && (
             <span className={cn(
               "text-xs font-black px-1.5 py-0.5 rounded-md uppercase tracking-widest border border-[var(--border-primary)] shadow-sm transition-all",
@@ -91,6 +87,16 @@ export const WBSTreeItem = ({
               {node.issue_type}
             </span>
           )}
+        </div>
+
+        <div className="w-24 shrink-0 px-2 flex items-center h-full">
+          <span className={cn(
+            "font-mono text-xs font-black px-2 py-0.5 rounded-md tracking-tighter border-2 shadow-sm transition-all",
+            isSelected ? "bg-[var(--accent-primary)] text-white border-[var(--accent-secondary)] shadow-md scale-105" :
+            node.isCritical ? "bg-[var(--status-blocked)]/20 text-[var(--status-blocked)] border-[var(--status-blocked)]/40" : "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]"
+          )}>
+            {node.id.split('-').pop()}
+          </span>
         </div>
       </div>
     </div>

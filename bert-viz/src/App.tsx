@@ -687,8 +687,10 @@ function App() {
           <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
             <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em]">
               <div className="w-10 shrink-0" />
-              <div className="w-28 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">ID</div>
-              <div className="flex-1 px-4">Name</div>
+              <div className="w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">Priority</div>
+              <div className="flex-1 px-4 border-r-2 border-[var(--border-primary)]/50">Name</div>
+              <div className="w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">Type</div>
+              <div className="w-24 shrink-0 px-2">ID</div>
             </div>
             <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
               <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
@@ -709,10 +711,10 @@ function App() {
               </div>
             </div>
             <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
-              <div className="relative" style={{ height: Math.max(800, processedData.layout.rowCount * 48), width: 5000 * zoom }}>
+              <div className="relative" style={{ height: Math.max(800, visibleGanttLayout.rowCount * 48), width: 5000 * zoom }}>
                  {loading && <GanttSkeleton />}
                  <div className="absolute inset-0 pointer-events-none">
-                    {processedData.layout.rowDepths.map((depth, i) => (
+                    {visibleGanttLayout.rowDepths.map((depth, i) => (
                       <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
                     ))}
                     <div className="absolute inset-0 flex">
@@ -722,12 +724,12 @@ function App() {
                     </div>
                  </div>
                <svg className="absolute inset-0 pointer-events-none overflow-visible" style={{ width: '100%', height: '100%' }}>
-                  {processedData.layout.connectors.map((c: any, i: number) => (
-                    <path key={i} d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`} fill="none" stroke={c.isCritical ? "var(--status-blocked)" : "var(--text-muted)"} strokeWidth={c.isCritical ? 2.5 : 1.5} strokeDasharray={c.isCritical ? "0" : "4 2"} opacity={0.8} />
+                  {visibleGanttLayout.connectors.map((c: any) => (
+                    <path key={`${c.from.x}-${c.from.y}-${c.to.x}-${c.to.y}`} d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`} fill="none" stroke={c.isCritical ? "var(--status-blocked)" : "var(--text-muted)"} strokeWidth={c.isCritical ? 2.5 : 1.5} strokeDasharray={c.isCritical ? "0" : "4 2"} opacity={0.8} />
                   ))}
                </svg>
-               {visibleGanttLayout.items.map((item: any, i: number) => (
-                 <div key={i} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
+               {visibleGanttLayout.items.map((item: any) => (
+                 <div key={item.bead.id} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
                     <GanttBar item={item} onClick={handleBeadClick} isSelected={selectedBead?.id === item.bead.id} />
                  </div>
                ))}
