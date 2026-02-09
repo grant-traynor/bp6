@@ -13,7 +13,9 @@ use tauri::{Emitter, AppHandle, Manager};
 struct BeadsWatcher {
     watcher: notify::RecommendedWatcher,
     current_path: Option<PathBuf>,
+    #[allow(dead_code)] // Used in watcher closure
     last_checksum: Arc<Mutex<u64>>,
+    #[allow(dead_code)] // Used in watcher closure
     last_emit: Arc<Mutex<Instant>>,
 }
 
