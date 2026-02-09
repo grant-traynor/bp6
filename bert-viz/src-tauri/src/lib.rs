@@ -490,75 +490,31 @@ pub fn run() {
             let handle = app.handle().clone();
             let proj_handle = app.handle().clone();
 
-            // Watch beads file with debouncing and content checksumming
-            if let Some(path) = find_beads_file() {
-                let parent_path = path.parent().unwrap().to_path_buf();
-                let last_emit = Arc::new(Mutex::new(Instant::now()));
-                let last_checksum = Arc::new(Mutex::new(0u64));
+            // Poll beads file periodically for changes (works across project switches)
+            let last_checksum = Arc::new(Mutex::new(0u64));
+            let poll_handle = handle.clone();
 
-                let watch_target = path.clone();
-                eprintln!("🔍 Watching target: {}", watch_target.display());
-                let mut watcher = notify::RecommendedWatcher::new(move |res: std::result::Result<notify::Event, notify::Error>| {
-                    match res {
-                        Ok(event) => {
-                            eprintln!("📁 Event received: {:?}", event.kind);
-                            for p in &event.paths {
-                                eprintln!("  Path: {}", p.display());
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_millis(500)); // Poll every 500ms
+
+                    if let Some(current_path) = find_beads_file() {
+                        if let Ok(bytes) = std::fs::read(&current_path) {
+                            let mut hasher = DefaultHasher::new();
+                            bytes.hash(&mut hasher);
+                            let new_checksum = hasher.finish();
+
+                            let mut last_hash = last_checksum.lock().unwrap();
+
+                            if *last_hash != new_checksum {
+                                *last_hash = new_checksum;
+                                let _ = poll_handle.emit("beads-updated", ());
+                                eprintln!("📊 Beads file changed (polling), emitting update");
                             }
-                            eprintln!("  Target: {}", watch_target.display());
-
-                            // Check if event affects the specific target file (full path comparison)
-                            let affects_target = event.paths.iter().any(|p| p == &watch_target);
-                            eprintln!("  Affects target: {}", affects_target);
-
-                            if affects_target {
-                                // Single non-blocking read attempt
-                                if let Ok(bytes) = std::fs::read(&watch_target) {
-                                    // Calculate checksum of the file content
-                                    let mut hasher = DefaultHasher::new();
-                                    bytes.hash(&mut hasher);
-                                    let new_checksum = hasher.finish();
-
-                                    let mut last_hash = last_checksum.lock().unwrap();
-                                    eprintln!("  Checksum: old={}, new={}", *last_hash, new_checksum);
-
-                                    // Only update if content has actually changed
-                                    if *last_hash != new_checksum {
-                                        *last_hash = new_checksum;
-
-                                        // Debounce: only emit if at least 250ms have passed since last emit
-                                        let mut last = last_emit.lock().unwrap();
-                                        let now = Instant::now();
-                                        let elapsed = now.duration_since(*last).as_millis();
-                                        eprintln!("  Debounce: elapsed={}ms, threshold=250ms", elapsed);
-                                        if now.duration_since(*last) >= Duration::from_millis(250) {
-                                            *last = now;
-                                            eprintln!("  ✅ EMITTING beads-updated event!");
-                                            let _ = handle.emit("beads-updated", ());
-                                        } else {
-                                            eprintln!("  ⏱️  Debounced (too soon)");
-                                        }
-                                    } else {
-                                        eprintln!("  ⏭️  Skipped (same checksum)");
-                                    }
-                                } else {
-                                    eprintln!("  ❌ Failed to read file");
-                                }
-                                // If read fails, frontend get_beads() will retry - no problem
-                            }
-                        },
-                        Err(e) => eprintln!("Beads file watch error: {:?}", e),
+                        }
                     }
-                }, Config::default()).unwrap();
-
-                // Watch the parent directory (either .beads or beads-sync/.beads)
-                if let Err(e) = watcher.watch(&parent_path, RecursiveMode::Recursive) {
-                    eprintln!("Failed to watch beads directory {}: {:?}", parent_path.display(), e);
-                } else {
-                    println!("Watching beads file at: {}", path.display());
                 }
-                std::mem::forget(watcher);
-            }
+            });
 
             // Watch projects file with debouncing
             if let Ok(proj_path) = get_projects_path() {
