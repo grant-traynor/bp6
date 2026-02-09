@@ -5,13 +5,14 @@ use std::hash::{Hash, Hasher};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, Config};
 use tauri::{Emitter, AppHandle, Manager};
 
 // Global cache for beads file path (avoid expensive subprocess calls)
-static BEADS_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+// Use Mutex<Option> instead of OnceLock so we can clear it when switching projects
+static BEADS_FILE_PATH_CACHE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 // Shared state for the file watcher
 struct BeadsWatcher {
@@ -250,9 +251,13 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
     let start_time = std::time::Instant::now();
 
     // 1. Load beads from file (use cached path to avoid expensive subprocess)
-    let beads_path = BEADS_FILE_PATH.get_or_init(|| {
-        find_beads_file().expect("Could not locate .beads/issues.jsonl in any parent directory")
-    });
+    let beads_path = {
+        let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
+        if cache.is_none() {
+            *cache = find_beads_file();
+        }
+        cache.clone().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?
+    };
 
     eprintln!("📖 get_processed_data: Reading from {}", beads_path.display());
     let load_start = std::time::Instant::now();
@@ -1777,6 +1782,13 @@ fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
         });
     }
     save_projects(projects)?;
+
+    // Clear cached beads file path when switching projects
+    {
+        let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
+        *cache = None;
+        eprintln!("🗑️  Cleared beads file path cache for new project");
+    }
 
     // Update watcher to monitor new project's beads file
     if let Some(new_beads_path) = find_beads_file() {
