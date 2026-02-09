@@ -46,6 +46,7 @@ function App() {
   const [zoom, setZoom] = useState(1);
   const [isDark, setIsDark] = useState(true);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
@@ -138,7 +139,7 @@ function App() {
     }, 150); // 150ms debounce for filter text changes
 
     return () => clearTimeout(debounceTimeout);
-  }, [filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter, currentProjectPath]);
+  }, [filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter, currentProjectPath, refetchTrigger]);
 
   useEffect(() => {
     // Prevent double initialization (React 19 Strict Mode runs effects twice)
@@ -167,7 +168,11 @@ function App() {
       }
     };
     init();
-    const unlistenBeads = listen("beads-updated", () => loadData());
+    const unlistenBeads = listen("beads-updated", () => {
+      console.log('🎉 beads-updated event received, triggering refetch');
+      loadData();
+      setRefetchTrigger(prev => prev + 1); // Force processedData refetch
+    });
     const unlistenProjs = listen("projects-updated", () => loadProjects());
     return () => {
       unlistenBeads.then(f => f());
