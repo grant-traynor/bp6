@@ -401,6 +401,19 @@ function App() {
     }
   }, [loading]);
 
+  // Restore scroll position after processedData updates
+  useEffect(() => {
+    const savedScroll = localStorage.getItem("scrollTop");
+    if (savedScroll && !loading && !processingData) {
+      const top = parseInt(savedScroll);
+      // Use setTimeout to ensure DOM has updated
+      setTimeout(() => {
+        if (scrollRefWBS.current) scrollRefWBS.current.scrollTop = top;
+        if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = top;
+      }, 0);
+    }
+  }, [processedData, loading, processingData]);
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
     if (activeScrollSource.current && activeScrollSource.current !== target) return;
