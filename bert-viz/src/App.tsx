@@ -167,16 +167,33 @@ function App() {
         setLoading(false);
       }
     };
+
+    console.log('🔧 Setting up event listeners...');
     init();
-    const unlistenBeads = listen("beads-updated", () => {
-      console.log('🎉 beads-updated event received, triggering refetch');
+
+    listen("beads-updated", (event) => {
+      console.log('🎉 beads-updated event received!', event);
       loadData();
-      setRefetchTrigger(prev => prev + 1); // Force processedData refetch
+      setRefetchTrigger(prev => prev + 1);
+    }).then((unlisten) => {
+      console.log('✅ beads-updated listener registered');
+      return unlisten;
+    }).catch((err) => {
+      console.error('❌ Failed to register beads-updated listener:', err);
     });
-    const unlistenProjs = listen("projects-updated", () => loadProjects());
+
+    listen("projects-updated", (event) => {
+      console.log('🎉 projects-updated event received!', event);
+      loadProjects();
+    }).then((unlisten) => {
+      console.log('✅ projects-updated listener registered');
+      return unlisten;
+    }).catch((err) => {
+      console.error('❌ Failed to register projects-updated listener:', err);
+    });
+
     return () => {
-      unlistenBeads.then(f => f());
-      unlistenProjs.then(f => f());
+      console.log('🧹 Cleaning up event listeners');
     };
   }, [handleOpenProject, loadData, loadProjects]);
 
