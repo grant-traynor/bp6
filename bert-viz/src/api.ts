@@ -84,7 +84,7 @@ export async function fetchBeads(): Promise<Bead[]> {
 
 export async function updateBead(bead: Bead): Promise<void> {
   try {
-    await invoke("update_bead", { updated_bead: bead });
+    await invoke("update_bead", { updatedBead: bead });
   } catch (error) {
     console.error("Failed to update bead:", error);
     throw error;
@@ -94,7 +94,7 @@ export async function updateBead(bead: Bead): Promise<void> {
 export async function createBead(bead: Bead): Promise<string> {
   try {
     console.log('🔧 api.createBead: Invoking Tauri command with bead:', bead);
-    const result = await invoke<string>("create_bead", { new_bead: bead });
+    const result = await invoke<string>("create_bead", { newBead: bead });
     console.log('🔧 api.createBead: Tauri returned ID:', result);
     return result;
   } catch (error) {
