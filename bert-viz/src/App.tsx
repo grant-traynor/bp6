@@ -103,6 +103,18 @@ function App() {
   });
   const [processingData, setProcessingData] = useState(false);
 
+  // Apply collapsed state to tree on the frontend
+  const treeWithCollapsedState = useMemo(() => {
+    const applyCollapsedState = (nodes: WBSNode[]): WBSNode[] => {
+      return nodes.map(node => ({
+        ...node,
+        isExpanded: !collapsedIds.has(node.bead.id),
+        children: applyCollapsedState(node.children)
+      }));
+    };
+    return applyCollapsedState(processedData.tree);
+  }, [processedData.tree, collapsedIds]);
+
   // Fetch processed data from Rust backend when filters change
   useEffect(() => {
     // Debounce filter text to avoid excessive backend calls while typing
@@ -482,18 +494,6 @@ function App() {
       if (selected && typeof selected === 'string') await handleOpenProject(selected);
     } catch (error) { alert(`Failed to select project: ${error}`); }
   };
-
-  // Apply collapsed state to tree on the frontend
-  const treeWithCollapsedState = useMemo(() => {
-    const applyCollapsedState = (nodes: WBSNode[]): WBSNode[] => {
-      return nodes.map(node => ({
-        ...node,
-        isExpanded: !collapsedIds.has(node.bead.id),
-        children: applyCollapsedState(node.children)
-      }));
-    };
-    return applyCollapsedState(processedData.tree);
-  }, [processedData.tree, collapsedIds]);
 
   const favoriteBeads = useMemo(() => beads.filter(b => b.is_favorite), [beads]);
   const favoriteProjects = useMemo(() => projects.filter(p => p.is_favorite), [projects]);
