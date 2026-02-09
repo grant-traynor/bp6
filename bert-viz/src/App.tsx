@@ -84,12 +84,53 @@ function App() {
   };
 
   const processedData = useMemo(() => {
+    // Helper: Check if bead passes time-based filter for closed tasks
+    const passesClosedTimeFilter = (bead: Bead): boolean => {
+      // Only filter closed tasks
+      if (bead.status !== 'closed') return true;
+
+      // 'all' filter shows all closed tasks
+      if (closedTimeFilter === 'all') return true;
+
+      // If no closed_at timestamp, include it (benefit of the doubt)
+      if (!bead.closed_at) return true;
+
+      try {
+        const closedDate = new Date(bead.closed_at);
+        const now = new Date();
+
+        // Check for invalid dates
+        if (isNaN(closedDate.getTime())) return true;
+
+        const hoursAgo = (now.getTime() - closedDate.getTime()) / (1000 * 60 * 60);
+
+        switch (closedTimeFilter) {
+          case '1h': return hoursAgo <= 1;
+          case '6h': return hoursAgo <= 6;
+          case '24h': return hoursAgo <= 24;
+          case '7d': return hoursAgo <= 168; // 7 * 24
+          case '30d': return hoursAgo <= 720; // 30 * 24
+          case 'older_than_6h': return hoursAgo > 6;
+          default: return true;
+        }
+      } catch (e) {
+        // If date parsing fails, include the bead
+        return true;
+      }
+    };
+
     let filtered: Bead[] = [];
-    if (!filterText && !hideClosed) {
+    if (!filterText && !hideClosed && closedTimeFilter === 'all') {
       filtered = beads;
     } else {
       const matches = beads.filter(b => {
+        // Apply hideClosed filter
         if (hideClosed && b.status === 'closed') return false;
+
+        // Apply time-based filter for closed tasks
+        if (!passesClosedTimeFilter(b)) return false;
+
+        // Apply text search filter
         if (!filterText) return true;
         const search = filterText.toLowerCase();
         return (
@@ -127,7 +168,7 @@ function App() {
     const layout = calculateGanttLayout(beads, wbsTree, zoom);
     const distributions = calculateStateDistribution(layout.items, zoom);
     return { tree: wbsTree, layout, distributions };
-  }, [beads, filterText, zoom, collapsedIds, hideClosed, includeHierarchy]);
+  }, [beads, filterText, zoom, collapsedIds, hideClosed, includeHierarchy, closedTimeFilter]);
 
   useEffect(() => {
     const init = async () => {
