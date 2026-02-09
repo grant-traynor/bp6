@@ -108,12 +108,36 @@ function App() {
     const applyCollapsedState = (nodes: WBSNode[]): WBSNode[] => {
       return nodes.map(node => ({
         ...node,
-        isExpanded: !collapsedIds.has(node.bead.id),
+        isExpanded: !collapsedIds.has(node.id),
         children: applyCollapsedState(node.children)
       }));
     };
     return applyCollapsedState(processedData.tree);
   }, [processedData.tree, collapsedIds]);
+
+  // Filter Gantt layout to only show visible nodes based on collapsed state
+  const visibleGanttLayout = useMemo(() => {
+    const getVisibleIds = (nodes: WBSNode[]): Set<string> => {
+      const ids = new Set<string>();
+      nodes.forEach(node => {
+        ids.add(node.id);
+        if (node.isExpanded && node.children.length > 0) {
+          getVisibleIds(node.children).forEach(id => ids.add(id));
+        }
+      });
+      return ids;
+    };
+
+    const visibleIds = getVisibleIds(treeWithCollapsedState);
+    const visibleItems = processedData.layout.items.filter(item => visibleIds.has(item.bead.id));
+    const visibleConnectors = processedData.layout.connectors; // Keep all connectors for now
+
+    return {
+      ...processedData.layout,
+      items: visibleItems,
+      connectors: visibleConnectors
+    };
+  }, [processedData.layout, treeWithCollapsedState]);
 
   // Fetch processed data from Rust backend when filters change
   useEffect(() => {
@@ -234,7 +258,7 @@ function App() {
     const findParents = (nodes: WBSNode[]) => {
       nodes.forEach(node => {
         if (node.children.length > 0) {
-          allParentIds.add(node.bead.id);
+          allParentIds.add(node.id);
           findParents(node.children);
         }
       });
@@ -656,7 +680,7 @@ function App() {
                     <path key={i} d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`} fill="none" stroke={c.isCritical ? "var(--status-blocked)" : "var(--text-muted)"} strokeWidth={c.isCritical ? 2.5 : 1.5} strokeDasharray={c.isCritical ? "0" : "4 2"} opacity={0.8} />
                   ))}
                </svg>
-               {processedData.layout.items.map((item: any, i: number) => (
+               {visibleGanttLayout.items.map((item: any, i: number) => (
                  <div key={i} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
                     <GanttBar item={item} onClick={handleBeadClick} isSelected={selectedBead?.id === item.bead.id} />
                  </div>
