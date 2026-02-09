@@ -148,17 +148,23 @@ export const Sidebar = ({
                 <option value="epic">Epic</option>
               </select>
             </div>
-            <div className="flex-1 flex flex-col gap-2.5">
+            <div className="flex-1 flex flex-col gap-2.5 min-w-0">
               <span className="text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.25em] pl-1">Parent</span>
               <select
                 value={formData.parent || ""}
                 onChange={e => setFormData({...formData, parent: e.target.value})}
-                className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
+                className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm max-w-full truncate"
+                title="Only Epics and Features can be parents"
               >
                 <option value="">None</option>
-                {beads.filter(b => b.issue_type === 'epic' || b.issue_type === 'feature').map(b => (
-                  <option key={b.id} value={b.id}>{b.id}: {b.title}</option>
-                ))}
+                {beads
+                  .filter(b => b.issue_type === 'epic' || b.issue_type === 'feature')
+                  .filter(b => !isCreating || b.id !== formData.id) // Don't show self as parent
+                  .map(b => (
+                    <option key={b.id} value={b.id}>
+                      {b.id}: {b.title.length > 30 ? b.title.substring(0, 30) + '...' : b.title}
+                    </option>
+                  ))}
               </select>
             </div>
           </div>
