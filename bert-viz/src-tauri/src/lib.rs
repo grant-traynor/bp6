@@ -41,23 +41,43 @@ impl BeadsWatcher {
                         // Get first path from event
                         if let Some(path) = event.paths.first() {
                             if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-                                if let Ok(bytes) = std::fs::read(path) {
-                                    let mut hasher = DefaultHasher::new();
-                                    bytes.hash(&mut hasher);
-                                    let new_checksum = hasher.finish();
-
+                                // Handle file deletion (beads daemon deletes and recreates the file)
+                                if matches!(event.kind, notify::EventKind::Remove(_)) {
+                                    eprintln!("  🗑️  File removed, clearing checksum cache");
                                     let mut last_hash = checksum_clone.lock().unwrap();
+                                    *last_hash = 0; // Reset checksum so next create triggers update
+                                    return;
+                                }
 
-                                    if *last_hash != new_checksum {
-                                        *last_hash = new_checksum;
+                                // Handle file creation and modification
+                                // (beads daemon creates new file after deletion)
+                                if matches!(event.kind, notify::EventKind::Create(_) | notify::EventKind::Modify(_)) {
+                                    // Add a small delay for file creation to complete
+                                    if matches!(event.kind, notify::EventKind::Create(_)) {
+                                        std::thread::sleep(Duration::from_millis(50));
+                                    }
 
-                                        let mut last = emit_clone.lock().unwrap();
-                                        let now = Instant::now();
-                                        if now.duration_since(*last) >= Duration::from_millis(250) {
-                                            *last = now;
-                                            let _ = handle.emit("beads-updated", ());
-                                            eprintln!("  ✅ Emitted beads-updated");
+                                    if let Ok(bytes) = std::fs::read(path) {
+                                        let mut hasher = DefaultHasher::new();
+                                        bytes.hash(&mut hasher);
+                                        let new_checksum = hasher.finish();
+
+                                        let mut last_hash = checksum_clone.lock().unwrap();
+
+                                        if *last_hash != new_checksum {
+                                            *last_hash = new_checksum;
+
+                                            let mut last = emit_clone.lock().unwrap();
+                                            let now = Instant::now();
+                                            if now.duration_since(*last) >= Duration::from_millis(250) {
+                                                *last = now;
+                                                let _ = handle.emit("beads-updated", ());
+                                                eprintln!("  ✅ Emitted beads-updated ({})",
+                                                    if matches!(event.kind, notify::EventKind::Create(_)) { "create" } else { "modify" });
+                                            }
                                         }
+                                    } else {
+                                        eprintln!("  ⚠️  Failed to read file, might be mid-write");
                                     }
                                 }
                             }
