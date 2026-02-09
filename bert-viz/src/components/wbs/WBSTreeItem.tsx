@@ -21,10 +21,12 @@ export const WBSTreeItem = ({
   const hasChildren = node.children.length > 0;
 
   return (
-    <div className={cn(
-      "select-none h-[48px] flex flex-col justify-center border-b border-[var(--border-primary)]/50 relative transition-colors duration-200",
-      isSelected ? "bg-[var(--accent-primary)]/10" : ""
-    )}
+    <div
+      data-bead-id={node.id}
+      className={cn(
+        "select-none h-[48px] flex flex-col justify-center border-b border-[var(--border-primary)]/50 relative transition-colors duration-200",
+        isSelected ? "bg-[var(--accent-primary)]/10" : ""
+      )}
       style={{ backgroundColor: !isSelected ? `var(--level-${Math.min(depth, 4)})` : undefined }}
     >
       {Array.from({ length: depth }).map((_, i) => (

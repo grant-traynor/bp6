@@ -54,6 +54,7 @@ function App() {
   const scrollRefGanttHeader = useRef<HTMLDivElement>(null);
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
   const hasInitialized = useRef(false);
+  const lastToggledNode = useRef<{ id: string; offsetTop: number } | null>(null);
 
   const loadProjects = useCallback(async () => {
     const data = await fetchProjects();
@@ -198,6 +199,15 @@ function App() {
   }, [handleOpenProject, loadData, loadProjects]);
 
   const toggleNode = useCallback((id: string) => {
+    // Find the DOM element for this node to track its position
+    const element = document.querySelector(`[data-bead-id="${id}"]`);
+    if (element && scrollRefWBS.current) {
+      const elementRect = element.getBoundingClientRect();
+      const containerRect = scrollRefWBS.current.getBoundingClientRect();
+      const offsetTop = elementRect.top - containerRect.top;
+      lastToggledNode.current = { id, offsetTop };
+    }
+
     setCollapsedIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -403,14 +413,37 @@ function App() {
 
   // Restore scroll position after processedData updates
   useEffect(() => {
-    const savedScroll = localStorage.getItem("scrollTop");
-    if (savedScroll && !loading && !processingData) {
-      const top = parseInt(savedScroll);
-      // Use setTimeout to ensure DOM has updated
+    if (loading || processingData) return;
+
+    // If we just toggled a node, adjust scroll to keep it in the same visual position
+    if (lastToggledNode.current) {
       setTimeout(() => {
-        if (scrollRefWBS.current) scrollRefWBS.current.scrollTop = top;
-        if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = top;
+        const { id, offsetTop } = lastToggledNode.current!;
+        const element = document.querySelector(`[data-bead-id="${id}"]`);
+        if (element && scrollRefWBS.current) {
+          const elementRect = element.getBoundingClientRect();
+          const containerRect = scrollRefWBS.current.getBoundingClientRect();
+          const currentOffsetTop = elementRect.top - containerRect.top;
+          const scrollAdjustment = currentOffsetTop - offsetTop;
+
+          const newScrollTop = scrollRefWBS.current.scrollTop + scrollAdjustment;
+          scrollRefWBS.current.scrollTop = newScrollTop;
+          if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = newScrollTop;
+
+          localStorage.setItem("scrollTop", newScrollTop.toString());
+        }
+        lastToggledNode.current = null;
       }, 0);
+    } else {
+      // Normal scroll restoration
+      const savedScroll = localStorage.getItem("scrollTop");
+      if (savedScroll) {
+        const top = parseInt(savedScroll);
+        setTimeout(() => {
+          if (scrollRefWBS.current) scrollRefWBS.current.scrollTop = top;
+          if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = top;
+        }, 0);
+      }
     }
   }, [processedData, loading, processingData]);
 
