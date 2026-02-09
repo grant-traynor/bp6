@@ -238,6 +238,133 @@ fn find_beads_file() -> Option<PathBuf> {
     None
 }
 
+// ============================================================================
+// Main Tauri Command for Processed Data (bp6-07y.5.2)
+// ============================================================================
+
+#[tauri::command]
+fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
+    // 1. Load beads from file
+    let beads_path = find_beads_file()
+        .ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
+
+    eprintln!("📖 get_processed_data: Reading from {}", beads_path.display());
+
+    let file = File::open(&beads_path).map_err(|e| format!("Failed to open issues.jsonl: {}", e))?;
+    let reader = BufReader::new(file);
+
+    let mut beads: Vec<Bead> = Vec::new();
+    for (index, line) in reader.lines().enumerate() {
+        let line = line.map_err(|e| format!("Error reading line {}: {}", index + 1, e))?;
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let bead: Bead = serde_json::from_str(&line)
+            .map_err(|e| format!("Failed to parse bead at line {}: {}", index + 1, e))?;
+        beads.push(bead);
+    }
+
+    // 2. Apply filters
+    let mut filtered = beads.clone();
+
+    // Apply status and time filters
+    filtered = filter_by_status_and_time(&filtered, params.hide_closed, &params.closed_time_filter);
+
+    // Apply text search
+    filtered = filter_by_text(&filtered, &params.filter_text);
+
+    // Include hierarchy if needed
+    if !params.filter_text.is_empty() && params.include_hierarchy {
+        filtered = include_hierarchy(filtered, &beads, &params.filter_text, params.include_hierarchy);
+    }
+
+    // 3. Build dependency graph
+    let graph = build_dependency_graph(&filtered);
+
+    // 4. Build WBS tree
+    let mut tree = build_wbs_tree(&filtered);
+
+    // 5. Sort siblings by dependencies
+    tree = sort_wbs_tree_siblings(tree, &graph);
+
+    // Apply collapsed state to tree
+    fn apply_collapsed_state(nodes: &mut [WBSNode], collapsed_ids: &[String]) {
+        for node in nodes {
+            if collapsed_ids.contains(&node.bead.id) {
+                node.is_expanded = false;
+            }
+            if !node.children.is_empty() {
+                apply_collapsed_state(&mut node.children, collapsed_ids);
+            }
+        }
+    }
+    apply_collapsed_state(&mut tree, &params.collapsed_ids);
+
+    // 6. Build blocks and successors maps for Gantt layout
+    let mut blocks_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut successors_map: HashMap<String, Vec<String>> = HashMap::new();
+
+    for bead in &filtered {
+        for dep in &bead.dependencies {
+            if dep.r#type == "blocks" {
+                // dep.depends_on_id blocks bead.id
+                blocks_map
+                    .entry(bead.id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(dep.depends_on_id.clone());
+
+                successors_map
+                    .entry(dep.depends_on_id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(bead.id.clone());
+            }
+        }
+    }
+
+    // 7. Calculate earliest start times (X positions)
+    let x_map = calculate_earliest_start_times(&filtered, &blocks_map);
+
+    // 8. Calculate node ranges (position and width)
+    let mut range_cache: HashMap<String, NodeRange> = HashMap::new();
+    calculate_node_ranges(&tree, &x_map, &mut range_cache);
+
+    // 9. Find critical path
+    let critical_path = find_critical_path(&filtered, &successors_map);
+
+    // 10. Mark critical nodes in tree
+    fn mark_critical_nodes(nodes: &mut [WBSNode], critical_path: &HashSet<String>) {
+        for node in nodes {
+            if critical_path.contains(&node.bead.id) {
+                node.is_critical = true;
+            }
+            mark_critical_nodes(&mut node.children, critical_path);
+        }
+    }
+    mark_critical_nodes(&mut tree, &critical_path);
+
+    // 11. Generate Gantt layout (items and connectors)
+    let layout = generate_gantt_layout(
+        &filtered,
+        &tree,
+        &x_map,
+        &range_cache,
+        &critical_path,
+        params.zoom,
+    );
+
+    // 12. Calculate state distributions
+    let distributions = calculate_state_distribution(&layout.items, params.zoom);
+
+    // 13. Return ProcessedData
+    Ok(ProcessedData {
+        tree,
+        layout,
+        distributions,
+    })
+}
+
 #[tauri::command]
 fn get_beads() -> Result<Vec<Bead>, String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
@@ -1676,7 +1803,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            get_beads, update_bead, create_bead, close_bead, reopen_bead, claim_bead,
+            get_beads, get_processed_data, update_bead, create_bead, close_bead, reopen_bead, claim_bead,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir
         ])
