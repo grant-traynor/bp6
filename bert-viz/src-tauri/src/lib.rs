@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::fs::File;
@@ -543,6 +544,80 @@ fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> 
     Ok(new_id)
 }
 
+// ============================================================================
+// Data Structures for Processed Output (bp6-07y.1)
+// ============================================================================
+
+/// WBSNode represents a node in the Work Breakdown Structure tree.
+/// Extends Bead with tree-specific metadata for hierarchical display.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WBSNode {
+    // Flatten all Bead fields
+    #[serde(flatten)]
+    pub bead: Bead,
+
+    // Tree structure
+    pub children: Vec<WBSNode>,
+
+    // UI state flags
+    pub is_expanded: bool,
+    pub is_blocked: bool,
+    pub is_critical: bool,
+}
+
+/// Point represents an (x, y) coordinate for Gantt chart rendering.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// GanttItem represents a single bead's position in the Gantt chart.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GanttItem {
+    pub bead: Bead,
+    pub x: f64,
+    pub width: f64,
+    pub row: usize,
+    pub depth: usize,
+    pub is_critical: bool,
+    pub is_blocked: bool,
+}
+
+/// GanttConnector represents a dependency line between two beads in the Gantt chart.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GanttConnector {
+    pub from: Point,
+    pub to: Point,
+    pub is_critical: bool,
+}
+
+/// GanttLayout contains all computed layout data for Gantt chart rendering.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GanttLayout {
+    pub items: Vec<GanttItem>,
+    pub connectors: Vec<GanttConnector>,
+    pub row_count: usize,
+    pub row_depths: Vec<usize>,
+}
+
+/// BucketDistribution represents status counts for a time bucket in the Gantt header.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BucketDistribution {
+    pub open: usize,
+    pub in_progress: usize,
+    pub blocked: usize,
+    pub closed: usize,
+}
+
+/// ProcessedData is the top-level response structure containing all processed data.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ProcessedData {
+    pub tree: Vec<WBSNode>,
+    pub layout: GanttLayout,
+    pub distributions: Vec<BucketDistribution>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Project {
     pub name: String,
@@ -550,6 +625,382 @@ pub struct Project {
     #[serde(default)]
     pub is_favorite: bool,
     pub last_opened: Option<String>,
+}
+
+// ============================================================================
+// WBS Tree Building Algorithms (bp6-07y.2)
+// ============================================================================
+
+/// DependencyGraph contains the graph representation of blocking dependencies.
+/// Used for topological sorting and building the WBS tree.
+#[derive(Debug, Clone)]
+struct DependencyGraph {
+    /// Map from bead ID to list of beads it blocks (successors)
+    blocks: HashMap<String, Vec<String>>,
+    /// Map from bead ID to list of beads that block it (predecessors)
+    blocked_by: HashMap<String, Vec<String>>,
+}
+
+impl DependencyGraph {
+    fn new() -> Self {
+        DependencyGraph {
+            blocks: HashMap::new(),
+            blocked_by: HashMap::new(),
+        }
+    }
+}
+
+/// Construct a dependency graph from bead dependencies.
+/// Separates parent-child relationships from blocking dependencies.
+///
+/// Returns a DependencyGraph with blocks and blocked_by maps populated.
+fn build_dependency_graph(beads: &[Bead]) -> DependencyGraph {
+    let mut graph = DependencyGraph::new();
+
+    // Initialize empty vectors for all beads
+    for bead in beads {
+        graph.blocks.insert(bead.id.clone(), Vec::new());
+        graph.blocked_by.insert(bead.id.clone(), Vec::new());
+    }
+
+    // Build the graph from dependencies
+    for bead in beads {
+        for dep in &bead.dependencies {
+            if dep.r#type == "blocks" {
+                // dep.depends_on_id blocks bead.id
+                // So: depends_on_id -> bead.id (edge in graph)
+                let blocker_id = dep.depends_on_id.clone();
+                let blocked_id = bead.id.clone();
+
+                // Add to blocks map (blocker blocks blocked_id)
+                graph.blocks
+                    .entry(blocker_id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(blocked_id.clone());
+
+                // Add to blocked_by map (blocked_id is blocked by blocker)
+                graph.blocked_by
+                    .entry(blocked_id)
+                    .or_insert_with(Vec::new)
+                    .push(blocker_id);
+            }
+        }
+    }
+
+    graph
+}
+
+/// Topologically sort nodes using Kahn's Algorithm.
+///
+/// This handles circular dependencies by appending remaining nodes at the end.
+/// Secondary sort by priority for deterministic ordering.
+///
+/// # Arguments
+/// * `nodes` - The WBSNodes to sort (typically siblings at the same tree level)
+/// * `bead_ids` - Set of bead IDs that are part of this sibling group
+/// * `graph` - The dependency graph for all beads
+///
+/// # Returns
+/// A topologically sorted vector of WBSNodes.
+fn topological_sort(
+    nodes: Vec<WBSNode>,
+    bead_ids: &HashSet<String>,
+    graph: &DependencyGraph,
+) -> Vec<WBSNode> {
+    if nodes.len() <= 1 {
+        return nodes;
+    }
+
+    // Build a map for quick lookup
+    let node_map: HashMap<String, WBSNode> =
+        nodes.into_iter().map(|n| (n.bead.id.clone(), n)).collect();
+
+    // Calculate in-degree for nodes in this sibling group
+    let mut in_degree: HashMap<String, usize> = HashMap::new();
+
+    for id in bead_ids {
+        // Count how many blockers from THIS sibling group block this node
+        let empty_vec = Vec::new();
+        let blockers = graph.blocked_by.get(id).unwrap_or(&empty_vec);
+        let count = blockers.iter().filter(|b| bead_ids.contains(*b)).count();
+        in_degree.insert(id.clone(), count);
+    }
+
+    // Initialize queue with nodes that have in-degree 0
+    let mut initial_nodes: Vec<&WBSNode> = node_map
+        .values()
+        .filter(|n| *in_degree.get(&n.bead.id).unwrap_or(&0) == 0)
+        .collect();
+
+    // Sort by priority for deterministic ordering (ascending: P0 < P1 < P2)
+    initial_nodes.sort_by_key(|n| n.bead.priority);
+
+    let mut queue: Vec<String> = initial_nodes.iter().map(|n| n.bead.id.clone()).collect();
+    let mut result: Vec<WBSNode> = Vec::new();
+
+    // Kahn's algorithm
+    while let Some(u) = queue.pop() {
+        if let Some(node) = node_map.get(&u) {
+            result.push(node.clone());
+        }
+
+        // Process neighbors (nodes that u blocks)
+        if let Some(neighbors) = graph.blocks.get(&u) {
+            for v in neighbors {
+                // Only process if v is in this sibling group
+                if bead_ids.contains(v) {
+                    if let Some(degree) = in_degree.get_mut(v) {
+                        *degree = degree.saturating_sub(1);
+                        if *degree == 0 {
+                            queue.push(v.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle circular dependencies: append remaining nodes sorted by priority
+    if result.len() != node_map.len() {
+        let added_ids: HashSet<String> = result.iter().map(|n| n.bead.id.clone()).collect();
+        let mut remaining: Vec<WBSNode> = node_map
+            .into_iter()
+            .filter(|(id, _)| !added_ids.contains(id))
+            .map(|(_, node)| node)
+            .collect();
+
+        remaining.sort_by_key(|n| n.bead.priority);
+        result.extend(remaining);
+    }
+
+    result
+}
+
+// ============================================================================
+// Filtering and State Distribution (bp6-07y.4)
+// ============================================================================
+
+/// ClosedTimeFilter enum for filtering closed beads by time.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum ClosedTimeFilter {
+    All,
+    #[serde(rename = "1h")]
+    OneHour,
+    #[serde(rename = "6h")]
+    SixHours,
+    #[serde(rename = "24h")]
+    TwentyFourHours,
+    #[serde(rename = "7d")]
+    SevenDays,
+    #[serde(rename = "30d")]
+    ThirtyDays,
+    #[serde(rename = "older_than_6h")]
+    OlderThan6h,
+}
+
+/// Filter beads by text search across title, id, owner, and labels.
+/// Case-insensitive matching.
+fn filter_by_text(beads: &[Bead], filter_text: &str) -> Vec<Bead> {
+    if filter_text.is_empty() {
+        return beads.to_vec();
+    }
+
+    let search = filter_text.to_lowercase();
+
+    beads
+        .iter()
+        .filter(|b| {
+            b.title.to_lowercase().contains(&search)
+                || b.id.to_lowercase().contains(&search)
+                || b.owner
+                    .as_ref()
+                    .map(|o| o.to_lowercase().contains(&search))
+                    .unwrap_or(false)
+                || b.labels
+                    .as_ref()
+                    .map(|labels| labels.iter().any(|l| l.to_lowercase().contains(&search)))
+                    .unwrap_or(false)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Check if a bead passes the closed time filter.
+fn passes_closed_time_filter(bead: &Bead, filter: &ClosedTimeFilter) -> bool {
+    // If not closed, always passes
+    if bead.status != "closed" {
+        return true;
+    }
+
+    // 'all' filter shows all closed tasks
+    if *filter == ClosedTimeFilter::All {
+        return true;
+    }
+
+    // If no closed_at timestamp, include it (benefit of the doubt)
+    let closed_at = match &bead.closed_at {
+        Some(s) if !s.is_empty() => s,
+        _ => return true,
+    };
+
+    // Parse the timestamp (RFC3339 format expected)
+    let closed_date = match chrono::DateTime::parse_from_rfc3339(closed_at) {
+        Ok(dt) => dt,
+        Err(_) => return true, // Invalid timestamp, include it
+    };
+
+    let now = chrono::Utc::now();
+    let duration = now.signed_duration_since(closed_date);
+    let hours_ago = duration.num_hours() as f64 + (duration.num_minutes() % 60) as f64 / 60.0;
+
+    match filter {
+        ClosedTimeFilter::All => true,
+        ClosedTimeFilter::OneHour => hours_ago <= 1.0,
+        ClosedTimeFilter::SixHours => hours_ago <= 6.0,
+        ClosedTimeFilter::TwentyFourHours => hours_ago <= 24.0,
+        ClosedTimeFilter::SevenDays => hours_ago <= 24.0 * 7.0,
+        ClosedTimeFilter::ThirtyDays => hours_ago <= 24.0 * 30.0,
+        ClosedTimeFilter::OlderThan6h => hours_ago > 6.0,
+    }
+}
+
+/// Filter beads by status (hide closed) and time-based filters.
+fn filter_by_status_and_time(
+    beads: &[Bead],
+    hide_closed: bool,
+    closed_time_filter: &ClosedTimeFilter,
+) -> Vec<Bead> {
+    beads
+        .iter()
+        .filter(|b| {
+            // Apply hide_closed filter
+            if hide_closed && b.status == "closed" {
+                return false;
+            }
+
+            // Apply time-based filter for closed tasks
+            passes_closed_time_filter(b, closed_time_filter)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Include ancestors of matched beads when text search is active and include_hierarchy is true.
+/// Ensures tree context is preserved.
+fn include_hierarchy(
+    matched_beads: Vec<Bead>,
+    all_beads: &[Bead],
+    filter_text: &str,
+    include_hierarchy_flag: bool,
+) -> Vec<Bead> {
+    if !include_hierarchy_flag || filter_text.is_empty() {
+        return matched_beads;
+    }
+
+    // Build a map of all beads for quick lookup (not currently used but may be needed for optimization)
+    let _bead_map: HashMap<String, &Bead> = all_beads.iter().map(|b| (b.id.clone(), b)).collect();
+
+    // Build parent map from dependencies
+    let mut parent_map: HashMap<String, String> = HashMap::new();
+    for bead in all_beads {
+        for dep in &bead.dependencies {
+            if dep.r#type == "parent-child" {
+                parent_map.insert(bead.id.clone(), dep.depends_on_id.clone());
+            }
+        }
+    }
+
+    let mut included_ids: HashSet<String> = HashSet::new();
+
+    // Recursive function to add a bead and its ancestors
+    fn add_with_ancestors(
+        bead_id: &str,
+        parent_map: &HashMap<String, String>,
+        included_ids: &mut HashSet<String>,
+    ) {
+        if included_ids.contains(bead_id) {
+            return;
+        }
+
+        included_ids.insert(bead_id.to_string());
+
+        // Recursively add parent
+        if let Some(parent_id) = parent_map.get(bead_id) {
+            add_with_ancestors(parent_id, parent_map, included_ids);
+        }
+    }
+
+    // Add matched beads and their ancestors
+    for bead in &matched_beads {
+        add_with_ancestors(&bead.id, &parent_map, &mut included_ids);
+    }
+
+    // Return all beads that are in included_ids
+    all_beads
+        .iter()
+        .filter(|b| included_ids.contains(&b.id))
+        .cloned()
+        .collect()
+}
+
+/// Calculate state distribution (open/inProgress/blocked/closed counts) across 100-unit time buckets.
+/// Used for Gantt header visualization.
+fn calculate_state_distribution(
+    items: &[GanttItem],
+    _zoom: f64,
+) -> Vec<BucketDistribution> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+
+    // Find the maximum x + width to determine number of buckets
+    let max_x = items
+        .iter()
+        .map(|item| item.x + item.width)
+        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap_or(0.0);
+
+    // Bucket size is 100 units (pre-zoom)
+    let bucket_size = 100.0;
+    let num_buckets = ((max_x / bucket_size).ceil() as usize).max(1);
+
+    let mut buckets: Vec<BucketDistribution> = (0..num_buckets)
+        .map(|_| BucketDistribution {
+            open: 0,
+            in_progress: 0,
+            blocked: 0,
+            closed: 0,
+        })
+        .collect();
+
+    // Count beads in each bucket by status
+    // Exclude epics and features (tasks only)
+    for item in items {
+        if item.bead.issue_type == "epic" || item.bead.issue_type == "feature" {
+            continue;
+        }
+
+        let start_bucket = (item.x / bucket_size).floor() as usize;
+        let end_bucket = ((item.x + item.width) / bucket_size).floor() as usize;
+
+        // Handle bead overlap across buckets
+        for bucket_idx in start_bucket..=end_bucket.min(num_buckets - 1) {
+            match item.bead.status.as_str() {
+                "open" => buckets[bucket_idx].open += 1,
+                "in_progress" => buckets[bucket_idx].in_progress += 1,
+                "closed" => buckets[bucket_idx].closed += 1,
+                _ => {}
+            }
+
+            // Count blocked beads
+            if item.is_blocked {
+                buckets[bucket_idx].blocked += 1;
+            }
+        }
+    }
+
+    buckets
 }
 
 fn get_projects_path() -> Result<PathBuf, String> {
@@ -678,17 +1129,11 @@ pub fn run() {
             let handle = app.handle().clone();
             let proj_handle = app.handle().clone();
 
-            // Initialize file watcher
-            let mut beads_watcher = BeadsWatcher::new(handle.clone())
+            // Initialize file watcher (lazy - will watch when first project is opened)
+            let beads_watcher = BeadsWatcher::new(handle.clone())
                 .expect("Failed to create beads watcher");
 
-            // Watch initial beads file if exists
-            if let Some(initial_path) = find_beads_file() {
-                beads_watcher.watch_beads_file(initial_path)
-                    .expect("Failed to watch initial beads file");
-            }
-
-            // Store watcher in managed state so commands can access it
+            // Store watcher in managed state (but don't watch anything yet)
             app.manage(Arc::new(Mutex::new(beads_watcher)));
 
             // Watch projects file with debouncing
