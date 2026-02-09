@@ -26,7 +26,8 @@
       "Bash(git add:*)",
       "Bash(bd reopen:*)",
       "Bash(git checkout:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(bd stats:*)"
     ]
   }
 }
