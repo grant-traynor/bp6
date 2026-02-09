@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { User, Tag, Clock, Star, Trash2, Plus, ArrowRight } from "lucide-react";
 import type { Bead } from "../../api";
 
@@ -97,12 +97,26 @@ export const Sidebar = ({
     });
   };
 
-  const handleSave = async () => {
+  const pendingSaveRef = useRef<'create' | 'edit' | null>(null);
+
+  // Effect to handle saves after editForm state updates
+  useEffect(() => {
+    if (pendingSaveRef.current === 'create') {
+      pendingSaveRef.current = null;
+      handleSaveCreate();
+    } else if (pendingSaveRef.current === 'edit') {
+      pendingSaveRef.current = null;
+      handleSaveEdit();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editForm]);
+
+  const handleSave = () => {
     setEditForm(formData);
     if (isCreating) {
-      await handleSaveCreate();
+      pendingSaveRef.current = 'create';
     } else {
-      await handleSaveEdit();
+      pendingSaveRef.current = 'edit';
     }
   };
 
