@@ -1,4 +1,4 @@
-import { Save, Edit3, Trash2 } from "lucide-react";
+import { Save, Edit3, CheckCircle } from "lucide-react";
 import { cn } from "../../../utils";
 
 interface SidebarActionsProps {
@@ -7,7 +7,7 @@ interface SidebarActionsProps {
   onEdit: () => void;
   onCancel: () => void;
   onSave: () => void;
-  onDelete?: () => void;
+  onDelete?: () => void;  // TODO: Rename to onClose for clarity
   isValid?: boolean;
 }
 
@@ -57,11 +57,13 @@ export const SidebarActions = ({
         Edit Bead
       </button>
       {onDelete && (
-        <button 
+        <button
           onClick={onDelete}
-          className="px-4 py-4 border-2 border-[var(--border-primary)] text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-2xl transition-all active:scale-95 border-rose-500/20"
+          className="px-6 py-4 border-2 border-[var(--border-primary)] text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-2xl transition-all active:scale-95 border-emerald-500/20 font-black text-xs uppercase tracking-[0.2em] flex items-center gap-2"
+          title="Close bead (mark as complete)"
         >
-          <Trash2 size={20} strokeWidth={2.5} />
+          <CheckCircle size={20} strokeWidth={2.5} />
+          Close
         </button>
       )}
     </div>
