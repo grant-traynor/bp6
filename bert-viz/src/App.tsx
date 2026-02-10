@@ -786,8 +786,12 @@ function App() {
                   height={Math.max(800, ganttLayout.rowCount * 48)}
                 >
                   {ganttLayout.connectors.map((conn, idx) => {
-                    const midX = (conn.fromX + conn.toX) / 2;
-                    const path = `M ${conn.fromX} ${conn.fromY} L ${midX} ${conn.fromY} L ${midX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
+                    // Keep vertical segment in connector channel (first 20px of each cell)
+                    // Place it 10px into the channel immediately after the blocker
+                    const channelOffset = 10 * zoom;
+                    const verticalX = conn.fromX + channelOffset;
+
+                    const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
                     return (
                       <path
                         key={`${conn.fromId}-${conn.toId}-${idx}`}
