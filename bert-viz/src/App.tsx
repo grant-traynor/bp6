@@ -290,13 +290,16 @@ function App() {
       blocksDeps.forEach((dep: any) => {
         const blocker = idToItem.get(dep.depends_on_id);
         if (blocker) {
+          // Account for the 20px left padding (8px + 12px) on bars
+          const CONNECTOR_PADDING = 20;
+
           // Connector from right edge of BLOCKER to left edge of BLOCKED task
           const connector = {
             fromId: dep.depends_on_id,
             toId: item.bead.id,
-            fromX: blocker.x + blocker.width,  // Right edge of blocker (pixels)
+            fromX: blocker.x + blocker.width,      // Right edge of blocker cell
             fromY: blocker.row * 48 + 24,
-            toX: item.x,                        // Left edge of blocked task (pixels)
+            toX: item.x + CONNECTOR_PADDING,       // Left edge of blocked bar (after padding)
             toY: item.row * 48 + 24,
             isCritical: items.find(i => i.bead.id === dep.depends_on_id)?.isCritical && item.isCritical || false
           };
