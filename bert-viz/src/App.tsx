@@ -294,14 +294,26 @@ function App() {
           const connector = {
             fromId: dep.depends_on_id,
             toId: item.bead.id,
-            fromX: blocker.x + blocker.width,  // Right edge of blocker
+            fromX: blocker.x + blocker.width,  // Right edge of blocker (pixels)
             fromY: blocker.row * 48 + 24,
-            toX: item.x,                        // Left edge of blocked task
+            toX: item.x,                        // Left edge of blocked task (pixels)
             toY: item.row * 48 + 24,
             isCritical: items.find(i => i.bead.id === dep.depends_on_id)?.isCritical && item.isCritical || false
           };
           connectors.push(connector);
-          console.log('Added connector:', connector);
+
+          // Enhanced debug logging
+          if (connectors.length <= 3) {
+            console.log(`Connector ${connectors.length}:`, {
+              from: dep.depends_on_id,
+              to: item.bead.id,
+              blockerCell: items.find(i => i.bead.id === dep.depends_on_id)?.bead.cellOffset,
+              blockerPixels: blocker.x,
+              blockedCell: item.bead.cellOffset,
+              blockedPixels: item.x,
+              connector
+            });
+          }
         }
       });
     });
