@@ -277,7 +277,9 @@ function App() {
     }> = [];
 
     items.forEach(item => {
-      // Find "blocks" dependencies (this task blocks others)
+      // Find "blocks" dependencies (other tasks block this task)
+      // If item has {type: "blocks", depends_on_id: "B"}, it means B blocks item
+      // So we draw: B → item (from blocker to blocked)
       const blocksDeps = item.bead.dependencies?.filter((d: any) => d.type === 'blocks') || [];
 
       // Debug: log dependencies for first few items
@@ -286,17 +288,17 @@ function App() {
       }
 
       blocksDeps.forEach((dep: any) => {
-        const successor = idToItem.get(dep.depends_on_id);
-        if (successor) {
-          // Connector from right edge of predecessor to left edge of successor
+        const blocker = idToItem.get(dep.depends_on_id);
+        if (blocker) {
+          // Connector from right edge of BLOCKER to left edge of BLOCKED task
           const connector = {
-            fromId: item.bead.id,
-            toId: dep.depends_on_id,
-            fromX: item.x + item.width,
-            fromY: item.row * 48 + 24, // Center of row
-            toX: successor.x,
-            toY: successor.row * 48 + 24,
-            isCritical: item.isCritical && items.find(i => i.bead.id === dep.depends_on_id)?.isCritical || false
+            fromId: dep.depends_on_id,
+            toId: item.bead.id,
+            fromX: blocker.x + blocker.width,  // Right edge of blocker
+            fromY: blocker.row * 48 + 24,
+            toX: item.x,                        // Left edge of blocked task
+            toY: item.row * 48 + 24,
+            isCritical: items.find(i => i.bead.id === dep.depends_on_id)?.isCritical && item.isCritical || false
           };
           connectors.push(connector);
           console.log('Added connector:', connector);
