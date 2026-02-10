@@ -762,7 +762,7 @@ function App() {
                   </div>
                 </div>
                 {/* Dependency connectors */}
-                <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 5 }}>
+                <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 30 }}>
                   {ganttLayout.connectors.map((conn, idx) => {
                     const midX = (conn.fromX + conn.toX) / 2;
                     const path = `M ${conn.fromX} ${conn.fromY} L ${midX} ${conn.fromY} L ${midX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
@@ -770,10 +770,12 @@ function App() {
                       <path
                         key={`${conn.fromId}-${conn.toId}-${idx}`}
                         d={path}
-                        stroke={conn.isCritical ? "var(--status-blocked)" : "var(--border-primary)"}
-                        strokeWidth="2"
+                        stroke={conn.isCritical ? "#ef4444" : "#94a3b8"}
+                        strokeWidth="3"
                         fill="none"
-                        opacity={conn.isCritical ? 0.8 : 0.4}
+                        opacity="0.9"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
                       />
                     );
                   })}
