@@ -776,7 +776,12 @@ function App() {
                   </div>
                 </div>
                 {/* Dependency connectors */}
-                <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 30 }}>
+                <svg
+                  className="absolute inset-0 pointer-events-none"
+                  style={{ zIndex: 30 }}
+                  width={5000 * zoom}
+                  height={Math.max(800, ganttLayout.rowCount * 48)}
+                >
                   {ganttLayout.connectors.map((conn, idx) => {
                     const midX = (conn.fromX + conn.toX) / 2;
                     const path = `M ${conn.fromX} ${conn.fromY} L ${midX} ${conn.fromY} L ${midX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
