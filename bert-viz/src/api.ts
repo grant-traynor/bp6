@@ -28,6 +28,10 @@ export interface Bead {
   is_favorite?: boolean;
   parent?: string;
   external_reference?: string;
+  // Unified field naming (matches Rust and JSONL)
+  design?: string;
+  notes?: string;
+  // Legacy field names (for backward compatibility)
   design_notes?: string;
   working_notes?: string;
   [key: string]: any;

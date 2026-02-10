@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
-import { fetchBeads, fetchProcessedData, updateBead, createBead, closeBead, reopenBead, claimBead, type WBSNode, type Bead, type Project, type ProcessedData, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
+import { fetchBeads, fetchProcessedData, fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, type WBSNode, type Bead, type BeadNode, type Project, type ProcessedData, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -23,7 +23,8 @@ type ClosedTimeFilter =
   | 'older_than_6h'; // Closed more than 6 hours ago
 
 function App() {
-  const [beads, setBeads] = useState<Bead[]>([]);
+  // Unified View Model State (replaces beads + processedData)
+  const [viewModel, setViewModel] = useState<ProjectViewModel | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
   const [hasProject, setHasProject] = useState(false);
@@ -32,7 +33,7 @@ function App() {
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
   const [loading, setLoading] = useState(true);
-  const [selectedBead, setSelectedBead] = useState<Bead | null>(null);
+  const [selectedBead, setSelectedBead] = useState<BeadNode | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Bead>>({});
@@ -64,12 +65,10 @@ function App() {
   const loadData = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
-      const data = await fetchBeads();
-      setBeads(data);
-      return data;
+      // Trigger a refetch of the view model
+      setRefetchTrigger(prev => prev + 1);
     } catch (error) {
       console.error("Error in loadData:", error);
-      return [];
     } finally {
       setLoading(false);
     }
@@ -95,97 +94,12 @@ function App() {
     }
   }, [loadData, loadProjects]);
 
-  // ProcessedData state (computed in Rust backend)
-  const [processedData, setProcessedData] = useState<ProcessedData>({
-    tree: [],
-    layout: { items: [], connectors: [], rowCount: 0, rowDepths: [] },
-    distributions: []
-  });
   const [processingData, setProcessingData] = useState(false);
 
-  // Apply collapsed state to tree on the frontend
-  const treeWithCollapsedState = useMemo(() => {
-    const applyCollapsedState = (nodes: WBSNode[]): WBSNode[] => {
-      return nodes.map(node => ({
-        ...node,
-        isExpanded: !collapsedIds.has(node.id),
-        children: applyCollapsedState(node.children)
-      }));
-    };
-    return applyCollapsedState(processedData.tree);
-  }, [processedData.tree, collapsedIds]);
+  // The view model tree already includes isExpanded and isVisible state from backend
+  // No need for complex frontend processing - just access viewModel.tree directly
 
-  // Rebuild Gantt layout for visible nodes with correct row numbering
-  const visibleGanttLayout = useMemo(() => {
-    // Build a map of visible node IDs to their sequential row numbers
-    const visibleRowMap = new Map<string, number>();
-    const visibleDepths: number[] = [];
-    let rowIndex = 0;
-
-    const buildRowMap = (nodes: WBSNode[], depth: number = 0) => {
-      nodes.forEach(node => {
-        visibleRowMap.set(node.id, rowIndex);
-        visibleDepths.push(depth);
-        rowIndex++;
-        if (node.isExpanded && node.children.length > 0) {
-          buildRowMap(node.children, depth + 1);
-        }
-      });
-    };
-
-    buildRowMap(treeWithCollapsedState);
-
-    // Filter and renumber items
-    const visibleItems = processedData.layout.items
-      .filter(item => visibleRowMap.has(item.bead.id))
-      .map(item => ({
-        ...item,
-        row: visibleRowMap.get(item.bead.id)!,
-        depth: visibleDepths[visibleRowMap.get(item.bead.id)!]
-      }));
-
-    // Filter and adjust connectors
-    const visibleConnectors = processedData.layout.connectors
-      .filter(conn => {
-        // Only show connectors where both endpoints are visible
-        const fromItem = processedData.layout.items.find(item =>
-          Math.abs(item.x + item.width - conn.from.x) < 1 && Math.abs(item.row * 48 + 24 - conn.from.y) < 1
-        );
-        const toItem = processedData.layout.items.find(item =>
-          Math.abs(item.x - conn.to.x) < 1 && Math.abs(item.row * 48 + 24 - conn.to.y) < 1
-        );
-        return fromItem && toItem && visibleRowMap.has(fromItem.bead.id) && visibleRowMap.has(toItem.bead.id);
-      })
-      .map(conn => {
-        // Adjust connector positions for new row numbers
-        const fromItem = processedData.layout.items.find(item =>
-          Math.abs(item.x + item.width - conn.from.x) < 1 && Math.abs(item.row * 48 + 24 - conn.from.y) < 1
-        );
-        const toItem = processedData.layout.items.find(item =>
-          Math.abs(item.x - conn.to.x) < 1 && Math.abs(item.row * 48 + 24 - conn.to.y) < 1
-        );
-
-        if (fromItem && toItem) {
-          const newFromRow = visibleRowMap.get(fromItem.bead.id)!;
-          const newToRow = visibleRowMap.get(toItem.bead.id)!;
-          return {
-            ...conn,
-            from: { ...conn.from, y: newFromRow * 48 + 24 },
-            to: { ...conn.to, y: newToRow * 48 + 24 }
-          };
-        }
-        return conn;
-      });
-
-    return {
-      items: visibleItems,
-      connectors: visibleConnectors,
-      rowCount: rowIndex,
-      rowDepths: visibleDepths
-    };
-  }, [processedData.layout, treeWithCollapsedState]);
-
-  // Fetch processed data from Rust backend when filters change
+  // Fetch view model from Rust backend when filters change
   useEffect(() => {
     // Debounce filter text to avoid excessive backend calls while typing
     const debounceTimeout = setTimeout(() => {
@@ -195,25 +109,25 @@ function App() {
         try {
           // Use startTransition to maintain UI responsiveness
           startTransition(() => {
-            fetchProcessedData({
+            fetchProjectViewModel({
               filter_text: filterText,
               hide_closed: hideClosed,
               closed_time_filter: closedTimeFilter,
               include_hierarchy: includeHierarchy,
               zoom: zoom,
-              collapsed_ids: [] // Don't send to backend, apply on frontend
+              collapsed_ids: Array.from(collapsedIds) // Backend now handles collapsed state
             }).then(data => {
               const endTime = performance.now();
               console.log(`⏱️  Frontend: IPC call took ${(endTime - startTime).toFixed(2)}ms`);
-              setProcessedData(data);
+              setViewModel(data);
               setProcessingData(false);
             }).catch(error => {
-              console.error("Failed to fetch processed data:", error);
+              console.error("Failed to fetch view model:", error);
               setProcessingData(false);
             });
           });
         } catch (error) {
-          console.error("Failed to fetch processed data:", error);
+          console.error("Failed to fetch view model:", error);
           setProcessingData(false);
         }
       };
@@ -222,7 +136,7 @@ function App() {
     }, 150); // 150ms debounce for filter text changes
 
     return () => clearTimeout(debounceTimeout);
-  }, [filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, currentProjectPath, refetchTrigger]);
+  }, [filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, collapsedIds, currentProjectPath, refetchTrigger]);
 
   useEffect(() => {
     // Prevent double initialization (React 19 Strict Mode runs effects twice)
@@ -280,6 +194,23 @@ function App() {
     };
   }, [handleOpenProject, loadData, loadProjects]);
 
+  // Helper: Flatten tree to array of beads for backward compatibility
+  const flattenTree = useCallback((nodes: BeadNode[]): BeadNode[] => {
+    const result: BeadNode[] = [];
+    const traverse = (nodeList: BeadNode[]) => {
+      nodeList.forEach(node => {
+        result.push(node);
+        if (node.children.length > 0) {
+          traverse(node.children);
+        }
+      });
+    };
+    traverse(nodes);
+    return result;
+  }, []);
+
+  const beads = useMemo(() => viewModel ? flattenTree(viewModel.tree) : [], [viewModel, flattenTree]);
+
   const toggleNode = useCallback((id: string) => {
     // Find the DOM element for this node to track its position
     const element = document.querySelector(`[data-bead-id="${id}"]`);
@@ -301,7 +232,7 @@ function App() {
   const expandAll = useCallback(() => setCollapsedIds(new Set()), []);
   const collapseAll = useCallback(() => {
     const allParentIds = new Set<string>();
-    const findParents = (nodes: WBSNode[]) => {
+    const findParents = (nodes: BeadNode[]) => {
       nodes.forEach(node => {
         if (node.children.length > 0) {
           allParentIds.add(node.id);
@@ -309,9 +240,11 @@ function App() {
         }
       });
     };
-    findParents(treeWithCollapsedState);
+    if (viewModel) {
+      findParents(viewModel.tree);
+    }
     setCollapsedIds(allParentIds);
-  }, [treeWithCollapsedState]);
+  }, [viewModel]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -527,7 +460,7 @@ function App() {
         }, 0);
       }
     }
-  }, [processedData, loading, processingData]);
+  }, [viewModel, loading, processingData]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
@@ -694,8 +627,8 @@ function App() {
             </div>
             <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
               <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
-                <div style={{ width: Math.max(5000 * zoom, (processedData.distributions.length * 100 * zoom)) }}>
-                  <GanttStateHeader distributions={processedData.distributions} zoom={zoom} />
+                <div style={{ width: Math.max(5000 * zoom, ((viewModel?.metadata.distributions.length || 0) * 100 * zoom)) }}>
+                  <GanttStateHeader distributions={viewModel?.metadata.distributions || []} zoom={zoom} />
                 </div>
               </div>
             </div>
@@ -705,34 +638,26 @@ function App() {
               <div className="p-0">
                 {(loading || processingData) ? <WBSSkeleton /> : (
                   <div className="flex flex-col">
-                    <WBSTreeList nodes={treeWithCollapsedState} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
+                    <WBSTreeList nodes={viewModel?.tree || []} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
                   </div>
                 )}
               </div>
             </div>
             <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
-              <div className="relative" style={{ height: Math.max(800, visibleGanttLayout.rowCount * 48), width: 5000 * zoom }}>
-                 {loading && <GanttSkeleton />}
-                 <div className="absolute inset-0 pointer-events-none">
-                    {visibleGanttLayout.rowDepths.map((depth, i) => (
-                      <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
-                    ))}
-                    <div className="absolute inset-0 flex">
-                      {Array.from({ length: 50 }).map((_, i) => (
-                        <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
-                      ))}
-                    </div>
-                 </div>
-               <svg className="absolute inset-0 pointer-events-none overflow-visible" style={{ width: '100%', height: '100%' }}>
-                  {visibleGanttLayout.connectors.map((c: any) => (
-                    <path key={`${c.from.x}-${c.from.y}-${c.to.x}-${c.to.y}`} d={`M ${c.from.x} ${c.from.y} L ${c.from.x + 20} ${c.from.y} L ${c.from.x + 20} ${c.to.y} L ${c.to.x} ${c.to.y}`} fill="none" stroke={c.isCritical ? "var(--status-blocked)" : "var(--text-muted)"} strokeWidth={c.isCritical ? 2.5 : 1.5} strokeDasharray={c.isCritical ? "0" : "4 2"} opacity={0.8} />
-                  ))}
-               </svg>
-               {visibleGanttLayout.items.map((item: any) => (
-                 <div key={item.bead.id} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
-                    <GanttBar item={item} onClick={handleBeadClick} isSelected={selectedBead?.id === item.bead.id} />
-                 </div>
-               ))}
+              {/* TODO: Implement Gantt rendering with BeadNode logical positioning */}
+              {/* For now, show a placeholder. Full Gantt rendering needs: */}
+              {/* 1. Flatten tree to get visible nodes with row numbers */}
+              {/* 2. Convert logical positions (earliestStart, duration) to pixels */}
+              {/* 3. Render connectors based on blockingIds */}
+              <div className="p-8 text-[var(--text-secondary)]">
+                <div className="text-xl font-semibold mb-4">Gantt Chart (In Progress)</div>
+                <div className="space-y-2">
+                  <p>The Gantt chart is being refactored to use the unified view model.</p>
+                  <p className="text-sm">The tree view on the left is now working with the new architecture.</p>
+                  <p className="text-sm">Total beads: {viewModel?.metadata.totalBeads || 0}</p>
+                  <p className="text-sm">Open: {viewModel?.metadata.openCount || 0} | In Progress: {viewModel?.metadata.inProgressCount || 0} | Blocked: {viewModel?.metadata.blockedCount || 0} | Closed: {viewModel?.metadata.closedCount || 0}</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>

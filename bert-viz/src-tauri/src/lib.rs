@@ -158,8 +158,11 @@ pub struct Bead {
     pub is_favorite: Option<bool>,
     pub parent: Option<String>,
     pub external_reference: Option<String>,
-    pub design_notes: Option<String>,
-    pub working_notes: Option<String>,
+    // Unified field naming (matches JSONL and BeadNode)
+    #[serde(alias = "design_notes")]
+    pub design: Option<String>,
+    #[serde(alias = "working_notes")]
+    pub notes: Option<String>,
     #[serde(flatten)]
     pub extra_metadata: serde_json::Map<String, serde_json::Value>,
 }
@@ -421,7 +424,7 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
 // ============================================================================
 
 /// Convert a Bead to a BeadNode with computed properties.
-/// This is where we unify the field naming (design_notes → design, working_notes → notes).
+/// Field names are now unified (design, notes) in both Bead and BeadNode.
 fn bead_to_bead_node(
     bead: &Bead,
     children: Vec<BeadNode>,
@@ -458,9 +461,9 @@ fn bead_to_bead_node(
         parent: bead.parent.clone(),
         external_reference: bead.external_reference.clone(),
 
-        // Unified Field Naming (design_notes → design, working_notes → notes)
-        design: bead.design_notes.clone(),
-        notes: bead.working_notes.clone(),
+        // Unified Field Naming
+        design: bead.design.clone(),
+        notes: bead.notes.clone(),
 
         // Hierarchical Structure
         children,
@@ -915,11 +918,11 @@ fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> 
     if let Some(ext_ref) = &updated_bead.external_reference {
         cmd.arg("--external-ref").arg(ext_ref);
     }
-    if let Some(design) = &updated_bead.design_notes {
+    if let Some(design) = &updated_bead.design {
         cmd.arg("--design").arg(design);
     }
-    if let Some(working) = &updated_bead.working_notes {
-        cmd.arg("--notes").arg(working);
+    if let Some(notes) = &updated_bead.notes {
+        cmd.arg("--notes").arg(notes);
     }
 
     // Pass everything also to --metadata to ensure extra_metadata is preserved
@@ -1052,11 +1055,11 @@ fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> 
     if let Some(ext_ref) = &new_bead.external_reference {
         cmd.arg("--external-ref").arg(ext_ref);
     }
-    if let Some(design) = &new_bead.design_notes {
+    if let Some(design) = &new_bead.design {
         cmd.arg("--design").arg(design);
     }
-    if let Some(working) = &new_bead.working_notes {
-        cmd.arg("--notes").arg(working);
+    if let Some(notes) = &new_bead.notes {
+        cmd.arg("--notes").arg(notes);
     }
 
     eprintln!("🆕 create_bead: Executing bd command in directory: {}", repo_path.display());
