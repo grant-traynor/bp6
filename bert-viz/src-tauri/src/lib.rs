@@ -734,10 +734,16 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
 
     // 7. Calculate earliest start times (logical units, not pixels)
     let x_map = calculate_earliest_start_times(&filtered, &blocks_map);
+    eprintln!("⏱️  x_map has {} entries", x_map.len());
+    if !x_map.is_empty() {
+        let first_entry = x_map.iter().next().unwrap();
+        eprintln!("⏱️  First x_map entry: {} -> {}", first_entry.0, first_entry.1);
+    }
 
     // 8. Calculate node ranges
     let mut range_cache: HashMap<String, NodeRange> = HashMap::new();
     calculate_node_ranges(&tree, &x_map, &mut range_cache);
+    eprintln!("⏱️  range_cache has {} entries", range_cache.len());
 
     // 9. Find critical path
     let critical_path = find_critical_path(&filtered, &successors_map);

@@ -232,8 +232,14 @@ function App() {
     const traverse = (nodes: BeadNode[], depth: number = 0) => {
       nodes.forEach(node => {
         // Convert logical position to pixels
-        const x = node.earliestStart * zoom * 100;
-        const width = node.duration * zoom * 100;
+        // Scale: 10px per time unit (adjust zoom to scale)
+        const x = node.earliestStart * zoom * 10;
+        const width = Math.max(node.duration * zoom * 10, 20); // Minimum 20px width
+
+        // Debug: log first few items to see values
+        if (rowIndex < 3) {
+          console.log(`Bead ${node.id}: earliestStart=${node.earliestStart}, duration=${node.duration}, x=${x}px, width=${width}px`);
+        }
 
         items.push({
           bead: node,
@@ -706,7 +712,7 @@ function App() {
                 </div>
                 {/* Gantt bars */}
                 {ganttLayout.items.map((item) => (
-                  <div key={item.bead.id} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
+                  <div key={item.bead.id} style={{ position: 'absolute', top: item.row * 48, height: 48, left: 0, right: 0 }}>
                     <GanttBar
                       item={{
                         bead: item.bead,
