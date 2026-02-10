@@ -429,8 +429,8 @@ fn bead_to_bead_node(
     bead: &Bead,
     children: Vec<BeadNode>,
     depth: usize,
-    earliest_start: f64,
-    duration: f64,
+    cell_offset: usize,
+    cell_count: usize,
     is_blocked: bool,
     is_critical: bool,
     blocking_ids: Vec<String>,
@@ -475,8 +475,8 @@ fn bead_to_bead_node(
 
         // Logical Positioning
         depth,
-        earliest_start,
-        duration,
+        cell_offset,
+        cell_count,
 
         // UI State
         is_expanded,
@@ -497,15 +497,18 @@ fn convert_wbs_to_bead_nodes(
     collapsed_ids: &[String],
 ) -> Vec<BeadNode> {
     nodes.iter().map(|node| {
-        // Get logical positioning from range cache (includes rollup for parents)
+        // Get cell positioning from range cache (includes rollup for parents)
+        // Range cache has x and width in time units, convert to cells
         let node_range = range_cache.get(&node.bead.id);
-        let (earliest_start, duration) = if let Some(range) = node_range {
-            (range.x, range.width)
+        let (cell_offset, cell_count) = if let Some(range) = node_range {
+            // Convert time units to cells (10 time units = 1 cell)
+            let offset = (range.x / 10.0).round() as usize;
+            let count = (range.width / 10.0).ceil().max(1.0) as usize;
+            (offset, count)
         } else {
             // Fallback if range not calculated (shouldn't happen)
-            let start = x_map.get(&node.bead.id).copied().unwrap_or(0) as f64;
-            let dur = node.bead.estimate.map(|e| e as f64 / 60.0).unwrap_or(10.0);
-            (start, dur)
+            let offset = x_map.get(&node.bead.id).copied().unwrap_or(0);
+            (offset, 1)
         };
 
         // Compute properties
@@ -539,8 +542,8 @@ fn convert_wbs_to_bead_nodes(
             &node.bead,
             children,
             depth,
-            earliest_start,
-            duration,
+            cell_offset,
+            cell_count,
             is_blocked,
             is_critical,
             blocking_ids,
@@ -1259,11 +1262,12 @@ pub struct BeadNode {
     // ===== Logical Positioning (NOT pixels - frontend converts to pixels) =====
     /// Tree depth (0 = root, 1 = child, 2 = grandchild, etc.)
     pub depth: usize,
-    /// Earliest start time in logical time units (NOT pixels)
-    #[serde(rename = "earliestStart")]
-    pub earliest_start: f64,
-    /// Duration in logical time units (NOT pixels)
-    pub duration: f64,
+    /// Cell offset: which grid cell column this task starts in (0, 1, 2, ...)
+    #[serde(rename = "cellOffset")]
+    pub cell_offset: usize,
+    /// Cell count: how many grid cells wide this task is (1, 2, 3, ...)
+    #[serde(rename = "cellCount")]
+    pub cell_count: usize,
 
     // ===== UI State =====
     #[serde(rename = "isExpanded")]

@@ -232,14 +232,15 @@ function App() {
     // Traverse tree and build visible items with row numbers
     const traverse = (nodes: BeadNode[], depth: number = 0) => {
       nodes.forEach(node => {
-        // Convert logical position to pixels
-        // Scale: 10px per time unit (adjust zoom to scale)
-        const x = node.earliestStart * zoom * 10;
-        const width = Math.max(node.duration * zoom * 10, 20); // Minimum 20px width
+        // Convert cell offset/count to pixels
+        // Cell size: 100px at zoom=1
+        const cellSize = 100 * zoom;
+        const x = node.cellOffset * cellSize;
+        const width = node.cellCount * cellSize;
 
         // Debug: log first few items to see values
         if (rowIndex < 3) {
-          console.log(`Bead ${node.id}: earliestStart=${node.earliestStart}, duration=${node.duration}, x=${x}px, width=${width}px`);
+          console.log(`Bead ${node.id}: cellOffset=${node.cellOffset}, cellCount=${node.cellCount}, x=${x}px, width=${width}px`);
         }
 
         const item = {

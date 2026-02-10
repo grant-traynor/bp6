@@ -241,8 +241,8 @@ export interface BeadNode {
 
   // Logical Positioning (NOT pixels - frontend converts)
   depth: number;
-  earliestStart: number;
-  duration: number;
+  cellOffset: number;  // Which grid cell column (0, 1, 2, ...)
+  cellCount: number;   // How many cells wide (1, 2, 3, ...)
 
   // UI State
   isExpanded: boolean;
