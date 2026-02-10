@@ -554,18 +554,18 @@ fn convert_wbs_to_bead_nodes(
     collapsed_ids: &[String],
 ) -> Vec<BeadNode> {
     nodes.iter().map(|node| {
-        // Get cell positioning from range cache (includes rollup for parents)
-        // Range cache has x and width in time units, convert to cells
+        // Get cell positioning
+        // x_map contains cell offsets (0, 1, 2, 3...) - these ARE the cell positions
+        // range cache contains duration in time units (10, 20, 30...)
+        let cell_offset = x_map.get(&node.bead.id).copied().unwrap_or(0);
+
         let node_range = range_cache.get(&node.bead.id);
-        let (cell_offset, cell_count) = if let Some(range) = node_range {
-            // Convert time units to cells (10 time units = 1 cell)
-            let offset = (range.x / 10.0).round() as usize;
-            let count = (range.width / 10.0).ceil().max(1.0) as usize;
-            (offset, count)
+        let cell_count = if let Some(range) = node_range {
+            // Convert time units to cell count (10 time units = 1 cell)
+            (range.width / 10.0).ceil().max(1.0) as usize
         } else {
-            // Fallback if range not calculated (shouldn't happen)
-            let offset = x_map.get(&node.bead.id).copied().unwrap_or(0);
-            (offset, 1)
+            // Fallback: 1 cell
+            1
         };
 
         // Compute properties
