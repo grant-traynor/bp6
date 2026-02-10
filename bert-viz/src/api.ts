@@ -139,6 +139,19 @@ export async function fetchProcessedData(params: FilterParams): Promise<Processe
   }
 }
 
+/**
+ * Fetch the unified ProjectViewModel from Rust backend.
+ * This is the new API that replaces the dual-state system.
+ */
+export async function fetchProjectViewModel(params: FilterParams): Promise<ProjectViewModel> {
+  try {
+    return await invoke<ProjectViewModel>("get_project_view_model", { params });
+  } catch (error) {
+    console.error("Failed to fetch project view model:", error);
+    throw error;
+  }
+}
+
 // buildWBSTree function removed - now handled by Rust backend in get_processed_data
 
 export interface GanttItem {
@@ -175,6 +188,96 @@ export interface ProcessedData {
   tree: WBSNode[];
   layout: GanttLayout;
   distributions: BucketDistribution[];
+}
+
+// ============================================================================
+// Unified View Model Types (bp6-75y.1)
+// ============================================================================
+
+/**
+ * BeadNode is the unified node structure in the view model tree.
+ * Contains all bead data, computed properties, hierarchical structure,
+ * and logical positioning (NOT pixel coordinates).
+ */
+export interface BeadNode {
+  // Core Bead Data
+  id: string;
+  title: string;
+  description?: string;
+  status: string;
+  priority: number;
+  issueType: string;
+  estimate?: number;
+  dependencies: Dependency[];
+
+  // Metadata
+  owner?: string;
+  createdAt?: string;
+  createdBy?: string;
+  updatedAt?: string;
+  labels?: string[];
+  acceptanceCriteria?: string[];
+  closedAt?: string;
+  closeReason?: string;
+  isFavorite?: boolean;
+  parent?: string;
+  externalReference?: string;
+
+  // Unified Field Naming (design/notes, not design_notes/working_notes)
+  design?: string;
+  notes?: string;
+
+  // Hierarchical Structure
+  children: BeadNode[];
+
+  // Computed Properties
+  isBlocked: boolean;
+  isCritical: boolean;
+  blockingIds: string[];
+
+  // Logical Positioning (NOT pixels - frontend converts)
+  depth: number;
+  earliestStart: number;
+  duration: number;
+
+  // UI State
+  isExpanded: boolean;
+  isVisible: boolean;
+
+  // Extra metadata
+  [key: string]: any;
+}
+
+/**
+ * ViewIndexes provides fast lookups into the view model tree.
+ */
+export interface ViewIndexes {
+  idToIndex: Record<string, number>;
+  idToParent: Record<string, string>;
+  criticalPath: string[];
+}
+
+/**
+ * ProjectMetadata contains aggregate statistics about the project.
+ */
+export interface ProjectMetadata {
+  totalBeads: number;
+  openCount: number;
+  blockedCount: number;
+  inProgressCount: number;
+  closedCount: number;
+  totalDuration: number;
+  distributions: BucketDistribution[];
+}
+
+/**
+ * ProjectViewModel is the single source of truth for all UI components.
+ * Backend computes this once, frontend reactively renders it.
+ */
+export interface ProjectViewModel {
+  tree: BeadNode[];
+  metadata: ProjectMetadata;
+  indexes: ViewIndexes;
 }
 
 export interface FilterParams {

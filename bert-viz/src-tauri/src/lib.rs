@@ -416,6 +416,385 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
     })
 }
 
+// ============================================================================
+// Unified View Layer (bp6-75y.2)
+// ============================================================================
+
+/// Convert a Bead to a BeadNode with computed properties.
+/// This is where we unify the field naming (design_notes → design, working_notes → notes).
+fn bead_to_bead_node(
+    bead: &Bead,
+    children: Vec<BeadNode>,
+    depth: usize,
+    earliest_start: f64,
+    duration: f64,
+    is_blocked: bool,
+    is_critical: bool,
+    blocking_ids: Vec<String>,
+    is_expanded: bool,
+    is_visible: bool,
+) -> BeadNode {
+    BeadNode {
+        // Core Bead Data
+        id: bead.id.clone(),
+        title: bead.title.clone(),
+        description: bead.description.clone(),
+        status: bead.status.clone(),
+        priority: bead.priority,
+        issue_type: bead.issue_type.clone(),
+        estimate: bead.estimate,
+        dependencies: bead.dependencies.clone(),
+
+        // Metadata
+        owner: bead.owner.clone(),
+        created_at: bead.created_at.clone(),
+        created_by: bead.created_by.clone(),
+        updated_at: bead.updated_at.clone(),
+        labels: bead.labels.clone(),
+        acceptance_criteria: bead.acceptance_criteria.clone(),
+        closed_at: bead.closed_at.clone(),
+        close_reason: bead.close_reason.clone(),
+        is_favorite: bead.is_favorite,
+        parent: bead.parent.clone(),
+        external_reference: bead.external_reference.clone(),
+
+        // Unified Field Naming (design_notes → design, working_notes → notes)
+        design: bead.design_notes.clone(),
+        notes: bead.working_notes.clone(),
+
+        // Hierarchical Structure
+        children,
+
+        // Computed Properties
+        is_blocked,
+        is_critical,
+        blocking_ids,
+
+        // Logical Positioning
+        depth,
+        earliest_start,
+        duration,
+
+        // UI State
+        is_expanded,
+        is_visible,
+
+        // Extra metadata
+        extra_metadata: bead.extra_metadata.clone(),
+    }
+}
+
+/// Convert WBSNode tree to BeadNode tree with computed properties.
+fn convert_wbs_to_bead_nodes(
+    nodes: &[WBSNode],
+    depth: usize,
+    x_map: &HashMap<String, usize>,
+    range_cache: &HashMap<String, NodeRange>,
+    critical_path: &HashSet<String>,
+    collapsed_ids: &[String],
+) -> Vec<BeadNode> {
+    nodes.iter().map(|node| {
+        // Get logical positioning
+        let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0) as f64;
+        let node_range = range_cache.get(&node.bead.id);
+        let duration = node_range.map(|r| r.width).unwrap_or_else(|| {
+            node.bead.estimate.map(|e| e as f64).unwrap_or(1.0)
+        });
+
+        // Compute properties
+        let is_blocked = node.is_blocked;
+        let is_critical = critical_path.contains(&node.bead.id);
+        let blocking_ids: Vec<String> = node.bead.dependencies
+            .iter()
+            .filter(|dep| dep.r#type == "blocks")
+            .map(|dep| dep.depends_on_id.clone())
+            .collect();
+
+        // UI state
+        let is_expanded = !collapsed_ids.contains(&node.bead.id);
+        let is_visible = true; // Will be computed during tree traversal
+
+        // Recursively convert children
+        let children = if !node.children.is_empty() {
+            convert_wbs_to_bead_nodes(
+                &node.children,
+                depth + 1,
+                x_map,
+                range_cache,
+                critical_path,
+                collapsed_ids,
+            )
+        } else {
+            Vec::new()
+        };
+
+        bead_to_bead_node(
+            &node.bead,
+            children,
+            depth,
+            earliest_start,
+            duration,
+            is_blocked,
+            is_critical,
+            blocking_ids,
+            is_expanded,
+            is_visible,
+        )
+    }).collect()
+}
+
+/// Build ViewIndexes for fast lookups.
+fn build_view_indexes(tree: &[BeadNode], critical_path: &HashSet<String>) -> ViewIndexes {
+    let mut id_to_index = HashMap::new();
+    let mut id_to_parent = HashMap::new();
+    let mut index = 0;
+
+    fn traverse(
+        nodes: &[BeadNode],
+        parent_id: Option<&str>,
+        id_to_index: &mut HashMap<String, usize>,
+        id_to_parent: &mut HashMap<String, String>,
+        index: &mut usize,
+    ) {
+        for node in nodes {
+            id_to_index.insert(node.id.clone(), *index);
+            *index += 1;
+
+            if let Some(parent) = parent_id {
+                id_to_parent.insert(node.id.clone(), parent.to_string());
+            }
+
+            if !node.children.is_empty() {
+                traverse(&node.children, Some(&node.id), id_to_index, id_to_parent, index);
+            }
+        }
+    }
+
+    traverse(tree, None, &mut id_to_index, &mut id_to_parent, &mut index);
+
+    // Convert critical path HashSet to Vec
+    let critical_path_vec: Vec<String> = critical_path.iter().cloned().collect();
+
+    ViewIndexes {
+        id_to_index,
+        id_to_parent,
+        critical_path: critical_path_vec,
+    }
+}
+
+/// Calculate project metadata (aggregate statistics).
+fn calculate_project_metadata(
+    _tree: &[BeadNode],
+    filtered_beads: &[Bead],
+    distributions: Vec<BucketDistribution>,
+    _critical_path: &HashSet<String>,
+    x_map: &HashMap<String, usize>,
+) -> ProjectMetadata {
+    let mut open_count = 0;
+    let mut in_progress_count = 0;
+    let mut blocked_count = 0;
+    let mut closed_count = 0;
+
+    for bead in filtered_beads {
+        match bead.status.as_str() {
+            "open" | "pending" => open_count += 1,
+            "in_progress" => in_progress_count += 1,
+            "closed" | "done" => closed_count += 1,
+            _ => {}
+        }
+
+        if bead.status != "closed" && bead.status != "done" {
+            // Check if blocked
+            let is_blocked = bead.dependencies.iter().any(|dep| {
+                if dep.r#type == "blocks" {
+                    // Check if the blocker is not closed
+                    filtered_beads.iter().any(|b| {
+                        b.id == dep.depends_on_id && b.status != "closed" && b.status != "done"
+                    })
+                } else {
+                    false
+                }
+            });
+
+            if is_blocked {
+                blocked_count += 1;
+            }
+        }
+    }
+
+    // Calculate total duration (critical path length)
+    let total_duration = x_map.values().copied().map(|v| v as f64).fold(0.0f64, f64::max);
+
+    ProjectMetadata {
+        total_beads: filtered_beads.len(),
+        open_count,
+        in_progress_count,
+        blocked_count,
+        closed_count,
+        total_duration,
+        distributions,
+    }
+}
+
+/// Get ProjectViewModel - the unified view model for all UI components.
+/// This function does all CPU-intensive computation: filtering, sorting, dependency
+/// graph building, critical path calculation, and tree construction.
+#[tauri::command]
+fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, String> {
+    let start_time = std::time::Instant::now();
+
+    // 1. Load beads from file (reuse logic from get_processed_data)
+    let beads_path = {
+        let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
+        if cache.is_none() {
+            *cache = find_beads_file();
+        }
+        cache.clone().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?
+    };
+
+    eprintln!("📖 get_project_view_model: Reading from {}", beads_path.display());
+    let load_start = std::time::Instant::now();
+
+    let file = File::open(&beads_path).map_err(|e| format!("Failed to open issues.jsonl: {}", e))?;
+    let reader = BufReader::new(file);
+
+    let mut beads: Vec<Bead> = Vec::new();
+    for (index, line) in reader.lines().enumerate() {
+        let line = line.map_err(|e| format!("Error reading line {}: {}", index + 1, e))?;
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let bead: Bead = serde_json::from_str(&line)
+            .map_err(|e| format!("Failed to parse bead at line {}: {}", index + 1, e))?;
+        beads.push(bead);
+    }
+
+    eprintln!("⏱️  File load: {:.2}ms ({} beads)", load_start.elapsed().as_secs_f64() * 1000.0, beads.len());
+
+    // 2. Apply filters
+    let mut filtered = beads.clone();
+    filtered = filter_by_status_and_time(&filtered, params.hide_closed, &params.closed_time_filter);
+    filtered = filter_by_text(&filtered, &params.filter_text);
+
+    if !params.filter_text.is_empty() && params.include_hierarchy {
+        filtered = include_hierarchy(filtered, &beads, &params.filter_text, params.include_hierarchy);
+    }
+
+    let tree_start = std::time::Instant::now();
+
+    // 3. Build dependency graph
+    let graph = build_dependency_graph(&filtered);
+
+    // 4. Build WBS tree
+    let mut tree = build_wbs_tree(&filtered);
+
+    // 5. Sort siblings by dependencies
+    tree = sort_wbs_tree_siblings(tree, &graph);
+
+    // Apply collapsed state
+    fn apply_collapsed_state(nodes: &mut [WBSNode], collapsed_ids: &[String]) {
+        for node in nodes {
+            if collapsed_ids.contains(&node.bead.id) {
+                node.is_expanded = false;
+            }
+            if !node.children.is_empty() {
+                apply_collapsed_state(&mut node.children, collapsed_ids);
+            }
+        }
+    }
+    apply_collapsed_state(&mut tree, &params.collapsed_ids);
+
+    eprintln!("⏱️  Tree building: {:.2}ms", tree_start.elapsed().as_secs_f64() * 1000.0);
+    let compute_start = std::time::Instant::now();
+
+    // 6. Build blocks and successors maps
+    let mut blocks_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut successors_map: HashMap<String, Vec<String>> = HashMap::new();
+
+    for bead in &filtered {
+        for dep in &bead.dependencies {
+            if dep.r#type == "blocks" {
+                blocks_map
+                    .entry(bead.id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(dep.depends_on_id.clone());
+
+                successors_map
+                    .entry(dep.depends_on_id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(bead.id.clone());
+            }
+        }
+    }
+
+    // 7. Calculate earliest start times (logical units, not pixels)
+    let x_map = calculate_earliest_start_times(&filtered, &blocks_map);
+
+    // 8. Calculate node ranges
+    let mut range_cache: HashMap<String, NodeRange> = HashMap::new();
+    calculate_node_ranges(&tree, &x_map, &mut range_cache);
+
+    // 9. Find critical path
+    let critical_path = find_critical_path(&filtered, &successors_map);
+
+    // 10. Mark critical nodes in tree
+    fn mark_critical_nodes(nodes: &mut [WBSNode], critical_path: &HashSet<String>) {
+        for node in nodes {
+            if critical_path.contains(&node.bead.id) {
+                node.is_critical = true;
+            }
+            mark_critical_nodes(&mut node.children, critical_path);
+        }
+    }
+    mark_critical_nodes(&mut tree, &critical_path);
+
+    // 11. Convert WBS tree to BeadNode tree
+    let bead_node_tree = convert_wbs_to_bead_nodes(
+        &tree,
+        0, // root depth
+        &x_map,
+        &range_cache,
+        &critical_path,
+        &params.collapsed_ids,
+    );
+
+    // 12. Generate Gantt layout for distributions (reuse existing logic)
+    let layout = generate_gantt_layout(
+        &filtered,
+        &tree,
+        &x_map,
+        &range_cache,
+        &critical_path,
+        params.zoom,
+    );
+    let distributions = calculate_state_distribution(&layout.items, params.zoom);
+
+    // 13. Build indexes
+    let indexes = build_view_indexes(&bead_node_tree, &critical_path);
+
+    // 14. Calculate metadata
+    let metadata = calculate_project_metadata(
+        &bead_node_tree,
+        &filtered,
+        distributions,
+        &critical_path,
+        &x_map,
+    );
+
+    eprintln!("⏱️  Compute properties: {:.2}ms", compute_start.elapsed().as_secs_f64() * 1000.0);
+
+    let total_time = start_time.elapsed();
+    eprintln!("⏱️  Total view model time: {:.2}ms", total_time.as_secs_f64() * 1000.0);
+
+    Ok(ProjectViewModel {
+        tree: bead_node_tree,
+        metadata,
+        indexes,
+    })
+}
+
 #[tauri::command]
 fn get_beads() -> Result<Vec<Bead>, String> {
     let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
@@ -803,6 +1182,149 @@ pub struct ProcessedData {
     pub tree: Vec<WBSNode>,
     pub layout: GanttLayout,
     pub distributions: Vec<BucketDistribution>,
+}
+
+// ============================================================================
+// Unified View Model (bp6-75y.1)
+// ============================================================================
+
+/// BeadNode is the unified node structure in the view model tree.
+/// It contains all bead data, computed properties, hierarchical structure,
+/// and logical positioning (NOT pixel coordinates - those are computed by frontend).
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BeadNode {
+    // ===== Core Bead Data =====
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub priority: u32,
+    #[serde(rename = "issueType")]
+    pub issue_type: String,
+    pub estimate: Option<u32>,
+    #[serde(default)]
+    pub dependencies: Vec<Dependency>,
+
+    // ===== Metadata Fields =====
+    pub owner: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: Option<String>,
+    #[serde(rename = "createdBy")]
+    pub created_by: Option<String>,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: Option<String>,
+    pub labels: Option<Vec<String>>,
+    #[serde(default, rename = "acceptanceCriteria")]
+    pub acceptance_criteria: Option<Vec<String>>,
+    #[serde(rename = "closedAt")]
+    pub closed_at: Option<String>,
+    #[serde(rename = "closeReason")]
+    pub close_reason: Option<String>,
+    #[serde(rename = "isFavorite")]
+    pub is_favorite: Option<bool>,
+    pub parent: Option<String>,
+    #[serde(rename = "externalReference")]
+    pub external_reference: Option<String>,
+
+    // ===== Unified Field Naming =====
+    // Note: JSONL uses 'design' and 'notes', NOT 'design_notes'/'working_notes'
+    pub design: Option<String>,
+    pub notes: Option<String>,
+
+    // ===== Hierarchical Structure =====
+    pub children: Vec<BeadNode>,
+
+    // ===== Computed Properties (Backend calculates these) =====
+    #[serde(rename = "isBlocked")]
+    pub is_blocked: bool,
+    #[serde(rename = "isCritical")]
+    pub is_critical: bool,
+    #[serde(rename = "blockingIds")]
+    pub blocking_ids: Vec<String>,
+
+    // ===== Logical Positioning (NOT pixels - frontend converts to pixels) =====
+    /// Tree depth (0 = root, 1 = child, 2 = grandchild, etc.)
+    pub depth: usize,
+    /// Earliest start time in logical time units (NOT pixels)
+    #[serde(rename = "earliestStart")]
+    pub earliest_start: f64,
+    /// Duration in logical time units (NOT pixels)
+    pub duration: f64,
+
+    // ===== UI State =====
+    #[serde(rename = "isExpanded")]
+    pub is_expanded: bool,
+    #[serde(rename = "isVisible")]
+    pub is_visible: bool,
+
+    // Extra metadata (preserves any unknown fields from JSONL)
+    #[serde(flatten)]
+    pub extra_metadata: serde_json::Map<String, serde_json::Value>,
+}
+
+/// ViewIndexes provides fast lookups into the view model tree.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewIndexes {
+    /// Map from bead ID to its index in a flattened tree traversal
+    #[serde(rename = "idToIndex")]
+    pub id_to_index: HashMap<String, usize>,
+
+    /// Map from bead ID to its parent's ID
+    #[serde(rename = "idToParent")]
+    pub id_to_parent: HashMap<String, String>,
+
+    /// List of all critical path bead IDs (in order)
+    #[serde(rename = "criticalPath")]
+    pub critical_path: Vec<String>,
+}
+
+/// ProjectMetadata contains aggregate statistics about the project.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectMetadata {
+    /// Total number of beads in the project
+    #[serde(rename = "totalBeads")]
+    pub total_beads: usize,
+
+    /// Number of open beads
+    #[serde(rename = "openCount")]
+    pub open_count: usize,
+
+    /// Number of blocked beads
+    #[serde(rename = "blockedCount")]
+    pub blocked_count: usize,
+
+    /// Number of beads in progress
+    #[serde(rename = "inProgressCount")]
+    pub in_progress_count: usize,
+
+    /// Number of closed beads
+    #[serde(rename = "closedCount")]
+    pub closed_count: usize,
+
+    /// Total project duration (critical path length)
+    #[serde(rename = "totalDuration")]
+    pub total_duration: f64,
+
+    /// State distributions by time bucket
+    pub distributions: Vec<BucketDistribution>,
+}
+
+/// ProjectViewModel is the single source of truth for all UI components.
+/// Backend computes this once per filter/view change, frontend reactively renders it.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectViewModel {
+    /// Hierarchical tree of beads with all computed properties
+    pub tree: Vec<BeadNode>,
+
+    /// Project-level metadata and statistics
+    pub metadata: ProjectMetadata,
+
+    /// Fast lookup indexes
+    pub indexes: ViewIndexes,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -1854,7 +2376,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            get_beads, get_processed_data, update_bead, create_bead, close_bead, reopen_bead, claim_bead,
+            get_beads, get_processed_data, get_project_view_model, update_bead, create_bead, close_bead, reopen_bead, claim_bead,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir
         ])
