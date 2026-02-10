@@ -279,11 +279,17 @@ function App() {
     items.forEach(item => {
       // Find "blocks" dependencies (this task blocks others)
       const blocksDeps = item.bead.dependencies?.filter((d: any) => d.type === 'blocks') || [];
+
+      // Debug: log dependencies for first few items
+      if (item.row < 3 && item.bead.dependencies && item.bead.dependencies.length > 0) {
+        console.log(`Dependencies for ${item.bead.id}:`, item.bead.dependencies);
+      }
+
       blocksDeps.forEach((dep: any) => {
         const successor = idToItem.get(dep.depends_on_id);
         if (successor) {
           // Connector from right edge of predecessor to left edge of successor
-          connectors.push({
+          const connector = {
             fromId: item.bead.id,
             toId: dep.depends_on_id,
             fromX: item.x + item.width,
@@ -291,11 +297,14 @@ function App() {
             toX: successor.x,
             toY: successor.row * 48 + 24,
             isCritical: item.isCritical && items.find(i => i.bead.id === dep.depends_on_id)?.isCritical || false
-          });
+          };
+          connectors.push(connector);
+          console.log('Added connector:', connector);
         }
       });
     });
 
+    console.log(`Total connectors: ${connectors.length}`);
     return { items, rowCount: rowIndex, rowDepths, connectors };
   }, [viewModel, zoom]);
 

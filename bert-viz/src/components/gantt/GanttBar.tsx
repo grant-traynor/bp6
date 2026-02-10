@@ -26,15 +26,15 @@ export const GanttBar = ({ item, onClick, isSelected }: GanttBarProps) => {
   };
 
   return (
-    <div 
+    <div
       className={cn(
         "absolute h-full flex items-center group cursor-pointer transition-transform duration-200",
         isSelected ? "z-20 scale-y-110" : "z-10 hover:z-20"
       )}
-      style={{ left: x, width: isMilestone ? 12 : width }}
+      style={{ left: x, width: isMilestone ? 12 : width, paddingLeft: isMilestone ? 0 : '8px' }}
       onClick={() => onClick(bead)}
     >
-      <div className="flex-1 flex items-center h-full relative">
+      <div className="flex-1 flex items-center h-full relative" style={{ paddingLeft: isMilestone ? 0 : '12px' }}>
         {isSummary ? (
           <div className={cn(
             "w-full h-2 relative rounded-sm border-b-2 transition-all",
@@ -59,7 +59,7 @@ export const GanttBar = ({ item, onClick, isSelected }: GanttBarProps) => {
         )}
 
         <div className={cn(
-          "absolute left-full ml-4 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10 transition-all",
+          "absolute left-full ml-6 flex items-center gap-2 whitespace-nowrap pointer-events-none z-10 transition-all",
           isSelected ? "opacity-100 scale-105 origin-left" : "opacity-80 group-hover:opacity-100 group-hover:translate-x-1"
         )}>
           <span className={cn(

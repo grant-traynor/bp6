@@ -405,8 +405,65 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
 
     eprintln!("⏱️  Layout calculation: {:.2}ms", layout_start.elapsed().as_secs_f64() * 1000.0);
 
-    // 12. Calculate state distributions
-    let distributions = calculate_state_distribution(&layout.items, params.zoom);
+    // 12. Calculate state distributions from tree
+    // Convert tree to temporary BeadNode tree for distribution calculation
+    fn wbs_to_temp_bead_nodes(
+        nodes: &[WBSNode],
+        x_map: &HashMap<String, usize>,
+        range_cache: &HashMap<String, NodeRange>,
+    ) -> Vec<BeadNode> {
+        nodes
+            .iter()
+            .map(|node| {
+                let node_range = range_cache.get(&node.bead.id);
+                let (cell_offset, cell_count) = if let Some(range) = node_range {
+                    let offset = (range.x / 10.0).round() as usize;
+                    let count = (range.width / 10.0).ceil().max(1.0) as usize;
+                    (offset, count)
+                } else {
+                    let offset = x_map.get(&node.bead.id).copied().unwrap_or(0);
+                    (offset, 1)
+                };
+
+                BeadNode {
+                    id: node.bead.id.clone(),
+                    title: node.bead.title.clone(),
+                    description: node.bead.description.clone(),
+                    status: node.bead.status.clone(),
+                    priority: node.bead.priority,
+                    issue_type: node.bead.issue_type.clone(),
+                    estimate: node.bead.estimate,
+                    dependencies: node.bead.dependencies.clone(),
+                    owner: node.bead.owner.clone(),
+                    created_at: node.bead.created_at.clone(),
+                    created_by: node.bead.created_by.clone(),
+                    updated_at: node.bead.updated_at.clone(),
+                    labels: node.bead.labels.clone(),
+                    acceptance_criteria: node.bead.acceptance_criteria.clone(),
+                    closed_at: node.bead.closed_at.clone(),
+                    close_reason: node.bead.close_reason.clone(),
+                    is_favorite: node.bead.is_favorite,
+                    parent: node.bead.parent.clone(),
+                    external_reference: node.bead.external_reference.clone(),
+                    design: node.bead.design.clone(),
+                    notes: node.bead.notes.clone(),
+                    children: wbs_to_temp_bead_nodes(&node.children, x_map, range_cache),
+                    is_blocked: node.is_blocked,
+                    is_critical: node.is_critical,
+                    blocking_ids: vec![],
+                    depth: 0,
+                    cell_offset,
+                    cell_count,
+                    is_expanded: node.is_expanded,
+                    is_visible: true,
+                    extra_metadata: node.bead.extra_metadata.clone(),
+                }
+            })
+            .collect()
+    }
+
+    let temp_tree = wbs_to_temp_bead_nodes(&tree, &x_map, &range_cache);
+    let distributions = calculate_state_distribution_from_tree(&temp_tree);
 
     // 13. Return ProcessedData
     let total_time = start_time.elapsed();
@@ -777,15 +834,8 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
     );
 
     // 12. Generate Gantt layout for distributions (reuse existing logic)
-    let layout = generate_gantt_layout(
-        &filtered,
-        &tree,
-        &x_map,
-        &range_cache,
-        &critical_path,
-        params.zoom,
-    );
-    let distributions = calculate_state_distribution(&layout.items, params.zoom);
+    // 12. Calculate state distributions from tree (before building layout)
+    let distributions = calculate_state_distribution_from_tree(&bead_node_tree);
 
     // 13. Build indexes
     let indexes = build_view_indexes(&bead_node_tree, &critical_path);
@@ -1670,26 +1720,36 @@ fn include_hierarchy(
         .collect()
 }
 
-/// Calculate state distribution (open/inProgress/blocked/closed counts) across 100-unit time buckets.
-/// Used for Gantt header visualization.
-fn calculate_state_distribution(
-    items: &[GanttItem],
-    _zoom: f64,
+/// Calculate state distribution (open/inProgress/blocked/closed counts) across grid cell buckets.
+/// Used for Gantt header visualization. Each bucket = 1 grid cell.
+fn calculate_state_distribution_from_tree(
+    tree: &[BeadNode],
 ) -> Vec<BucketDistribution> {
-    if items.is_empty() {
+    // Flatten tree to get all nodes
+    fn flatten(nodes: &[BeadNode], acc: &mut Vec<BeadNode>) {
+        for node in nodes {
+            acc.push(node.clone());
+            if !node.children.is_empty() {
+                flatten(&node.children, acc);
+            }
+        }
+    }
+
+    let mut all_nodes = Vec::new();
+    flatten(tree, &mut all_nodes);
+
+    if all_nodes.is_empty() {
         return Vec::new();
     }
 
-    // Find the maximum x + width to determine number of buckets
-    let max_x = items
+    // Find the maximum cell offset + count to determine number of buckets
+    let max_cell = all_nodes
         .iter()
-        .map(|item| item.x + item.width)
-        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-        .unwrap_or(0.0);
+        .map(|node| node.cell_offset + node.cell_count)
+        .max()
+        .unwrap_or(1);
 
-    // Bucket size is 100 units (pre-zoom)
-    let bucket_size = 100.0;
-    let num_buckets = ((max_x / bucket_size).ceil() as usize).max(1);
+    let num_buckets = max_cell.max(1);
 
     let mut buckets: Vec<BucketDistribution> = (0..num_buckets)
         .map(|_| BucketDistribution {
@@ -1702,17 +1762,17 @@ fn calculate_state_distribution(
 
     // Count beads in each bucket by status
     // Exclude epics and features (tasks only)
-    for item in items {
-        if item.bead.issue_type == "epic" || item.bead.issue_type == "feature" {
+    for node in &all_nodes {
+        if node.issue_type == "epic" || node.issue_type == "feature" {
             continue;
         }
 
-        let start_bucket = (item.x / bucket_size).floor() as usize;
-        let end_bucket = ((item.x + item.width) / bucket_size).floor() as usize;
+        let start_bucket = node.cell_offset;
+        let end_bucket = node.cell_offset + node.cell_count - 1;
 
         // Handle bead overlap across buckets
         for bucket_idx in start_bucket..=end_bucket.min(num_buckets - 1) {
-            match item.bead.status.as_str() {
+            match node.status.as_str() {
                 "open" => buckets[bucket_idx].open += 1,
                 "in_progress" => buckets[bucket_idx].in_progress += 1,
                 "closed" => buckets[bucket_idx].closed += 1,
@@ -1720,7 +1780,7 @@ fn calculate_state_distribution(
             }
 
             // Count blocked beads
-            if item.is_blocked {
+            if node.is_blocked {
                 buckets[bucket_idx].blocked += 1;
             }
         }
