@@ -211,6 +211,53 @@ function App() {
 
   const beads = useMemo(() => viewModel ? flattenTree(viewModel.tree) : [], [viewModel, flattenTree]);
 
+  // Gantt layout: flatten tree to visible nodes with row numbers and pixel positions
+  const ganttLayout = useMemo(() => {
+    if (!viewModel) {
+      return { items: [], rowCount: 0, rowDepths: [] };
+    }
+
+    const items: Array<{
+      bead: BeadNode;
+      x: number;
+      width: number;
+      row: number;
+      depth: number;
+      isCritical: boolean;
+    }> = [];
+    const rowDepths: number[] = [];
+    let rowIndex = 0;
+
+    // Traverse tree and build visible items with row numbers
+    const traverse = (nodes: BeadNode[], depth: number = 0) => {
+      nodes.forEach(node => {
+        // Convert logical position to pixels
+        const x = node.earliestStart * zoom * 100;
+        const width = node.duration * zoom * 100;
+
+        items.push({
+          bead: node,
+          x,
+          width,
+          row: rowIndex,
+          depth,
+          isCritical: node.isCritical,
+        });
+        rowDepths.push(depth);
+        rowIndex++;
+
+        // Recurse to children if node is expanded
+        if (node.isExpanded && node.children.length > 0) {
+          traverse(node.children, depth + 1);
+        }
+      });
+    };
+
+    traverse(viewModel.tree);
+
+    return { items, rowCount: rowIndex, rowDepths };
+  }, [viewModel, zoom]);
+
   const toggleNode = useCallback((id: string) => {
     // Find the DOM element for this node to track its position
     const element = document.querySelector(`[data-bead-id="${id}"]`);
@@ -644,19 +691,37 @@ function App() {
               </div>
             </div>
             <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
-              {/* TODO: Implement Gantt rendering with BeadNode logical positioning */}
-              {/* For now, show a placeholder. Full Gantt rendering needs: */}
-              {/* 1. Flatten tree to get visible nodes with row numbers */}
-              {/* 2. Convert logical positions (earliestStart, duration) to pixels */}
-              {/* 3. Render connectors based on blockingIds */}
-              <div className="p-8 text-[var(--text-secondary)]">
-                <div className="text-xl font-semibold mb-4">Gantt Chart (In Progress)</div>
-                <div className="space-y-2">
-                  <p>The Gantt chart is being refactored to use the unified view model.</p>
-                  <p className="text-sm">The tree view on the left is now working with the new architecture.</p>
-                  <p className="text-sm">Total beads: {viewModel?.metadata.totalBeads || 0}</p>
-                  <p className="text-sm">Open: {viewModel?.metadata.openCount || 0} | In Progress: {viewModel?.metadata.inProgressCount || 0} | Blocked: {viewModel?.metadata.blockedCount || 0} | Closed: {viewModel?.metadata.closedCount || 0}</p>
+              <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>
+                {loading && <GanttSkeleton />}
+                {/* Background grid */}
+                <div className="absolute inset-0 pointer-events-none">
+                  {ganttLayout.rowDepths.map((depth, i) => (
+                    <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
+                  ))}
+                  <div className="absolute inset-0 flex">
+                    {Array.from({ length: 50 }).map((_, i) => (
+                      <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
+                    ))}
+                  </div>
                 </div>
+                {/* Gantt bars */}
+                {ganttLayout.items.map((item) => (
+                  <div key={item.bead.id} className="absolute w-full" style={{ top: item.row * 48, height: 48 }}>
+                    <GanttBar
+                      item={{
+                        bead: item.bead,
+                        x: item.x,
+                        width: item.width,
+                        row: item.row,
+                        depth: item.depth,
+                        isCritical: item.isCritical,
+                        isBlocked: item.bead.isBlocked,
+                      }}
+                      onClick={handleBeadClick}
+                      isSelected={selectedBead?.id === item.bead.id}
+                    />
+                  </div>
+                ))}
               </div>
             </div>
           </div>
