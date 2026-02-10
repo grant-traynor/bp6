@@ -1,13 +1,13 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "../../utils";
-import type { Bead, WBSNode } from "../../api";
+import type { BeadNode } from "../../api";
 import { getChipStyles } from "../shared/Chip";
 
 interface WBSTreeItemProps {
-  node: WBSNode;
+  node: BeadNode;
   depth?: number;
   onToggle: (id: string) => void;
-  onClick: (bead: Bead) => void;
+  onClick: (bead: BeadNode) => void;
   isSelected?: boolean;
 }
 
@@ -43,7 +43,7 @@ export const WBSTreeItem = ({
           isSelected && "bg-[var(--accent-primary)]/5 shadow-[inset_4px_0_0_0_var(--accent-primary)]"
         )}
         style={{ paddingLeft: `${depth * 1.5}rem` }}
-        onClick={() => onClick(node as Bead)}
+        onClick={() => onClick(node)}
       >
         <div
           className="w-10 shrink-0 flex items-center justify-center h-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
@@ -79,14 +79,12 @@ export const WBSTreeItem = ({
         </div>
 
         <div className="w-20 shrink-0 px-2 flex items-center justify-center h-full">
-          {node.issue_type !== 'task' && (
-            <span className={cn(
-              "text-xs font-black px-1.5 py-0.5 rounded-md uppercase tracking-widest border border-[var(--border-primary)] shadow-sm transition-all",
-              isSelected ? "bg-[var(--accent-primary)]/20 border-[var(--accent-primary)]/40 text-[var(--accent-primary)] scale-95" : getChipStyles(node.issue_type)
-            )}>
-              {node.issue_type}
-            </span>
-          )}
+          <span className={cn(
+            "text-xs font-black px-1.5 py-0.5 rounded-md uppercase tracking-widest border border-[var(--border-primary)] shadow-sm transition-all",
+            isSelected ? "bg-[var(--accent-primary)]/20 border-[var(--accent-primary)]/40 text-[var(--accent-primary)] scale-95" : getChipStyles(node.issueType)
+          )}>
+            {node.issueType}
+          </span>
         </div>
 
         <div className="w-24 shrink-0 px-2 flex items-center h-full">
@@ -103,7 +101,7 @@ export const WBSTreeItem = ({
   );
 };
 
-export const WBSTreeList = ({ nodes, depth = 0, onToggle, onClick, selectedId }: { nodes: WBSNode[], depth?: number, onToggle: (id: string) => void, onClick: (bead: Bead) => void, selectedId?: string }) => {
+export const WBSTreeList = ({ nodes, depth = 0, onToggle, onClick, selectedId }: { nodes: BeadNode[], depth?: number, onToggle: (id: string) => void, onClick: (bead: BeadNode) => void, selectedId?: string }) => {
   return (
     <>
       {nodes.map(node => (

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
-import { fetchBeads, fetchProcessedData, fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, type WBSNode, type Bead, type BeadNode, type Project, type ProcessedData, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
+import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -36,7 +36,7 @@ function App() {
   const [selectedBead, setSelectedBead] = useState<BeadNode | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const [editForm, setEditForm] = useState<Partial<Bead>>({});
+  const [editForm, setEditForm] = useState<Partial<BeadNode>>({});
   const [filterText, setFilterText] = useState("");
   const [hideClosed, setHideClosed] = useState(false);
   const [closedTimeFilter, setClosedTimeFilter] = useState<ClosedTimeFilter>(() => {
@@ -214,7 +214,7 @@ function App() {
   // Gantt layout: flatten tree to visible nodes with row numbers and pixel positions
   const ganttLayout = useMemo(() => {
     if (!viewModel) {
-      return { items: [], rowCount: 0, rowDepths: [] };
+      return { items: [], rowCount: 0, rowDepths: [], connectors: [] };
     }
 
     const items: Array<{
@@ -226,6 +226,7 @@ function App() {
       isCritical: boolean;
     }> = [];
     const rowDepths: number[] = [];
+    const idToItem = new Map<string, { x: number; width: number; row: number }>();
     let rowIndex = 0;
 
     // Traverse tree and build visible items with row numbers
@@ -241,14 +242,16 @@ function App() {
           console.log(`Bead ${node.id}: earliestStart=${node.earliestStart}, duration=${node.duration}, x=${x}px, width=${width}px`);
         }
 
-        items.push({
+        const item = {
           bead: node,
           x,
           width,
           row: rowIndex,
           depth,
           isCritical: node.isCritical,
-        });
+        };
+        items.push(item);
+        idToItem.set(node.id, { x, width, row: rowIndex });
         rowDepths.push(depth);
         rowIndex++;
 
@@ -261,7 +264,38 @@ function App() {
 
     traverse(viewModel.tree);
 
-    return { items, rowCount: rowIndex, rowDepths };
+    // Build connectors from "blocks" dependencies
+    const connectors: Array<{
+      fromId: string;
+      toId: string;
+      fromX: number;
+      fromY: number;
+      toX: number;
+      toY: number;
+      isCritical: boolean;
+    }> = [];
+
+    items.forEach(item => {
+      // Find "blocks" dependencies (this task blocks others)
+      const blocksDeps = item.bead.dependencies?.filter((d: any) => d.type === 'blocks') || [];
+      blocksDeps.forEach((dep: any) => {
+        const successor = idToItem.get(dep.depends_on_id);
+        if (successor) {
+          // Connector from right edge of predecessor to left edge of successor
+          connectors.push({
+            fromId: item.bead.id,
+            toId: dep.depends_on_id,
+            fromX: item.x + item.width,
+            fromY: item.row * 48 + 24, // Center of row
+            toX: successor.x,
+            toY: successor.row * 48 + 24,
+            isCritical: item.isCritical && items.find(i => i.bead.id === dep.depends_on_id)?.isCritical || false
+          });
+        }
+      });
+    });
+
+    return { items, rowCount: rowIndex, rowDepths, connectors };
   }, [viewModel, zoom]);
 
   const toggleNode = useCallback((id: string) => {
@@ -362,7 +396,7 @@ function App() {
     }
   };
 
-  const handleBeadClick = (bead: Bead) => {
+  const handleBeadClick = (bead: BeadNode) => {
     setSelectedBead(bead);
     setIsEditing(false);
     setIsCreating(false);
@@ -380,16 +414,18 @@ function App() {
   const handleSaveEdit = async () => {
     if (selectedBead && editForm) {
       try {
-        const updated = { ...editForm } as Bead;
-        const currentParent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'));
-        if (updated.parent !== currentParent?.id) {
-          updated.dependencies = (updated.dependencies || []).filter(d => d.type !== 'parent-child');
-          if (updated.parent) {
-            updated.dependencies.push({ issue_id: updated.id, depends_on_id: updated.parent, type: 'parent-child' });
+        const beads = flattenTree(viewModel?.tree || []);
+        const currentParent = beads.find(b => b.dependencies?.some((d: any) => d.issue_id === selectedBead.id && d.type === 'parent-child'));
+        const updatedNode = { ...editForm };
+        if (updatedNode.parent !== currentParent?.id) {
+          updatedNode.dependencies = (updatedNode.dependencies || []).filter((d: any) => d.type !== 'parent-child');
+          if (updatedNode.parent) {
+            updatedNode.dependencies.push({ issue_id: updatedNode.id!, depends_on_id: updatedNode.parent, type: 'parent-child' });
           }
         }
-        await updateBead(updated);
-        setSelectedBead(updated);
+        const updated = beadNodeToBead(updatedNode);
+        await updateBead(updated as any);
+        setSelectedBead(updatedNode as BeadNode);
         setIsEditing(false);
         await loadData();
       } catch (error) { alert(`Failed to save bead: ${error}`); }
@@ -403,11 +439,11 @@ function App() {
       title: "",
       status: "open",
       priority: 2,
-      issue_type: "task",
+      issueType: "task",
       dependencies: [],
-      created_at: new Date().toISOString(),
-      acceptance_criteria: []
-    });
+      createdAt: new Date().toISOString(),
+      acceptanceCriteria: []
+    } as Partial<BeadNode>);
     setIsEditing(false);
     setIsCreating(true);
   }, []);
@@ -417,17 +453,19 @@ function App() {
     if (editForm.title) {
       console.log('🆕 Title exists, proceeding with create');
       try {
-        const newBead = { ...editForm } as Bead;
-        console.log('🆕 newBead prepared:', newBead);
-        if (newBead.parent) {
-          newBead.dependencies = [...(newBead.dependencies || []), { issue_id: newBead.id, depends_on_id: newBead.parent, type: 'parent-child' }];
+        const newNode = { ...editForm };
+        console.log('🆕 newNode prepared:', newNode);
+        if (newNode.parent) {
+          newNode.dependencies = [...(newNode.dependencies || []), { issue_id: newNode.id!, depends_on_id: newNode.parent, type: 'parent-child' }];
         }
+        const newBead = beadNodeToBead(newNode);
         console.log('🆕 Calling createBead...');
-        const createdId = await createBead(newBead);
+        const createdId = await createBead(newBead as any);
         console.log('🆕 Created bead ID:', createdId);
         setIsCreating(false);
-        const freshBeads = await loadData();
-        const createdBead = freshBeads.find(b => b.id === createdId);
+        await loadData();
+        const allBeads = flattenTree(viewModel?.tree || []);
+        const createdBead = allBeads.find((b: BeadNode) => b.id === createdId);
         if (createdBead) {
           setSelectedBead(createdBead);
         }
@@ -535,10 +573,13 @@ function App() {
     activeScrollSource.current = e.currentTarget;
   };
 
-  const toggleFavorite = async (bead: Bead) => {
+  const toggleFavorite = async (bead: BeadNode) => {
     try {
-      const updated = { ...bead, is_favorite: !bead.is_favorite };
-      await updateBead(updated);
+      const updated = beadNodeToBead({
+        ...bead,
+        isFavorite: !bead.isFavorite
+      });
+      await updateBead(updated as any);
       await loadData();
     } catch (error) { alert(`Failed to toggle favorite: ${error}`); }
   };
@@ -710,6 +751,23 @@ function App() {
                     ))}
                   </div>
                 </div>
+                {/* Dependency connectors */}
+                <svg className="absolute inset-0 pointer-events-none" style={{ zIndex: 5 }}>
+                  {ganttLayout.connectors.map((conn, idx) => {
+                    const midX = (conn.fromX + conn.toX) / 2;
+                    const path = `M ${conn.fromX} ${conn.fromY} L ${midX} ${conn.fromY} L ${midX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
+                    return (
+                      <path
+                        key={`${conn.fromId}-${conn.toId}-${idx}`}
+                        d={path}
+                        stroke={conn.isCritical ? "var(--status-blocked)" : "var(--border-primary)"}
+                        strokeWidth="2"
+                        fill="none"
+                        opacity={conn.isCritical ? 0.8 : 0.4}
+                      />
+                    );
+                  })}
+                </svg>
                 {/* Gantt bars */}
                 {ganttLayout.items.map((item) => (
                   <div key={item.bead.id} style={{ position: 'absolute', top: item.row * 48, height: 48, left: 0, right: 0 }}>

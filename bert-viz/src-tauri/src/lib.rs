@@ -497,12 +497,16 @@ fn convert_wbs_to_bead_nodes(
     collapsed_ids: &[String],
 ) -> Vec<BeadNode> {
     nodes.iter().map(|node| {
-        // Get logical positioning
-        let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0) as f64;
+        // Get logical positioning from range cache (includes rollup for parents)
         let node_range = range_cache.get(&node.bead.id);
-        let duration = node_range.map(|r| r.width).unwrap_or_else(|| {
-            node.bead.estimate.map(|e| e as f64).unwrap_or(1.0)
-        });
+        let (earliest_start, duration) = if let Some(range) = node_range {
+            (range.x, range.width)
+        } else {
+            // Fallback if range not calculated (shouldn't happen)
+            let start = x_map.get(&node.bead.id).copied().unwrap_or(0) as f64;
+            let dur = node.bead.estimate.map(|e| e as f64 / 60.0).unwrap_or(10.0);
+            (start, dur)
+        };
 
         // Compute properties
         let is_blocked = node.is_blocked;
@@ -1951,7 +1955,9 @@ struct NodeRange {
 }
 
 /// Calculate position and width for each node in the tree.
-/// Leaf nodes use estimate-based width, parent nodes span their children's ranges.
+/// All values are in logical time units (NOT pixels).
+/// Leaf nodes: start at earliestStart, duration = 1 grid cell (10 time units) or estimate-based.
+/// Parent nodes: span from earliest child start to latest child end (rollup).
 fn calculate_node_ranges(
     tree: &[WBSNode],
     x_map: &HashMap<String, usize>,
@@ -1968,15 +1974,24 @@ fn calculate_node_ranges(
         }
 
         let range = if node.children.is_empty() {
-            // Leaf node: x = earliest_start * 100 + 40, width = max(estimate/10, 40)
-            let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0);
-            let x = (earliest_start * 100 + 40) as f64;
-            let estimate = node.bead.estimate.unwrap_or(600);
-            let width = (estimate as f64 / 10.0).max(40.0);
+            // Leaf node: position in logical time units
+            let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0) as f64;
 
-            NodeRange { x, width }
+            // Duration: default to 10 time units (1 grid cell), or use estimate
+            // If estimate exists and is > 0, map it to time units (assume minutes, 1 time unit = 60 min)
+            let duration = if let Some(est) = node.bead.estimate {
+                if est > 0 {
+                    (est as f64 / 60.0).max(10.0)  // Convert minutes to time units, min 10 units (1 grid cell)
+                } else {
+                    10.0  // Zero estimate = milestone, but still give it width for now
+                }
+            } else {
+                10.0  // No estimate = 1 grid cell (10 time units)
+            };
+
+            NodeRange { x: earliest_start, width: duration }
         } else {
-            // Parent node: spans children's ranges
+            // Parent node: spans children's ranges (rollup behavior)
             let child_ranges: Vec<NodeRange> = node
                 .children
                 .iter()
@@ -1985,10 +2000,10 @@ fn calculate_node_ranges(
 
             if child_ranges.is_empty() {
                 // Fallback if somehow no children (shouldn't happen)
-                let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0);
-                let x = (earliest_start * 100 + 40) as f64;
-                NodeRange { x, width: 40.0 }
+                let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0) as f64;
+                NodeRange { x: earliest_start, width: 10.0 }
             } else {
+                // Start at earliest child's start, end at latest child's end
                 let min_x = child_ranges.iter().map(|r| r.x).fold(f64::INFINITY, f64::min);
                 let max_x = child_ranges
                     .iter()

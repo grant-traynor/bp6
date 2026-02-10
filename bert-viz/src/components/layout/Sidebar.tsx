@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { User, Tag, Clock, Star, Trash2, Plus, ArrowRight } from "lucide-react";
-import type { Bead } from "../../api";
+import type { BeadNode } from "../../api";
 
 // Subcomponents
 import { CollapsibleSection } from "./sidebar/CollapsibleSection";
@@ -9,22 +9,22 @@ import { SidebarProperty } from "./sidebar/SidebarProperty";
 import { SidebarActions } from "./sidebar/SidebarActions";
 
 interface SidebarProps {
-  selectedBead: Bead | null;
+  selectedBead: BeadNode | null;
   isCreating: boolean;
   isEditing: boolean;
-  editForm: Partial<Bead>;
-  beads: Bead[];
+  editForm: Partial<BeadNode>;
+  beads: BeadNode[];
   setIsEditing: (editing: boolean) => void;
   setIsCreating: (creating: boolean) => void;
-  setSelectedBead: (bead: Bead | null) => void;
-  setEditForm: (form: Partial<Bead>) => void;
+  setSelectedBead: (bead: BeadNode | null) => void;
+  setEditForm: (form: Partial<BeadNode>) => void;
   handleSaveEdit: () => Promise<void>;
   handleSaveCreate: () => Promise<void>;
   handleStartEdit: () => void;
   handleCloseBead: (beadId: string) => Promise<void>;
   handleReopenBead: (beadId: string) => Promise<void>;
   handleClaimBead: (beadId: string) => Promise<void>;
-  toggleFavorite: (bead: Bead) => Promise<void>;
+  toggleFavorite: (bead: BeadNode) => Promise<void>;
 }
 
 export const Sidebar = ({
@@ -49,7 +49,7 @@ export const Sidebar = ({
   });
 
   // Local form state for unified always-editable fields
-  const [formData, setFormData] = useState<Partial<Bead>>(() => {
+  const [formData, setFormData] = useState<Partial<BeadNode>>(() => {
     if (isCreating) return editForm;
     if (selectedBead) return selectedBead;
     return {};
@@ -79,11 +79,11 @@ export const Sidebar = ({
       (original.owner || '') !== (current.owner || '') ||
       (original.priority || 0) !== (current.priority || 0) ||
       (original.estimate || 0) !== (current.estimate || 0) ||
-      (original.issue_type || '') !== (current.issue_type || '') ||
+      (original.issueType || '') !== (current.issueType || '') ||
       (original.parent || '') !== (current.parent || '') ||
-      (original.design_notes || '') !== (current.design_notes || '') ||
-      (original.working_notes || '') !== (current.working_notes || '') ||
-      (original.external_reference || '') !== (current.external_reference || '') ||
+      (original.design || '') !== (current.design || '') ||
+      (original.notes || '') !== (current.notes || '') ||
+      (original.externalReference || '') !== (current.externalReference || '') ||
       JSON.stringify(original.labels || []) !== JSON.stringify(current.labels || []) ||
       JSON.stringify(original.acceptance_criteria || []) !== JSON.stringify(current.acceptance_criteria || [])
     );
@@ -140,9 +140,9 @@ export const Sidebar = ({
     <div className="absolute right-0 top-0 bottom-0 w-[480px] bg-[var(--background-primary)] border-l-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-panel)] z-50 flex flex-col animate-in slide-in-from-right duration-300 backdrop-blur-2xl">
       {/* Header */}
       <SidebarHeader
-        bead={displayBead as Bead}
+        bead={displayBead as BeadNode}
         onClose={() => { setSelectedBead(null); setIsCreating(false); }}
-        onToggleFavorite={toggleFavorite}
+        onToggleFavorite={toggleFavorite as any}
       />
 
       <div className="flex-1 overflow-y-auto p-10 flex flex-col gap-12 custom-scrollbar">
@@ -152,8 +152,8 @@ export const Sidebar = ({
             <div className="flex-1 flex flex-col gap-2.5">
               <span className="text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.25em] pl-1">Type</span>
               <select
-                value={formData.issue_type || "task"}
-                onChange={e => setFormData({...formData, issue_type: e.target.value})}
+                value={formData.issueType || "task"}
+                onChange={e => setFormData({...formData, issueType: e.target.value})}
                 className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
               >
                 <option value="task">Task</option>
@@ -172,7 +172,7 @@ export const Sidebar = ({
               >
                 <option value="">None</option>
                 {beads
-                  .filter(b => b.issue_type === 'epic' || b.issue_type === 'feature')
+                  .filter(b => b.issueType === 'epic' || b.issueType === 'feature')
                   .filter(b => !isCreating || b.id !== formData.id) // Don't show self as parent
                   .map(b => (
                     <option key={b.id} value={b.id}>
@@ -286,8 +286,8 @@ export const Sidebar = ({
               <span className="text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Design Notes</span>
               <textarea
                 className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-4 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[100px] resize-none shadow-sm leading-relaxed"
-                value={formData.design_notes || ""}
-                onChange={e => setFormData({...formData, design_notes: e.target.value})}
+                value={formData.design || ""}
+                onChange={e => setFormData({...formData, design: e.target.value})}
                 placeholder="Architectural decisions..."
               />
             </div>
@@ -295,8 +295,8 @@ export const Sidebar = ({
               <span className="text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">Working Notes</span>
               <textarea
                 className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-4 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[100px] resize-none shadow-sm leading-relaxed"
-                value={formData.working_notes || ""}
-                onChange={e => setFormData({...formData, working_notes: e.target.value})}
+                value={formData.notes || ""}
+                onChange={e => setFormData({...formData, notes: e.target.value})}
                 placeholder="Progress observations..."
               />
             </div>
@@ -304,8 +304,8 @@ export const Sidebar = ({
               <span className="text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.2em]">External Reference</span>
               <input
                 className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
-                value={formData.external_reference || ""}
-                onChange={e => setFormData({...formData, external_reference: e.target.value})}
+                value={formData.externalReference || ""}
+                onChange={e => setFormData({...formData, externalReference: e.target.value})}
                 placeholder="URLs, IDs, or paths..."
               />
             </div>
@@ -318,7 +318,7 @@ export const Sidebar = ({
           onToggle={() => toggleSection('ac')}
         >
           <div className="flex flex-col gap-4">
-            {(formData.acceptance_criteria || []).map((ac, i) => (
+            {(formData.acceptance_criteria || []).map((ac: string, i: number) => (
               <div key={i} className="flex gap-3">
                 <input
                   className="flex-1 bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
@@ -331,7 +331,7 @@ export const Sidebar = ({
                 />
                 <button
                   onClick={() => {
-                    const newAC = (formData.acceptance_criteria || []).filter((_, idx) => idx !== i);
+                    const newAC = (formData.acceptance_criteria || []).filter((_: string, idx: number) => idx !== i);
                     setFormData({...formData, acceptance_criteria: newAC});
                   }}
                   className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-3 rounded-xl transition-colors border-2 border-transparent hover:border-rose-500/20 active:scale-90"

@@ -17,11 +17,11 @@ interface SidebarActionsProps {
 }
 
 export const SidebarActions = ({
-  isEditing,
+  isEditing: _isEditing,
   isCreating,
   isDirty,
-  beadStatus,
-  onEdit,
+  beadStatus: _beadStatus,
+  onEdit: _onEdit,
   onCancel,
   onSave,
   onUndo,

@@ -1,12 +1,12 @@
 import { X, Star } from "lucide-react";
 import { cn } from "../../../utils";
 import { StatusIcon } from "../../shared/StatusIcon";
-import type { Bead } from "../../../api";
+import type { BeadNode } from "../../../api";
 
 interface SidebarHeaderProps {
-  bead: Bead;
+  bead: BeadNode;
   onClose: () => void;
-  onToggleFavorite?: (bead: Bead) => void;
+  onToggleFavorite?: (bead: BeadNode) => void;
 }
 
 export const SidebarHeader = ({ bead, onClose, onToggleFavorite }: SidebarHeaderProps) => {

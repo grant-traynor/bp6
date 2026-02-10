@@ -1,16 +1,16 @@
 import { Flame } from "lucide-react";
 import { cn } from "../../utils";
-import type { Bead, GanttItem } from "../../api";
+import type { BeadNode, GanttItem } from "../../api";
 
 interface GanttBarProps {
   item: GanttItem;
-  onClick: (bead: Bead) => void;
+  onClick: (bead: BeadNode) => void;
   isSelected?: boolean;
 }
 
 export const GanttBar = ({ item, onClick, isSelected }: GanttBarProps) => {
   const { bead, isCritical, isBlocked, x, width } = item;
-  const isSummary = bead.issue_type === 'epic' || bead.issue_type === 'feature';
+  const isSummary = bead.issueType === 'epic' || bead.issueType === 'feature';
   const isMilestone = bead.estimate === 0 && !isSummary;
 
   const getStatusColor = () => {

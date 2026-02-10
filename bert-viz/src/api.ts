@@ -159,7 +159,7 @@ export async function fetchProjectViewModel(params: FilterParams): Promise<Proje
 // buildWBSTree function removed - now handled by Rust backend in get_processed_data
 
 export interface GanttItem {
-  bead: Bead;
+  bead: BeadNode;
   x: number;
   width: number;
   row: number;
@@ -291,6 +291,36 @@ export interface FilterParams {
   include_hierarchy?: boolean;
   zoom?: number;
   collapsed_ids?: string[];
+}
+
+/**
+ * Convert BeadNode (camelCase, from view model) to Bead (snake_case, for API mutations).
+ * Used when updating or creating beads.
+ */
+export function beadNodeToBead(node: Partial<BeadNode>): Partial<Bead> {
+  return {
+    id: node.id,
+    title: node.title,
+    description: node.description,
+    status: node.status,
+    priority: node.priority,
+    issue_type: node.issueType,
+    estimate: node.estimate,
+    dependencies: node.dependencies,
+    owner: node.owner,
+    created_at: node.createdAt,
+    created_by: node.createdBy,
+    updated_at: node.updatedAt,
+    labels: node.labels,
+    acceptance_criteria: node.acceptanceCriteria,
+    closed_at: node.closedAt,
+    close_reason: node.closeReason,
+    is_favorite: node.isFavorite,
+    parent: node.parent,
+    external_reference: node.externalReference,
+    design: node.design,
+    notes: node.notes,
+  };
 }
 
 // calculateStateDistribution function removed - now handled by Rust backend in get_processed_data
