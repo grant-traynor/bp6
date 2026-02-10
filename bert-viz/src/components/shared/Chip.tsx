@@ -1,6 +1,7 @@
 import { cn } from "../../utils";
 
-export const getChipStyles = (label: string) => {
+export const getChipStyles = (label: string | undefined) => {
+  if (!label) return "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]";
   const l = label.toLowerCase();
   if (l === 'epic') return "bg-purple-500/20 text-purple-800 dark:text-purple-300 border-purple-500/40";
   if (l === 'bug') return "bg-rose-500/20 text-rose-800 dark:text-rose-300 border-rose-500/40";
@@ -11,8 +12,8 @@ export const getChipStyles = (label: string) => {
   return "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]";
 };
 
-export const Chip = ({ label }: { label: string }) => (
+export const Chip = ({ label }: { label: string | undefined }) => (
   <span className={cn("px-2 py-0.5 rounded-md text-xs font-black uppercase tracking-widest border transition-all", getChipStyles(label))}>
-    {label}
+    {label || 'unknown'}
   </span>
 );
