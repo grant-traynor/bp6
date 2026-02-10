@@ -661,7 +661,6 @@ function App() {
             </div>
           </div>
         </div>
-      </div>
         )}
       {hasProject && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} />}
       </main>
