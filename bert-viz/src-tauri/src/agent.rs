@@ -1,8 +1,8 @@
-use std::process::{Command, Stdio};
+use std::process::{Command, Stdio, Child, ChildStdin};
 use std::io::{BufRead, BufReader, Write};
 use tauri::{AppHandle, Emitter, State};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 const SYSTEM_PROMPT_PM: &str = "You are a Product Manager for BERT (Bead-based Epic and Requirement Tracker). \
 Your goal is to help users elaborate epics and decompose them into features and tasks. \
@@ -21,7 +21,8 @@ pub struct AgentChunk {
 }
 
 pub struct AgentProcess {
-    pub child: std::process::Child,
+    pub child: Arc<Mutex<Child>>,
+    pub stdin: Arc<Mutex<ChildStdin>>,
 }
 
 #[derive(Default)]
@@ -42,17 +43,14 @@ pub fn start_agent_session(app_handle: AppHandle, state: State<'_, AgentState>, 
     let mut process_guard = state.process.lock().unwrap();
     
     if process_guard.is_some() {
-        if let Some(mut old_process) = process_guard.take() {
-            let _ = old_process.child.kill();
+        if let Some(old_process) = process_guard.take() {
+            let mut child = old_process.child.lock().unwrap();
+            let _ = child.kill();
         }
     }
 
     let mut cmd = Command::new("gemini");
     cmd.arg("--output-format").arg("stream-json");
-
-    if persona == "product-manager" {
-        cmd.arg("-i").arg(format!("activate_skill spec\n{}", SYSTEM_PROMPT_PM));
-    }
 
     let mut child = cmd
         .stdin(Stdio::piped())
@@ -61,8 +59,16 @@ pub fn start_agent_session(app_handle: AppHandle, state: State<'_, AgentState>, 
         .spawn()
         .map_err(|e| format!("Failed to spawn gemini: {}", e))?;
 
+    let mut stdin = child.stdin.take().ok_or("Failed to open stdin")?;
     let stdout = child.stdout.take().ok_or("Failed to open stdout")?;
     let stderr = child.stderr.take().ok_or("Failed to open stderr")?;
+
+    // Send initialization commands via stdin
+    if persona == "product-manager" {
+        writeln!(stdin, "activate_skill spec").map_err(|e| e.to_string())?;
+        writeln!(stdin, "{}", SYSTEM_PROMPT_PM).map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
+    }
     
     let handle_clone = app_handle.clone();
     
@@ -71,7 +77,6 @@ pub fn start_agent_session(app_handle: AppHandle, state: State<'_, AgentState>, 
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line_str) = line {
-                // Filter for JSON lines from Gemini CLI
                 if line_str.trim().starts_with('{') {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line_str) {
                         if json["type"] == "message" && json["role"] == "assistant" {
@@ -91,14 +96,12 @@ pub fn start_agent_session(app_handle: AppHandle, state: State<'_, AgentState>, 
                 }
             }
         }
-        // When stdout closes, signal completion if not already done
         let _ = handle_clone.emit("agent-chunk", AgentChunk {
             content: "".to_string(),
             is_done: true,
         });
     });
 
-    // Thread to read stderr (for debugging/logging)
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
         for line in reader.lines() {
@@ -108,17 +111,20 @@ pub fn start_agent_session(app_handle: AppHandle, state: State<'_, AgentState>, 
         }
     });
 
-    *process_guard = Some(AgentProcess { child });
+    *process_guard = Some(AgentProcess { 
+        child: Arc::new(Mutex::new(child)), 
+        stdin: Arc::new(Mutex::new(stdin)) 
+    });
     
     Ok(())
 }
 
 #[tauri::command]
 pub fn send_agent_message(message: String, state: State<'_, AgentState>) -> Result<(), String> {
-    let mut process_guard = state.process.lock().unwrap();
+    let process_guard = state.process.lock().unwrap();
     
-    if let Some(process) = process_guard.as_mut() {
-        let stdin = process.child.stdin.as_mut().ok_or("Failed to open stdin")?;
+    if let Some(process) = process_guard.as_ref() {
+        let mut stdin = process.stdin.lock().unwrap();
         writeln!(stdin, "{}", message).map_err(|e| format!("Failed to write to stdin: {}", e))?;
         stdin.flush().map_err(|e| format!("Failed to flush stdin: {}", e))?;
         Ok(())
@@ -131,8 +137,9 @@ pub fn send_agent_message(message: String, state: State<'_, AgentState>) -> Resu
 pub fn stop_agent_session(state: State<'_, AgentState>) -> Result<(), String> {
     let mut process_guard = state.process.lock().unwrap();
     
-    if let Some(mut process) = process_guard.take() {
-        let _ = process.child.kill();
+    if let Some(process) = process_guard.take() {
+        let mut child = process.child.lock().unwrap();
+        let _ = child.kill();
         Ok(())
     } else {
         Ok(())
@@ -141,15 +148,13 @@ pub fn stop_agent_session(state: State<'_, AgentState>) -> Result<(), String> {
 
 #[tauri::command]
 pub fn approve_suggestion(command: String) -> Result<String, String> {
-    // Parse the command string. For now, we assume it's a 'bd' command.
-    // We should be careful about what we execute.
     if !command.starts_with("bd ") {
         return Err("Only 'bd' commands are supported for approval".to_string());
     }
 
     let args: Vec<String> = command
         .split_whitespace()
-        .skip(1) // Skip "bd"
+        .skip(1)
         .map(|s| s.to_string())
         .collect();
 
