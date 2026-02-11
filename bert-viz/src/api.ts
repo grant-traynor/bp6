@@ -156,6 +156,51 @@ export async function fetchProjectViewModel(params: FilterParams): Promise<Proje
   }
 }
 
+// ============================================================================
+// Agent API (bp6-5s4.2.5)
+// ============================================================================
+
+export interface AgentChunk {
+  content: string;
+  isDone: boolean;
+}
+
+export async function startAgentSession(persona: string): Promise<void> {
+  try {
+    await invoke("start_agent_session", { persona });
+  } catch (error) {
+    console.error("Failed to start agent session:", error);
+    throw error;
+  }
+}
+
+export async function sendAgentMessage(message: string): Promise<void> {
+  try {
+    await invoke("send_agent_message", { message });
+  } catch (error) {
+    console.error("Failed to send agent message:", error);
+    throw error;
+  }
+}
+
+export async function stopAgentSession(): Promise<void> {
+  try {
+    await invoke("stop_agent_session");
+  } catch (error) {
+    console.error("Failed to stop agent session:", error);
+    throw error;
+  }
+}
+
+export async function approveSuggestion(command: string): Promise<string> {
+  try {
+    return await invoke<string>("approve_suggestion", { command });
+  } catch (error) {
+    console.error("Failed to approve suggestion:", error);
+    throw error;
+  }
+}
+
 // buildWBSTree function removed - now handled by Rust backend in get_processed_data
 
 export interface GanttItem {

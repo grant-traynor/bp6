@@ -7,6 +7,7 @@ interface HeaderProps {
   setIsDark: (dark: boolean) => void;
   handleStartCreate: () => void;
   loadData: () => void;
+  onOpenChat: (persona: string) => void;
   projectMenuOpen: boolean;
   setProjectMenuOpen: (open: boolean) => void;
   favoriteProjects: Project[];
@@ -23,6 +24,7 @@ export const Header = ({
   setIsDark,
   handleStartCreate,
   loadData,
+  onOpenChat,
   projectMenuOpen,
   setProjectMenuOpen,
   favoriteProjects,
@@ -63,6 +65,12 @@ export const Header = ({
         </div>
       </div>
       <div className="flex items-center gap-3">
+        <button 
+          onClick={() => onOpenChat('product-manager')}
+          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-indigo-600 dark:text-indigo-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
+        >
+          <span className="text-base">🤖</span> PM
+        </button>
         <button 
           onClick={() => setIsDark(!isDark)} 
           className="h-10 w-10 hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] rounded-xl flex items-center justify-center transition-all border-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-sm)] active:scale-90"

@@ -11,6 +11,7 @@ import { WBSTreeList } from "./components/wbs/WBSTreeItem";
 import { GanttBar } from "./components/gantt/GanttBar";
 import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
 import { WBSSkeleton, GanttSkeleton } from "./components/shared/Skeleton";
+import ChatDialog from "./components/chat/ChatDialog";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -49,6 +50,10 @@ function App() {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Chat state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatPersona, setChatPersona] = useState("product-manager");
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
@@ -360,6 +365,11 @@ function App() {
     setCollapsedIds(allParentIds);
   }, [viewModel]);
 
+  const handleOpenChat = useCallback((persona: string) => {
+    setChatPersona(persona);
+    setIsChatOpen(true);
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
@@ -371,16 +381,17 @@ function App() {
       }
       switch (e.key) {
         case '/': e.preventDefault(); searchInputRef.current?.focus(); break;
-        case 'Escape': setSelectedBead(null); setIsCreating(false); setIsEditing(false); break;
+        case 'Escape': setSelectedBead(null); setIsCreating(false); setIsEditing(false); setIsChatOpen(false); break;
         case '+': case '=': e.preventDefault(); expandAll(); break;
         case '-': case '_': e.preventDefault(); collapseAll(); break;
         case 'n': e.preventDefault(); handleStartCreate(); break;
         case 'r': e.preventDefault(); loadData(); break;
+        case 'c': e.preventDefault(); handleOpenChat('product-manager'); break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [expandAll, collapseAll, loadData]);
+  }, [expandAll, collapseAll, loadData, handleOpenChat]);
 
   useEffect(() => {
     localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
@@ -644,7 +655,7 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
       <Navigation />
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
-        <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} />
+        <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} onOpenChat={handleOpenChat} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} />
         {!hasProject ? (
           <div className="flex-1 flex items-center justify-center">
             {loading ? (
@@ -830,6 +841,7 @@ function App() {
         </div>
         )}
       {hasProject && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} />}
+      <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} />
       </main>
     </div>
   );
