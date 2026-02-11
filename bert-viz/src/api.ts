@@ -291,6 +291,8 @@ export interface FilterParams {
   include_hierarchy?: boolean;
   zoom?: number;
   collapsed_ids?: string[];
+  sort_by?: 'priority' | 'title' | 'type' | 'id' | 'none';
+  sort_order?: 'asc' | 'desc' | 'none';
 }
 
 /**
