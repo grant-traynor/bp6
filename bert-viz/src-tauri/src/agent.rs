@@ -4,6 +4,63 @@ use tauri::{AppHandle, Emitter, State};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
+/// Represents the available CLI backends for AI agent execution
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CliBackend {
+    Gemini,
+    #[serde(rename = "claude")]
+    ClaudeCode,
+}
+
+impl CliBackend {
+    /// Returns the command name to execute for this CLI backend
+    pub fn as_command_name(&self) -> &str {
+        match self {
+            CliBackend::Gemini => "gemini",
+            CliBackend::ClaudeCode => "claude",
+        }
+    }
+
+    /// Returns whether this CLI backend supports streaming output
+    pub fn supports_streaming(&self) -> bool {
+        match self {
+            CliBackend::Gemini => true,
+            CliBackend::ClaudeCode => true,
+        }
+    }
+
+    /// Returns the default arguments for this CLI backend
+    pub fn default_args(&self) -> Vec<String> {
+        match self {
+            CliBackend::Gemini => vec![
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--yolo".to_string(),
+            ],
+            CliBackend::ClaudeCode => vec![
+                // Will be populated based on Claude CLI research
+                // Placeholder for now
+            ],
+        }
+    }
+}
+
+impl Default for CliBackend {
+    fn default() -> Self {
+        CliBackend::Gemini
+    }
+}
+
+impl std::fmt::Display for CliBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CliBackend::Gemini => write!(f, "Gemini"),
+            CliBackend::ClaudeCode => write!(f, "Claude Code"),
+        }
+    }
+}
+
 const SYSTEM_PROMPT_PM: &str = "You are an automated task processing engine for BERT (Bead-based Epic and Requirement Tracker). \
 Your goal is to process epics and features based strictly on the provided templates. \
 CRITICAL: DO NOT use 'activate_skill'. DO NOT attempt to load external tools or knowledge. \
@@ -51,7 +108,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Creating implementation elements**: Create tasks, chores, and bugs to decompose the feature. Decompose the feature into smaller, actionable units. EVERY unit MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each unit should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
 5. **Task Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs in the format {{feature_id}}.001, {{feature_id}}.002, etc. Example: If decomposing feature bp6-123.001, tasks become bp6-123.001.001, bp6-123.001.002, etc.
-6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
+6. **Mandatory Fields**: ALWAYS provide --design and --acceptance criteria when creating beads. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the units that you create.
 9. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -67,7 +124,7 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 All beads are created using --parent flag. The CLI automatically generates sequential IDs.
 
-**MANDATORY: Always include --design and --acceptance-criteria for each bead.**
+**MANDATORY: Always include --design and --acceptance for each bead.**
 
 ```bash
 bd create --parent {{feature_id}} \
@@ -76,7 +133,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Create database models and repositories" \
   --design "Add UserModel and UserRepository in src/data/. Follow repository pattern." \
-  --acceptance-criteria "CRUD methods work. Tests pass. No direct DB calls in logic."
+  --acceptance "CRUD methods work. Tests pass. No direct DB calls in logic."
 
 bd create --parent {{feature_id}} \
   --title "Build API endpoints" \
@@ -84,7 +141,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Add REST endpoints for CRUD operations" \
   --design "Routes in src/api/users.ts. Use auth middleware." \
-  --acceptance-criteria "Endpoints work. Auth applied. Validation passes. Tests pass."
+  --acceptance "Endpoints work. Auth applied. Validation passes. Tests pass."
 ```
 
 **Common bd commands:**
@@ -144,7 +201,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Creating features**: Create features to decompose the epic. Decompose the epic into smaller, actionable features. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
 5. **Feature Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs in the format {{epic_id}}.001, {{epic_id}}.002, etc. Example: If decomposing epic bp6-643, features become bp6-643.001, bp6-643.002, etc.
-6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
+6. **Mandatory Fields**: ALWAYS provide --design and --acceptance criteria when creating features. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the features that you create.
 9. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -161,7 +218,7 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 All features are created using --parent flag. The CLI automatically generates sequential IDs in the format {{epic_id}}.001, {{epic_id}}.002, etc.
 {{feature_id}} in the examples below is the placeholder that gets replaced with the actual epic ID.
 
-**MANDATORY: Always include --design and --acceptance-criteria for each feature.**
+**MANDATORY: Always include --design and --acceptance for each feature.**
 
 ```bash
 bd create --parent {{feature_id}} \
@@ -170,7 +227,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "User login and registration with OAuth2 and JWT" \
   --design "Passport.js for OAuth2. JWT in HTTP-only cookies. UI in src/components/auth/." \
-  --acceptance-criteria "Email/password and OAuth2 login work. Sessions persist. Tests pass."
+  --acceptance "Email/password and OAuth2 login work. Sessions persist. Tests pass."
 
 bd create --parent {{feature_id}} \
   --title "Data Management" \
@@ -178,7 +235,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "CRUD operations for core entities" \
   --design "PostgreSQL with Prisma. Repository pattern in src/data/. API in src/api/." \
-  --acceptance-criteria "All CRUD works. Migrations run. Validation at boundaries. Tests pass."
+  --acceptance "All CRUD works. Migrations run. Validation at boundaries. Tests pass."
 ```
 
 **The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
@@ -244,7 +301,7 @@ This is a planning session. All output is beads and discussion, not code.
 4. **Creating implementation elements**: Create tasks, bugs, or chores to extend the feature, depending on the context of the discussion with the user. EVERY element MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each element should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
 6. **Task Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs continuing from existing tasks. Example: If extending feature bp6-123.001 that already has .001 and .002, new tasks become bp6-123.001.003, bp6-123.001.004, etc.
-7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
+7. **Mandatory Fields**: ALWAYS provide --design and --acceptance criteria when creating beads. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing tasks within the feature.
 10. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -260,7 +317,7 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 All beads are created using --parent flag. The CLI automatically generates sequential IDs continuing from existing tasks.
 
-**MANDATORY: Always include --design and --acceptance-criteria for each bead.**
+**MANDATORY: Always include --design and --acceptance for each bead.**
 
 ```bash
 bd create --parent {{feature_id}} \
@@ -269,7 +326,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Add try-catch and error logging to API endpoints" \
   --design "Use asyncHandler() wrapper. Winston logger for errors. Update src/api/*.ts." \
-  --acceptance-criteria "All async ops have try-catch. Errors logged. Tests pass."
+  --acceptance "All async ops have try-catch. Errors logged. Tests pass."
 
 bd create --parent {{feature_id}} \
   --title "Fix validation bug" \
@@ -277,7 +334,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Fix email validation regex" \
   --design "Update src/validators/email.ts with RFC 5322 pattern. Add edge case tests." \
-  --acceptance-criteria "Invalid emails rejected. Valid TLDs accepted. Tests pass."
+  --acceptance "Invalid emails rejected. Valid TLDs accepted. Tests pass."
 ```
 
 **Common bd commands:**
@@ -341,7 +398,7 @@ This is a planning session. All output is beads and discussion, not code.
 4. **Creating features**: Create new features to extend the epic. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
 6. **Feature Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs continuing from existing features. Example: If extending epic bp6-643 that already has .001 and .002, new features become bp6-643.003, bp6-643.004, etc.
-7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
+7. **Mandatory Fields**: ALWAYS provide --design and --acceptance criteria when creating features. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing features within the epic.
 10. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -358,7 +415,7 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 All features are created using --parent flag. The CLI automatically generates sequential IDs continuing from existing features.
 {{feature_id}} in the examples below is the placeholder that gets replaced with the actual epic ID.
 
-**MANDATORY: Always include --design and --acceptance-criteria for each feature.**
+**MANDATORY: Always include --design and --acceptance for each feature.**
 
 ```bash
 bd create --parent {{feature_id}} \
@@ -367,7 +424,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Administrative interface for user management and monitoring" \
   --design "React admin panel in src/admin/. User CRUD, metrics, feature flags, audit log." \
-  --acceptance-criteria "User management works. Metrics refresh. RBAC enforced. Tests pass."
+  --acceptance "User management works. Metrics refresh. RBAC enforced. Tests pass."
 
 bd create --parent {{feature_id}} \
   --title "API Documentation" \
@@ -375,7 +432,7 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Interactive API docs with live testing" \
   --design "Swagger/OpenAPI 3.0. Auto-gen from JSDoc. Hosted at /api/docs. SDK generation." \
-  --acceptance-criteria "All endpoints documented. Try it out works. SDK publishes. Search works."
+  --acceptance "All endpoints documented. Try it out works. SDK publishes. Search works."
 ```
 
 **The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
