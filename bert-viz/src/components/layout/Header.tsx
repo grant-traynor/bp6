@@ -7,7 +7,7 @@ interface HeaderProps {
   setIsDark: (dark: boolean) => void;
   handleStartCreate: () => void;
   loadData: () => void;
-  onOpenChat: (persona: string) => void;
+  onOpenChat: (persona: string, initialMessage?: string) => void;
   projectMenuOpen: boolean;
   setProjectMenuOpen: (open: boolean) => void;
   favoriteProjects: Project[];
@@ -66,10 +66,16 @@ export const Header = ({
       </div>
       <div className="flex items-center gap-3">
         <button 
-          onClick={() => onOpenChat('product-manager')}
+          onClick={() => onOpenChat('product-manager', undefined, undefined)}
           className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-indigo-600 dark:text-indigo-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
         >
           <span className="text-base">🤖</span> PM
+        </button>
+        <button 
+          onClick={() => onOpenChat('qa-engineer', 'fix_dependencies', undefined)}
+          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-emerald-600 dark:text-emerald-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
+        >
+          <span className="text-base">🛡️</span> QA
         </button>
         <button 
           onClick={() => setIsDark(!isDark)} 

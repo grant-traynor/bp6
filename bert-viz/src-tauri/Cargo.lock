@@ -230,6 +230,7 @@ name = "bert-viz"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "libc",
  "notify",
  "serde",
  "serde_json",

@@ -165,9 +165,9 @@ export interface AgentChunk {
   isDone: boolean;
 }
 
-export async function startAgentSession(persona: string): Promise<void> {
+export async function startAgentSession(persona: string, task?: string, beadId?: string): Promise<void> {
   try {
-    await invoke("start_agent_session", { persona });
+    await invoke("start_agent_session", { persona, task, beadId });
   } catch (error) {
     console.error("Failed to start agent session:", error);
     throw error;

@@ -54,6 +54,8 @@ function App() {
   // Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatPersona, setChatPersona] = useState("product-manager");
+  const [chatTask, setChatTask] = useState<string | null>(null);
+  const [chatBeadId, setChatBeadId] = useState<string | null>(null);
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
@@ -365,8 +367,10 @@ function App() {
     setCollapsedIds(allParentIds);
   }, [viewModel]);
 
-  const handleOpenChat = useCallback((persona: string) => {
+  const handleOpenChat = useCallback((persona: string, task?: string, beadId?: string) => {
     setChatPersona(persona);
+    setChatTask(task ?? null);
+    setChatBeadId(beadId ?? null);
     setIsChatOpen(true);
   }, []);
 
@@ -840,8 +844,8 @@ function App() {
           </div>
         </div>
         )}
-      {hasProject && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} />}
-      <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} />
+      {hasProject && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} onOpenChat={handleOpenChat} />}
+      <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} task={chatTask} beadId={chatBeadId} />
       </main>
     </div>
   );

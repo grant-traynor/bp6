@@ -33,7 +33,8 @@
       "Bash(npx tsc:*)",
       "Bash(~/.cargo/bin/cargo build:*)",
       "Bash(~/.cargo/bin/cargo fix --lib --allow-dirty)",
-      "Bash(export PATH=\"/Users/gkt/.cargo/bin:$PATH\")"
+      "Bash(export PATH=\"/Users/gkt/.cargo/bin:$PATH\")",
+      "Bash(git fetch:*)"
     ]
   }
 }

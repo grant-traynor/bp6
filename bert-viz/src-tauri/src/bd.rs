@@ -151,6 +151,13 @@ pub fn get_beads() -> Result<Vec<Bead>, String> {
     Err(format!("Failed to read beads after retries. Last error: {}", last_error))
 }
 
+pub fn get_bead_by_id(id: &str) -> Result<Bead, String> {
+    let beads = get_beads()?;
+    beads.into_iter()
+        .find(|b| b.id == id)
+        .ok_or_else(|| format!("Bead with ID {} not found", id))
+}
+
 #[tauri::command]
 pub fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
     check_bd_available()?;

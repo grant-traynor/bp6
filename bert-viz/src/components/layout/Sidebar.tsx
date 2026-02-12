@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { User, Tag, Clock, Star, Trash2, Plus, ArrowRight } from "lucide-react";
+import { User, Tag, Clock, Star, Trash2, Plus, ArrowRight, BrainCircuit, Sparkles, Terminal, MessageSquare } from "lucide-react";
 import type { BeadNode } from "../../api";
 
 // Subcomponents
@@ -25,6 +25,7 @@ interface SidebarProps {
   handleReopenBead: (beadId: string) => Promise<void>;
   handleClaimBead: (beadId: string) => Promise<void>;
   toggleFavorite: (bead: BeadNode) => Promise<void>;
+  onOpenChat: (persona: string, initialMessage?: string) => void;
 }
 
 export const Sidebar = ({
@@ -41,6 +42,7 @@ export const Sidebar = ({
   handleReopenBead,
   handleClaimBead,
   toggleFavorite,
+  onOpenChat,
 }: SidebarProps) => {
   // Collapsible section state
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => {
@@ -97,6 +99,11 @@ export const Sidebar = ({
     });
   };
 
+  const handleAIAction = (templateKey: string) => {
+    if (!selectedBead) return;
+    onOpenChat("product-manager", templateKey, selectedBead.id);
+  };
+
   const pendingSaveRef = useRef<'create' | 'edit' | null>(null);
 
   // Effect to handle saves after editForm state updates
@@ -146,6 +153,47 @@ export const Sidebar = ({
       />
 
       <div className="flex-1 overflow-y-auto p-10 flex flex-col gap-12 custom-scrollbar">
+        {/* AI Actions */}
+        {!isCreating && selectedBead && (
+          <section className="bg-indigo-500/10 border-2 border-indigo-500/20 rounded-2xl p-6 flex flex-col gap-4">
+            <h3 className="text-xs font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-[0.25em] flex items-center gap-2">
+              <BrainCircuit size={16} /> AI PM Actions
+            </h3>
+            <div className="flex flex-wrap gap-3">
+              <button 
+                onClick={() => handleAIAction('chat')}
+                className="flex-1 min-w-[120px] bg-slate-600 hover:bg-slate-700 text-white py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg"
+              >
+                <MessageSquare size={14} /> Chat
+              </button>
+              {(selectedBead.issueType === 'epic' || selectedBead.issueType === 'feature') && (
+                <button 
+                  onClick={() => handleAIAction('decompose')}
+                  className="flex-1 min-w-[120px] bg-indigo-600 hover:bg-indigo-700 text-white py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg"
+                >
+                  <Sparkles size={14} /> Decompose
+                </button>
+              )}
+              {(selectedBead.issueType === 'epic' || selectedBead.issueType === 'feature') && (
+                <button 
+                  onClick={() => handleAIAction('extend')}
+                  className="flex-1 min-w-[120px] bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-indigo-600 dark:text-indigo-400 py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 border-indigo-500/20 transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                  <Plus size={14} /> Extend
+                </button>
+              )}
+              {(selectedBead.issueType === 'feature' || selectedBead.issueType === 'task') && (
+                <button 
+                  onClick={() => handleAIAction('implement')}
+                  className="flex-1 min-w-[120px] bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg"
+                >
+                  <Terminal size={14} /> Implement
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* Title & Description - Always Editable, Styled Like Read-Only */}
         <section className="flex flex-col gap-6">
           <div className="flex gap-4">
