@@ -131,13 +131,26 @@ export const Sidebar = ({
     if (!selectedBead) setSelectedBead(null);
   };
 
-  if (!selectedBead && !isCreating) return null;
-  if (!formData || Object.keys(formData).length === 0) return null;
-
   const displayBead = formData;
 
+  if (!selectedBead && !isCreating) {
+    return (
+      <div className="w-[624px] h-full bg-[var(--background-primary)] border-l-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-panel)] flex flex-col backdrop-blur-2xl shrink-0 items-center justify-center p-12 text-center">
+        <div className="w-20 h-20 bg-[var(--background-secondary)] rounded-3xl flex items-center justify-center mb-6 border-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-sm)]">
+          <Tag size={32} className="text-indigo-500 opacity-20" />
+        </div>
+        <h3 className="text-xl font-black text-[var(--text-primary)] mb-2 uppercase tracking-tight">No Bead Selected</h3>
+        <p className="text-sm text-[var(--text-muted)] font-medium leading-relaxed max-w-[280px]">
+          Select a bead from the WBS tree or Gantt chart to view and edit its details.
+        </p>
+      </div>
+    );
+  }
+
+  if (!formData || Object.keys(formData).length === 0) return null;
+
   return (
-    <div className="absolute right-0 top-0 bottom-0 w-[480px] bg-[var(--background-primary)] border-l-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-panel)] z-50 flex flex-col animate-in slide-in-from-right duration-300 backdrop-blur-2xl">
+    <div className="w-[624px] h-full bg-[var(--background-primary)] border-l-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-panel)] flex flex-col backdrop-blur-2xl shrink-0">
       {/* Header */}
       <SidebarHeader
         bead={displayBead as BeadNode}

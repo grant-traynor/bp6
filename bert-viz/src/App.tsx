@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown } from "lucide-react";
+import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, PanelRight } from "lucide-react";
 import { cn } from "./utils";
 import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
@@ -98,6 +98,7 @@ function App() {
   const [processingData, setProcessingData] = useState(false);
   const [sortBy, setSortBy] = useState<'priority' | 'title' | 'type' | 'id' | 'none'>('none');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'none'>('none');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // The view model tree already includes isExpanded and isVisible state from backend
   // No need for complex frontend processing - just access viewModel.tree directly
@@ -686,214 +687,227 @@ function App() {
             )}
           </div>
         ) : (
-          <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
-            <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex flex-col">
-              <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
-                <h2 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Task Breakdown</h2>
-                <div className="flex items-center gap-1">
-                  <button onClick={expandAll} title="Expand All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"><ChevronsDown size={16} strokeWidth={2.5} /></button>
-                  <button onClick={collapseAll} title="Collapse All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"><ChevronsUp size={16} strokeWidth={2.5} /></button>
+          <div className="flex-1 flex overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
+                <div className="w-[40%] min-w-[525px] border-r-2 border-[var(--border-primary)] flex flex-col">
+                  <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
+                    <h2 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Task Breakdown</h2>
+                    <div className="flex items-center gap-1">
+                      <button onClick={expandAll} title="Expand All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"><ChevronsDown size={16} strokeWidth={2.5} /></button>
+                      <button onClick={collapseAll} title="Collapse All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"><ChevronsUp size={16} strokeWidth={2.5} /></button>
+                    </div>
+                  </div>
+                  {favoriteBeads.length > 0 && (
+                    <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 bg-indigo-500/10">
+                      <h2 className="text-xs font-black text-indigo-800 dark:text-indigo-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-3"><Star size={12} className="fill-current" /> Favorites</h2>
+                      <div className="flex flex-wrap gap-2">
+                        {favoriteBeads.map(f => (
+                          <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[var(--background-primary)] border-[var(--border-thick)] border-[var(--border-primary)] hover:border-indigo-500 shadow-[var(--shadow-sm)] cursor-pointer transition-all active:scale-95 hover-lift">
+                            <span className="font-mono text-xs font-black text-indigo-700 dark:text-indigo-400">{f.id}</span>
+                            <span className="text-sm font-black text-[var(--text-primary)] truncate max-w-[140px]">{f.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="px-4 py-3 bg-[var(--background-primary)]">
+                    <div className="relative group mb-3">
+                      <input ref={searchInputRef} type="text" placeholder="Search by title, ID, or label..." className="w-full bg-[var(--background-secondary)] border-[var(--border-thick)] border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-[var(--shadow-inset)]" value={filterText} onChange={e => setFilterText(e.target.value)} />
+                    </div>
+                    <div className="flex items-center gap-4 px-1 flex-wrap">
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" checked={hideClosed} onChange={e => setHideClosed(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
+                        <span className="text-xs font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hide Closed</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer group">
+                        <input type="checkbox" checked={includeHierarchy} onChange={e => setIncludeHierarchy(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
+                        <span className="text-xs font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hierarchy</span>
+                      </label>
+                      <label className="flex items-center gap-2 group">
+                        <span className="text-xs font-black text-[var(--text-muted)] uppercase tracking-wider">Closed:</span>
+                        <select
+                          value={closedTimeFilter}
+                          onChange={e => setClosedTimeFilter(e.target.value as ClosedTimeFilter)}
+                          className="text-xs font-black bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-lg px-2 py-1 text-[var(--text-primary)] focus:border-indigo-500 outline-none uppercase tracking-wider"
+                        >
+                          <option value="all">All Time</option>
+                          <option value="1h">Last Hour</option>
+                          <option value="6h">Last 6 Hours</option>
+                          <option value="24h">Last 24 Hours</option>
+                          <option value="7d">Last 7 Days</option>
+                          <option value="30d">Last 30 Days</option>
+                          <option value="older_than_6h">Older Than 6h</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex-1 flex items-end justify-between px-8 py-3 bg-[var(--background-primary)]">
+                  <div className="flex items-center gap-10 mb-1">
+                      <div className="flex flex-col"><span className="text-xs font-black text-[var(--text-muted)] uppercase tracking-[0.25em] mb-1">Total</span><span className="text-base font-black text-[var(--text-primary)]">{stats.total}</span></div>
+                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-open)] uppercase tracking-[0.25em] mb-1">Open</span><span className="text-base font-black text-[var(--status-open)]">{stats.open}</span></div>
+                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-active)] uppercase tracking-[0.25em] mb-1">In Progress</span><span className="text-base font-black text-[var(--status-active)]">{stats.inProgress}</span></div>
+                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-blocked)] uppercase tracking-[0.25em] mb-1">Blocked</span><span className="text-base font-black text-[var(--status-blocked)]">{stats.blocked}</span></div>
+                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-done)] uppercase tracking-[0.25em] mb-1">Closed</span><span className="text-base font-black text-[var(--status-done)]">{stats.closed}</span></div>
+                  </div>
+                  <div className="flex items-center gap-1 bg-[var(--background-secondary)] p-1.5 rounded-2xl border-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-md)] mb-1">
+                      <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">-</button>
+                      <span className="text-sm font-mono font-black text-[var(--text-primary)] min-w-[50px] text-center">{Math.round(zoom * 100)}%</span>
+                      <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">+</button>
+                      <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
+                      <button onClick={() => setZoom(1)} className="px-4 py-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black uppercase tracking-[0.2em] active:scale-95">Reset</button>
+                      <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
+                      <button 
+                        onClick={() => setSidebarOpen(!sidebarOpen)} 
+                        className={cn(
+                          "p-2 hover:bg-[var(--background-tertiary)] rounded-xl transition-all active:scale-90",
+                          sidebarOpen ? "text-indigo-500 bg-indigo-500/10" : "text-[var(--text-primary)]"
+                        )}
+                        title={sidebarOpen ? "Close Sidebar" : "Open Sidebar"}
+                      >
+                        <PanelRight size={18} strokeWidth={2.5} />
+                      </button>
+                  </div>
                 </div>
               </div>
-              {favoriteBeads.length > 0 && (
-                <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 bg-indigo-500/10">
-                  <h2 className="text-xs font-black text-indigo-800 dark:text-indigo-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-3"><Star size={12} className="fill-current" /> Favorites</h2>
-                  <div className="flex flex-wrap gap-2">
-                    {favoriteBeads.map(f => (
-                      <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[var(--background-primary)] border-[var(--border-thick)] border-[var(--border-primary)] hover:border-indigo-500 shadow-[var(--shadow-sm)] cursor-pointer transition-all active:scale-95 hover-lift">
-                        <span className="font-mono text-xs font-black text-indigo-700 dark:text-indigo-400">{f.id}</span>
-                        <span className="text-sm font-black text-[var(--text-primary)] truncate max-w-[140px]">{f.title}</span>
+              <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
+                <div className="w-[40%] min-w-[525px] border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em] select-none">
+                  <div className="w-10 shrink-0" />
+                  <div 
+                    className={cn(
+                      "w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                      sortBy === 'priority' && sortOrder !== 'none' && "text-indigo-500"
+                    )}
+                    onClick={() => handleHeaderClick('priority')}
+                  >
+                    <span>P</span>
+                    {sortBy === 'priority' && sortOrder !== 'none' && (
+                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                    )}
+                  </div>
+                  <div 
+                    className={cn(
+                      "flex-1 px-4 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                      sortBy === 'title' && sortOrder !== 'none' && "text-indigo-500"
+                    )}
+                    onClick={() => handleHeaderClick('title')}
+                  >
+                    <span>Name</span>
+                    {sortBy === 'title' && sortOrder !== 'none' && (
+                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                    )}
+                  </div>
+                  <div 
+                    className={cn(
+                      "w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                      sortBy === 'type' && sortOrder !== 'none' && "text-indigo-500"
+                    )}
+                    onClick={() => handleHeaderClick('type')}
+                  >
+                    <span>Type</span>
+                    {sortBy === 'type' && sortOrder !== 'none' && (
+                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                    )}
+                  </div>
+                  <div 
+                    className={cn(
+                      "w-24 shrink-0 px-2 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                      sortBy === 'id' && sortOrder !== 'none' && "text-indigo-500"
+                    )}
+                    onClick={() => handleHeaderClick('id')}
+                  >
+                    <span>ID</span>
+                    {sortBy === 'id' && sortOrder !== 'none' && (
+                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                    )}
+                  </div>
+                </div>
+                <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
+                  <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
+                    <div style={{ width: Math.max(5000 * zoom, ((viewModel?.metadata.distributions.length || 0) * 100 * zoom)) }}>
+                      <GanttStateHeader distributions={viewModel?.metadata.distributions || []} zoom={zoom} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex-1 flex overflow-hidden">
+                <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="w-[40%] border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[525px] overflow-y-auto custom-scrollbar">
+                  <div className="p-0">
+                    {(loading || processingData) ? <WBSSkeleton /> : (
+                      <div className="flex flex-col">
+                        <WBSTreeList nodes={viewModel?.tree || []} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
+                  <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>
+                    {loading && <GanttSkeleton />}
+                    {/* Background grid */}
+                    <div className="absolute inset-0 pointer-events-none">
+                      {ganttLayout.rowDepths.map((depth, i) => (
+                        <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
+                      ))}
+                      <div className="absolute inset-0 flex">
+                        {Array.from({ length: 50 }).map((_, i) => (
+                          <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
+                        ))}
+                      </div>
+                    </div>
+                    {/* Dependency connectors */}
+                    <svg
+                      className="absolute inset-0 pointer-events-none"
+                      style={{ zIndex: 30 }}
+                      width={5000 * zoom}
+                      height={Math.max(800, ganttLayout.rowCount * 48)}
+                    >
+                      {ganttLayout.connectors.map((conn, idx) => {
+                        // Keep vertical segment in connector channel (first 20px of each cell)
+                        // Place it 10px into the channel immediately after the blocker
+                        const channelOffset = 10 * zoom;
+                        const verticalX = conn.fromX + channelOffset;
+
+                        const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
+                        return (
+                          <path
+                            key={`${conn.fromId}-${conn.toId}-${idx}`}
+                            d={path}
+                            stroke={conn.isCritical ? "#ef4444" : "#94a3b8"}
+                            strokeWidth="3"
+                            fill="none"
+                            opacity="0.9"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        );
+                      })}
+                    </svg>
+                    {/* Gantt bars */}
+                    {ganttLayout.items.map((item) => (
+                      <div key={item.bead.id} style={{ position: 'absolute', top: item.row * 48, height: 48, left: 0, right: 0 }}>
+                        <GanttBar
+                          item={{
+                            bead: item.bead,
+                            x: item.x,
+                            width: item.width,
+                            row: item.row,
+                            depth: item.depth,
+                            isCritical: item.isCritical,
+                            isBlocked: item.bead.isBlocked,
+                          }}
+                          onClick={handleBeadClick}
+                          isSelected={selectedBead?.id === item.bead.id}
+                        />
                       </div>
                     ))}
                   </div>
                 </div>
-              )}
-              <div className="px-4 py-3 bg-[var(--background-primary)]">
-                <div className="relative group mb-3">
-                  <input ref={searchInputRef} type="text" placeholder="Search by title, ID, or label..." className="w-full bg-[var(--background-secondary)] border-[var(--border-thick)] border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-[var(--shadow-inset)]" value={filterText} onChange={e => setFilterText(e.target.value)} />
-                </div>
-                <div className="flex items-center gap-4 px-1 flex-wrap">
-                  <label className="flex items-center gap-2 cursor-pointer group">
-                    <input type="checkbox" checked={hideClosed} onChange={e => setHideClosed(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
-                    <span className="text-xs font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hide Closed</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer group">
-                    <input type="checkbox" checked={includeHierarchy} onChange={e => setIncludeHierarchy(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
-                    <span className="text-xs font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hierarchy</span>
-                  </label>
-                  <label className="flex items-center gap-2 group">
-                    <span className="text-xs font-black text-[var(--text-muted)] uppercase tracking-wider">Closed:</span>
-                    <select
-                      value={closedTimeFilter}
-                      onChange={e => setClosedTimeFilter(e.target.value as ClosedTimeFilter)}
-                      className="text-xs font-black bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-lg px-2 py-1 text-[var(--text-primary)] focus:border-indigo-500 outline-none uppercase tracking-wider"
-                    >
-                      <option value="all">All Time</option>
-                      <option value="1h">Last Hour</option>
-                      <option value="6h">Last 6 Hours</option>
-                      <option value="24h">Last 24 Hours</option>
-                      <option value="7d">Last 7 Days</option>
-                      <option value="30d">Last 30 Days</option>
-                      <option value="older_than_6h">Older Than 6h</option>
-                    </select>
-                  </label>
-                </div>
               </div>
             </div>
-            <div className="flex-1 flex items-end justify-between px-8 py-3 bg-[var(--background-primary)]">
-               <div className="flex items-center gap-10 mb-1">
-                  <div className="flex flex-col"><span className="text-xs font-black text-[var(--text-muted)] uppercase tracking-[0.25em] mb-1">Total</span><span className="text-base font-black text-[var(--text-primary)]">{stats.total}</span></div>
-                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-open)] uppercase tracking-[0.25em] mb-1">Open</span><span className="text-base font-black text-[var(--status-open)]">{stats.open}</span></div>
-                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-active)] uppercase tracking-[0.25em] mb-1">In Progress</span><span className="text-base font-black text-[var(--status-active)]">{stats.inProgress}</span></div>
-                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-blocked)] uppercase tracking-[0.25em] mb-1">Blocked</span><span className="text-base font-black text-[var(--status-blocked)]">{stats.blocked}</span></div>
-                  <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-done)] uppercase tracking-[0.25em] mb-1">Closed</span><span className="text-base font-black text-[var(--status-done)]">{stats.closed}</span></div>
-               </div>
-               <div className="flex items-center gap-1 bg-[var(--background-secondary)] p-1.5 rounded-2xl border-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-md)] mb-1">
-                  <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">-</button>
-                  <span className="text-sm font-mono font-black text-[var(--text-primary)] min-w-[50px] text-center">{Math.round(zoom * 100)}%</span>
-                  <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">+</button>
-                  <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
-                  <button onClick={() => setZoom(1)} className="px-4 py-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black uppercase tracking-[0.2em] active:scale-95">Reset</button>
-               </div>
-            </div>
+            {sidebarOpen && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} />}
           </div>
-          <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
-            <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em] select-none">
-              <div className="w-10 shrink-0" />
-              <div 
-                className={cn(
-                  "w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                  sortBy === 'priority' && sortOrder !== 'none' && "text-indigo-500"
-                )}
-                onClick={() => handleHeaderClick('priority')}
-              >
-                <span>P</span>
-                {sortBy === 'priority' && sortOrder !== 'none' && (
-                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                )}
-              </div>
-              <div 
-                className={cn(
-                  "flex-1 px-4 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                  sortBy === 'title' && sortOrder !== 'none' && "text-indigo-500"
-                )}
-                onClick={() => handleHeaderClick('title')}
-              >
-                <span>Name</span>
-                {sortBy === 'title' && sortOrder !== 'none' && (
-                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                )}
-              </div>
-              <div 
-                className={cn(
-                  "w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                  sortBy === 'type' && sortOrder !== 'none' && "text-indigo-500"
-                )}
-                onClick={() => handleHeaderClick('type')}
-              >
-                <span>Type</span>
-                {sortBy === 'type' && sortOrder !== 'none' && (
-                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                )}
-              </div>
-              <div 
-                className={cn(
-                  "w-24 shrink-0 px-2 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                  sortBy === 'id' && sortOrder !== 'none' && "text-indigo-500"
-                )}
-                onClick={() => handleHeaderClick('id')}
-              >
-                <span>ID</span>
-                {sortBy === 'id' && sortOrder !== 'none' && (
-                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                )}
-              </div>
-            </div>
-            <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
-              <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
-                <div style={{ width: Math.max(5000 * zoom, ((viewModel?.metadata.distributions.length || 0) * 100 * zoom)) }}>
-                  <GanttStateHeader distributions={viewModel?.metadata.distributions || []} zoom={zoom} />
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="flex-1 flex overflow-hidden">
-            <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="w-1/3 border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[420px] overflow-y-auto custom-scrollbar">
-              <div className="p-0">
-                {(loading || processingData) ? <WBSSkeleton /> : (
-                  <div className="flex flex-col">
-                    <WBSTreeList nodes={viewModel?.tree || []} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
-                  </div>
-                )}
-              </div>
-            </div>
-            <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
-              <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>
-                {loading && <GanttSkeleton />}
-                {/* Background grid */}
-                <div className="absolute inset-0 pointer-events-none">
-                  {ganttLayout.rowDepths.map((depth, i) => (
-                    <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
-                  ))}
-                  <div className="absolute inset-0 flex">
-                    {Array.from({ length: 50 }).map((_, i) => (
-                      <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
-                    ))}
-                  </div>
-                </div>
-                {/* Dependency connectors */}
-                <svg
-                  className="absolute inset-0 pointer-events-none"
-                  style={{ zIndex: 30 }}
-                  width={5000 * zoom}
-                  height={Math.max(800, ganttLayout.rowCount * 48)}
-                >
-                  {ganttLayout.connectors.map((conn, idx) => {
-                    // Keep vertical segment in connector channel (first 20px of each cell)
-                    // Place it 10px into the channel immediately after the blocker
-                    const channelOffset = 10 * zoom;
-                    const verticalX = conn.fromX + channelOffset;
-
-                    const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
-                    return (
-                      <path
-                        key={`${conn.fromId}-${conn.toId}-${idx}`}
-                        d={path}
-                        stroke={conn.isCritical ? "#ef4444" : "#94a3b8"}
-                        strokeWidth="3"
-                        fill="none"
-                        opacity="0.9"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    );
-                  })}
-                </svg>
-                {/* Gantt bars */}
-                {ganttLayout.items.map((item) => (
-                  <div key={item.bead.id} style={{ position: 'absolute', top: item.row * 48, height: 48, left: 0, right: 0 }}>
-                    <GanttBar
-                      item={{
-                        bead: item.bead,
-                        x: item.x,
-                        width: item.width,
-                        row: item.row,
-                        depth: item.depth,
-                        isCritical: item.isCritical,
-                        isBlocked: item.bead.isBlocked,
-                      }}
-                      onClick={handleBeadClick}
-                      isSelected={selectedBead?.id === item.bead.id}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
         )}
-      {hasProject && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} />}
       </main>
     </div>
   );
