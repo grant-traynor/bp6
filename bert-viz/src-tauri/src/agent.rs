@@ -48,10 +48,10 @@ This is a planning session. All output is beads and discussion, not code.
 
 1. **Related Change Assessment**: Use "bd list" to identify and assess any possible related issues. Use "bd show" to establish context for each issue.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
-3. **Creating implementation elements**: Create tasks, chores, and bugs to decompose the feature. Decompose the feature into smaller, actionable units. Each should have a description, design notes, and acceptance criteria (where applicable). Each unit must have acceptance criteria defined based upon the verification by inspection of code of the unit's definition.
+3. **Creating implementation elements**: Create tasks, chores, and bugs to decompose the feature. Decompose the feature into smaller, actionable units. EVERY unit MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each unit should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Numbering and Identification**: All units must be numbered as {{feature_id}}.<id> where id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
-6. **Structure Preservation and Quality**: All units must have {{feature_id}} set as the parent task. Use "bd update <id> --parent {{feature_id}}" to set the parent task.
+5. **Numbering and Identification**: All units must be numbered as {{feature_id}}.<id> where id is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the units that you create.
 9. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -67,14 +67,26 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 All beads MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
 
-**Use the --id flag to specify the exact ID, and --parent to set the parent feature:**
+**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+
+**MANDATORY: Always include --design and --acceptance-criteria for each bead.**
 
 ```bash
-bd create --id {{feature_id}}.001 --title "Implement data layer" --type task --priority 2 --description "Create the database models and repositories" --parent {{feature_id}}
+bd create --id {{feature_id}}.001 \
+  --title "Implement data layer" \
+  --type task \
+  --priority 2 \
+  --description "Create database models and repositories" \
+  --design "Add UserModel and UserRepository in src/data/. Follow repository pattern." \
+  --acceptance-criteria "CRUD methods work. Tests pass. No direct DB calls in logic."
 
-bd create --id {{feature_id}}.002 --title "Build API endpoints" --type task --priority 2 --description "Add REST endpoints for CRUD operations" --parent {{feature_id}}
-
-bd create --id {{feature_id}}.003 --title "Add unit tests" --type chore --priority 2 --description "Write tests for data layer and API" --parent {{feature_id}}
+bd create --id {{feature_id}}.002 \
+  --title "Build API endpoints" \
+  --type task \
+  --priority 2 \
+  --description "Add REST endpoints for CRUD operations" \
+  --design "Routes in src/api/users.ts. Use auth middleware." \
+  --acceptance-criteria "Endpoints work. Auth applied. Validation passes. Tests pass."
 ```
 
 **The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
@@ -133,10 +145,10 @@ This is a planning session. All output is beads and discussion, not code.
 
 1. **Related Change Assessment**: Use "bd list" to identify and assess any possible related issues. Use "bd show" to establish context for each issue.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
-3. **Creating features**: Create features to decompose the epic. Decompose the epic into smaller, actionable features. Each feature should have a description, design notes, and acceptance criteria. Each feature must have acceptance criteria defined based upon the verification by inspection of code of the features definition.
+3. **Creating features**: Create features to decompose the epic. Decompose the epic into smaller, actionable features. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.<feature_id> where feature_id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
-6. **Structure Preservation and Quality**: All features must have {{feature_id}} set as the parent epic. Use "bd update <feature_id> --parent {{feature_id}}" to set the parent epic.
+5. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.001, {{feature_id}}.002, etc. where the numeric suffix is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the features that you create.
 9. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -152,14 +164,26 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 All features MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
 
-**Use the --id flag to specify the exact ID, and --parent to set the parent epic:**
+**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+
+**MANDATORY: Always include --design and --acceptance-criteria for each feature.**
 
 ```bash
-bd create --id {{feature_id}}.001 --title "User Authentication" --type feature --priority 2 --description "Implement user login and registration" --parent {{feature_id}}
+bd create --id {{feature_id}}.001 \
+  --title "User Authentication" \
+  --type feature \
+  --priority 2 \
+  --description "User login and registration with OAuth2 and JWT" \
+  --design "Passport.js for OAuth2. JWT in HTTP-only cookies. UI in src/components/auth/." \
+  --acceptance-criteria "Email/password and OAuth2 login work. Sessions persist. Tests pass."
 
-bd create --id {{feature_id}}.002 --title "Data Management" --type feature --priority 2 --description "Build CRUD operations for core entities" --parent {{feature_id}}
-
-bd create --id {{feature_id}}.003 --title "Reporting Dashboard" --type feature --priority 2 --description "Create analytics and reporting views" --parent {{feature_id}}
+bd create --id {{feature_id}}.002 \
+  --title "Data Management" \
+  --type feature \
+  --priority 2 \
+  --description "CRUD operations for core entities" \
+  --design "PostgreSQL with Prisma. Repository pattern in src/data/. API in src/api/." \
+  --acceptance-criteria "All CRUD works. Migrations run. Validation at boundaries. Tests pass."
 ```
 
 **The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
@@ -222,10 +246,10 @@ This is a planning session. All output is beads and discussion, not code.
 1. **Related Change Assessment**: Use "bd list" to identify and assess any possible related issues.
 2. **Establish Feature Scope Extension**: Ask questions to establish how the feature should be extended. Challenge understanding to establish correctness.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
-4. **Creating implementation elements**: Create tasks, bugs, or chores to extend the feature, depending on the context of the discussion with the user. Each element should have a description, design notes, and acceptance criteria. Each element must have acceptance criteria defined based upon the verification by inspection of code of the element's definition.
+4. **Creating implementation elements**: Create tasks, bugs, or chores to extend the feature, depending on the context of the discussion with the user. EVERY element MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each element should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Task Numbering and Identification**: All elements must be numbered as {{feature_id}}.<task_id> where task_id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
-7. **Structure Preservation and Quality**: All elements must have {{feature_id}} set as the parent task. Use "bd update <task_id> --parent {{feature_id}}" to set the parent task.
+6. **Task Numbering and Identification**: All elements must be numbered as {{feature_id}}.<task_id> where task_id is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing tasks within the feature.
 10. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -241,12 +265,14 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 All beads MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
 
+**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+
+**MANDATORY: Always include --design and --acceptance-criteria for each bead.**
+
 **IMPORTANT:** Before creating new beads, check existing child beads to determine the next number:
 ```bash
-bd list --status open --parent {{feature_id}}
+bd list --parent {{feature_id}}
 ```
-
-**Use the --id flag to specify the exact ID, and --parent to set the parent feature:**
 
 **Example (extending feature bp6-abc.5 that already has .001 and .002):**
 ```bash
@@ -254,10 +280,22 @@ bd list --status open --parent {{feature_id}}
 bd list --parent {{feature_id}}
 
 # Create third bead (continuing from existing .001 and .002)
-bd create --id {{feature_id}}.003 --title "Add error handling" --type task --priority 2 --description "Add try-catch blocks and error logging" --parent {{feature_id}}
+bd create --id {{feature_id}}.003 \
+  --title "Add error handling" \
+  --type task \
+  --priority 2 \
+  --description "Add try-catch and error logging to API endpoints" \
+  --design "Use asyncHandler() wrapper. Winston logger for errors. Update src/api/*.ts." \
+  --acceptance-criteria "All async ops have try-catch. Errors logged. Tests pass."
 
 # Fourth bead
-bd create --id {{feature_id}}.004 --title "Fix validation bug" --type bug --priority 2 --description "Fix email validation regex" --parent {{feature_id}}
+bd create --id {{feature_id}}.004 \
+  --title "Fix validation bug" \
+  --type bug \
+  --priority 2 \
+  --description "Fix email validation regex" \
+  --design "Update src/validators/email.ts with RFC 5322 pattern. Add edge case tests." \
+  --acceptance-criteria "Invalid emails rejected. Valid TLDs accepted. Tests pass."
 ```
 
 **The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
@@ -320,10 +358,10 @@ This is a planning session. All output is beads and discussion, not code.
 1. **Related Change Assessment**: Use "bd list" to identify and assess any possible related issues.
 2. **Establish Epic Scope Extension**: Ask questions to establish how the epic should be extended. Challenge understanding to establish correctness.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
-4. **Creating features**: Create new features to extend the epic. Each feature should have a description, design notes, and acceptance criteria. Each feature must have acceptance criteria defined based upon the verification by inspection of code of the features definition.
+4. **Creating features**: Create new features to extend the epic. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.<feature_id> where feature_id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
-7. **Structure Preservation and Quality**: All features must have {{feature_id}} set as the parent epic. Use "bd update <feature_id> --parent {{feature_id}}" to set the parent epic.
+6. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.001, {{feature_id}}.002, etc. where the numeric suffix is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing features within the epic.
 10. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
@@ -339,12 +377,14 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 All features MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
 
+**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+
+**MANDATORY: Always include --design and --acceptance-criteria for each feature.**
+
 **IMPORTANT:** Before creating new features, check existing child features to determine the next number:
 ```bash
-bd list --status open --parent {{feature_id}}
+bd list --parent {{feature_id}}
 ```
-
-**Use the --id flag to specify the exact ID, and --parent to set the parent epic:**
 
 **Example (extending epic bp6-xyz that already has .001 and .002):**
 ```bash
@@ -352,10 +392,22 @@ bd list --status open --parent {{feature_id}}
 bd list --parent {{feature_id}}
 
 # Create third feature (continuing from existing .001 and .002)
-bd create --id {{feature_id}}.003 --title "Admin Dashboard" --type feature --priority 2 --description "Build administrative interface" --parent {{feature_id}}
+bd create --id {{feature_id}}.003 \
+  --title "Admin Dashboard" \
+  --type feature \
+  --priority 2 \
+  --description "Administrative interface for user management and monitoring" \
+  --design "React admin panel in src/admin/. User CRUD, metrics, feature flags, audit log." \
+  --acceptance-criteria "User management works. Metrics refresh. RBAC enforced. Tests pass."
 
 # Fourth feature
-bd create --id {{feature_id}}.004 --title "API Documentation" --type feature --priority 2 --description "Generate API docs with examples" --parent {{feature_id}}
+bd create --id {{feature_id}}.004 \
+  --title "API Documentation" \
+  --type feature \
+  --priority 2 \
+  --description "Interactive API docs with live testing" \
+  --design "Swagger/OpenAPI 3.0. Auto-gen from JSDoc. Hosted at /api/docs. SDK generation." \
+  --acceptance-criteria "All endpoints documented. Try it out works. SDK publishes. Search works."
 ```
 
 **The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
