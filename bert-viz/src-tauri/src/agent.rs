@@ -833,6 +833,44 @@ fn kill_process_group(pid: u32) {
     }
 }
 
+/// Build command arguments for Gemini CLI
+fn build_gemini_args(prompt: &str, resume: bool) -> Vec<String> {
+    let mut args = vec![
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--yolo".to_string(),
+    ];
+
+    if resume {
+        args.push("--resume".to_string());
+        args.push("latest".to_string());
+    }
+
+    args.push("--prompt".to_string());
+    args.push(prompt.to_string());
+
+    args
+}
+
+/// Build command arguments for Claude Code CLI
+fn build_claude_args(prompt: &str, resume: bool) -> Vec<String> {
+    let mut args = vec![
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--dangerously-skip-permissions".to_string(),
+    ];
+
+    if resume {
+        args.push("--resume".to_string());
+        args.push("latest".to_string());
+    }
+
+    // Claude Code takes the prompt as a positional argument, not --prompt
+    args.push(prompt.to_string());
+
+    args
+}
+
 fn run_cli_command(
     cli_backend: CliBackend,
     app_handle: AppHandle,
@@ -847,14 +885,13 @@ fn run_cli_command(
     eprintln!("🎯 Starting agent in directory: {}", repo_root.display());
 
     let mut cmd = Command::new(cli_backend.as_command_name());
-    cmd.arg("--output-format").arg("stream-json");
-    cmd.arg("--yolo");
 
-    if resume {
-        cmd.arg("--resume").arg("latest");
-    }
-
-    cmd.arg("--prompt").arg(&prompt);
+    // Build CLI-specific arguments
+    let args = match cli_backend {
+        CliBackend::Gemini => build_gemini_args(&prompt, resume),
+        CliBackend::ClaudeCode => build_claude_args(&prompt, resume),
+    };
+    cmd.args(&args);
 
     // Set working directory to project root
     cmd.current_dir(&repo_root);
