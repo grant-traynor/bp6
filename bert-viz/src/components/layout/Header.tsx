@@ -7,7 +7,7 @@ interface HeaderProps {
   setIsDark: (dark: boolean) => void;
   handleStartCreate: () => void;
   loadData: () => void;
-  onOpenChat: (persona: string, initialMessage?: string) => void;
+  onOpenChat: (persona: string, task?: string, beadId?: string) => void;
   projectMenuOpen: boolean;
   setProjectMenuOpen: (open: boolean) => void;
   favoriteProjects: Project[];

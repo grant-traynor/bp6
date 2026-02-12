@@ -628,6 +628,102 @@ Ensure the project is organized into a clean Epic -> Feature -> Task tree where 
 **CRITICAL**: A bead showing (blocked by: its_parent_id) in bd list is **NOT** a violation; it is proof that the hierarchy is working. Do not attempt to "fix" these.
 "#;
 
+const TEMPLATE_WEB: &str = r#"
+# Web Specialist — UI/UX & Implementation (TS/Vite/Tailwind)
+
+You are an expert frontend engineer specializing in React, TypeScript, and Tailwind CSS.
+
+## Core Principles
+
+1. **TypeScript First**: Ensure all components and utilities are strictly typed.
+2. **Tailwind CSS v4**: Use project-specific theme variables (e.g., `bg-background-primary`).
+3. **Brutalist Design System**: Adhere to the project's aesthetic:
+   - Use `shadow-brutalist-sm`, `md`, etc.
+   - Use `border-thin`, `border-thick`.
+   - Incorporate micro-animations (`hover-lift`, `animate-press`).
+
+## Execution Context
+
+Immediately run:
+bd show {{feature_id}}
+ls -R src/components
+cat src/index.css
+
+## Tool Rules
+
+- ALWAYS use "bash" for bd commands.
+- Use "read_file" to understand existing patterns.
+- ALWAYS run "npm run build" or "tsc" before closing to verify types.
+"#;
+
+const TEMPLATE_FLUTTER: &str = r#"
+# Flutter Specialist — Mobile & Cross-platform
+
+You are an expert Flutter/Dart engineer.
+
+## Core Principles
+
+1. **Idiomatic Dart**: Follow Effective Dart guidelines.
+2. **Widget Composition**: Build small, reusable widgets.
+3. **Material 3**: Use Material 3 design principles as adapted for the project.
+
+## Execution Context
+
+Immediately run:
+bd show {{feature_id}}
+flutter doctor
+ls -R lib/
+"#;
+
+const TEMPLATE_SUPABASE_DB: &str = r#"
+# Supabase Database Specialist
+
+You are an expert in PostgreSQL, PostgREST, and Supabase.
+
+## Core Principles
+
+1. **Strict Schema**: Use meaningful names and correct types.
+2. **RLS (Row Level Security)**: ALWAYS implement appropriate RLS policies.
+3. **Migrations**: All changes must be delivered as Supabase migrations.
+
+## Execution Context
+
+Immediately run:
+bd show {{feature_id}}
+ls -R supabase/migrations
+"#;
+
+/// Helper function to extract the specialist role from a bead.
+/// First checks labels for 'specialist:<role>' pattern, then falls back to extra_metadata['role'].
+/// Returns None if no role is found.
+fn get_role_from_bead(bead: &crate::Bead) -> Option<String> {
+    // First check labels for 'specialist:<role>' pattern
+    if let Some(labels) = &bead.labels {
+        for label in labels {
+            if let Some(role) = label.strip_prefix("specialist:") {
+                return Some(role.to_string());
+            }
+        }
+    }
+
+    // Fall back to extra_metadata['role']
+    bead.extra_metadata
+        .get("role")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+}
+
+/// Maps a specialist role string to the corresponding template constant.
+/// Returns TEMPLATE_IMPLEMENT_TASK as fallback for unknown roles.
+fn get_template_for_role(role: &str) -> &'static str {
+    match role {
+        "web" => TEMPLATE_WEB,
+        "flutter" => TEMPLATE_FLUTTER,
+        "supabase-db" => TEMPLATE_SUPABASE_DB,
+        _ => TEMPLATE_IMPLEMENT_TASK,
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentChunk {
@@ -781,7 +877,28 @@ pub fn start_agent_session(
     // Build initial prompt
     let mut prompt = String::new();
     
-    if persona == "product-manager" {
+    if persona == "specialist" {
+        if let Some(bid) = bead_id {
+            let bead = crate::bd::get_bead_by_id(&bid).map_err(|e| e.to_string())?;
+
+            // Discover role using helper function
+            let role = get_role_from_bead(&bead).unwrap_or_else(|| "default".to_string());
+
+            // Map role to template using helper function
+            let mut template = get_template_for_role(&role).to_string();
+
+            template = template.replace("{{feature_id}}", &bid);
+            prompt.push_str(&template);
+
+            if let Ok(json) = serde_json::to_string_pretty(&bead) {
+                prompt.push_str("\nContext JSON:\n```json\n");
+                prompt.push_str(&json);
+                prompt.push_str("\n```\n");
+            }
+        } else {
+            return Err("bead_id is required for specialist persona".to_string());
+        }
+    } else if persona == "product-manager" {
         if let (Some(t), Some(bid)) = (task, bead_id) {
             let bead = crate::bd::get_bead_by_id(&bid).ok();
             let issue_type = bead.as_ref().map(|b| b.issue_type.as_str()).unwrap_or("");

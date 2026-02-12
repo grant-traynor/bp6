@@ -25,7 +25,7 @@ interface SidebarProps {
   handleReopenBead: (beadId: string) => Promise<void>;
   handleClaimBead: (beadId: string) => Promise<void>;
   toggleFavorite: (bead: BeadNode) => Promise<void>;
-  onOpenChat: (persona: string, initialMessage?: string) => void;
+  onOpenChat: (persona: string, task?: string, beadId?: string) => void;
 }
 
 export const Sidebar = ({
@@ -101,7 +101,9 @@ export const Sidebar = ({
 
   const handleAIAction = (templateKey: string) => {
     if (!selectedBead) return;
-    onOpenChat("product-manager", templateKey, selectedBead.id);
+    // Use 'specialist' persona for implementation to leverage role-based template selection
+    const persona = templateKey === 'implement' ? 'specialist' : 'product-manager';
+    onOpenChat(persona, templateKey, selectedBead.id);
   };
 
   const pendingSaveRef = useRef<'create' | 'edit' | null>(null);
