@@ -50,7 +50,7 @@ This is a planning session. All output is beads and discussion, not code.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 3. **Creating implementation elements**: Create tasks, chores, and bugs to decompose the feature. Decompose the feature into smaller, actionable units. EVERY unit MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each unit should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Numbering and Identification**: All units must be numbered as {{feature_id}}.<id> where id is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+5. **Task Numbering and Identification**: All tasks must be numbered as {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc. where {{feature_id}} is the parent feature ID and the numeric suffix is a zero-padded three-digit number. Example: If decomposing feature bp6-123.001, tasks become bp6-123.001.001, bp6-123.001.002, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
 6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the units that you create.
@@ -147,7 +147,7 @@ This is a planning session. All output is beads and discussion, not code.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 3. **Creating features**: Create features to decompose the epic. Decompose the epic into smaller, actionable features. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.001, {{feature_id}}.002, etc. where the numeric suffix is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+5. **Feature Numbering and Identification**: All features must be numbered as {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc. where {{epic_id}} is the parent epic ID (represented by {{feature_id}} placeholder in this template) and the numeric suffix is a zero-padded three-digit number. Example: If decomposing epic bp6-643, features become bp6-643.001, bp6-643.002, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
 6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the features that you create.
@@ -162,7 +162,8 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 **Creating features with proper ID numbering (zero-padded three-digit format):**
 
-All features MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
+All features MUST be created with explicit IDs using the format {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc.
+In the examples below, {{feature_id}} is the placeholder that gets replaced with the actual epic ID.
 
 **CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
 
@@ -248,7 +249,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 4. **Creating implementation elements**: Create tasks, bugs, or chores to extend the feature, depending on the context of the discussion with the user. EVERY element MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each element should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Task Numbering and Identification**: All elements must be numbered as {{feature_id}}.<task_id> where task_id is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+6. **Task Numbering and Identification**: All tasks must be numbered as {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc. where {{feature_id}} is the parent feature ID and the numeric suffix is a zero-padded three-digit number. Example: If extending feature bp6-123.001 that already has .001 and .002, new tasks become bp6-123.001.003, bp6-123.001.004, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
 7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing tasks within the feature.
@@ -360,7 +361,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 4. **Creating features**: Create new features to extend the epic. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.001, {{feature_id}}.002, etc. where the numeric suffix is a zero-padded three-digit number (e.g., 001, 002, 010). The dotted notation automatically establishes the parent relationship - never use --parent flag.
+6. **Feature Numbering and Identification**: All features must be numbered as {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc. where {{epic_id}} is the parent epic ID (represented by {{feature_id}} placeholder in this template) and the numeric suffix is a zero-padded three-digit number. Example: If extending epic bp6-643 that already has .001 and .002, new features become bp6-643.003, bp6-643.004, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
 7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing features within the epic.
@@ -375,7 +376,8 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 **Creating features with proper ID numbering (zero-padded three-digit format):**
 
-All features MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
+All features MUST be created with explicit IDs using the format {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc.
+In the examples below, {{feature_id}} is the placeholder that gets replaced with the actual epic ID.
 
 **CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
 
