@@ -833,7 +833,8 @@ fn kill_process_group(pid: u32) {
     }
 }
 
-fn run_gemini_command(
+fn run_cli_command(
+    cli_backend: CliBackend,
     app_handle: AppHandle,
     state: &AgentState,
     prompt: String,
@@ -845,7 +846,7 @@ fn run_gemini_command(
 
     eprintln!("🎯 Starting agent in directory: {}", repo_root.display());
 
-    let mut cmd = Command::new("gemini");
+    let mut cmd = Command::new(cli_backend.as_command_name());
     cmd.arg("--output-format").arg("stream-json");
     cmd.arg("--yolo");
 
@@ -873,7 +874,7 @@ fn run_gemini_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn gemini in {}: {}", repo_root.display(), e))?;
+        .map_err(|e| format!("Failed to spawn {} in {}: {}", cli_backend.as_command_name(), repo_root.display(), e))?;
 
     {
         let mut proc_guard = state.current_process.lock().unwrap();
@@ -1027,16 +1028,16 @@ pub fn start_agent_session(
         }
     }
 
-    run_gemini_command(app_handle, &state, prompt, false)
+    run_cli_command(CliBackend::Gemini, app_handle, &state, prompt, false)
 }
 
 #[tauri::command]
 pub fn send_agent_message(
     app_handle: AppHandle,
-    message: String, 
+    message: String,
     state: State<'_, AgentState>
 ) -> Result<(), String> {
-    run_gemini_command(app_handle, &state, message, true)
+    run_cli_command(CliBackend::Gemini, app_handle, &state, message, true)
 }
 
 #[tauri::command]
