@@ -810,12 +810,14 @@ pub struct AgentChunk {
 
 pub struct AgentState {
     pub current_process: Mutex<Option<Child>>,
+    pub cli_backend: Mutex<CliBackend>,
 }
 
 impl AgentState {
     pub fn new() -> Self {
         AgentState {
             current_process: Mutex::new(None),
+            cli_backend: Mutex::new(CliBackend::Gemini),
         }
     }
 }
@@ -1076,6 +1078,12 @@ pub fn start_agent_session(
         }
     }
 
+    // Store the CLI backend in state for this session
+    {
+        let mut backend_guard = state.cli_backend.lock().unwrap();
+        *backend_guard = backend;
+    }
+
     run_cli_command(backend, app_handle, &state, prompt, false)
 }
 
@@ -1085,7 +1093,13 @@ pub fn send_agent_message(
     message: String,
     state: State<'_, AgentState>
 ) -> Result<(), String> {
-    run_cli_command(CliBackend::Gemini, app_handle, &state, message, true)
+    // Read the CLI backend from state to maintain consistency across session
+    let backend = {
+        let backend_guard = state.cli_backend.lock().unwrap();
+        *backend_guard
+    };
+
+    run_cli_command(backend, app_handle, &state, message, true)
 }
 
 #[tauri::command]
