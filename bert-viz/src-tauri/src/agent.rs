@@ -62,17 +62,30 @@ Always use the "bash" tool for bd commands.
 Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Features are decomposed into TASKS, CHORES, or BUGS.
-When creating beads for this feature, you MUST use the correct --type flag (task, chore, or bug):
-bd create --title "..." --type [task|chore|bug] --priority 2 --description "..."
 
-bd create --title "..." --type [task|chore|bug] --priority 2 --description "..." # Create new unit
-bd update <bead_id> --parent {{feature_id}} # Set the parent feature for a task
-bd list --status open # List open beads
-bd ready # Show unblocked beads ready for work
-bd show <bead_id> # Show bead details
-bd dep add <dependent_id> <blocker_id> # Add dependency (dependent depends on blocker)
-bd dep rm <dependent_id> <blocker_id> # Remove dependency
-bd stats # Progress overview
+**Creating beads with proper ID numbering (zero-padded three-digit format):**
+
+All beads MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
+
+**Use the --id flag to specify the exact ID, and --parent to set the parent feature:**
+
+```bash
+bd create --id {{feature_id}}.001 --title "Implement data layer" --type task --priority 2 --description "Create the database models and repositories" --parent {{feature_id}}
+
+bd create --id {{feature_id}}.002 --title "Build API endpoints" --type task --priority 2 --description "Add REST endpoints for CRUD operations" --parent {{feature_id}}
+
+bd create --id {{feature_id}}.003 --title "Add unit tests" --type chore --priority 2 --description "Write tests for data layer and API" --parent {{feature_id}}
+```
+
+**The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
+
+**Common bd commands:**
+- `bd list --status open --parent {{feature_id}}` - List child beads of this feature
+- `bd ready` - Show unblocked beads ready for work
+- `bd show <bead_id>` - Show bead details
+- `bd dep add <dependent_id> <blocker_id>` - Add dependency (dependent depends on blocker)
+- `bd dep rm <dependent_id> <blocker_id>` - Remove dependency
+- `bd stats` - Progress overview
 
 ## Output Goal
 
@@ -134,17 +147,30 @@ Always use the "bash" tool for bd commands.
 Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Epics are decomposed into FEATURES.
-When creating beads for this epic, you MUST use the --type feature flag:
-bd create --title "..." --type feature --priority 2 --description "..."
 
-bd create --title "..." --type feature --priority 2 --description "..." # Create new feature
-bd update <bead_id> --parent {{feature_id}} # Set the parent epic for a feature
-bd list --status open # List open beads
-bd ready # Show unblocked beads ready for work
-bd show <bead_id> # Show bead details
-bd dep add <dependent_id> <blocker_id> # Add dependency (dependent depends on blocker)
-bd dep rm <dependent_id> <blocker_id> # Remove dependency
-bd stats # Progress overview
+**Creating features with proper ID numbering (zero-padded three-digit format):**
+
+All features MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
+
+**Use the --id flag to specify the exact ID, and --parent to set the parent epic:**
+
+```bash
+bd create --id {{feature_id}}.001 --title "User Authentication" --type feature --priority 2 --description "Implement user login and registration" --parent {{feature_id}}
+
+bd create --id {{feature_id}}.002 --title "Data Management" --type feature --priority 2 --description "Build CRUD operations for core entities" --parent {{feature_id}}
+
+bd create --id {{feature_id}}.003 --title "Reporting Dashboard" --type feature --priority 2 --description "Create analytics and reporting views" --parent {{feature_id}}
+```
+
+**The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
+
+**Common bd commands:**
+- `bd list --status open --parent {{feature_id}}` - List child features of this epic
+- `bd ready` - Show unblocked beads ready for work
+- `bd show <bead_id>` - Show bead details
+- `bd dep add <dependent_id> <blocker_id>` - Add dependency (dependent depends on blocker)
+- `bd dep rm <dependent_id> <blocker_id>` - Remove dependency
+- `bd stats` - Progress overview
 
 ## Output Goal
 
@@ -210,17 +236,39 @@ Always use the "bash" tool for bd commands.
 Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Features are extended with TASKS, BUGS, or CHORES.
-When creating beads for this feature, you MUST use the correct --type flag (task, bug, or chore):
-bd create --title "..." --type [task|bug|chore] --priority 2 --description "..."
 
-bd create --title "..." --type [task|bug|chore] --priority 2 --description "..." # Create new element
-bd update <bead_id> --parent {{feature_id}} # Set the parent feature for an element
-bd list --status open # List open beads
-bd ready # Show unblocked beads ready for work
-bd show <bead_id> # Show bead details
-bd dep add <dependent_id> <blocker_id> # Add dependency (dependent depends on blocker)
-bd dep rm <dependent_id> <blocker_id> # Remove dependency
-bd stats # Progress overview
+**Creating beads with proper ID numbering (zero-padded three-digit format):**
+
+All beads MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
+
+**IMPORTANT:** Before creating new beads, check existing child beads to determine the next number:
+```bash
+bd list --status open --parent {{feature_id}}
+```
+
+**Use the --id flag to specify the exact ID, and --parent to set the parent feature:**
+
+**Example (extending feature bp6-abc.5 that already has .001 and .002):**
+```bash
+# Check existing beads first
+bd list --parent {{feature_id}}
+
+# Create third bead (continuing from existing .001 and .002)
+bd create --id {{feature_id}}.003 --title "Add error handling" --type task --priority 2 --description "Add try-catch blocks and error logging" --parent {{feature_id}}
+
+# Fourth bead
+bd create --id {{feature_id}}.004 --title "Fix validation bug" --type bug --priority 2 --description "Fix email validation regex" --parent {{feature_id}}
+```
+
+**The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
+
+**Common bd commands:**
+- `bd list --status open --parent {{feature_id}}` - List child beads of this feature
+- `bd ready` - Show unblocked beads ready for work
+- `bd show <bead_id>` - Show bead details
+- `bd dep add <dependent_id> <blocker_id>` - Add dependency (dependent depends on blocker)
+- `bd dep rm <dependent_id> <blocker_id>` - Remove dependency
+- `bd stats` - Progress overview
 
 ## Output Goal
 
@@ -286,17 +334,39 @@ Always use the "bash" tool for bd commands.
 Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Epics are extended with FEATURES only.
-When creating beads for this epic, you MUST use the --type feature flag:
-bd create --title "..." --type feature --priority 2 --description "..."
 
-bd create --title "..." --type feature --priority 2 --description "..." # Create new feature
-bd update <bead_id> --parent {{feature_id}} # Set the parent epic for a feature
-bd list --status open # List open beads
-bd ready # Show unblocked beads ready for work
-bd show <bead_id> # Show bead details
-bd dep add <dependent_id> <blocker_id> # Add dependency (dependent depends on blocker)
-bd dep rm <dependent_id> <blocker_id> # Remove dependency
-bd stats # Progress overview
+**Creating features with proper ID numbering (zero-padded three-digit format):**
+
+All features MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
+
+**IMPORTANT:** Before creating new features, check existing child features to determine the next number:
+```bash
+bd list --status open --parent {{feature_id}}
+```
+
+**Use the --id flag to specify the exact ID, and --parent to set the parent epic:**
+
+**Example (extending epic bp6-xyz that already has .001 and .002):**
+```bash
+# Check existing features first
+bd list --parent {{feature_id}}
+
+# Create third feature (continuing from existing .001 and .002)
+bd create --id {{feature_id}}.003 --title "Admin Dashboard" --type feature --priority 2 --description "Build administrative interface" --parent {{feature_id}}
+
+# Fourth feature
+bd create --id {{feature_id}}.004 --title "API Documentation" --type feature --priority 2 --description "Generate API docs with examples" --parent {{feature_id}}
+```
+
+**The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
+
+**Common bd commands:**
+- `bd list --status open --parent {{feature_id}}` - List child features of this epic
+- `bd ready` - Show unblocked beads ready for work
+- `bd show <bead_id>` - Show bead details
+- `bd dep add <dependent_id> <blocker_id>` - Add dependency (dependent depends on blocker)
+- `bd dep rm <dependent_id> <blocker_id>` - Remove dependency
+- `bd stats` - Progress overview
 
 ## Output Goal
 
