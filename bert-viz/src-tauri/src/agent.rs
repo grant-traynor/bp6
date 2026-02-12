@@ -50,7 +50,7 @@ This is a planning session. All output is beads and discussion, not code.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 3. **Creating implementation elements**: Create tasks, chores, and bugs to decompose the feature. Decompose the feature into smaller, actionable units. EVERY unit MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each unit should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Task Numbering and Identification**: All tasks must be numbered as {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc. where {{feature_id}} is the parent feature ID and the numeric suffix is a zero-padded three-digit number. Example: If decomposing feature bp6-123.001, tasks become bp6-123.001.001, bp6-123.001.002, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
+5. **Task Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs in the format {{feature_id}}.001, {{feature_id}}.002, etc. Example: If decomposing feature bp6-123.001, tasks become bp6-123.001.001, bp6-123.001.002, etc.
 6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the units that you create.
@@ -63,16 +63,14 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Features are decomposed into TASKS, CHORES, or BUGS.
 
-**Creating beads with proper ID numbering (zero-padded three-digit format):**
+**Creating beads with auto-numbered IDs:**
 
-All beads MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
-
-**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+All beads are created using --parent flag. The CLI automatically generates sequential IDs.
 
 **MANDATORY: Always include --design and --acceptance-criteria for each bead.**
 
 ```bash
-bd create --id {{feature_id}}.001 \
+bd create --parent {{feature_id}} \
   --title "Implement data layer" \
   --type task \
   --priority 2 \
@@ -80,7 +78,7 @@ bd create --id {{feature_id}}.001 \
   --design "Add UserModel and UserRepository in src/data/. Follow repository pattern." \
   --acceptance-criteria "CRUD methods work. Tests pass. No direct DB calls in logic."
 
-bd create --id {{feature_id}}.002 \
+bd create --parent {{feature_id}} \
   --title "Build API endpoints" \
   --type task \
   --priority 2 \
@@ -88,8 +86,6 @@ bd create --id {{feature_id}}.002 \
   --design "Routes in src/api/users.ts. Use auth middleware." \
   --acceptance-criteria "Endpoints work. Auth applied. Validation passes. Tests pass."
 ```
-
-**The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
 
 **Common bd commands:**
 - `bd list --status open --parent {{feature_id}}` - List child beads of this feature
@@ -147,7 +143,7 @@ This is a planning session. All output is beads and discussion, not code.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 3. **Creating features**: Create features to decompose the epic. Decompose the epic into smaller, actionable features. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 4. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Feature Numbering and Identification**: All features must be numbered as {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc. where {{epic_id}} is the parent epic ID (represented by {{feature_id}} placeholder in this template) and the numeric suffix is a zero-padded three-digit number. Example: If decomposing epic bp6-643, features become bp6-643.001, bp6-643.002, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
+5. **Feature Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs in the format {{epic_id}}.001, {{epic_id}}.002, etc. Example: If decomposing epic bp6-643, features become bp6-643.001, bp6-643.002, etc.
 6. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the features that you create.
@@ -160,17 +156,15 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Epics are decomposed into FEATURES.
 
-**Creating features with proper ID numbering (zero-padded three-digit format):**
+**Creating features with auto-numbered IDs:**
 
-All features MUST be created with explicit IDs using the format {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc.
-In the examples below, {{feature_id}} is the placeholder that gets replaced with the actual epic ID.
-
-**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+All features are created using --parent flag. The CLI automatically generates sequential IDs in the format {{epic_id}}.001, {{epic_id}}.002, etc.
+{{feature_id}} in the examples below is the placeholder that gets replaced with the actual epic ID.
 
 **MANDATORY: Always include --design and --acceptance-criteria for each feature.**
 
 ```bash
-bd create --id {{feature_id}}.001 \
+bd create --parent {{feature_id}} \
   --title "User Authentication" \
   --type feature \
   --priority 2 \
@@ -178,7 +172,7 @@ bd create --id {{feature_id}}.001 \
   --design "Passport.js for OAuth2. JWT in HTTP-only cookies. UI in src/components/auth/." \
   --acceptance-criteria "Email/password and OAuth2 login work. Sessions persist. Tests pass."
 
-bd create --id {{feature_id}}.002 \
+bd create --parent {{feature_id}} \
   --title "Data Management" \
   --type feature \
   --priority 2 \
@@ -249,7 +243,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 4. **Creating implementation elements**: Create tasks, bugs, or chores to extend the feature, depending on the context of the discussion with the user. EVERY element MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each element should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Task Numbering and Identification**: All tasks must be numbered as {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc. where {{feature_id}} is the parent feature ID and the numeric suffix is a zero-padded three-digit number. Example: If extending feature bp6-123.001 that already has .001 and .002, new tasks become bp6-123.001.003, bp6-123.001.004, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
+6. **Task Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs continuing from existing tasks. Example: If extending feature bp6-123.001 that already has .001 and .002, new tasks become bp6-123.001.003, bp6-123.001.004, etc.
 7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating beads. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing tasks within the feature.
@@ -262,26 +256,14 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Features are extended with TASKS, BUGS, or CHORES.
 
-**Creating beads with proper ID numbering (zero-padded three-digit format):**
+**Creating beads with auto-numbered IDs:**
 
-All beads MUST be created with explicit IDs using the format {{feature_id}}.001, {{feature_id}}.002, {{feature_id}}.003, etc.
-
-**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+All beads are created using --parent flag. The CLI automatically generates sequential IDs continuing from existing tasks.
 
 **MANDATORY: Always include --design and --acceptance-criteria for each bead.**
 
-**IMPORTANT:** Before creating new beads, check existing child beads to determine the next number:
 ```bash
-bd list --parent {{feature_id}}
-```
-
-**Example (extending feature bp6-abc.5 that already has .001 and .002):**
-```bash
-# Check existing beads first
-bd list --parent {{feature_id}}
-
-# Create third bead (continuing from existing .001 and .002)
-bd create --id {{feature_id}}.003 \
+bd create --parent {{feature_id}} \
   --title "Add error handling" \
   --type task \
   --priority 2 \
@@ -289,8 +271,7 @@ bd create --id {{feature_id}}.003 \
   --design "Use asyncHandler() wrapper. Winston logger for errors. Update src/api/*.ts." \
   --acceptance-criteria "All async ops have try-catch. Errors logged. Tests pass."
 
-# Fourth bead
-bd create --id {{feature_id}}.004 \
+bd create --parent {{feature_id}} \
   --title "Fix validation bug" \
   --type bug \
   --priority 2 \
@@ -298,8 +279,6 @@ bd create --id {{feature_id}}.004 \
   --design "Update src/validators/email.ts with RFC 5322 pattern. Add edge case tests." \
   --acceptance-criteria "Invalid emails rejected. Valid TLDs accepted. Tests pass."
 ```
-
-**The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
 
 **Common bd commands:**
 - `bd list --status open --parent {{feature_id}}` - List child beads of this feature
@@ -361,7 +340,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 4. **Creating features**: Create new features to extend the epic. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
 5. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Feature Numbering and Identification**: All features must be numbered as {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc. where {{epic_id}} is the parent epic ID (represented by {{feature_id}} placeholder in this template) and the numeric suffix is a zero-padded three-digit number. Example: If extending epic bp6-643 that already has .001 and .002, new features become bp6-643.003, bp6-643.004, etc. The dotted notation automatically establishes the parent relationship - never use --parent flag.
+6. **Feature Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs continuing from existing features. Example: If extending epic bp6-643 that already has .001 and .002, new features become bp6-643.003, bp6-643.004, etc.
 7. **Mandatory Fields**: ALWAYS provide --design and --acceptance-criteria when creating features. These fields are not optional.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing features within the epic.
@@ -374,27 +353,15 @@ Always use the bd CLI. Never edit .beads/issues.jsonl directly.
 
 ### MANDATORY: Epics are extended with FEATURES only.
 
-**Creating features with proper ID numbering (zero-padded three-digit format):**
+**Creating features with auto-numbered IDs:**
 
-All features MUST be created with explicit IDs using the format {{epic_id}}.001, {{epic_id}}.002, {{epic_id}}.003, etc.
-In the examples below, {{feature_id}} is the placeholder that gets replaced with the actual epic ID.
-
-**CRITICAL: The dotted ID notation automatically establishes the parent relationship. DO NOT use --parent flag.**
+All features are created using --parent flag. The CLI automatically generates sequential IDs continuing from existing features.
+{{feature_id}} in the examples below is the placeholder that gets replaced with the actual epic ID.
 
 **MANDATORY: Always include --design and --acceptance-criteria for each feature.**
 
-**IMPORTANT:** Before creating new features, check existing child features to determine the next number:
 ```bash
-bd list --parent {{feature_id}}
-```
-
-**Example (extending epic bp6-xyz that already has .001 and .002):**
-```bash
-# Check existing features first
-bd list --parent {{feature_id}}
-
-# Create third feature (continuing from existing .001 and .002)
-bd create --id {{feature_id}}.003 \
+bd create --parent {{feature_id}} \
   --title "Admin Dashboard" \
   --type feature \
   --priority 2 \
@@ -402,8 +369,7 @@ bd create --id {{feature_id}}.003 \
   --design "React admin panel in src/admin/. User CRUD, metrics, feature flags, audit log." \
   --acceptance-criteria "User management works. Metrics refresh. RBAC enforced. Tests pass."
 
-# Fourth feature
-bd create --id {{feature_id}}.004 \
+bd create --parent {{feature_id}} \
   --title "API Documentation" \
   --type feature \
   --priority 2 \
