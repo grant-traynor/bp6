@@ -50,7 +50,7 @@ This is a planning session. All output is beads and discussion, not code.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 3. **Creating implementation elements**: Create tasks, chores, and bugs to decompose the feature. Decompose the feature into smaller, actionable units. Each should have a description, design notes, and acceptance criteria (where applicable). Each unit must have acceptance criteria defined based upon the verification by inspection of code of the unit's definition.
 4. **Level Of Detail**: Each unit should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Numbering and Identification**: All units must be numbered as {{feature_id}}.<id> where id is a sequence of the form ###
+5. **Numbering and Identification**: All units must be numbered as {{feature_id}}.<id> where id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
 6. **Structure Preservation and Quality**: All units must have {{feature_id}} set as the parent task. Use "bd update <id> --parent {{feature_id}}" to set the parent task.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the units that you create.
@@ -122,7 +122,7 @@ This is a planning session. All output is beads and discussion, not code.
 2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 3. **Creating features**: Create features to decompose the epic. Decompose the epic into smaller, actionable features. Each feature should have a description, design notes, and acceptance criteria. Each feature must have acceptance criteria defined based upon the verification by inspection of code of the features definition.
 4. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.<feature_id> where feature_id is a sequence of the form ###
+5. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.<feature_id> where feature_id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
 6. **Structure Preservation and Quality**: All features must have {{feature_id}} set as the parent epic. Use "bd update <feature_id> --parent {{feature_id}}" to set the parent epic.
 7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the features that you create.
@@ -198,7 +198,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 4. **Creating implementation elements**: Create tasks, bugs, or chores to extend the feature, depending on the context of the discussion with the user. Each element should have a description, design notes, and acceptance criteria. Each element must have acceptance criteria defined based upon the verification by inspection of code of the element's definition.
 5. **Level Of Detail**: Each element should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Task Numbering and Identification**: All elements must be numbered as {{feature_id}}.<task_id> where task_id is a sequence of the form ###
+6. **Task Numbering and Identification**: All elements must be numbered as {{feature_id}}.<task_id> where task_id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
 7. **Structure Preservation and Quality**: All elements must have {{feature_id}} set as the parent task. Use "bd update <task_id> --parent {{feature_id}}" to set the parent task.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing tasks within the feature.
@@ -274,7 +274,7 @@ This is a planning session. All output is beads and discussion, not code.
 3. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
 4. **Creating features**: Create new features to extend the epic. Each feature should have a description, design notes, and acceptance criteria. Each feature must have acceptance criteria defined based upon the verification by inspection of code of the features definition.
 5. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-6. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.<feature_id> where feature_id is a sequence of the form ###
+6. **Feature Numbering and Identification**: All features must be numbered as {{feature_id}}.<feature_id> where feature_id is a zero-padded three-digit number (e.g., 001, 002, 010). This ensures proper numerical sorting in lists and directories.
 7. **Structure Preservation and Quality**: All features must have {{feature_id}} set as the parent epic. Use "bd update <feature_id> --parent {{feature_id}}" to set the parent epic.
 8. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing features within the epic.
