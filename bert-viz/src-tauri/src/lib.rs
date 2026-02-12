@@ -218,21 +218,7 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
     eprintln!("📖 get_processed_data: Reading from {}", beads_path.display());
     let load_start = std::time::Instant::now();
 
-    let file = File::open(&beads_path).map_err(|e| format!("Failed to open issues.jsonl: {}", e))?;
-    let reader = BufReader::new(file);
-
-    let mut beads: Vec<Bead> = Vec::new();
-    for (index, line) in reader.lines().enumerate() {
-        let line = line.map_err(|e| format!("Error reading line {}: {}", index + 1, e))?;
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let bead: Bead = serde_json::from_str(&line)
-            .map_err(|e| format!("Failed to parse bead at line {}: {}", index + 1, e))?;
-        beads.push(bead);
-    }
+    let beads = load_beads_from_file(&beads_path)?;
 
     eprintln!("⏱️  File load: {:.2}ms ({} beads)", load_start.elapsed().as_secs_f64() * 1000.0, beads.len());
 
@@ -258,8 +244,8 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
     // 4. Build WBS tree
     let mut tree = build_wbs_tree(&filtered);
 
-    // 5. Sort siblings by dependencies
-    tree = sort_wbs_tree_siblings(tree, &graph);
+    // 5. Sort siblings (by dependencies or explicit sort)
+    tree = sort_wbs_tree_siblings(tree, &graph, &params.sort_by, &params.sort_order);
 
     eprintln!("⏱️  Tree building: {:.2}ms", tree_start.elapsed().as_secs_f64() * 1000.0);
     let layout_start = std::time::Instant::now();
@@ -648,21 +634,7 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
     eprintln!("📖 get_project_view_model: Reading from {}", beads_path.display());
     let load_start = std::time::Instant::now();
 
-    let file = File::open(&beads_path).map_err(|e| format!("Failed to open issues.jsonl: {}", e))?;
-    let reader = BufReader::new(file);
-
-    let mut beads: Vec<Bead> = Vec::new();
-    for (index, line) in reader.lines().enumerate() {
-        let line = line.map_err(|e| format!("Error reading line {}: {}", index + 1, e))?;
-
-        if line.trim().is_empty() {
-            continue;
-        }
-
-        let bead: Bead = serde_json::from_str(&line)
-            .map_err(|e| format!("Failed to parse bead at line {}: {}", index + 1, e))?;
-        beads.push(bead);
-    }
+    let beads = load_beads_from_file(&beads_path)?;
 
     eprintln!("⏱️  File load: {:.2}ms ({} beads)", load_start.elapsed().as_secs_f64() * 1000.0, beads.len());
 
@@ -683,8 +655,8 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
     // 4. Build WBS tree
     let mut tree = build_wbs_tree(&filtered);
 
-    // 5. Sort siblings by dependencies
-    tree = sort_wbs_tree_siblings(tree, &graph);
+    // 5. Sort siblings (by dependencies or explicit sort)
+    tree = sort_wbs_tree_siblings(tree, &graph, &params.sort_by, &params.sort_order);
 
     // Apply collapsed state
     fn apply_collapsed_state(nodes: &mut [WBSNode], collapsed_ids: &[String]) {
@@ -785,6 +757,346 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
         metadata,
         indexes,
     })
+}
+
+/// Robustly load beads from a jsonl file with retries to handle partial writes or locks.
+fn load_beads_from_file(path: &std::path::Path) -> Result<Vec<Bead>, String> {
+    let mut last_error = String::new();
+    let mut last_size = 0;
+
+    for i in 0..10 {
+        // 1. Check metadata and stability
+        let metadata = match std::fs::metadata(path) {
+            Ok(m) => m,
+            Err(e) => {
+                if i < 9 {
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                return Err(format!("Failed to get metadata: {}", e));
+            }
+        };
+
+        let current_size = metadata.len();
+        if current_size == 0 {
+            if i < 9 {
+                std::thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            return Ok(Vec::new());
+        }
+
+        // If file size is still changing, wait for it to settle
+        if current_size != last_size && i < 9 {
+            last_size = current_size;
+            std::thread::sleep(Duration::from_millis(100));
+            continue;
+        }
+
+        // 2. Try to open and verify completeness
+        match File::open(path) {
+            Ok(mut file) => {
+                // Check if last byte is newline - beads JSONL always ends with \n
+                use std::io::{Seek, SeekFrom, Read};
+                if current_size > 0 {
+                    if let Ok(_) = file.seek(SeekFrom::End(-1)) {
+                        let mut last_byte = [0u8; 1];
+                        if let Ok(_) = file.read_exact(&mut last_byte) {
+                            if last_byte[0] != b'\n' && i < 9 {
+                                std::thread::sleep(Duration::from_millis(100));
+                                continue;
+                            }
+                        }
+                    }
+                    // Reset to start for reading
+                    let _ = file.seek(SeekFrom::Start(0));
+                }
+
+                let reader = BufReader::new(file);
+                let mut beads = Vec::new();
+                let mut had_parse_error = false;
+
+                for (index, line) in reader.lines().enumerate() {
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(e) => {
+                            if i < 9 {
+                                had_parse_error = true;
+                                last_error = format!("IO error reading line {}: {}", index + 1, e);
+                                break;
+                            } else {
+                                return Err(format!("Error reading line {}: {}", index + 1, e));
+                            }
+                        }
+                    };
+
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+
+                    match serde_json::from_str::<Bead>(&line) {
+                        Ok(bead) => beads.push(bead),
+                        Err(e) => {
+                            if i < 9 {
+                                had_parse_error = true;
+                                last_error = format!("Failed to parse bead at line {}: {}", index + 1, e);
+                                break;
+                            } else {
+                                return Err(format!("Failed to parse bead at line {}: {}. Line content: {}", index + 1, e, line));
+                            }
+                        }
+                    }
+                }
+
+                if !had_parse_error {
+                    return Ok(beads);
+                }
+
+                std::thread::sleep(Duration::from_millis(100 * (i + 1)));
+            }
+            Err(e) => {
+                if i == 9 {
+                    return Err(format!("Failed to open issues.jsonl after retries: {}", e));
+                }
+                std::thread::sleep(Duration::from_millis(100 * (i + 1)));
+            }
+        }
+    }
+
+    Err(format!("Failed to read beads after retries. Last error: {}", last_error))
+}
+
+#[tauri::command]
+fn get_beads() -> Result<Vec<Bead>, String> {
+    let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
+    eprintln!("📖 get_beads: Reading from {}", path.display());
+    load_beads_from_file(&path)
+}
+
+#[tauri::command]
+fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("📝 update_bead: Called for bead '{}' ({})", updated_bead.title, updated_bead.id);
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
+    eprintln!("📝 update_bead: Using repo_path = {}", repo_path.display());
+
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("update")
+        .arg(&updated_bead.id)
+        .arg("--title").arg(&updated_bead.title)
+        .arg("--status").arg(&updated_bead.status)
+        .arg("--priority").arg(updated_bead.priority.to_string())
+        .arg("--type").arg(&updated_bead.issue_type);
+
+    if let Some(desc) = &updated_bead.description {
+        cmd.arg("--description").arg(desc);
+    }
+    if let Some(est) = updated_bead.estimate {
+        cmd.arg("--estimate").arg(est.to_string());
+    }
+    if let Some(owner) = &updated_bead.owner {
+        cmd.arg("--assignee").arg(owner);
+    }
+    if let Some(labels) = &updated_bead.labels {
+        if !labels.is_empty() {
+            cmd.arg("--set-labels").arg(labels.join(","));
+        }
+    }
+    if let Some(ac) = &updated_bead.acceptance_criteria {
+        if !ac.is_empty() {
+            cmd.arg("--acceptance").arg(ac.join("\n"));
+        }
+    }
+    if let Some(parent) = &updated_bead.parent {
+        cmd.arg("--parent").arg(parent);
+    }
+    if let Some(ext_ref) = &updated_bead.external_reference {
+        cmd.arg("--external-ref").arg(ext_ref);
+    }
+    if let Some(design) = &updated_bead.design {
+        cmd.arg("--design").arg(design);
+    }
+    if let Some(notes) = &updated_bead.notes {
+        cmd.arg("--notes").arg(notes);
+    }
+
+    // Pass everything also to --metadata to ensure extra_metadata is preserved
+    // and fields that don't have explicit flags are updated.
+    let metadata_json = serde_json::to_string(&updated_bead).map_err(|e| e.to_string())?;
+    cmd.arg("--metadata").arg(metadata_json);
+
+    eprintln!("📝 update_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("📝 update_bead: Command: {:?}", cmd);
+    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let _ = app_handle.emit("beads-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn close_bead(bead_id: String, reason: Option<String>, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("🔒 close_bead: Called for bead '{}'", bead_id);
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
+    eprintln!("🔒 close_bead: Using repo_path = {}", repo_path.display());
+
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("close").arg(&bead_id);
+
+    if let Some(r) = reason {
+        cmd.arg("--reason").arg(r);
+    }
+
+    eprintln!("🔒 close_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("🔒 close_bead: Command: {:?}", cmd);
+    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let _ = app_handle.emit("beads-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn reopen_bead(bead_id: String, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("🔓 reopen_bead: Called for bead '{}'", bead_id);
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
+    eprintln!("🔓 reopen_bead: Using repo_path = {}", repo_path.display());
+
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("reopen").arg(&bead_id);
+
+    eprintln!("🔓 reopen_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("🔓 reopen_bead: Command: {:?}", cmd);
+    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let _ = app_handle.emit("beads-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn claim_bead(bead_id: String, app_handle: AppHandle) -> Result<(), String> {
+    eprintln!("👤 claim_bead: Called for bead '{}'", bead_id);
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
+    eprintln!("👤 claim_bead: Using repo_path = {}", repo_path.display());
+
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("update")
+        .arg(&bead_id)
+        .arg("--status")
+        .arg("in_progress");
+
+    eprintln!("👤 claim_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("👤 claim_bead: Command: {:?}", cmd);
+    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let _ = app_handle.emit("beads-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> {
+    eprintln!("🆕 create_bead: Called for bead '{}'", new_bead.title);
+    check_bd_available()?;
+    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
+    eprintln!("🆕 create_bead: Using repo_path = {}", repo_path.display());
+
+    // 1. Create with minimal flags to get ID
+    let mut cmd = std::process::Command::new("bd");
+    cmd.arg("create")
+        .arg(&new_bead.title)
+        .arg("--priority").arg(new_bead.priority.to_string())
+        .arg("--type").arg(&new_bead.issue_type)
+        .arg("--silent");
+
+    if let Some(desc) = &new_bead.description {
+        cmd.arg("--description").arg(desc);
+    }
+    if let Some(est) = new_bead.estimate {
+        cmd.arg("--estimate").arg(est.to_string());
+    }
+    if let Some(owner) = &new_bead.owner {
+        cmd.arg("--assignee").arg(owner);
+    }
+    if let Some(labels) = &new_bead.labels {
+        if !labels.is_empty() {
+            cmd.arg("--labels").arg(labels.join(","));
+        }
+    }
+    if let Some(ac) = &new_bead.acceptance_criteria {
+        if !ac.is_empty() {
+            cmd.arg("--acceptance").arg(ac.join("\n"));
+        }
+    }
+    if let Some(parent) = &new_bead.parent {
+        cmd.arg("--parent").arg(parent);
+    }
+    if let Some(ext_ref) = &new_bead.external_reference {
+        cmd.arg("--external-ref").arg(ext_ref);
+    }
+    if let Some(design) = &new_bead.design {
+        cmd.arg("--design").arg(design);
+    }
+    if let Some(notes) = &new_bead.notes {
+        cmd.arg("--notes").arg(notes);
+    }
+
+    eprintln!("🆕 create_bead: Executing bd command in directory: {}", repo_path.display());
+    eprintln!("🆕 create_bead: Command: {:?}", cmd);
+    let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("CLI Create Error: {}", stderr));
+    }
+
+    // Capture the generated ID
+    let new_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if new_id.is_empty() {
+        return Err("Create command succeeded but returned no ID".to_string());
+    }
+    eprintln!("🆕 create_bead: Created bead with ID: {}", new_id);
+
+    // 2. Immediately update to set fields that create doesn't support (like status and metadata)
+    let mut update_cmd = std::process::Command::new("bd");
+    update_cmd.arg("update")
+        .arg(&new_id)
+        .arg("--status").arg(&new_bead.status);
+
+    let metadata_json = serde_json::to_string(&new_bead).map_err(|e| e.to_string())?;
+    update_cmd.arg("--metadata").arg(metadata_json);
+
+    eprintln!("🆕 create_bead: Executing follow-up bd update in directory: {}", repo_path.display());
+    eprintln!("🆕 create_bead: Update command: {:?}", update_cmd);
+    let update_output = update_cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
+
+    if !update_output.status.success() {
+        let stderr = String::from_utf8_lossy(&update_output.stderr);
+        return Err(format!(
+            "Bead created as {} but initial update failed: {}", 
+            new_id, 
+            stderr
+        ));
+    }
+
+    let _ = app_handle.emit("beads-updated", ());
+    Ok(new_id)
 }
 
 // ============================================================================
@@ -1129,7 +1441,15 @@ fn topological_sort(
         .collect();
 
     // Sort by priority for deterministic ordering (ascending: P0 < P1 < P2)
-    initial_nodes.sort_by_key(|n| n.bead.priority);
+    // Secondary sort by ID for stability
+    initial_nodes.sort_by(|a, b| {
+        let ord = a.bead.priority.cmp(&b.bead.priority);
+        if ord == std::cmp::Ordering::Equal {
+            a.bead.id.cmp(&b.bead.id)
+        } else {
+            ord
+        }
+    });
 
     let mut queue: Vec<String> = initial_nodes.iter().map(|n| n.bead.id.clone()).collect();
     let mut result: Vec<WBSNode> = Vec::new();
@@ -1193,6 +1513,24 @@ pub enum ClosedTimeFilter {
     ThirtyDays,
     #[serde(rename = "older_than_6h")]
     OlderThan6h,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SortOrder {
+    Asc,
+    Desc,
+    None,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SortBy {
+    Priority,
+    Title,
+    Type,
+    Id,
+    None,
 }
 
 /// Filter beads by text search across title, id, owner, and labels.
@@ -1414,80 +1752,71 @@ fn calculate_state_distribution_from_tree(
 // ============================================================================
 
 /// Build hierarchical WBS tree from flat bead list using parent-child dependencies.
-/// Groups beads into root nodes and nested children.
+/// Groups beads into root nodes and nested children recursively to support deep hierarchies.
 fn build_wbs_tree(beads: &[Bead]) -> Vec<WBSNode> {
-    let mut node_map: HashMap<String, WBSNode> = HashMap::new();
-    let mut roots: Vec<WBSNode> = Vec::new();
+    let bead_map: HashMap<String, &Bead> = beads.iter().map(|b| (b.id.clone(), b)).collect();
+    
+    // Map of parent_id -> list of child_ids (ordered by appearance in beads list)
+    let mut parent_to_children: HashMap<String, Vec<String>> = HashMap::new();
+    let mut root_ids: Vec<String> = Vec::new();
 
-    // Helper to check if a bead is blocked
-    let check_blocked = |bead: &Bead, all_beads: &[Bead]| -> bool {
-        let deps: Vec<&Dependency> = bead
-            .dependencies
-            .iter()
-            .filter(|d| d.r#type == "blocks")
-            .collect();
-
-        deps.iter().any(|d| {
-            all_beads
-                .iter()
-                .find(|b| b.id == d.depends_on_id)
-                .map(|pred| pred.status != "closed")
-                .unwrap_or(false)
-        })
-    };
-
-    // Create WBSNode for each bead
+    // 1. Identify roots and parent-child relationships
     for bead in beads {
-        node_map.insert(
-            bead.id.clone(),
-            WBSNode {
-                bead: bead.clone(),
-                children: Vec::new(),
-                is_expanded: true,
-                is_blocked: check_blocked(bead, beads),
-                is_critical: false, // Will be set later during critical path calculation
-            },
-        );
-    }
-
-    // Build tree structure by collecting parent-child relationships first
-    let mut child_to_parent: HashMap<String, String> = HashMap::new();
-    let mut root_ids: HashSet<String> = HashSet::new();
-
-    for bead in beads {
-        let parent_dep = bead
-            .dependencies
-            .iter()
-            .find(|d| d.r#type == "parent-child");
-
+        let parent_dep = bead.dependencies.iter().find(|d| d.r#type == "parent-child");
         if let Some(dep) = parent_dep {
-            child_to_parent.insert(bead.id.clone(), dep.depends_on_id.clone());
+            parent_to_children
+                .entry(dep.depends_on_id.clone())
+                .or_default()
+                .push(bead.id.clone());
         } else {
-            // No parent dependency means this is a root node
-            root_ids.insert(bead.id.clone());
+            root_ids.push(bead.id.clone());
         }
     }
 
-    // Build the parent-child relationships in node_map
-    for (child_id, parent_id) in child_to_parent.iter() {
-        if let Some(child_node) = node_map.get(child_id).cloned() {
-            if let Some(parent_node) = node_map.get_mut(parent_id) {
-                parent_node.children.push(child_node);
-            } else {
-                // Parent doesn't exist (orphaned node), treat as root
-                root_ids.insert(child_id.clone());
+    // 2. Pre-calculate blocked status for efficiency
+    let status_map: HashMap<String, String> = beads.iter().map(|b| (b.id.clone(), b.status.clone())).collect();
+    let mut blocked_map: HashMap<String, bool> = HashMap::new();
+    
+    for bead in beads {
+        let is_blocked = bead.dependencies.iter()
+            .filter(|d| d.r#type == "blocks")
+            .any(|d| {
+                status_map.get(&d.depends_on_id)
+                    .map(|status| status != "closed" && status != "done")
+                    .unwrap_or(false)
+            });
+        blocked_map.insert(bead.id.clone(), is_blocked);
+    }
+
+    // 3. Recursive builder function
+    fn build_node_recursive(
+        id: &str,
+        bead_map: &HashMap<String, &Bead>,
+        parent_to_children: &HashMap<String, Vec<String>>,
+        blocked_map: &HashMap<String, bool>,
+    ) -> WBSNode {
+        let bead = bead_map.get(id).expect("Bead ID missing from map");
+        let mut children = Vec::new();
+        
+        if let Some(child_ids) = parent_to_children.get(id) {
+            for child_id in child_ids {
+                children.push(build_node_recursive(child_id, bead_map, parent_to_children, blocked_map));
             }
         }
-    }
 
-    // Now collect the root nodes (which now have their children populated)
-    for id in root_ids {
-        if let Some(node) = node_map.get(&id) {
-            roots.push(node.clone());
+        WBSNode {
+            bead: (*bead).clone(),
+            children,
+            is_expanded: true,
+            is_blocked: *blocked_map.get(id).unwrap_or(&false),
+            is_critical: false,
         }
     }
 
-    roots
+    // 4. Build the tree starting from roots
+    root_ids.into_iter()
+        .map(|id| build_node_recursive(&id, &bead_map, &parent_to_children, &blocked_map))
+        .collect()
 }
 
 // ============================================================================
@@ -1574,6 +1903,12 @@ pub struct FilterParams {
 
     #[serde(default)]
     pub collapsed_ids: Vec<String>,
+
+    #[serde(default)]
+    pub sort_by: SortBy,
+
+    #[serde(default)]
+    pub sort_order: SortOrder,
 }
 
 fn default_true() -> bool {
@@ -1593,6 +1928,8 @@ impl Default for FilterParams {
             include_hierarchy: true,
             zoom: 1.0,
             collapsed_ids: Vec::new(),
+            sort_by: SortBy::None,
+            sort_order: SortOrder::None,
         }
     }
 }
@@ -1603,24 +1940,72 @@ impl Default for ClosedTimeFilter {
     }
 }
 
+impl Default for SortOrder {
+    fn default() -> Self {
+        SortOrder::None
+    }
+}
+
+impl Default for SortBy {
+    fn default() -> Self {
+        SortBy::None
+    }
+}
+
 // ============================================================================
 // WBS Tree Building - Sort Siblings by Dependencies (bp6-07y.2.4)
 // ============================================================================
 
-/// Recursively sort sibling nodes using topological sort based on blocking dependencies.
-fn sort_wbs_tree_siblings(mut tree: Vec<WBSNode>, graph: &DependencyGraph) -> Vec<WBSNode> {
-    // Sort the current level of siblings
-    let sibling_ids: HashSet<String> = tree.iter().map(|n| n.bead.id.clone()).collect();
+/// Recursively sort sibling nodes using topological sort or explicit property sort.
+fn sort_wbs_tree_siblings(
+    mut tree: Vec<WBSNode>,
+    graph: &DependencyGraph,
+    sort_by: &SortBy,
+    sort_order: &SortOrder,
+) -> Vec<WBSNode> {
+    // If explicit sort is requested, use it
+    if *sort_by != SortBy::None && *sort_order != SortOrder::None {
+        tree.sort_by(|a, b| {
+            let ord = match sort_by {
+                SortBy::Priority => a.bead.priority.cmp(&b.bead.priority),
+                SortBy::Title => a.bead.title.to_lowercase().cmp(&b.bead.title.to_lowercase()),
+                SortBy::Type => a.bead.issue_type.cmp(&b.bead.issue_type),
+                SortBy::Id => a.bead.id.cmp(&b.bead.id),
+                SortBy::None => std::cmp::Ordering::Equal,
+            };
 
-    // If only one node, no sorting needed, but still recurse on children
-    if tree.len() > 1 {
-        tree = topological_sort(tree, &sibling_ids, graph);
+            // Use ID as tie-breaker for stable sorting across runs
+            let ord = if ord == std::cmp::Ordering::Equal {
+                a.bead.id.cmp(&b.bead.id)
+            } else {
+                ord
+            };
+
+            if *sort_order == SortOrder::Desc {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+    } else {
+        // Fallback to topological sort based on dependencies
+        let sibling_ids: HashSet<String> = tree.iter().map(|n| n.bead.id.clone()).collect();
+
+        // If only one node, no sorting needed
+        if tree.len() > 1 {
+            tree = topological_sort(tree, &sibling_ids, graph);
+        }
     }
 
     // Recursively sort children
     for node in &mut tree {
         if !node.children.is_empty() {
-            node.children = sort_wbs_tree_siblings(node.children.clone(), graph);
+            node.children = sort_wbs_tree_siblings(
+                node.children.clone(),
+                graph,
+                sort_by,
+                sort_order,
+            );
         }
     }
 

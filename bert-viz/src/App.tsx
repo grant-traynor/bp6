@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Star, ChevronsDown, ChevronsUp } from "lucide-react";
+import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown } from "lucide-react";
+import { cn } from "./utils";
 import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
 
 // Components
@@ -102,6 +103,8 @@ function App() {
   }, [loadData, loadProjects]);
 
   const [processingData, setProcessingData] = useState(false);
+  const [sortBy, setSortBy] = useState<'priority' | 'title' | 'type' | 'id' | 'none'>('none');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'none'>('none');
 
   // The view model tree already includes isExpanded and isVisible state from backend
   // No need for complex frontend processing - just access viewModel.tree directly
@@ -122,7 +125,9 @@ function App() {
               closed_time_filter: closedTimeFilter,
               include_hierarchy: includeHierarchy,
               zoom: zoom,
-              collapsed_ids: Array.from(collapsedIds) // Backend now handles collapsed state
+              collapsed_ids: Array.from(collapsedIds), // Backend now handles collapsed state
+              sort_by: sortBy,
+              sort_order: sortOrder
             }).then(data => {
               const endTime = performance.now();
               console.log(`⏱️  Frontend: IPC call took ${(endTime - startTime).toFixed(2)}ms`);
@@ -143,7 +148,7 @@ function App() {
     }, 150); // 150ms debounce for filter text changes
 
     return () => clearTimeout(debounceTimeout);
-  }, [filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, collapsedIds, currentProjectPath, refetchTrigger]);
+  }, [filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, collapsedIds, currentProjectPath, refetchTrigger, sortBy, sortOrder]);
 
   useEffect(() => {
     // Prevent double initialization (React 19 Strict Mode runs effects twice)
@@ -442,6 +447,21 @@ function App() {
     setSelectedBead(bead);
     setIsEditing(false);
     setIsCreating(false);
+  };
+
+  const handleHeaderClick = (column: 'priority' | 'title' | 'type' | 'id') => {
+    if (sortBy === column) {
+      if (sortOrder === 'asc') setSortOrder('desc');
+      else if (sortOrder === 'desc') {
+        setSortOrder('none');
+        setSortBy('none');
+      } else {
+        setSortOrder('asc');
+      }
+    } else {
+      setSortBy(column);
+      setSortOrder('asc');
+    }
   };
 
   const handleStartEdit = () => {
@@ -754,12 +774,56 @@ function App() {
             </div>
           </div>
           <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
-            <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em]">
+            <div className="w-1/3 min-w-[420px] border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em] select-none">
               <div className="w-10 shrink-0" />
-              <div className="w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">P</div>
-              <div className="flex-1 px-4 border-r-2 border-[var(--border-primary)]/50">Name</div>
-              <div className="w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50">Type</div>
-              <div className="w-24 shrink-0 px-2">ID</div>
+              <div 
+                className={cn(
+                  "w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                  sortBy === 'priority' && sortOrder !== 'none' && "text-indigo-500"
+                )}
+                onClick={() => handleHeaderClick('priority')}
+              >
+                <span>P</span>
+                {sortBy === 'priority' && sortOrder !== 'none' && (
+                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                )}
+              </div>
+              <div 
+                className={cn(
+                  "flex-1 px-4 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                  sortBy === 'title' && sortOrder !== 'none' && "text-indigo-500"
+                )}
+                onClick={() => handleHeaderClick('title')}
+              >
+                <span>Name</span>
+                {sortBy === 'title' && sortOrder !== 'none' && (
+                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                )}
+              </div>
+              <div 
+                className={cn(
+                  "w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                  sortBy === 'type' && sortOrder !== 'none' && "text-indigo-500"
+                )}
+                onClick={() => handleHeaderClick('type')}
+              >
+                <span>Type</span>
+                {sortBy === 'type' && sortOrder !== 'none' && (
+                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                )}
+              </div>
+              <div 
+                className={cn(
+                  "w-24 shrink-0 px-2 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                  sortBy === 'id' && sortOrder !== 'none' && "text-indigo-500"
+                )}
+                onClick={() => handleHeaderClick('id')}
+              >
+                <span>ID</span>
+                {sortBy === 'id' && sortOrder !== 'none' && (
+                  sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                )}
+              </div>
             </div>
             <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
               <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
