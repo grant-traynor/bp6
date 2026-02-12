@@ -165,9 +165,28 @@ export interface AgentChunk {
   isDone: boolean;
 }
 
-export async function startAgentSession(persona: string, task?: string, beadId?: string): Promise<void> {
+/**
+ * CLI backend type for agent sessions.
+ * - 'gemini': Use Google Gemini CLI
+ * - 'claude' | 'claude-code': Use Claude Code CLI
+ */
+export type CliBackend = 'gemini' | 'claude' | 'claude-code';
+
+/**
+ * Start a new agent session.
+ * @param persona - The agent persona ('specialist', 'product-manager', 'qa-engineer')
+ * @param task - Optional task type for the persona
+ * @param beadId - Optional bead ID for context
+ * @param cliBackend - Optional CLI backend to use (defaults to 'gemini' if not provided)
+ */
+export async function startAgentSession(
+  persona: string,
+  task?: string,
+  beadId?: string,
+  cliBackend?: CliBackend
+): Promise<void> {
   try {
-    await invoke("start_agent_session", { persona, task, beadId });
+    await invoke("start_agent_session", { persona, task, beadId, cliBackend });
   } catch (error) {
     console.error("Failed to start agent session:", error);
     throw error;
