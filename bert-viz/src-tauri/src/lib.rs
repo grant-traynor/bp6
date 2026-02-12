@@ -1268,8 +1268,8 @@ fn filter_by_status_and_time(
     beads
         .iter()
         .filter(|b| {
-            // Apply hide_closed filter
-            if hide_closed && b.status == "closed" {
+            // Apply hide_closed filter (also filters tombstones - effectively deleted beads)
+            if hide_closed && (b.status == "closed" || b.status == "tombstone") {
                 return false;
             }
 
