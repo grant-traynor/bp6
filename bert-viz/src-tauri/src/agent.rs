@@ -976,11 +976,12 @@ fn run_cli_command(
 
 #[tauri::command]
 pub fn start_agent_session(
-    app_handle: AppHandle, 
-    state: State<'_, AgentState>, 
-    persona: String, 
+    app_handle: AppHandle,
+    state: State<'_, AgentState>,
+    persona: String,
     task: Option<String>,
-    bead_id: Option<String>
+    bead_id: Option<String>,
+    cli_backend: Option<String>
 ) -> Result<(), String> {
     // Stop any existing turn
     let mut process_guard = state.current_process.lock().unwrap();
@@ -988,6 +989,16 @@ pub fn start_agent_session(
         kill_process_group(child.id());
     }
     drop(process_guard);
+
+    // Parse CLI backend, defaulting to Gemini
+    let backend = cli_backend
+        .as_deref()
+        .and_then(|s| match s.to_lowercase().as_str() {
+            "gemini" => Some(CliBackend::Gemini),
+            "claude" | "claude-code" => Some(CliBackend::ClaudeCode),
+            _ => None,
+        })
+        .unwrap_or(CliBackend::Gemini);
 
     // Build initial prompt
     let mut prompt = String::new();
@@ -1065,7 +1076,7 @@ pub fn start_agent_session(
         }
     }
 
-    run_cli_command(CliBackend::Gemini, app_handle, &state, prompt, false)
+    run_cli_command(backend, app_handle, &state, prompt, false)
 }
 
 #[tauri::command]
