@@ -596,15 +596,24 @@ fn run_gemini_command(
     prompt: String,
     resume: bool,
 ) -> Result<(), String> {
+    // Get the project root directory to ensure agent runs in correct context
+    let repo_root = crate::bd::find_repo_root()
+        .ok_or_else(|| "Could not locate project root (.beads directory). Please ensure a project is loaded.".to_string())?;
+
+    eprintln!("🎯 Starting agent in directory: {}", repo_root.display());
+
     let mut cmd = Command::new("gemini");
     cmd.arg("--output-format").arg("stream-json");
     cmd.arg("--yolo");
-    
+
     if resume {
         cmd.arg("--resume").arg("latest");
     }
-    
+
     cmd.arg("--prompt").arg(&prompt);
+
+    // Set working directory to project root
+    cmd.current_dir(&repo_root);
 
     #[cfg(unix)]
     {
@@ -621,7 +630,7 @@ fn run_gemini_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn gemini: {}", e))?;
+        .map_err(|e| format!("Failed to spawn gemini in {}: {}", repo_root.display(), e))?;
 
     {
         let mut proc_guard = state.current_process.lock().unwrap();
