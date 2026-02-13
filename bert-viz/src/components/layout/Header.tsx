@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Sun, Moon, Plus, Package, FolderOpen, ChevronDown, Star, Trash2 } from "lucide-react";
 import { cn } from "../../utils";
 import type { Project, CliBackend } from "../../api";
@@ -39,6 +40,8 @@ export const Header = ({
   currentCli,
   setCurrentCli,
 }: HeaderProps) => {
+  const [cliMenuOpen, setCliMenuOpen] = useState(false);
+
   return (
     <header className="h-16 border-b-2 border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/90 backdrop-blur-xl z-30">
       <div className="flex items-center gap-6">
@@ -69,7 +72,47 @@ export const Header = ({
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <button 
+        <div className="relative">
+          <button
+            onClick={() => setCliMenuOpen(!cliMenuOpen)}
+            className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] px-4 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
+          >
+            <span className="text-base">{currentCli === 'gemini' ? '🤖' : '⚡'}</span>
+            <span>{currentCli === 'gemini' ? 'Gemini' : 'Claude'}</span>
+            <ChevronDown size={14} className={cn("transition-transform", cliMenuOpen && "rotate-180")} strokeWidth={3} />
+          </button>
+
+          {cliMenuOpen && (
+            <div className="absolute right-0 mt-3 w-56 bg-[var(--background-primary)] border-2 border-[var(--border-primary)] rounded-xl shadow-[var(--shadow-xl)] z-[60] py-2 animate-in fade-in zoom-in-95 duration-150">
+              <button
+                onClick={() => { setCurrentCli('gemini'); setCliMenuOpen(false); }}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold transition-all text-left",
+                  currentCli === 'gemini'
+                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                    : "hover:bg-[var(--background-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                )}
+              >
+                <span className="text-lg">🤖</span>
+                <span>Gemini CLI</span>
+              </button>
+              <button
+                onClick={() => { setCurrentCli('claude-code'); setCliMenuOpen(false); }}
+                className={cn(
+                  "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold transition-all text-left",
+                  currentCli === 'claude-code' || currentCli === 'claude'
+                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                    : "hover:bg-[var(--background-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                )}
+              >
+                <span className="text-lg">⚡</span>
+                <span>Claude Code CLI</span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        <button
           onClick={() => onOpenChat('product-manager', undefined, undefined)}
           className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-indigo-600 dark:text-indigo-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
         >
