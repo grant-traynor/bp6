@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 mod agent;
 mod bd;
+mod settings;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -14,9 +15,44 @@ use std::time::{Duration, Instant};
 use notify::{Watcher, RecursiveMode, Config};
 use tauri::{Emitter, AppHandle, Manager};
 
+use settings::AppSettings;
+
 // Global cache for beads file path (avoid expensive subprocess calls)
 // Use Mutex<Option> instead of OnceLock so we can clear it when switching projects
 static BEADS_FILE_PATH_CACHE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Settings state for CLI preference and other app settings
+/// Managed by Tauri for thread-safe access across commands
+pub struct SettingsState {
+    pub settings: Mutex<AppSettings>,
+}
+
+impl SettingsState {
+    /// Create new SettingsState by loading settings from file
+    /// Falls back to defaults if file doesn't exist or has errors
+    pub fn new() -> Self {
+        let settings = match settings::get_config_path() {
+            Ok(path) => match AppSettings::load_from_file(&path) {
+                Ok(s) => {
+                    eprintln!("✅ Loaded settings from {}", path.display());
+                    s
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Failed to load settings: {}. Using defaults.", e);
+                    AppSettings::default()
+                }
+            },
+            Err(e) => {
+                eprintln!("⚠️  Failed to get config path: {}. Using defaults.", e);
+                AppSettings::default()
+            }
+        };
+
+        SettingsState {
+            settings: Mutex::new(settings),
+        }
+    }
+}
 
 // Shared state for the file watcher
 struct BeadsWatcher {
@@ -2132,7 +2168,8 @@ pub fn run() {
             bd::get_beads, get_processed_data, get_project_view_model, bd::update_bead, bd::create_bead, bd::close_bead, bd::reopen_bead, bd::claim_bead,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir,
-            agent::start_agent_session, agent::send_agent_message, agent::stop_agent_session, agent::approve_suggestion
+            agent::start_agent_session, agent::send_agent_message, agent::stop_agent_session, agent::approve_suggestion,
+            settings::get_cli_preference, settings::set_cli_preference
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -2140,6 +2177,9 @@ pub fn run() {
 
             // Initialize agent state
             app.manage(agent::AgentState::new());
+
+            // Initialize settings state
+            app.manage(SettingsState::new());
 
             // Initialize file watcher (lazy - will watch when first project is opened)
             let beads_watcher = BeadsWatcher::new(handle.clone())

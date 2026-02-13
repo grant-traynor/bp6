@@ -913,7 +913,26 @@ fn run_cli_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn {} in {}: {}", cli_backend.as_command_name(), repo_root.display(), e))?;
+        .map_err(|e| {
+            let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
+                // CLI binary not found - provide installation instructions
+                let install_cmd = match cli_backend {
+                    CliBackend::Gemini => "npm install -g @google/generative-ai-cli",
+                    CliBackend::ClaudeCode => "See https://docs.anthropic.com/en/docs/claude-code for installation",
+                };
+                format!(
+                    "{} CLI not found. Please install it first: {}",
+                    cli_backend,
+                    install_cmd
+                )
+            } else {
+                format!("Failed to spawn {} in {}: {}", cli_backend.as_command_name(), repo_root.display(), e)
+            };
+
+            // Emit error to UI
+            let _ = app_handle.emit("agent-stderr", format!("[Error] {}", error_msg));
+            error_msg
+        })?;
 
     {
         let mut proc_guard = state.current_process.lock().unwrap();
