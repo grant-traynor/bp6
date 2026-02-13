@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::process::{Command, Stdio, Child};
 use std::io::{BufRead, BufReader};
 use std::time::SystemTime;
@@ -102,22 +103,32 @@ fn get_role_from_bead(bead: &crate::Bead) -> Option<String> {
 // Old helper functions removed - now using PersonaPlugin system
 // AgentChunk moved to plugin.rs
 
+/// Global state for managing multiple concurrent agent sessions
 pub struct AgentState {
-    pub current_process: Mutex<Option<Child>>,
+    /// Map of session_id -> SessionState for all active sessions
+    pub sessions: Mutex<HashMap<String, SessionState>>,
+    /// Registry of available CLI backends (Gemini, ClaudeCode, etc.)
     pub backend_registry: crate::agent::registry::BackendRegistry,
+    /// Default backend for new sessions (deprecated in multi-session context)
     pub current_backend: Mutex<crate::agent::plugin::BackendId>,
+    /// CLI session ID for resume capability (deprecated in multi-session context)
     pub current_session_id: Arc<Mutex<Option<String>>>,
+    /// The currently active/focused session ID
+    pub active_session_id: Arc<Mutex<Option<String>>>,
+    /// Registry of available persona plugins
     pub persona_registry: crate::agent::persona::PersonaRegistry,
+    /// Template loader for persona prompts
     pub template_loader: crate::agent::templates::TemplateLoader,
 }
 
 impl AgentState {
     pub fn new() -> Self {
         AgentState {
-            current_process: Mutex::new(None),
+            sessions: Mutex::new(HashMap::new()),
             backend_registry: crate::agent::registry::BackendRegistry::with_defaults(),
             current_backend: Mutex::new(crate::agent::plugin::BackendId::Gemini),
             current_session_id: Arc::new(Mutex::new(None)),
+            active_session_id: Arc::new(Mutex::new(None)),
             persona_registry: crate::agent::persona::PersonaRegistry::with_defaults(),
             template_loader: crate::agent::templates::TemplateLoader::new()
                 .expect("Failed to initialize template loader"),
@@ -182,7 +193,7 @@ fn run_cli_command(
         }
     }
 
-    let child = cmd
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -207,10 +218,11 @@ fn run_cli_command(
             error_msg
         })?;
 
-    {
-        let mut proc_guard = state.current_process.lock().unwrap();
-        *proc_guard = Some(child);
-    }
+    // TODO(bp6-643.001.5): Refactor to store child in sessions HashMap
+    // {
+    //     let mut proc_guard = state.current_process.lock().unwrap();
+    //     *proc_guard = Some(child);
+    // }
 
     // Log the prompt for debugging
     eprintln!("🚀 Sending prompt to agent:\n{}", prompt);
@@ -219,8 +231,9 @@ fn run_cli_command(
     // We need to re-lock to get the child out for reading, but we don't want to hold the lock
     // while reading stdout/stderr.
     let (stdout, stderr) = {
-        let mut proc_guard = state.current_process.lock().unwrap();
-        let child = proc_guard.as_mut().unwrap();
+        // TODO(bp6-643.001.5): Get child from sessions HashMap
+        // let mut proc_guard = state.current_process.lock().unwrap();
+        // let child = proc_guard.as_mut().unwrap();
         (child.stdout.take().unwrap(), child.stderr.take().unwrap())
     };
 
@@ -339,12 +352,13 @@ pub fn start_agent_session(
     bead_id: Option<String>,
     cli_backend: Option<String>
 ) -> Result<(), String> {
+    // TODO(bp6-643.001.6): In multi-session, DON'T stop existing sessions (allow concurrent)
     // Stop any existing turn
-    let mut process_guard = state.current_process.lock().unwrap();
-    if let Some(child) = process_guard.take() {
-        kill_process_group(child.id());
-    }
-    drop(process_guard);
+    // let mut process_guard = state.current_process.lock().unwrap();
+    // if let Some(child) = process_guard.take() {
+    //     kill_process_group(child.id());
+    // }
+    // drop(process_guard);
 
     // Parse CLI backend from argument, falling back to persisted setting
     let backend = if let Some(backend_str) = cli_backend {
@@ -400,11 +414,13 @@ pub fn send_agent_message(
 }
 
 #[tauri::command]
-pub fn stop_agent_session(state: State<'_, AgentState>) -> Result<(), String> {
-    let mut process_guard = state.current_process.lock().unwrap();
-    if let Some(child) = process_guard.take() {
-        kill_process_group(child.id());
-    }
+pub fn stop_agent_session(_state: State<'_, AgentState>) -> Result<(), String> {
+    // TODO(bp6-643.001.7): Update to accept session_id parameter
+    // let mut process_guard = state.current_process.lock().unwrap();
+    // if let Some(child) = process_guard.take() {
+    //     kill_process_group(child.id());
+    // }
+    eprintln!("⚠️  stop_agent_session: Multi-session refactor in progress");
     Ok(())
 }
 
