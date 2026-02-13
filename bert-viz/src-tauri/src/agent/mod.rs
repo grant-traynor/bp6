@@ -4,6 +4,8 @@
 /// CLI backends (Gemini, Claude Code, etc.) and persona templates.
 
 pub mod backends;
+pub mod persona;
+pub mod personas;
 pub mod plugin;
 pub mod registry;
 pub mod session;
@@ -12,6 +14,10 @@ pub mod templates;
 // Re-export commonly used types from plugin module (for future use)
 #[allow(unused_imports)]
 pub use plugin::{AgentChunk, BackendId, CliBackendPlugin};
+
+// Re-export persona types
+#[allow(unused_imports)]
+pub use persona::{PersonaContext, PersonaPlugin, PersonaRegistry, PersonaType};
 
 // Re-export existing agent session functionality
 pub use session::AgentState;

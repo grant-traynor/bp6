@@ -768,6 +768,8 @@ pub struct AgentState {
     pub current_process: Mutex<Option<Child>>,
     pub backend_registry: crate::agent::registry::BackendRegistry,
     pub current_backend: Mutex<crate::agent::plugin::BackendId>,
+    pub persona_registry: crate::agent::persona::PersonaRegistry,
+    pub template_loader: crate::agent::templates::TemplateLoader,
 }
 
 impl AgentState {
@@ -776,6 +778,9 @@ impl AgentState {
             current_process: Mutex::new(None),
             backend_registry: crate::agent::registry::BackendRegistry::with_defaults(),
             current_backend: Mutex::new(crate::agent::plugin::BackendId::Gemini),
+            persona_registry: crate::agent::persona::PersonaRegistry::with_defaults(),
+            template_loader: crate::agent::templates::TemplateLoader::new()
+                .expect("Failed to initialize template loader"),
         }
     }
 }
@@ -913,6 +918,63 @@ fn run_cli_command(
     Ok(())
 }
 
+/// Build prompt using persona plugin system
+fn build_prompt_with_persona(
+    state: &AgentState,
+    persona: &str,
+    task: Option<&str>,
+    bead_id: Option<&str>,
+) -> Result<String, String> {
+    use crate::agent::persona::{PersonaContext, PersonaType};
+
+    // Map persona string to PersonaType
+    let persona_type = match persona {
+        "specialist" => PersonaType::Specialist,
+        "product-manager" => PersonaType::ProductManager,
+        "qa-engineer" => PersonaType::QaEngineer,
+        _ => return Err(format!("Unknown persona: {}", persona)),
+    };
+
+    // Get persona plugin from registry
+    let persona_plugin = state
+        .persona_registry
+        .get(persona_type)
+        .ok_or_else(|| format!("Persona {:?} not registered", persona_type))?;
+
+    // Get bead and extract information
+    let (bead_json, issue_type, role) = if let Some(bid) = bead_id {
+        let bead = crate::bd::get_bead_by_id(bid).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(&bead).ok();
+        let issue_type = Some(bead.issue_type.clone());
+        let role = get_role_from_bead(&bead);
+        (json, issue_type, role)
+    } else {
+        (None, None, None)
+    };
+
+    // Build context for persona plugin
+    let context = PersonaContext {
+        task: task.map(String::from),
+        issue_type,
+        bead_id: bead_id.map(String::from),
+        role,
+    };
+
+    // Get template name from persona plugin
+    let template_name = persona_plugin.get_template_name(&context)?;
+
+    // Load template using TemplateLoader
+    let template_content = state
+        .template_loader
+        .load_template(persona_type.as_str(), &template_name)
+        .map_err(|e| format!("Failed to load template: {}", e))?;
+
+    // Build final prompt using persona plugin
+    let prompt = persona_plugin.build_prompt(template_content, &context, bead_json);
+
+    Ok(prompt)
+}
+
 #[tauri::command]
 pub fn start_agent_session(
     app_handle: AppHandle,
@@ -939,81 +1001,13 @@ pub fn start_agent_session(
         })
         .unwrap_or(crate::agent::plugin::BackendId::Gemini);
 
-    // Build initial prompt
-    let mut prompt = String::new();
-    
-    if persona == "specialist" {
-        if let Some(bid) = bead_id {
-            let bead = crate::bd::get_bead_by_id(&bid).map_err(|e| e.to_string())?;
-
-            // Discover role using helper function
-            let role = get_role_from_bead(&bead).unwrap_or_else(|| "default".to_string());
-
-            // Map role to template using helper function
-            let mut template = get_template_for_role(&role).to_string();
-
-            template = template.replace("{{feature_id}}", &bid);
-            prompt.push_str(&template);
-
-            if let Ok(json) = serde_json::to_string_pretty(&bead) {
-                prompt.push_str("\nContext JSON:\n```json\n");
-                prompt.push_str(&json);
-                prompt.push_str("\n```\n");
-            }
-        } else {
-            return Err("bead_id is required for specialist persona".to_string());
-        }
-    } else if persona == "product-manager" {
-        if let (Some(t), Some(bid)) = (task, bead_id) {
-            let bead = crate::bd::get_bead_by_id(&bid).ok();
-            let issue_type = bead.as_ref().map(|b| b.issue_type.as_str()).unwrap_or("");
-
-            let mut template = match (t.as_str(), issue_type) {
-                ("decompose", "epic") => TEMPLATE_DECOMPOSE_EPIC.to_string(),
-                ("decompose", _) => TEMPLATE_DECOMPOSE.to_string(),
-                ("extend", "epic") => TEMPLATE_EXTEND_EPIC.to_string(),
-                ("extend", _) => TEMPLATE_EXTEND.to_string(),
-                ("implement", "feature") => TEMPLATE_IMPLEMENT_FEATURE.to_string(),
-                ("implement", _) => TEMPLATE_IMPLEMENT_TASK.to_string(),
-                ("chat", _) => TEMPLATE_CHAT.to_string(),
-                _ => SYSTEM_PROMPT_PM.to_string(),
-            };
-
-            // If we hit the fallback but have a task, try to use a default template
-            if template == SYSTEM_PROMPT_PM && !t.is_empty() {
-                template = match t.as_str() {
-                    "decompose" => TEMPLATE_DECOMPOSE.to_string(),
-                    "extend" => TEMPLATE_EXTEND.to_string(),
-                    "implement" => TEMPLATE_IMPLEMENT_TASK.to_string(),
-                    "chat" => TEMPLATE_CHAT.to_string(),
-                    _ => SYSTEM_PROMPT_PM.to_string(),
-                };
-            }
-            
-            template = template.replace("{{feature_id}}", &bid);
-            prompt.push_str(&template);
-            
-            if let Some(bead) = bead {
-                if let Ok(json) = serde_json::to_string_pretty(&bead) {
-                    prompt.push_str("\nContext JSON:\n```json\n");
-                    prompt.push_str(&json);
-                    prompt.push_str("\n```\n");
-                }
-            }
-        } else {
-            prompt.push_str(SYSTEM_PROMPT_PM);
-        }
-    } else if persona == "qa-engineer" {
-        if let Some(t) = task {
-            let template = match t.as_str() {
-                "fix_dependencies" => TEMPLATE_FIX_DEPENDENCIES.to_string(),
-                _ => TEMPLATE_FIX_DEPENDENCIES.to_string(),
-            };
-            prompt.push_str(&template);
-        } else {
-            prompt.push_str(TEMPLATE_FIX_DEPENDENCIES);
-        }
-    }
+    // Build initial prompt using persona plugin system
+    let prompt = build_prompt_with_persona(
+        &state,
+        &persona,
+        task.as_deref(),
+        bead_id.as_deref(),
+    )?;
 
     // Store the CLI backend in state for this session
     {
