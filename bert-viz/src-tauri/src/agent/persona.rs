@@ -39,6 +39,7 @@ pub struct PersonaContext {
 /// and prompt building logic.
 pub trait PersonaPlugin: Send + Sync {
     /// Returns the persona type
+    #[allow(dead_code)]
     fn persona_type(&self) -> PersonaType;
 
     /// Get the template name based on context
@@ -87,6 +88,7 @@ pub trait PersonaPlugin: Send + Sync {
     }
 
     /// Get variables for template substitution
+    #[allow(dead_code)]
     fn get_variables(&self, context: &PersonaContext) -> HashMap<String, String> {
         let mut vars = HashMap::new();
         if let Some(bead_id) = &context.bead_id {

@@ -18,19 +18,14 @@ impl PersonaPlugin for SpecialistPersona {
     }
 
     fn get_template_name(&self, context: &PersonaContext) -> Result<String, String> {
-        // Use role from context to determine template
-        let role = context
-            .role
-            .as_ref()
-            .ok_or_else(|| "Specialist persona requires a role".to_string())?;
-
-        // Map role to template file name
-        let template_name = match role.as_str() {
-            "web" => "web",
-            "flutter" => "flutter",
-            "supabase-db" => "supabase-db",
-            "rust" | "rust-tauri" => "rust-tauri",
-            _ => return Err(format!("Unknown specialist role: {}", role)),
+        // Use role from context to determine template, fallback to chat
+        let template_name = match context.role.as_deref() {
+            Some("web") => "web",
+            Some("flutter") => "flutter",
+            Some("supabase-db") => "supabase-db",
+            Some("rust") | Some("rust-tauri") => "rust-tauri",
+            Some(role) => return Err(format!("Unknown specialist role: {}", role)),
+            None => "chat", // Fallback to interactive chat mode
         };
 
         Ok(template_name.to_string())
@@ -70,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn test_specialist_missing_role() {
+    fn test_specialist_missing_role_fallback_to_chat() {
         let persona = SpecialistPersona::new();
         let context = PersonaContext {
             task: None,
@@ -79,6 +74,7 @@ mod tests {
             role: None,
         };
 
-        assert!(persona.get_template_name(&context).is_err());
+        let template_name = persona.get_template_name(&context).unwrap();
+        assert_eq!(template_name, "chat");
     }
 }

@@ -127,12 +127,13 @@ pub trait CliBackendPlugin: Send + Sync {
     ///
     /// * `prompt` - The prompt text to send to the agent
     /// * `resume` - Whether to resume the previous session
+    /// * `session_id` - Optional session ID for resume (required for some backends)
     ///
     /// # Returns
     ///
     /// A vector of command-line arguments to pass to the CLI binary.
     /// The command name itself should NOT be included.
-    fn build_args(&self, prompt: &str, resume: bool) -> Vec<String>;
+    fn build_args(&self, prompt: &str, resume: bool, session_id: Option<&str>) -> Vec<String>;
 
     /// Parses a line of JSON output from the CLI's stdout
     ///

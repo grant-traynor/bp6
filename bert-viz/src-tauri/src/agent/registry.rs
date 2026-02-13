@@ -92,12 +92,14 @@ impl BackendRegistry {
     /// Get a list of all registered backend IDs
     ///
     /// Useful for UI enumeration or debugging.
+    #[allow(dead_code)]
     pub fn list_backends(&self) -> Vec<BackendId> {
         let backends = self.backends.read().unwrap();
         backends.keys().copied().collect()
     }
 
     /// Check if a specific backend is registered
+    #[allow(dead_code)]
     pub fn has_backend(&self, id: BackendId) -> bool {
         let backends = self.backends.read().unwrap();
         backends.contains_key(&id)

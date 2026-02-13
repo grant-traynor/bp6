@@ -17,12 +17,12 @@ impl PersonaPlugin for QaEngineerPersona {
     }
 
     fn get_template_name(&self, context: &PersonaContext) -> Result<String, String> {
-        let task = context.task.as_deref().unwrap_or("");
+        let task = context.task.as_deref();
 
-        // QA Engineer currently only has fix_dependencies template
+        // Select template based on task, default to chat for interactive mode
         let template_name = match task {
-            "fix_dependencies" => "fix-dependencies",
-            _ => "fix-dependencies", // Default for qa-engineer
+            Some("fix_dependencies") => "fix-dependencies",
+            Some(_) | None => "chat", // Default to interactive chat mode
         };
 
         Ok(template_name.to_string())
@@ -48,7 +48,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_template() {
+    fn test_default_template_is_chat() {
         let persona = QaEngineerPersona::new();
         let context = PersonaContext {
             task: None,
@@ -58,6 +58,6 @@ mod tests {
         };
 
         let template_name = persona.get_template_name(&context).unwrap();
-        assert_eq!(template_name, "fix-dependencies");
+        assert_eq!(template_name, "chat");
     }
 }

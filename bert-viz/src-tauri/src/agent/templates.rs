@@ -34,6 +34,7 @@ impl TemplateLoader {
     }
 
     /// Create a template loader with a custom template directory
+    #[allow(dead_code)]
     pub fn with_root<P: AsRef<Path>>(root: P) -> Self {
         TemplateLoader {
             template_root: root.as_ref().to_path_buf(),
@@ -75,6 +76,7 @@ impl TemplateLoader {
     }
 
     /// Load a template and substitute variables
+    #[allow(dead_code)]
     ///
     /// # Arguments
     ///
@@ -111,6 +113,7 @@ impl TemplateLoader {
     }
 
     /// List all available templates for a persona
+    #[allow(dead_code)]
     pub fn list_templates(&self, persona: &str) -> Result<Vec<String>, String> {
         let persona_dir = self.template_root.join(persona);
 

@@ -25,7 +25,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
         true
     }
 
-    fn build_args(&self, prompt: &str, resume: bool) -> Vec<String> {
+    fn build_args(&self, prompt: &str, resume: bool, session_id: Option<&str>) -> Vec<String> {
         let mut args = vec![
             "--output-format".to_string(),
             "stream-json".to_string(),
@@ -35,7 +35,12 @@ impl CliBackendPlugin for ClaudeCodeBackend {
 
         if resume {
             args.push("--resume".to_string());
-            args.push("latest".to_string());
+            // Claude Code requires a valid UUID session ID, not "latest"
+            if let Some(sid) = session_id {
+                args.push(sid.to_string());
+            } else {
+                eprintln!("⚠️  Warning: Claude Code backend requires session ID for resume, but none provided");
+            }
         }
 
         // Claude Code takes the prompt as a positional argument, not --prompt
@@ -97,7 +102,7 @@ mod tests {
     #[test]
     fn test_build_args_basic() {
         let backend = ClaudeCodeBackend::new();
-        let args = backend.build_args("test prompt", false);
+        let args = backend.build_args("test prompt", false, None);
 
         assert_eq!(args[0], "--output-format");
         assert_eq!(args[1], "stream-json");
@@ -110,10 +115,11 @@ mod tests {
     #[test]
     fn test_build_args_with_resume() {
         let backend = ClaudeCodeBackend::new();
-        let args = backend.build_args("test prompt", true);
+        let session_id = "550e8400-e29b-41d4-a716-446655440000";
+        let args = backend.build_args("test prompt", true, Some(session_id));
 
         assert!(args.contains(&"--resume".to_string()));
-        assert!(args.contains(&"latest".to_string()));
+        assert!(args.contains(&session_id.to_string()));
         assert_eq!(args.last().unwrap(), "test prompt"); // Prompt still last
     }
 

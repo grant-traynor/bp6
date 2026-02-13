@@ -25,7 +25,7 @@ impl CliBackendPlugin for GeminiBackend {
         true
     }
 
-    fn build_args(&self, prompt: &str, resume: bool) -> Vec<String> {
+    fn build_args(&self, prompt: &str, resume: bool, session_id: Option<&str>) -> Vec<String> {
         let mut args = vec![
             "--output-format".to_string(),
             "stream-json".to_string(),
@@ -34,7 +34,8 @@ impl CliBackendPlugin for GeminiBackend {
 
         if resume {
             args.push("--resume".to_string());
-            args.push("latest".to_string());
+            // Gemini supports "latest" as a session ID
+            args.push(session_id.unwrap_or("latest").to_string());
         }
 
         args.push("--prompt".to_string());
@@ -87,7 +88,7 @@ mod tests {
     #[test]
     fn test_build_args_basic() {
         let backend = GeminiBackend::new();
-        let args = backend.build_args("test prompt", false);
+        let args = backend.build_args("test prompt", false, None);
 
         assert_eq!(args[0], "--output-format");
         assert_eq!(args[1], "stream-json");
@@ -100,7 +101,7 @@ mod tests {
     #[test]
     fn test_build_args_with_resume() {
         let backend = GeminiBackend::new();
-        let args = backend.build_args("test prompt", true);
+        let args = backend.build_args("test prompt", true, None);
 
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"latest".to_string()));
