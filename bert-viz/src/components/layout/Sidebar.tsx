@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { User, Tag, Clock, Star, Trash2, Plus, ArrowRight, BrainCircuit, Sparkles, Terminal, MessageSquare } from "lucide-react";
+import { User, Tag, Clock, Star, Trash2, Plus, ArrowRight, BrainCircuit, Sparkles, Terminal, MessageSquare, Link2, CheckSquare } from "lucide-react";
 import type { BeadNode } from "../../api";
 
 // Subcomponents
@@ -380,34 +380,36 @@ export const Sidebar = ({
           isCollapsed={!!collapsedSections['ac']}
           onToggle={() => toggleSection('ac')}
         >
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2.5">
             {(formData.acceptance_criteria || []).map((ac: string, i: number) => (
-              <div key={i} className="flex gap-3">
+              <div key={i} className="flex items-center gap-2.5 group">
+                <CheckSquare size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" strokeWidth={2.5} />
                 <input
-                  className="flex-1 bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-2xl p-3.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
+                  className="flex-1 bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-lg px-3 py-2.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                   value={ac}
                   onChange={e => {
                     const newAC = [...(formData.acceptance_criteria || [])];
                     newAC[i] = e.target.value;
                     setFormData({...formData, acceptance_criteria: newAC});
                   }}
+                  placeholder={`Criterion ${i + 1}...`}
                 />
                 <button
                   onClick={() => {
                     const newAC = (formData.acceptance_criteria || []).filter((_: string, idx: number) => idx !== i);
                     setFormData({...formData, acceptance_criteria: newAC});
                   }}
-                  className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-3 rounded-xl transition-colors border-2 border-transparent hover:border-rose-500/20 active:scale-90"
+                  className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-colors border border-transparent hover:border-rose-500/20 active:scale-90 opacity-0 group-hover:opacity-100"
                 >
-                  <Trash2 size={20} strokeWidth={3} />
+                  <Trash2 size={16} strokeWidth={2.5} />
                 </button>
               </div>
             ))}
             <button
               onClick={() => setFormData({...formData, acceptance_criteria: [...(formData.acceptance_criteria || []), ""]})}
-              className="text-sm font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 self-start flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/10 active:scale-95 uppercase tracking-widest"
+              className="text-xs font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 self-start flex items-center gap-2.5 bg-indigo-500/10 px-4 py-2.5 rounded-xl border border-indigo-500/20 transition-all hover:bg-indigo-500/20 active:scale-95 uppercase tracking-widest"
             >
-              <Plus size={16} strokeWidth={3} /> ADD CRITERION
+              <Plus size={14} strokeWidth={3} /> ADD CRITERION
             </button>
           </div>
         </CollapsibleSection>
@@ -426,25 +428,24 @@ export const Sidebar = ({
                   setFormData({...formData, dependencies: newDeps as any});
                 }
               }}
-              className="text-sm font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-3 bg-indigo-500/10 px-5 py-3 rounded-2xl border-2 border-indigo-500/20 transition-all hover:bg-indigo-500/20 active:scale-95 uppercase tracking-widest"
+              className="text-xs font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-2.5 bg-indigo-500/10 px-4 py-2.5 rounded-xl border border-indigo-500/20 transition-all hover:bg-indigo-500/20 active:scale-95 uppercase tracking-widest"
             >
-              <Plus size={16} strokeWidth={3} /> ADD
+              <Plus size={14} strokeWidth={3} /> ADD
             </button>
           }
         >
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2.5">
             {formData.dependencies?.map((d, i) => (
-              <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-primary)]/40 group hover:border-indigo-500 shadow-sm transition-all">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-black font-mono text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20 shadow-sm">{d.depends_on_id}</span>
-                    <ArrowRight size={12} className="text-[var(--text-muted)] mt-0.5" />
-                    <span className="text-[10px] uppercase font-black text-[var(--text-primary)] tracking-[0.15em] opacity-80">{d.type}</span>
-                  </div>
+              <div key={i} className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-[var(--background-secondary)] border border-[var(--border-primary)]/40 group hover:border-indigo-500 shadow-sm transition-all">
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <Link2 size={14} className="text-indigo-600 dark:text-indigo-400 shrink-0" strokeWidth={2.5} />
+                  <span className="text-xs font-black font-mono text-indigo-700 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">{d.depends_on_id}</span>
+                  <ArrowRight size={10} className="text-[var(--text-muted)] shrink-0" strokeWidth={2.5} />
+                  <span className="text-[10px] uppercase font-black text-[var(--text-primary)] tracking-[0.15em] opacity-80">{d.type}</span>
                   {d.metadata && Object.keys(d.metadata).length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-0.5 pl-0.5">
+                    <div className="flex flex-wrap gap-1 ml-2">
                       {Object.entries(d.metadata).map(([k, v]) => (
-                        <span key={k} className="text-[9px] font-black bg-[var(--background-tertiary)] px-2 py-0.5 rounded-md text-[var(--text-muted)] border border-[var(--border-primary)]/30 font-mono tracking-tight">
+                        <span key={k} className="text-[9px] font-black bg-[var(--background-tertiary)] px-1.5 py-0.5 rounded text-[var(--text-muted)] border border-[var(--border-primary)]/30 font-mono">
                           {k}: {String(v)}
                         </span>
                       ))}
@@ -457,9 +458,9 @@ export const Sidebar = ({
                     const newDeps = currentDeps.filter((_, index) => index !== i);
                     setFormData({...formData, dependencies: newDeps});
                   }}
-                  className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-colors border border-transparent hover:border-rose-500/20 active:scale-90"
+                  className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-1.5 rounded-lg transition-colors border border-transparent hover:border-rose-500/20 active:scale-90 opacity-0 group-hover:opacity-100 shrink-0"
                 >
-                  <Trash2 size={16} strokeWidth={3} />
+                  <Trash2 size={14} strokeWidth={2.5} />
                 </button>
               </div>
             )) || <div className="text-sm text-[var(--text-muted)] font-black italic pl-1">None</div>}
