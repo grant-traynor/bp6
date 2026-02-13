@@ -211,6 +211,34 @@ export async function stopAgentSession(): Promise<void> {
   }
 }
 
+/**
+ * Get the current CLI backend preference from persistent storage.
+ * @returns The current CLI backend ('gemini', 'claude', or 'claude-code')
+ * @throws Error if unable to read CLI preference from storage
+ */
+export async function getCliPreference(): Promise<string> {
+  try {
+    return await invoke<string>("get_cli_preference");
+  } catch (error) {
+    console.error("Failed to get CLI preference:", error);
+    throw new Error(`Unable to retrieve CLI preference: ${error}`);
+  }
+}
+
+/**
+ * Set the CLI backend preference in persistent storage.
+ * @param cliBackend - The CLI backend to use ('gemini', 'claude', or 'claude-code')
+ * @throws Error if unable to save CLI preference to storage
+ */
+export async function setCliPreference(cliBackend: string): Promise<void> {
+  try {
+    await invoke("set_cli_preference", { cliBackend });
+  } catch (error) {
+    console.error("Failed to set CLI preference:", error);
+    throw new Error(`Unable to save CLI preference: ${error}`);
+  }
+}
+
 export async function approveSuggestion(command: string): Promise<string> {
   try {
     return await invoke<string>("approve_suggestion", { command });
