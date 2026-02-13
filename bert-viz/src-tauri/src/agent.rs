@@ -859,6 +859,7 @@ fn build_claude_args(prompt: &str, resume: bool) -> Vec<String> {
     let mut args = vec![
         "--output-format".to_string(),
         "stream-json".to_string(),
+        "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
     ];
 
