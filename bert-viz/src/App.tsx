@@ -940,7 +940,7 @@ function App() {
             {sidebarOpen && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} onOpenChat={handleOpenChat} />}
           </div>
         )}
-        <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} task={chatTask} beadId={chatBeadId} />
+        <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} task={chatTask} beadId={chatBeadId} cliBackend={currentCli} />
       </main>
     </div>
   );

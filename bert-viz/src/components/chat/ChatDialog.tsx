@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { startAgentSession, stopAgentSession, sendAgentMessage, approveSuggestion, AgentChunk } from '../../api';
+import { startAgentSession, stopAgentSession, sendAgentMessage, approveSuggestion, AgentChunk, CliBackend } from '../../api';
 import { listen } from '@tauri-apps/api/event';
 import { Terminal, MessageSquare, Trash2, X, Square } from 'lucide-react';
 
@@ -14,9 +14,10 @@ interface ChatDialogProps {
   persona: string;
   task: string | null;
   beadId: string | null;
+  cliBackend: CliBackend;
 }
 
-const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task, beadId }) => {
+const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task, beadId, cliBackend }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -54,7 +55,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       const setup = async () => {
         try {
           setIsLoading(true);
-          await startAgentSession(persona, task || undefined, beadId || undefined);
+          await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend);
           
           unlistenChunk = await listen<AgentChunk>('agent-chunk', (event) => {
             const { content, isDone } = event.payload;
