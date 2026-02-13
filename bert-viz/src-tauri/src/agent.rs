@@ -959,6 +959,7 @@ fn run_cli_command(
             if let Ok(line_str) = line {
                 if line_str.trim().starts_with('{') {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line_str) {
+                        // Handle Gemini CLI format
                         if json["type"] == "message" && json["role"] == "assistant" {
                             if let Some(content) = json["content"].as_str() {
                                 let _ = handle_clone.emit("agent-chunk", AgentChunk {
@@ -966,7 +967,26 @@ fn run_cli_command(
                                     is_done: false,
                                 });
                             }
-                        } else if json["type"] == "result" {
+                        }
+                        // Handle Claude Code CLI format
+                        else if json["type"] == "assistant" {
+                            if let Some(message) = json["message"].as_object() {
+                                if let Some(content_array) = message["content"].as_array() {
+                                    for content_block in content_array {
+                                        if content_block["type"] == "text" {
+                                            if let Some(text) = content_block["text"].as_str() {
+                                                let _ = handle_clone.emit("agent-chunk", AgentChunk {
+                                                    content: text.to_string(),
+                                                    is_done: false,
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Handle completion for both CLIs
+                        else if json["type"] == "result" {
                              let _ = handle_clone.emit("agent-chunk", AgentChunk {
                                     content: "".to_string(),
                                     is_done: true,
