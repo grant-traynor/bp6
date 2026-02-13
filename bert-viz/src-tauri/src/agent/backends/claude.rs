@@ -51,15 +51,36 @@ impl CliBackendPlugin for ClaudeCodeBackend {
 
     fn parse_stdout_line(&self, json: &Value) -> Option<AgentChunk> {
         // Handle Claude Code message format:
-        // {"type": "assistant", "message": {"content": [{"type": "text", "text": "..."}]}}
+        // {"type": "assistant", "message": {"content": [...]}}
         if json["type"] == "assistant" {
             if let Some(message) = json["message"].as_object() {
                 if let Some(content_array) = message["content"].as_array() {
                     for content_block in content_array {
+                        // Handle text content
                         if content_block["type"] == "text" {
                             if let Some(text) = content_block["text"].as_str() {
                                 return Some(AgentChunk {
                                     content: text.to_string(),
+                                    is_done: false,
+                                });
+                            }
+                        }
+
+                        // Handle tool use - emit notification so UI shows activity
+                        if content_block["type"] == "tool_use" {
+                            if let Some(tool_name) = content_block["name"].as_str() {
+                                let description = content_block["input"]["description"]
+                                    .as_str()
+                                    .unwrap_or("");
+
+                                let message = if !description.is_empty() {
+                                    format!("🔧 {}: {}", tool_name, description)
+                                } else {
+                                    format!("🔧 Using tool: {}", tool_name)
+                                };
+
+                                return Some(AgentChunk {
+                                    content: message,
                                     is_done: false,
                                 });
                             }
@@ -71,13 +92,32 @@ impl CliBackendPlugin for ClaudeCodeBackend {
 
         // Handle completion: {"type": "result"}
         if json["type"] == "result" {
+            // Check for errors in result
+            if json["is_error"].as_bool().unwrap_or(false) {
+                if let Some(errors) = json["errors"].as_array() {
+                    let error_messages: Vec<String> = errors
+                        .iter()
+                        .filter_map(|e| e.as_str())
+                        .map(|s| s.to_string())
+                        .collect();
+
+                    if !error_messages.is_empty() {
+                        return Some(AgentChunk {
+                            content: format!("❌ Error: {}", error_messages.join("; ")),
+                            is_done: true,
+                        });
+                    }
+                }
+            }
+
+            // Normal completion
             return Some(AgentChunk {
                 content: String::new(),
                 is_done: true,
             });
         }
 
-        // Ignore other JSON types
+        // Ignore other JSON types (user messages, etc.)
         None
     }
 }

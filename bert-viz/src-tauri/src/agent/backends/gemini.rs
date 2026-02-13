@@ -55,15 +55,57 @@ impl CliBackendPlugin for GeminiBackend {
             }
         }
 
+        // Handle tool use: {"type": "tool_use", "tool_name": "...", ...}
+        if json["type"] == "tool_use" {
+            if let Some(tool_name) = json["tool_name"].as_str() {
+                return Some(AgentChunk {
+                    content: format!("🔧 Using tool: {}", tool_name),
+                    is_done: false,
+                });
+            }
+        }
+
+        // Handle tool results: {"type": "tool_result", "status": "success", ...}
+        // Only show failed tool results to avoid clutter
+        if json["type"] == "tool_result" {
+            if let Some(status) = json["status"].as_str() {
+                if status != "success" {
+                    return Some(AgentChunk {
+                        content: format!("⚠️ Tool execution {}", status),
+                        is_done: false,
+                    });
+                }
+            }
+        }
+
         // Handle completion: {"type": "result"}
         if json["type"] == "result" {
+            // Check for errors in result
+            if json["subtype"] == "error_during_execution" || json["is_error"].as_bool().unwrap_or(false) {
+                if let Some(errors) = json["errors"].as_array() {
+                    let error_messages: Vec<String> = errors
+                        .iter()
+                        .filter_map(|e| e.as_str())
+                        .map(|s| s.to_string())
+                        .collect();
+
+                    if !error_messages.is_empty() {
+                        return Some(AgentChunk {
+                            content: format!("❌ Error: {}", error_messages.join("; ")),
+                            is_done: true,
+                        });
+                    }
+                }
+            }
+
+            // Normal completion
             return Some(AgentChunk {
                 content: String::new(),
                 is_done: true,
             });
         }
 
-        // Ignore other JSON types
+        // Ignore other JSON types (user messages, init, etc.)
         None
     }
 }

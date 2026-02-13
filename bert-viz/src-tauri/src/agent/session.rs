@@ -182,15 +182,11 @@ fn run_cli_command(
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line_str) = line {
-                eprintln!("📥 Agent Stdout: {}", line_str);
                 if line_str.trim().starts_with('{') {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                        eprintln!("✅ Parsed JSON: type={}", json["type"]);
-
                         // Extract and store session_id from result messages
                         if json["type"] == "result" {
                             if let Some(session_id) = json["session_id"].as_str() {
-                                eprintln!("💾 Storing session ID: {}", session_id);
                                 let mut session_guard = session_id_clone.lock().unwrap();
                                 *session_guard = Some(session_id.to_string());
                             }
@@ -198,18 +194,12 @@ fn run_cli_command(
 
                         // Use plugin to parse backend-specific JSON format
                         if let Some(chunk) = backend_clone.parse_stdout_line(&json) {
-                            eprintln!("📤 Emitting chunk: {:?}", chunk.content);
                             let _ = handle_clone.emit("agent-chunk", chunk);
-                        } else {
-                            eprintln!("⚠️  No chunk returned for JSON type: {}", json["type"]);
                         }
-                    } else {
-                        eprintln!("❌ Failed to parse JSON: {}", line_str);
                     }
                 }
             }
         }
-        eprintln!("🏁 Stdout stream ended");
         // Emit final completion chunk
         let _ = handle_clone.emit("agent-chunk", crate::agent::plugin::AgentChunk {
             content: "".to_string(),
