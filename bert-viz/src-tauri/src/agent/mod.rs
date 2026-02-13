@@ -7,6 +7,7 @@ pub mod backends;
 pub mod plugin;
 pub mod registry;
 pub mod session;
+pub mod templates;
 
 // Re-export commonly used types from plugin module (for future use)
 #[allow(unused_imports)]
