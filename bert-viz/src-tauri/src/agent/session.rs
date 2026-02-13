@@ -1,7 +1,57 @@
 use std::process::{Command, Stdio, Child};
 use std::io::{BufRead, BufReader};
+use std::time::SystemTime;
 use tauri::{AppHandle, Emitter, State};
 use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
+
+/// Status of an agent session
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    Running,
+    Stopped,
+    Error,
+}
+
+/// Internal session state tracking a running agent process
+#[derive(Debug)]
+pub struct SessionState {
+    /// The running CLI process handle
+    pub process: Child,
+    /// The bead/issue ID this session is working on (if any)
+    pub bead_id: Option<String>,
+    /// The persona/role for this session (specialist, product-manager, qa-engineer)
+    pub persona: String,
+    /// The CLI backend being used (Gemini, ClaudeCode)
+    pub backend_id: crate::agent::plugin::BackendId,
+    /// Current status of the session
+    pub status: SessionStatus,
+    /// When this session was created
+    pub created_at: SystemTime,
+    /// The CLI-provided session ID for resume capability (if available)
+    pub cli_session_id: Option<String>,
+}
+
+/// Serializable session information for UI display (excludes process handle)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    /// Unique session identifier (UUID v4)
+    pub session_id: String,
+    /// The bead/issue ID this session is working on (if any)
+    pub bead_id: Option<String>,
+    /// The persona/role for this session
+    pub persona: String,
+    /// The CLI backend being used
+    pub backend_id: crate::agent::plugin::BackendId,
+    /// Current status of the session
+    pub status: SessionStatus,
+    /// When this session was created (seconds since UNIX epoch)
+    pub created_at: u64,
+    /// The CLI-provided session ID for resume capability (if available)
+    pub cli_session_id: Option<String>,
+}
 
 // DEPRECATED: CliBackend enum replaced by plugin architecture
 // Use crate::agent::plugin::BackendId instead
