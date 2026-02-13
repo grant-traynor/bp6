@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Sun, Moon, Plus, Package, FolderOpen, ChevronDown, Star, Trash2 } from "lucide-react";
 import { cn } from "../../utils";
+import { setCliPreference } from "../../api";
 import type { Project, CliBackend } from "../../api";
 
 interface HeaderProps {
@@ -41,6 +42,23 @@ export const Header = ({
   setCurrentCli,
 }: HeaderProps) => {
   const [cliMenuOpen, setCliMenuOpen] = useState(false);
+
+  const handleCliSelect = async (cli: CliBackend) => {
+    try {
+      // Optimistic update - update UI immediately
+      setCurrentCli(cli);
+      setCliMenuOpen(false);
+
+      // Persist preference to backend
+      await setCliPreference(cli);
+
+      console.log(`✅ CLI preference saved: ${cli}`);
+    } catch (error) {
+      console.error("Failed to save CLI preference:", error);
+      // UI already updated optimistically, so user sees immediate feedback
+      // Could show toast notification here if desired
+    }
+  };
 
   return (
     <header className="h-16 border-b-2 border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/90 backdrop-blur-xl z-30">
@@ -85,7 +103,7 @@ export const Header = ({
           {cliMenuOpen && (
             <div className="absolute right-0 mt-3 w-56 bg-[var(--background-primary)] border-2 border-[var(--border-primary)] rounded-xl shadow-[var(--shadow-xl)] z-[60] py-2 animate-in fade-in zoom-in-95 duration-150">
               <button
-                onClick={() => { setCurrentCli('gemini'); setCliMenuOpen(false); }}
+                onClick={() => handleCliSelect('gemini')}
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold transition-all text-left",
                   currentCli === 'gemini'
@@ -97,7 +115,7 @@ export const Header = ({
                 <span>Gemini CLI</span>
               </button>
               <button
-                onClick={() => { setCurrentCli('claude-code'); setCliMenuOpen(false); }}
+                onClick={() => handleCliSelect('claude-code')}
                 className={cn(
                   "w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold transition-all text-left",
                   currentCli === 'claude-code' || currentCli === 'claude'
