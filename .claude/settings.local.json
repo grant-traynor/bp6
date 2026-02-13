@@ -36,7 +36,12 @@
       "Bash(export PATH=\"/Users/gkt/.cargo/bin:$PATH\")",
       "Bash(git fetch:*)",
       "mcp__standards__list_standards_catalogue",
-      "mcp__standards__get_applicable_standards"
+      "mcp__standards__get_applicable_standards",
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(claude:*)",
+      "Bash(timeout 5 bash -c 'echo \"\"Say hello in one word\"\" | claude --output-format stream-json --dangerously-skip-permissions 2>&1')",
+      "Bash(gtimeout 5 bash -c 'echo \"\"Say hello in one word\"\" | claude --output-format stream-json --dangerously-skip-permissions 2>&1')"
     ]
   }
 }
