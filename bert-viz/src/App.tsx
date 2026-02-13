@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, PanelRight } from "lucide-react";
 import { cn } from "./utils";
-import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject, getCliPreference, setCliPreference, type CliBackend } from "./api";
+import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject, getCliPreference, type CliBackend } from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
