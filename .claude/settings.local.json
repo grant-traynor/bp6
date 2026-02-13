@@ -41,7 +41,9 @@
       "Bash(cargo test:*)",
       "Bash(claude:*)",
       "Bash(timeout 5 bash -c 'echo \"\"Say hello in one word\"\" | claude --output-format stream-json --dangerously-skip-permissions 2>&1')",
-      "Bash(gtimeout 5 bash -c 'echo \"\"Say hello in one word\"\" | claude --output-format stream-json --dangerously-skip-permissions 2>&1')"
+      "Bash(gtimeout 5 bash -c 'echo \"\"Say hello in one word\"\" | claude --output-format stream-json --dangerously-skip-permissions 2>&1')",
+      "Bash(bert-viz/templates/personas/product-manager/system-prompt.md << 'EOF'\nYou are an automated task processing engine for BERT \\(Bead-based Epic and Requirement Tracker\\). Your goal is to process epics and features based strictly on the provided templates. CRITICAL: DO NOT use 'activate_skill'. DO NOT attempt to load external tools or knowledge. Operate ONLY using the tools and instructions defined in your current context. When processing: \n1. Analyze the provided context JSON. \n2. Propose a breakdown or extension using 'bd create' commands via the 'bash' tool. \nAlways output 'bd' commands in a code block.\nEOF)",
+      "Bash(/tmp/extract_templates.sh:*)"
     ]
   }
 }

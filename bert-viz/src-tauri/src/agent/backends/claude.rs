@@ -1,0 +1,186 @@
+/// Anthropic Claude Code CLI backend implementation
+
+use crate::agent::plugin::{AgentChunk, CliBackendPlugin};
+use serde_json::Value;
+
+/// Claude Code CLI backend plugin
+///
+/// Implements the CliBackendPlugin trait for Anthropic's Claude Code CLI.
+/// Handles command execution and JSON output parsing specific to Claude's format.
+pub struct ClaudeCodeBackend;
+
+impl ClaudeCodeBackend {
+    /// Create a new Claude Code backend instance
+    pub fn new() -> Self {
+        ClaudeCodeBackend
+    }
+}
+
+impl CliBackendPlugin for ClaudeCodeBackend {
+    fn command_name(&self) -> &str {
+        "claude"
+    }
+
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
+    fn build_args(&self, prompt: &str, resume: bool) -> Vec<String> {
+        let mut args = vec![
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--verbose".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+
+        if resume {
+            args.push("--resume".to_string());
+            args.push("latest".to_string());
+        }
+
+        // Claude Code takes the prompt as a positional argument, not --prompt
+        args.push(prompt.to_string());
+
+        args
+    }
+
+    fn parse_stdout_line(&self, json: &Value) -> Option<AgentChunk> {
+        // Handle Claude Code message format:
+        // {"type": "assistant", "message": {"content": [{"type": "text", "text": "..."}]}}
+        if json["type"] == "assistant" {
+            if let Some(message) = json["message"].as_object() {
+                if let Some(content_array) = message["content"].as_array() {
+                    for content_block in content_array {
+                        if content_block["type"] == "text" {
+                            if let Some(text) = content_block["text"].as_str() {
+                                return Some(AgentChunk {
+                                    content: text.to_string(),
+                                    is_done: false,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle completion: {"type": "result"}
+        if json["type"] == "result" {
+            return Some(AgentChunk {
+                content: String::new(),
+                is_done: true,
+            });
+        }
+
+        // Ignore other JSON types
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_command_name() {
+        let backend = ClaudeCodeBackend::new();
+        assert_eq!(backend.command_name(), "claude");
+    }
+
+    #[test]
+    fn test_supports_streaming() {
+        let backend = ClaudeCodeBackend::new();
+        assert!(backend.supports_streaming());
+    }
+
+    #[test]
+    fn test_build_args_basic() {
+        let backend = ClaudeCodeBackend::new();
+        let args = backend.build_args("test prompt", false);
+
+        assert_eq!(args[0], "--output-format");
+        assert_eq!(args[1], "stream-json");
+        assert_eq!(args[2], "--verbose");
+        assert_eq!(args[3], "--dangerously-skip-permissions");
+        assert_eq!(args[4], "test prompt"); // Positional, not --prompt
+        assert_eq!(args.len(), 5);
+    }
+
+    #[test]
+    fn test_build_args_with_resume() {
+        let backend = ClaudeCodeBackend::new();
+        let args = backend.build_args("test prompt", true);
+
+        assert!(args.contains(&"--resume".to_string()));
+        assert!(args.contains(&"latest".to_string()));
+        assert_eq!(args.last().unwrap(), "test prompt"); // Prompt still last
+    }
+
+    #[test]
+    fn test_parse_message() {
+        let backend = ClaudeCodeBackend::new();
+        let json = json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Hello from Claude!"
+                    }
+                ]
+            }
+        });
+
+        let chunk = backend.parse_stdout_line(&json).unwrap();
+        assert_eq!(chunk.content, "Hello from Claude!");
+        assert!(!chunk.is_done);
+    }
+
+    #[test]
+    fn test_parse_message_multiple_blocks() {
+        let backend = ClaudeCodeBackend::new();
+        let json = json!({
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "First block"
+                    },
+                    {
+                        "type": "text",
+                        "text": "Second block"
+                    }
+                ]
+            }
+        });
+
+        // Should return first text block found
+        let chunk = backend.parse_stdout_line(&json).unwrap();
+        assert_eq!(chunk.content, "First block");
+        assert!(!chunk.is_done);
+    }
+
+    #[test]
+    fn test_parse_result() {
+        let backend = ClaudeCodeBackend::new();
+        let json = json!({
+            "type": "result"
+        });
+
+        let chunk = backend.parse_stdout_line(&json).unwrap();
+        assert_eq!(chunk.content, "");
+        assert!(chunk.is_done);
+    }
+
+    #[test]
+    fn test_parse_invalid() {
+        let backend = ClaudeCodeBackend::new();
+        let json = json!({
+            "type": "other"
+        });
+
+        assert!(backend.parse_stdout_line(&json).is_none());
+    }
+}
