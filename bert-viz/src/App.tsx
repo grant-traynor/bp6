@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, startTransition } fr
 import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, PanelRight } from "lucide-react";
 import { cn } from "./utils";
-import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject } from "./api";
+import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject, getCliPreference, setCliPreference, type CliBackend } from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -57,6 +57,9 @@ function App() {
   const [chatPersona, setChatPersona] = useState("product-manager");
   const [chatTask, setChatTask] = useState<string | null>(null);
   const [chatBeadId, setChatBeadId] = useState<string | null>(null);
+
+  // CLI preference state
+  const [currentCli, setCurrentCli] = useState<CliBackend>("gemini");
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
@@ -206,6 +209,20 @@ function App() {
       console.log('🧹 Cleaning up event listeners');
     };
   }, [handleOpenProject, loadData, loadProjects]);
+
+  // Load CLI preference on mount
+  useEffect(() => {
+    const loadCliPreference = async () => {
+      try {
+        const preference = await getCliPreference();
+        setCurrentCli(preference as CliBackend);
+      } catch (error) {
+        console.error("Failed to load CLI preference:", error);
+        // Keep default value (gemini) on error
+      }
+    };
+    loadCliPreference();
+  }, []);
 
   // Helper: Flatten tree to array of beads for backward compatibility
   const flattenTree = useCallback((nodes: BeadNode[]): BeadNode[] => {
@@ -680,7 +697,7 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
       <Navigation />
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
-        <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} onOpenChat={handleOpenChat} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} />
+        <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} onOpenChat={handleOpenChat} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} currentCli={currentCli} setCurrentCli={setCurrentCli} />
         {!hasProject ? (
           <div className="flex-1 flex items-center justify-center">
             {loading ? (

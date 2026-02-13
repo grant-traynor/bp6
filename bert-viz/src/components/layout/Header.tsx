@@ -1,6 +1,6 @@
 import { Sun, Moon, Plus, Package, FolderOpen, ChevronDown, Star, Trash2 } from "lucide-react";
 import { cn } from "../../utils";
-import type { Project } from "../../api";
+import type { Project, CliBackend } from "../../api";
 
 interface HeaderProps {
   isDark: boolean;
@@ -17,6 +17,8 @@ interface HeaderProps {
   toggleFavoriteProject: (path: string) => Promise<void>;
   removeProject: (path: string) => Promise<void>;
   handleSelectProject: () => Promise<void>;
+  currentCli: CliBackend;
+  setCurrentCli: (cli: CliBackend) => void;
 }
 
 export const Header = ({
@@ -34,6 +36,8 @@ export const Header = ({
   toggleFavoriteProject,
   removeProject,
   handleSelectProject,
+  currentCli,
+  setCurrentCli,
 }: HeaderProps) => {
   return (
     <header className="h-16 border-b-2 border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/90 backdrop-blur-xl z-30">
