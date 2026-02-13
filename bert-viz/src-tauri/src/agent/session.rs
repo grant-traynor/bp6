@@ -4,61 +4,17 @@ use tauri::{AppHandle, Emitter, State};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
-/// Represents the available CLI backends for AI agent execution
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+// DEPRECATED: CliBackend enum replaced by plugin architecture
+// Use crate::agent::plugin::BackendId instead
+// This is kept temporarily for backwards compatibility but will be removed
+#[deprecated(
+    since = "0.2.0",
+    note = "Use crate::agent::plugin::BackendId and BackendRegistry instead"
+)]
+#[allow(dead_code)]
 pub enum CliBackend {
     Gemini,
-    #[serde(rename = "claude")]
     ClaudeCode,
-}
-
-impl CliBackend {
-    /// Returns the command name to execute for this CLI backend
-    pub fn as_command_name(&self) -> &str {
-        match self {
-            CliBackend::Gemini => "gemini",
-            CliBackend::ClaudeCode => "claude",
-        }
-    }
-
-    /// Returns whether this CLI backend supports streaming output
-    pub fn supports_streaming(&self) -> bool {
-        match self {
-            CliBackend::Gemini => true,
-            CliBackend::ClaudeCode => true,
-        }
-    }
-
-    /// Returns the default arguments for this CLI backend
-    pub fn default_args(&self) -> Vec<String> {
-        match self {
-            CliBackend::Gemini => vec![
-                "--output-format".to_string(),
-                "stream-json".to_string(),
-                "--yolo".to_string(),
-            ],
-            CliBackend::ClaudeCode => vec![
-                // Will be populated based on Claude CLI research
-                // Placeholder for now
-            ],
-        }
-    }
-}
-
-impl Default for CliBackend {
-    fn default() -> Self {
-        CliBackend::Gemini
-    }
-}
-
-impl std::fmt::Display for CliBackend {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CliBackend::Gemini => write!(f, "Gemini"),
-            CliBackend::ClaudeCode => write!(f, "Claude Code"),
-        }
-    }
 }
 
 const SYSTEM_PROMPT_PM: &str = "You are an automated task processing engine for BERT (Bead-based Epic and Requirement Tracker). \
@@ -810,14 +766,16 @@ pub struct AgentChunk {
 
 pub struct AgentState {
     pub current_process: Mutex<Option<Child>>,
-    pub cli_backend: Mutex<CliBackend>,
+    pub backend_registry: crate::agent::registry::BackendRegistry,
+    pub current_backend: Mutex<crate::agent::plugin::BackendId>,
 }
 
 impl AgentState {
     pub fn new() -> Self {
         AgentState {
             current_process: Mutex::new(None),
-            cli_backend: Mutex::new(CliBackend::Gemini),
+            backend_registry: crate::agent::registry::BackendRegistry::with_defaults(),
+            current_backend: Mutex::new(crate::agent::plugin::BackendId::Gemini),
         }
     }
 }
@@ -835,47 +793,10 @@ fn kill_process_group(pid: u32) {
     }
 }
 
-/// Build command arguments for Gemini CLI
-fn build_gemini_args(prompt: &str, resume: bool) -> Vec<String> {
-    let mut args = vec![
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--yolo".to_string(),
-    ];
-
-    if resume {
-        args.push("--resume".to_string());
-        args.push("latest".to_string());
-    }
-
-    args.push("--prompt".to_string());
-    args.push(prompt.to_string());
-
-    args
-}
-
-/// Build command arguments for Claude Code CLI
-fn build_claude_args(prompt: &str, resume: bool) -> Vec<String> {
-    let mut args = vec![
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-        "--dangerously-skip-permissions".to_string(),
-    ];
-
-    if resume {
-        args.push("--resume".to_string());
-        args.push("latest".to_string());
-    }
-
-    // Claude Code takes the prompt as a positional argument, not --prompt
-    args.push(prompt.to_string());
-
-    args
-}
+// Backend-specific functions removed - now handled by CliBackendPlugin implementations
 
 fn run_cli_command(
-    cli_backend: CliBackend,
+    backend_id: crate::agent::plugin::BackendId,
     app_handle: AppHandle,
     state: &AgentState,
     prompt: String,
@@ -887,13 +808,16 @@ fn run_cli_command(
 
     eprintln!("🎯 Starting agent in directory: {}", repo_root.display());
 
-    let mut cmd = Command::new(cli_backend.as_command_name());
+    // Get the backend plugin from registry
+    let backend = state
+        .backend_registry
+        .get(backend_id)
+        .ok_or_else(|| format!("Backend {:?} not registered", backend_id))?;
 
-    // Build CLI-specific arguments
-    let args = match cli_backend {
-        CliBackend::Gemini => build_gemini_args(&prompt, resume),
-        CliBackend::ClaudeCode => build_claude_args(&prompt, resume),
-    };
+    let mut cmd = Command::new(backend.command_name());
+
+    // Build CLI-specific arguments using plugin
+    let args = backend.build_args(&prompt, resume);
     cmd.args(&args);
 
     // Set working directory to project root
@@ -917,17 +841,17 @@ fn run_cli_command(
         .map_err(|e| {
             let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
                 // CLI binary not found - provide installation instructions
-                let install_cmd = match cli_backend {
-                    CliBackend::Gemini => "npm install -g @google/generative-ai-cli",
-                    CliBackend::ClaudeCode => "See https://docs.anthropic.com/en/docs/claude-code for installation",
+                let install_cmd = match backend_id {
+                    crate::agent::plugin::BackendId::Gemini => "npm install -g @google/generative-ai-cli",
+                    crate::agent::plugin::BackendId::ClaudeCode => "See https://docs.anthropic.com/en/docs/claude-code for installation",
                 };
                 format!(
                     "{} CLI not found. Please install it first: {}",
-                    cli_backend,
+                    backend.command_name(),
                     install_cmd
                 )
             } else {
-                format!("Failed to spawn {} in {}: {}", cli_backend.as_command_name(), repo_root.display(), e)
+                format!("Failed to spawn {} in {}: {}", backend.command_name(), repo_root.display(), e)
             };
 
             // Emit error to UI
@@ -953,50 +877,23 @@ fn run_cli_command(
     };
 
     let handle_clone = app_handle.clone();
+    let backend_clone = backend.clone();
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line_str) = line {
                 if line_str.trim().starts_with('{') {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                        // Handle Gemini CLI format
-                        if json["type"] == "message" && json["role"] == "assistant" {
-                            if let Some(content) = json["content"].as_str() {
-                                let _ = handle_clone.emit("agent-chunk", AgentChunk {
-                                    content: content.to_string(),
-                                    is_done: false,
-                                });
-                            }
-                        }
-                        // Handle Claude Code CLI format
-                        else if json["type"] == "assistant" {
-                            if let Some(message) = json["message"].as_object() {
-                                if let Some(content_array) = message["content"].as_array() {
-                                    for content_block in content_array {
-                                        if content_block["type"] == "text" {
-                                            if let Some(text) = content_block["text"].as_str() {
-                                                let _ = handle_clone.emit("agent-chunk", AgentChunk {
-                                                    content: text.to_string(),
-                                                    is_done: false,
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        // Handle completion for both CLIs
-                        else if json["type"] == "result" {
-                             let _ = handle_clone.emit("agent-chunk", AgentChunk {
-                                    content: "".to_string(),
-                                    is_done: true,
-                             });
+                        // Use plugin to parse backend-specific JSON format
+                        if let Some(chunk) = backend_clone.parse_stdout_line(&json) {
+                            let _ = handle_clone.emit("agent-chunk", chunk);
                         }
                     }
                 }
             }
         }
-        let _ = handle_clone.emit("agent-chunk", AgentChunk {
+        // Emit final completion chunk
+        let _ = handle_clone.emit("agent-chunk", crate::agent::plugin::AgentChunk {
             content: "".to_string(),
             is_done: true,
         });
@@ -1036,11 +933,11 @@ pub fn start_agent_session(
     let backend = cli_backend
         .as_deref()
         .and_then(|s| match s.to_lowercase().as_str() {
-            "gemini" => Some(CliBackend::Gemini),
-            "claude" | "claude-code" => Some(CliBackend::ClaudeCode),
+            "gemini" => Some(crate::agent::plugin::BackendId::Gemini),
+            "claude" | "claude-code" => Some(crate::agent::plugin::BackendId::ClaudeCode),
             _ => None,
         })
-        .unwrap_or(CliBackend::Gemini);
+        .unwrap_or(crate::agent::plugin::BackendId::Gemini);
 
     // Build initial prompt
     let mut prompt = String::new();
@@ -1120,7 +1017,7 @@ pub fn start_agent_session(
 
     // Store the CLI backend in state for this session
     {
-        let mut backend_guard = state.cli_backend.lock().unwrap();
+        let mut backend_guard = state.current_backend.lock().unwrap();
         *backend_guard = backend;
     }
 
@@ -1135,7 +1032,7 @@ pub fn send_agent_message(
 ) -> Result<(), String> {
     // Read the CLI backend from state to maintain consistency across session
     let backend = {
-        let backend_guard = state.cli_backend.lock().unwrap();
+        let backend_guard = state.current_backend.lock().unwrap();
         *backend_guard
     };
 

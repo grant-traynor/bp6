@@ -14,4 +14,4 @@ pub mod templates;
 pub use plugin::{AgentChunk, BackendId, CliBackendPlugin};
 
 // Re-export existing agent session functionality
-pub use session::{AgentState, CliBackend};
+pub use session::AgentState;

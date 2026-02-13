@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::State;
-use crate::agent::CliBackend;
+use crate::agent::plugin::BackendId;
 use crate::SettingsState;
 
 /// Application settings structure
@@ -10,13 +10,13 @@ use crate::SettingsState;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(rename = "cliBackend")]
-    pub cli_backend: CliBackend,
+    pub cli_backend: BackendId,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
-            cli_backend: CliBackend::Gemini,
+            cli_backend: BackendId::Gemini,
         }
     }
 }
@@ -99,8 +99,8 @@ pub fn get_cli_preference(settings_state: State<'_, SettingsState>) -> Result<St
 
     // Convert CliBackend to string representation
     let cli_str = match settings.cli_backend {
-        CliBackend::Gemini => "gemini",
-        CliBackend::ClaudeCode => "claude",
+        BackendId::Gemini => "gemini",
+        BackendId::ClaudeCode => "claude",
     };
 
     Ok(cli_str.to_string())
@@ -114,8 +114,8 @@ pub fn set_cli_preference(
 ) -> Result<(), String> {
     // Parse and validate the CLI backend string
     let backend = match cli_backend.to_lowercase().as_str() {
-        "gemini" => CliBackend::Gemini,
-        "claude" | "claude-code" => CliBackend::ClaudeCode,
+        "gemini" => BackendId::Gemini,
+        "claude" | "claude-code" => BackendId::ClaudeCode,
         _ => return Err(format!("Invalid CLI backend: '{}'. Valid options are: 'gemini', 'claude', 'claude-code'", cli_backend)),
     };
 
@@ -141,27 +141,27 @@ mod tests {
     #[test]
     fn test_default_settings() {
         let settings = AppSettings::default();
-        assert_eq!(settings.cli_backend, CliBackend::Gemini);
+        assert_eq!(settings.cli_backend, BackendId::Gemini);
     }
 
     #[test]
     fn test_settings_serialization() {
         let settings = AppSettings {
-            cli_backend: CliBackend::ClaudeCode,
+            cli_backend: BackendId::ClaudeCode,
         };
 
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"cliBackend\":\"claude\""));
 
         let deserialized: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.cli_backend, CliBackend::ClaudeCode);
+        assert_eq!(deserialized.cli_backend, BackendId::ClaudeCode);
     }
 
     #[test]
     fn test_load_missing_file() {
         let temp_path = env::temp_dir().join("nonexistent_settings.json");
         let settings = AppSettings::load_from_file(&temp_path).unwrap();
-        assert_eq!(settings.cli_backend, CliBackend::Gemini);
+        assert_eq!(settings.cli_backend, BackendId::Gemini);
     }
 
     #[test]
@@ -173,13 +173,13 @@ mod tests {
 
         // Save settings
         let settings = AppSettings {
-            cli_backend: CliBackend::ClaudeCode,
+            cli_backend: BackendId::ClaudeCode,
         };
         settings.save_to_file(&temp_path).unwrap();
 
         // Load settings
         let loaded = AppSettings::load_from_file(&temp_path).unwrap();
-        assert_eq!(loaded.cli_backend, CliBackend::ClaudeCode);
+        assert_eq!(loaded.cli_backend, BackendId::ClaudeCode);
 
         // Clean up
         let _ = fs::remove_file(&temp_path);
@@ -237,33 +237,33 @@ mod tests {
 
         // Create settings with Gemini
         let settings1 = AppSettings {
-            cli_backend: CliBackend::Gemini,
+            cli_backend: BackendId::Gemini,
         };
         settings1.save_to_file(&temp_path).unwrap();
 
         // Load and verify
         let loaded1 = AppSettings::load_from_file(&temp_path).unwrap();
-        assert_eq!(loaded1.cli_backend, CliBackend::Gemini);
+        assert_eq!(loaded1.cli_backend, BackendId::Gemini);
 
         // Update to Claude
         let settings2 = AppSettings {
-            cli_backend: CliBackend::ClaudeCode,
+            cli_backend: BackendId::ClaudeCode,
         };
         settings2.save_to_file(&temp_path).unwrap();
 
         // Load and verify
         let loaded2 = AppSettings::load_from_file(&temp_path).unwrap();
-        assert_eq!(loaded2.cli_backend, CliBackend::ClaudeCode);
+        assert_eq!(loaded2.cli_backend, BackendId::ClaudeCode);
 
         // Update back to Gemini
         let settings3 = AppSettings {
-            cli_backend: CliBackend::Gemini,
+            cli_backend: BackendId::Gemini,
         };
         settings3.save_to_file(&temp_path).unwrap();
 
         // Load and verify
         let loaded3 = AppSettings::load_from_file(&temp_path).unwrap();
-        assert_eq!(loaded3.cli_backend, CliBackend::Gemini);
+        assert_eq!(loaded3.cli_backend, BackendId::Gemini);
 
         // Verify file contents are valid JSON
         let contents = fs::read_to_string(&temp_path).unwrap();
@@ -279,36 +279,36 @@ mod tests {
         // Test valid backend strings
         assert_eq!(
             match "gemini".to_lowercase().as_str() {
-                "gemini" => Ok(CliBackend::Gemini),
-                "claude" | "claude-code" => Ok(CliBackend::ClaudeCode),
+                "gemini" => Ok(BackendId::Gemini),
+                "claude" | "claude-code" => Ok(BackendId::ClaudeCode),
                 _ => Err("Invalid"),
             },
-            Ok(CliBackend::Gemini)
+            Ok(BackendId::Gemini)
         );
 
         assert_eq!(
             match "claude".to_lowercase().as_str() {
-                "gemini" => Ok(CliBackend::Gemini),
-                "claude" | "claude-code" => Ok(CliBackend::ClaudeCode),
+                "gemini" => Ok(BackendId::Gemini),
+                "claude" | "claude-code" => Ok(BackendId::ClaudeCode),
                 _ => Err("Invalid"),
             },
-            Ok(CliBackend::ClaudeCode)
+            Ok(BackendId::ClaudeCode)
         );
 
         assert_eq!(
             match "claude-code".to_lowercase().as_str() {
-                "gemini" => Ok(CliBackend::Gemini),
-                "claude" | "claude-code" => Ok(CliBackend::ClaudeCode),
+                "gemini" => Ok(BackendId::Gemini),
+                "claude" | "claude-code" => Ok(BackendId::ClaudeCode),
                 _ => Err("Invalid"),
             },
-            Ok(CliBackend::ClaudeCode)
+            Ok(BackendId::ClaudeCode)
         );
 
         // Test invalid backend string
         assert_eq!(
             match "invalid-cli".to_lowercase().as_str() {
-                "gemini" => Ok(CliBackend::Gemini),
-                "claude" | "claude-code" => Ok(CliBackend::ClaudeCode),
+                "gemini" => Ok(BackendId::Gemini),
+                "claude" | "claude-code" => Ok(BackendId::ClaudeCode),
                 _ => Err("Invalid"),
             },
             Err("Invalid")
