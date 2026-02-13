@@ -254,6 +254,7 @@ fn run_cli_command(
         let _ = handle_clone.emit("agent-chunk", crate::agent::plugin::AgentChunk {
             content: "".to_string(),
             is_done: true,
+            session_id: None,
         });
     });
 

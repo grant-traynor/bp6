@@ -49,6 +49,10 @@ pub struct AgentChunk {
     pub content: String,
     /// Whether this is the final chunk (session complete)
     pub is_done: bool,
+    /// Optional session identifier (UUID v4) for multi-session support
+    /// Serializes as "sessionId" in JSON
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Plugin trait for CLI backend implementations
@@ -97,11 +101,13 @@ pub struct AgentChunk {
 ///             json["content"].as_str().map(|content| AgentChunk {
 ///                 content: content.to_string(),
 ///                 is_done: false,
+///                 session_id: None,
 ///             })
 ///         } else if json["type"] == "result" {
 ///             Some(AgentChunk {
 ///                 content: String::new(),
 ///                 is_done: true,
+///                 session_id: None,
 ///             })
 ///         } else {
 ///             None

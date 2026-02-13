@@ -51,6 +51,7 @@ impl CliBackendPlugin for GeminiBackend {
                 return Some(AgentChunk {
                     content: content.to_string(),
                     is_done: false,
+                    session_id: None,
                 });
             }
         }
@@ -61,6 +62,7 @@ impl CliBackendPlugin for GeminiBackend {
                 return Some(AgentChunk {
                     content: format!("🔧 Using tool: {}", tool_name),
                     is_done: false,
+                    session_id: None,
                 });
             }
         }
@@ -73,6 +75,7 @@ impl CliBackendPlugin for GeminiBackend {
                     return Some(AgentChunk {
                         content: format!("⚠️ Tool execution {}", status),
                         is_done: false,
+                        session_id: None,
                     });
                 }
             }
@@ -93,6 +96,7 @@ impl CliBackendPlugin for GeminiBackend {
                         return Some(AgentChunk {
                             content: format!("❌ Error: {}", error_messages.join("; ")),
                             is_done: true,
+                            session_id: None,
                         });
                     }
                 }
@@ -102,6 +106,7 @@ impl CliBackendPlugin for GeminiBackend {
             return Some(AgentChunk {
                 content: String::new(),
                 is_done: true,
+                session_id: None,
             });
         }
 

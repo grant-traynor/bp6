@@ -62,6 +62,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                                 return Some(AgentChunk {
                                     content: text.to_string(),
                                     is_done: false,
+                                    session_id: None,
                                 });
                             }
                         }
@@ -82,6 +83,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                                 return Some(AgentChunk {
                                     content: message,
                                     is_done: false,
+                                    session_id: None,
                                 });
                             }
                         }
@@ -105,6 +107,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                         return Some(AgentChunk {
                             content: format!("❌ Error: {}", error_messages.join("; ")),
                             is_done: true,
+                            session_id: None,
                         });
                     }
                 }
@@ -114,6 +117,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
             return Some(AgentChunk {
                 content: String::new(),
                 is_done: true,
+                session_id: None,
             });
         }
 
