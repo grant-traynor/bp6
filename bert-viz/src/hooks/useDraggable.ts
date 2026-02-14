@@ -35,8 +35,8 @@ export function useDraggable(initialPosition: Position = { x: 100, y: 100 }): Us
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isDragging) return;
 
-    // Constrain to window bounds (assuming 800x600 dialog size)
-    const newX = Math.max(0, Math.min(e.clientX - dragOffset.x, window.innerWidth - 800));
+    // Constrain to window bounds (assuming 850x600 dialog size)
+    const newX = Math.max(0, Math.min(e.clientX - dragOffset.x, window.innerWidth - 850));
     const newY = Math.max(0, Math.min(e.clientY - dragOffset.y, window.innerHeight - 600));
 
     setPosition({ x: newX, y: newY });

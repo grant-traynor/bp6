@@ -140,7 +140,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
   return (
     <div
-      className="fixed w-[650px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
+      className="fixed w-[850px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`
