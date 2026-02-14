@@ -32,6 +32,8 @@ const SessionListComponent: React.FC<SessionListProps> = ({
   const sessions = useSessionStore(state => state.sessions);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
+  console.log('📋 SessionList render:', { sessionsCount: sessions.length, sessions, isCollapsed });
+
   // Memoize bead title lookup to avoid recalculation on every render
   const getBeadTitle = useMemo(() => {
     return (beadId: string | null): string => {
