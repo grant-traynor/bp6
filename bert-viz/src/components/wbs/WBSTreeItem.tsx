@@ -1,7 +1,8 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "../../utils";
-import type { BeadNode } from "../../api";
+import type { BeadNode, SessionInfo } from "../../api";
 import { getChipStyles } from "../shared/Chip";
+import { SessionIndicator } from "../shared/SessionIndicator";
 
 interface WBSTreeItemProps {
   node: BeadNode;
@@ -9,6 +10,7 @@ interface WBSTreeItemProps {
   onToggle: (id: string) => void;
   onClick: (bead: BeadNode) => void;
   isSelected?: boolean;
+  sessions?: SessionInfo[];
 }
 
 export const WBSTreeItem = ({ 
@@ -16,13 +18,15 @@ export const WBSTreeItem = ({
   depth = 0, 
   onToggle,
   onClick,
-  isSelected
+  isSelected,
+  sessions = []
 }: WBSTreeItemProps) => {
   const hasChildren = node.children.length > 0;
 
   return (
     <div
       data-bead-id={node.id}
+      data-testid={`bead-item-${node.id}`}
       className={cn(
         "select-none h-[48px] flex flex-col justify-center border-b border-[var(--border-primary)]/50 relative transition-colors duration-200",
         isSelected ? "bg-[var(--accent-primary)]/10" : ""
@@ -67,7 +71,7 @@ export const WBSTreeItem = ({
         </div>
 
         <div
-          className="flex-1 px-4 flex items-center truncate h-full"
+          className="flex-1 px-4 flex items-center truncate h-full gap-2"
         >
           <span className={cn(
             "text-sm truncate font-black tracking-tight transition-colors",
@@ -76,6 +80,7 @@ export const WBSTreeItem = ({
           )}>
             {node.title}
           </span>
+          <SessionIndicator sessions={sessions} className="shrink-0" />
         </div>
 
         <div className="w-20 shrink-0 px-2 flex items-center justify-center h-full">
@@ -101,17 +106,46 @@ export const WBSTreeItem = ({
   );
 };
 
-export const WBSTreeList = ({ nodes, depth = 0, onToggle, onClick, selectedId }: { nodes: BeadNode[], depth?: number, onToggle: (id: string) => void, onClick: (bead: BeadNode) => void, selectedId?: string }) => {
+export const WBSTreeList = ({ 
+  nodes, 
+  depth = 0, 
+  onToggle, 
+  onClick, 
+  selectedId,
+  sessionsByBead = {}
+}: { 
+  nodes: BeadNode[], 
+  depth?: number, 
+  onToggle: (id: string) => void, 
+  onClick: (bead: BeadNode) => void, 
+  selectedId?: string,
+  sessionsByBead?: Record<string, SessionInfo[]>
+}) => {
   return (
     <>
       {nodes.map(node => (
         <div key={node.id}>
-          <WBSTreeItem node={node} depth={depth} onToggle={onToggle} onClick={onClick} isSelected={selectedId === node.id} />
+          <WBSTreeItem 
+            node={node} 
+            depth={depth} 
+            onToggle={onToggle} 
+            onClick={onClick} 
+            isSelected={selectedId === node.id} 
+            sessions={sessionsByBead[node.id]}
+          />
           {node.isExpanded && node.children.length > 0 && (
-            <WBSTreeList nodes={node.children} depth={depth + 1} onToggle={onToggle} onClick={onClick} selectedId={selectedId} />
+            <WBSTreeList 
+              nodes={node.children} 
+              depth={depth + 1} 
+              onToggle={onToggle} 
+              onClick={onClick} 
+              selectedId={selectedId} 
+              sessionsByBead={sessionsByBead}
+            />
           )}
         </div>
       ))}
     </>
   );
 };
+
