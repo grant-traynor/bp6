@@ -177,10 +177,10 @@ export interface SessionInfo {
   messageCount: number;   // Number of messages in session
 }
 
-// Persona icon mapping (aligned with PersonaType enum from 6dk)
+// Persona icon mapping (aligned with PersonaType enum - uses hyphens as per Rust backend)
 export const PERSONA_ICONS: Record<string, string> = {
-  'product_manager': '📋',
-  'qa_engineer': '🧪',
+  'product-manager': '📋',
+  'qa-engineer': '🧪',
   'specialist': '⚡',
   // Future: architect, security, etc.
 };
@@ -200,13 +200,11 @@ export function formatSessionRuntime(createdAt: number): string {
 
 /**
  * Get persona icon for a given persona type.
- * @param persona PersonaType as string
+ * @param persona PersonaType as string (with hyphens, e.g., "product-manager")
  * @returns Emoji icon for the persona, or ❓ if unknown
  */
 export function getPersonaIcon(persona: string): string {
-  // Normalize hyphen-separated to underscore (backend uses hyphens, mapping uses underscores)
-  const normalized = persona.replace(/-/g, '_');
-  return PERSONA_ICONS[normalized] || '❓';
+  return PERSONA_ICONS[persona] || '❓';
 }
 
 export interface AgentChunk {
@@ -476,7 +474,9 @@ export async function approveSuggestion(command: string): Promise<string> {
 export async function onSessionListChanged(
   callback: (sessions: SessionInfo[]) => void
 ): Promise<UnlistenFn> {
+  console.log('🎧 Setting up session-list-changed event listener');
   return listen<{ sessions: SessionInfo[] }>("session-list-changed", (event) => {
+    console.log('📨 RAW session-list-changed event received:', event);
     callback(event.payload.sessions);
   });
 }

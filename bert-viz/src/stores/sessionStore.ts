@@ -9,6 +9,7 @@ interface SessionStore {
   // Actions
   setSessions: (sessions: SessionInfo[]) => void;
   loadSessions: () => Promise<void>;
+  refreshSessions: () => Promise<void>;  // Manual refresh
   initializeStore: () => Promise<UnlistenFn | undefined>;
   cleanup: () => void;
 }
@@ -31,7 +32,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   isInitialized: false,
 
   // Actions
-  setSessions: (sessions) => set({ sessions }),
+  setSessions: (sessions) => {
+    console.log('📝 setSessions called with:', sessions);
+    set({ sessions });
+  },
 
   loadSessions: async () => {
     try {
@@ -42,6 +46,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       console.error('Failed to load sessions:', error);
       set({ sessions: [] });
     }
+  },
+
+  refreshSessions: async () => {
+    console.log('🔄 Manually refreshing sessions...');
+    await get().loadSessions();
   },
 
   // Initialize store: load sessions and set up event listener

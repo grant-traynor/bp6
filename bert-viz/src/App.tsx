@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
+import './stores/sessionStoreDiagnostics'; // Enable diagnostics
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -243,6 +244,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
               console.log(`⏱️  Frontend: IPC call took ${(endTime - startTime).toFixed(2)}ms`);
               setViewModel(data);
               setProcessingData(false);
+              // Refresh sessions after WBS loads to ensure indicators show
+              useSessionStore.getState().refreshSessions();
             }).catch(error => {
               console.error("Failed to fetch view model:", error);
               setProcessingData(false);
@@ -319,6 +322,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       });
       // Cleanup session store
       useSessionStore.getState().cleanup();
+      // Reset initialization flag for refresh
+      hasInitialized.current = false;
     };
   }, [handleOpenProject, loadData, loadProjects]);
 

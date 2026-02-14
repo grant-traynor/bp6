@@ -39,31 +39,31 @@ export const SessionItem = React.memo<SessionItemProps>(({
     return null;
   }
 
-  const [runtime, setRuntime] = useState(formatSessionRuntime(session.created_at));
-  const [lastActivity, setLastActivity] = useState(formatRelativeTime(session.last_activity));
+  const [runtime, setRuntime] = useState(formatSessionRuntime(session.createdAt));
+  const [lastActivity, setLastActivity] = useState(formatRelativeTime(session.lastActivity));
 
   // Update runtime and last activity every 10 seconds (reduce flashing)
   useEffect(() => {
     const interval = setInterval(() => {
-      setRuntime(formatSessionRuntime(session.created_at));
-      setLastActivity(formatRelativeTime(session.last_activity));
+      setRuntime(formatSessionRuntime(session.createdAt));
+      setLastActivity(formatRelativeTime(session.lastActivity));
     }, 10000); // 10 seconds instead of 1 second
 
     return () => clearInterval(interval);
-  }, [session.created_at, session.last_activity]);
+  }, [session.createdAt, session.lastActivity]);
 
   const handleTerminate = (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't trigger onSelect
-    if (window.confirm(`Terminate session ${session.session_id}? This will stop the agent.`)) {
-      onTerminate(session.session_id);
+    if (window.confirm(`Terminate session ${session.sessionId}? This will stop the agent.`)) {
+      onTerminate(session.sessionId);
     }
   };
 
   const handleOpenInWindow = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't trigger onSelect
     try {
-      const windowLabel = await createSessionWindow(session.session_id);
-      console.log(`Opened session ${session.session_id} in new window: ${windowLabel}`);
+      const windowLabel = await createSessionWindow(session.sessionId);
+      console.log(`Opened session ${session.sessionId} in new window: ${windowLabel}`);
     } catch (error) {
       console.error('Failed to open session in new window:', error);
       alert(`Failed to open window: ${error}`);
@@ -71,11 +71,11 @@ export const SessionItem = React.memo<SessionItemProps>(({
   };
 
   const handleSelect = () => {
-    onSelect(session.session_id, session.bead_id);
+    onSelect(session.sessionId, session.beadId);
   };
 
   const personaIcon = getPersonaIcon(session.persona);
-  const personaLabel = session.persona.replace('_', ' ').toUpperCase();
+  const personaLabel = session.persona.replace(/-/g, ' ').toUpperCase();
 
   return (
     <div
@@ -83,14 +83,14 @@ export const SessionItem = React.memo<SessionItemProps>(({
         'session-item',
         'group/session-item',
         'cursor-pointer',
-        'transition-all',
+        'transition-colors duration-150',  // Only transition colors, not layout
         isActive && 'session-item-active',
         className
       )}
       onClick={handleSelect}
       role="button"
       tabIndex={0}
-      aria-label={`Session for ${beadTitle} - ${personaLabel} - ${session.backend_id}`}
+      aria-label={`Session for ${beadTitle} - ${personaLabel} - ${session.backendId}`}
       aria-current={isActive ? 'true' : 'false'}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -103,7 +103,7 @@ export const SessionItem = React.memo<SessionItemProps>(({
       <div className="session-item-header">
         <div className="session-item-title">
           {/* Pulsing dot for unread indicator */}
-          {session.has_unread && (
+          {session.hasUnread && (
             <span className="session-unread-dot" aria-label="Has unread messages" title="Unread activity">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
@@ -121,7 +121,7 @@ export const SessionItem = React.memo<SessionItemProps>(({
           <button
             className="session-window-btn"
             onClick={handleOpenInWindow}
-            aria-label={`Open session ${session.session_id} in new window`}
+            aria-label={`Open session ${session.sessionId} in new window`}
             title="Open in new window"
           >
             <ExternalLink size={14} />
@@ -129,7 +129,7 @@ export const SessionItem = React.memo<SessionItemProps>(({
           <button
             className="session-terminate-btn"
             onClick={handleTerminate}
-            aria-label={`Terminate session ${session.session_id}`}
+            aria-label={`Terminate session ${session.sessionId}`}
             title="Terminate session"
           >
             <X size={14} />
@@ -139,7 +139,7 @@ export const SessionItem = React.memo<SessionItemProps>(({
 
       {/* Details: Backend + Runtime + Last Activity */}
       <div className="session-item-details">
-        <span className="session-backend">{session.backend_id}</span>
+        <span className="session-backend">{session.backendId}</span>
         <span className="session-runtime-separator">·</span>
         <span className="session-runtime">{runtime}</span>
         <span className="session-runtime-separator">·</span>
@@ -149,10 +149,10 @@ export const SessionItem = React.memo<SessionItemProps>(({
       </div>
 
       {/* Activity Badge: Message count */}
-      {session.message_count > 0 && (
+      {session.messageCount > 0 && (
         <div className="session-item-status">
-          <span className="session-message-count-badge" title={`${session.message_count} messages`}>
-            {session.message_count} {session.message_count === 1 ? 'message' : 'messages'}
+          <span className="session-message-count-badge" title={`${session.messageCount} messages`}>
+            {session.messageCount} {session.messageCount === 1 ? 'message' : 'messages'}
           </span>
         </div>
       )}

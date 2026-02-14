@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { SessionItem } from './SessionItem';
 import { BeadNode } from '../../api';
@@ -12,7 +12,7 @@ interface SessionListProps {
   beads?: Map<string, BeadNode>;  // For looking up bead titles
 }
 
-export const SessionList: React.FC<SessionListProps> = ({
+const SessionListComponent: React.FC<SessionListProps> = ({
   activeSessionId,
   onSessionSelect,
   onSessionTerminate,
@@ -21,6 +21,8 @@ export const SessionList: React.FC<SessionListProps> = ({
   // Get sessions from Zustand store (no local state or event listeners needed)
   const sessions = useSessionStore(state => state.sessions);
   const [isCollapsed, setIsCollapsed] = useState(false);
+
+  console.log('📋 SessionList render:', { sessionsCount: sessions.length, sessions });
 
   // Get bead title helper
   const getBeadTitle = (beadId: string | null): string => {
@@ -66,3 +68,6 @@ export const SessionList: React.FC<SessionListProps> = ({
     </div>
   );
 };
+
+// Memoize to prevent unnecessary re-renders
+export const SessionList = memo(SessionListComponent);

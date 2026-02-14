@@ -42,6 +42,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   const debugEndRef = useRef<HTMLDivElement>(null);
   const unlistenChunkRef = useRef<(() => void) | undefined>(undefined);
   const unlistenStderrRef = useRef<(() => void) | undefined>(undefined);
+  const isSwitchingSession = useRef(false);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
@@ -59,7 +60,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   };
 
   useEffect(() => {
-    if (!showDebug) {
+    // Don't auto-scroll while switching sessions to prevent aggressive scrolling
+    if (!showDebug && !isSwitchingSession.current) {
       const scrollContainer = messagesEndRef.current?.parentElement;
       if (isNearBottom(scrollContainer)) {
         scrollToBottom('auto'); // Instant scroll, no animation
@@ -71,17 +73,34 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     if (showDebug) scrollDebugToBottom();
   }, [debugLogs, showDebug]);
 
+  // Track previous bead/persona to prevent unnecessary resets
+  const prevContextRef = useRef<string>('');
+
   useEffect(() => {
     if (isOpen) {
-      // Clear state when opening or switching beads
-      setMessages([]);
-      setStreamingMessage('');
-      setDebugLogs(['[System] Starting agent session...']);
+      // Only clear state if context changed (different bead/persona combination)
+      const currentContext = `${beadId}-${persona}-${task}`;
+      const shouldReset = prevContextRef.current !== currentContext;
+      prevContextRef.current = currentContext;
+
+      if (shouldReset) {
+        setMessages([]);
+        setStreamingMessage('');
+        setDebugLogs(['[System] Starting agent session...']);
+      }
 
       const setup = async () => {
+        // Skip if we already have a session for this context
+        if (!shouldReset && sessionId) {
+          console.log('♻️  ChatDialog: Reusing existing session:', sessionId);
+          return;
+        }
+
         try {
+          console.log('🚀 ChatDialog: Starting session with:', { persona, task, beadId, cliBackend, isOpen });
           setIsLoading(true);
           const newSessionId = await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend);
+          console.log('✅ ChatDialog: Session started:', newSessionId);
           setSessionId(newSessionId);
           setDebugLogs(prev => [...prev, `[System] Session ID: ${newSessionId}`]);
 
@@ -98,6 +117,13 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
 
           // Subscribe to session-specific event channel for live updates
           const eventName = `agent-chunk-${newSessionId}`;
+
+          // Clean up any existing listener first to prevent duplicates
+          if (unlistenChunkRef.current) {
+            unlistenChunkRef.current();
+            unlistenChunkRef.current = undefined;
+          }
+
           unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
             const { content, isDone } = event.payload;
 
@@ -106,15 +132,26 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
             }
 
             if (isDone) {
+              // First, capture the current streaming message
               setStreamingMessage((current) => {
                 if (current) {
-                   setMessages(prev => [...prev, { role: 'assistant', content: current }]);
+                  // Add to messages array only if it's not a duplicate
+                  setMessages(prev => {
+                    // Check if the last message is already this content (duplicate prevention)
+                    const lastMsg = prev[prev.length - 1];
+                    if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === current) {
+                      console.warn('Prevented duplicate message from being added');
+                      return prev;
+                    }
+                    return [...prev, { role: 'assistant', content: current }];
+                  });
                 }
+                // Clear streaming message
                 return '';
               });
               setIsLoading(false);
               setDebugLogs(prev => [...prev, '[System] Agent finished response.']);
-            } else {
+            } else if (content) {
               setStreamingMessage((prev) => prev + content);
             }
           });
@@ -192,6 +229,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     if (targetSessionId === sessionId) return; // Same session check
 
     try {
+      // Set flag to prevent aggressive scrolling during session switch
+      isSwitchingSession.current = true;
       setIsLoading(true);
 
       // Clean up old listeners
@@ -207,6 +246,13 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
 
       // Set up new listeners for the target session
       const eventName = `agent-chunk-${targetSessionId}`;
+
+      // Ensure old listener is fully cleaned up before creating new one
+      if (unlistenChunkRef.current) {
+        unlistenChunkRef.current();
+        unlistenChunkRef.current = undefined;
+      }
+
       unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
         const { content, isDone } = event.payload;
 
@@ -215,15 +261,26 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
         }
 
         if (isDone) {
+          // First, capture the current streaming message
           setStreamingMessage((current) => {
             if (current) {
-              setMessages(prev => [...prev, { role: 'assistant', content: current }]);
+              // Add to messages array only if it's not a duplicate
+              setMessages(prev => {
+                // Check if the last message is already this content (duplicate prevention)
+                const lastMsg = prev[prev.length - 1];
+                if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === current) {
+                  console.warn('Prevented duplicate message from being added');
+                  return prev;
+                }
+                return [...prev, { role: 'assistant', content: current }];
+              });
             }
+            // Clear streaming message
             return '';
           });
           setIsLoading(false);
           setDebugLogs(prev => [...prev, '[System] Agent finished response.']);
-        } else {
+        } else if (content) {
           setStreamingMessage((prev) => prev + content);
         }
       });
@@ -263,6 +320,10 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       setDebugLogs(prev => [...prev, `[Error] Switch failed: ${error}`]);
     } finally {
       setIsLoading(false);
+      // Re-enable auto-scroll after a short delay to let history load settle
+      setTimeout(() => {
+        isSwitchingSession.current = false;
+      }, 500);
     }
   };
 
@@ -281,7 +342,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       if (targetSessionId === sessionId) {
         const sessions = await listActiveSessions();
         if (sessions.length > 0) {
-          await handleSessionSwitch(sessions[0].session_id, sessions[0].bead_id);
+          await handleSessionSwitch(sessions[0].sessionId, sessions[0].beadId);
         } else {
           setMessages([]);
           setSessionId(null);
@@ -296,36 +357,47 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   };
 
   const renderContent = (content: string) => {
-    const parts = content.split(/(```[\s\S]*?```|`bd .*?`|^bd .*$)/m);
-    
-    return parts.map((part, index) => {
-      const bdMatch = part.match(/^`?(bd\s+.*?)`?$/m) || part.match(/```(?:\w+)?\n?(bd\s+[\s\S]*?)```/);
-      
-      if (bdMatch) {
-        const command = bdMatch[1].trim();
-        return (
-          <div key={index} className="my-2 p-3 bg-slate-200 dark:bg-slate-900 rounded border border-indigo-500/30">
-            <code className="text-indigo-600 dark:text-indigo-400 font-mono text-sm">{command}</code>
-            <div className="mt-2 flex gap-2">
-              <button 
-                onClick={() => handleApprove(command)}
-                className="text-[10px] font-black uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
-              >
-                Approve
-              </button>
-              <button 
-                className="text-[10px] font-black uppercase tracking-wider bg-slate-300 dark:bg-slate-700 hover:bg-slate-400 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 px-2 py-1 rounded"
-                onClick={() => setInput(command)}
-              >
-                Edit
-              </button>
+    // Check if content contains `bd` commands that need special handling
+    const bdCommandRegex = /<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`/g;
+    const hasBdCommand = bdCommandRegex.test(content);
+
+    if (hasBdCommand) {
+      // Extract and render bd commands with approve/edit buttons
+      const parts = content.split(/(<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`)/g);
+
+      return parts.map((part, index) => {
+        const bdMatch = part.match(/<code>(bd\s+[^<]+)<\/code>/) || part.match(/`(bd\s+[^`]+)`/);
+
+        if (bdMatch) {
+          const command = bdMatch[1].trim();
+          return (
+            <div key={index} className="my-2 p-3 bg-slate-200 dark:bg-slate-900 rounded border border-indigo-500/30">
+              <code className="text-indigo-600 dark:text-indigo-400 font-mono text-sm">{command}</code>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => handleApprove(command)}
+                  className="text-[10px] font-black uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                >
+                  Approve
+                </button>
+                <button
+                  className="text-[10px] font-black uppercase tracking-wider bg-slate-300 dark:bg-slate-700 hover:bg-slate-400 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 px-2 py-1 rounded"
+                  onClick={() => setInput(command)}
+                >
+                  Edit
+                </button>
+              </div>
             </div>
-          </div>
-        );
-      }
-      
-      return <span key={index} className="whitespace-pre-wrap">{part}</span>;
-    });
+          );
+        }
+
+        // Render other HTML parts
+        return <span key={index} dangerouslySetInnerHTML={{ __html: part }} />;
+      });
+    }
+
+    // No bd commands - render HTML directly
+    return <div dangerouslySetInnerHTML={{ __html: content }} className="prose prose-sm dark:prose-invert max-w-none" />;
   };
 
   if (!isOpen) return null;
