@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { SessionInfo, listActiveSessions, onSessionListChanged, UnlistenFn } from '../../api';
 import { SessionItem } from './SessionItem';
 import { BeadNode } from '../../api';
 import { cn } from '../../utils';
+import { useSessionStore } from '../../stores/sessionStore';
 
 interface SessionListProps {
   activeSessionId: string | null;
@@ -18,7 +18,8 @@ export const SessionList: React.FC<SessionListProps> = ({
   onSessionTerminate,
   beads
 }) => {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  // Get sessions from Zustand store (no local state or event listeners needed)
+  const sessions = useSessionStore(state => state.sessions);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Get bead title helper
@@ -26,33 +27,6 @@ export const SessionList: React.FC<SessionListProps> = ({
     if (!beadId) return 'No Bead';
     return beads?.get(beadId)?.title || beadId;
   };
-
-  // Load initial sessions and subscribe to updates
-  useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
-
-    // Load initial session list
-    listActiveSessions().then(initialSessions => {
-      setSessions(initialSessions || []);
-    }).catch(error => {
-      console.error('Failed to load sessions:', error);
-      setSessions([]);
-    });
-
-    // Subscribe to session list changes (event-driven)
-    onSessionListChanged((updatedSessions) => {
-      setSessions(updatedSessions || []);
-    }).then(fn => {
-      unlisten = fn;
-    }).catch(error => {
-      console.error('Failed to subscribe to session changes:', error);
-    });
-
-    // Cleanup: unsubscribe on unmount
-    return () => {
-      unlisten?.();
-    };
-  }, []);
 
   const toggleCollapse = () => {
     setIsCollapsed(!isCollapsed);
@@ -79,10 +53,10 @@ export const SessionList: React.FC<SessionListProps> = ({
         ) : (
           safeSessions.map(session => (
             <SessionItem
-              key={session.session_id}
+              key={session.sessionId}
               session={session}
-              isActive={session.session_id === activeSessionId}
-              beadTitle={getBeadTitle(session.bead_id)}
+              isActive={session.sessionId === activeSessionId}
+              beadTitle={getBeadTitle(session.beadId)}
               onSelect={onSessionSelect}
               onTerminate={onSessionTerminate}
             />

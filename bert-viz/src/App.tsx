@@ -18,13 +18,12 @@ import {
   toggleFavoriteProject,
   getCliPreference,
   type CliBackend,
-  type SessionInfo,
   onBeadsUpdated,
   onProjectsUpdated,
-  onSessionListChanged,
   saveWindowState
 } from "./api";
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { useSessionStore } from "./stores/sessionStore";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -80,8 +79,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Agent Session State
-  const [sessionsByBead, setSessionsByBead] = useState<Record<string, SessionInfo[]>>({});
+  // Agent Session State (from Zustand store - single source of truth)
+  const sessionsByBead = useSessionStore(state => state.sessionsByBead());
 
   // Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -271,6 +270,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         const projs = await fetchProjects();
         setProjects(projs);
 
+        // Initialize session store (loads sessions and sets up event listener)
+        const sessionUnlisten = await useSessionStore.getState().initializeStore();
+
         // Auto-open most recent project if it exists
         const mostRecent = [...projs].sort((a, b) => (b.last_opened || "").localeCompare(a.last_opened || ""))[0];
         if (mostRecent) {
@@ -279,6 +281,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           // No projects - show welcome screen
           setHasProject(false);
         }
+
+        return sessionUnlisten;
       } catch (error) {
         console.error("Initialization failed:", error);
         setHasProject(false);
@@ -288,7 +292,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     };
 
     console.log('🔧 Setting up event listeners...');
-    init();
 
     const unlistenPromises = [
       onBeadsUpdated(() => {
@@ -300,16 +303,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         console.log('🎉 projects-updated event received!');
         loadProjects();
       }),
-      onSessionListChanged((sessions) => {
-        console.log('🎉 session-list-changed event received!', sessions);
-        const grouped: Record<string, SessionInfo[]> = {};
-        sessions.forEach(s => {
-          const key = s.beadId || 'untracked';
-          if (!grouped[key]) grouped[key] = [];
-          grouped[key].push(s);
-        });
-        setSessionsByBead(grouped);
-      })
+      init() // Initialize and add session store cleanup to promises
     ];
 
     return () => {
@@ -317,11 +311,13 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       unlistenPromises.forEach(async (p) => {
         try {
           const unlisten = await p;
-          unlisten();
+          unlisten?.();
         } catch (err) {
           console.error('❌ Failed to unlisten:', err);
         }
       });
+      // Cleanup session store
+      useSessionStore.getState().cleanup();
     };
   }, [handleOpenProject, loadData, loadProjects]);
 
