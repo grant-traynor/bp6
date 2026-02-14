@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+use std::fs;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// WindowInfo contains metadata about a session window
@@ -135,13 +137,35 @@ pub async fn create_session_window(
         }
     }
 
+    // Load saved window state if it exists
+    let saved_state = load_window_state(session_id.clone()).await.ok().flatten();
+
     // Create new window with session context
     let url = WebviewUrl::App(format!("index.html?session_id={}", session_id).into());
 
-    let _window = WebviewWindowBuilder::new(&app, &window_label, url)
+    // Build window with saved state or defaults
+    let mut builder = WebviewWindowBuilder::new(&app, &window_label, url)
         .title(format!("Agent Session - {}", session_id))
-        .inner_size(800.0, 600.0)
-        .resizable(true)
+        .resizable(true);
+
+    // Apply saved state if available
+    if let Some(state) = saved_state {
+        eprintln!("📍 Restoring window state: x={}, y={}, w={}, h={}, maximized={}",
+                  state.x, state.y, state.width, state.height, state.is_maximized);
+
+        builder = builder
+            .position(state.x as f64, state.y as f64)
+            .inner_size(state.width as f64, state.height as f64);
+
+        if state.is_maximized {
+            builder = builder.maximized(true);
+        }
+    } else {
+        // Default size if no saved state
+        builder = builder.inner_size(800.0, 600.0);
+    }
+
+    let _window = builder
         .build()
         .map_err(|e| format!("Failed to create window: {}", e))?;
 
@@ -225,6 +249,135 @@ pub async fn list_session_windows(
 ) -> Result<Vec<WindowInfo>, String> {
     let registry = app.state::<WindowRegistry>();
     Ok(registry.get_all_windows())
+}
+
+// ============================================================================
+// Window State Persistence
+// ============================================================================
+
+/// Window state for persistence across app restarts
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowState {
+    pub session_id: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub is_maximized: bool,
+    pub last_updated: u64,
+}
+
+/// Get the path to the window state file (~/.bp6/window-state.json)
+fn get_window_state_file_path() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+    let bp6_dir = home.join(".bp6");
+
+    // Ensure directory exists
+    if !bp6_dir.exists() {
+        fs::create_dir_all(&bp6_dir)
+            .map_err(|e| format!("Failed to create .bp6 directory: {}", e))?;
+    }
+
+    Ok(bp6_dir.join("window-state.json"))
+}
+
+/// Load all window states from disk
+fn load_window_states() -> Result<HashMap<String, WindowState>, String> {
+    let path = get_window_state_file_path()?;
+
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+
+    let contents = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read window state file: {}", e))?;
+
+    serde_json::from_str(&contents)
+        .map_err(|e| format!("Failed to parse window state file: {}", e))
+}
+
+/// Save all window states to disk
+fn save_window_states(states: &HashMap<String, WindowState>) -> Result<(), String> {
+    let path = get_window_state_file_path()?;
+
+    let contents = serde_json::to_string_pretty(states)
+        .map_err(|e| format!("Failed to serialize window states: {}", e))?;
+
+    fs::write(&path, contents)
+        .map_err(|e| format!("Failed to write window state file: {}", e))
+}
+
+/// Clean up stale window states (sessions closed > 30 days ago)
+fn cleanup_stale_states(states: &mut HashMap<String, WindowState>) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let thirty_days_seconds = 30 * 24 * 60 * 60;
+
+    states.retain(|_, state| {
+        now - state.last_updated < thirty_days_seconds
+    });
+}
+
+/// Save window state for a session
+///
+/// # Arguments
+/// * `session_id` - The session ID
+/// * `x` - Window X position
+/// * `y` - Window Y position
+/// * `width` - Window width
+/// * `height` - Window height
+/// * `is_maximized` - Whether window is maximized
+#[tauri::command]
+pub async fn save_window_state(
+    session_id: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    is_maximized: bool,
+) -> Result<(), String> {
+    let mut states = load_window_states()?;
+
+    // Cleanup stale entries before saving
+    cleanup_stale_states(&mut states);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    states.insert(session_id.clone(), WindowState {
+        session_id,
+        x,
+        y,
+        width,
+        height,
+        is_maximized,
+        last_updated: now,
+    });
+
+    save_window_states(&states)?;
+
+    Ok(())
+}
+
+/// Load window state for a session
+///
+/// # Arguments
+/// * `session_id` - The session ID to load state for
+///
+/// # Returns
+/// Optional WindowState if saved state exists
+#[tauri::command]
+pub async fn load_window_state(
+    session_id: String,
+) -> Result<Option<WindowState>, String> {
+    let states = load_window_states()?;
+    Ok(states.get(&session_id).cloned())
 }
 
 #[cfg(test)]

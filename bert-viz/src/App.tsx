@@ -1,28 +1,30 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
 import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, PanelRight } from "lucide-react";
 import { cn } from "./utils";
-import { 
-  fetchProjectViewModel, 
-  updateBead, 
-  createBead, 
-  closeBead, 
-  reopenBead, 
-  claimBead, 
-  beadNodeToBead, 
-  type BeadNode, 
-  type Project, 
-  type ProjectViewModel, 
-  fetchProjects, 
-  removeProject, 
-  openProject, 
-  toggleFavoriteProject, 
-  getCliPreference, 
-  type CliBackend, 
+import {
+  fetchProjectViewModel,
+  updateBead,
+  createBead,
+  closeBead,
+  reopenBead,
+  claimBead,
+  beadNodeToBead,
+  type BeadNode,
+  type Project,
+  type ProjectViewModel,
+  fetchProjects,
+  removeProject,
+  openProject,
+  toggleFavoriteProject,
+  getCliPreference,
+  type CliBackend,
   type SessionInfo,
   onBeadsUpdated,
   onProjectsUpdated,
-  onSessionListChanged
+  onSessionListChanged,
+  saveWindowState
 } from "./api";
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -101,6 +103,57 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   // Note: Full session connection implementation is in bp6-643.005.4
   if (isSessionWindow && sessionId) {
     console.log('📱 Session window mode:', { sessionId, windowLabel });
+
+    // Window state persistence hook (bp6-643.005.5)
+    useEffect(() => {
+      const saveCurrentState = async () => {
+        try {
+          const window = getCurrentWindow();
+          const position = await window.outerPosition();
+          const size = await window.outerSize();
+          const isMaximized = await window.isMaximized();
+
+          await saveWindowState(
+            sessionId,
+            position.x,
+            position.y,
+            size.width,
+            size.height,
+            isMaximized
+          );
+        } catch (error) {
+          console.error('Failed to save window state:', error);
+        }
+      };
+
+      // Debounced save - wait 500ms after last event
+      let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+      const debouncedSave = () => {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(saveCurrentState, 500);
+      };
+
+      // Listen to window resize and move events
+      let unlistenResize: (() => void) | null = null;
+      let unlistenMove: (() => void) | null = null;
+
+      const setupListeners = async () => {
+        const window = getCurrentWindow();
+        unlistenResize = await window.onResized(debouncedSave);
+        unlistenMove = await window.onMoved(debouncedSave);
+      };
+
+      setupListeners();
+
+      // Cleanup: save final state on unmount (window close)
+      return () => {
+        if (saveTimeout) clearTimeout(saveTimeout);
+        if (unlistenResize) unlistenResize();
+        if (unlistenMove) unlistenMove();
+        // Save final state synchronously
+        saveCurrentState();
+      };
+    }, [sessionId]);
 
     return (
       <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans">

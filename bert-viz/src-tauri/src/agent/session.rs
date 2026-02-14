@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::time::SystemTime;
 use std::path::PathBuf;
 use std::fs::{self, File};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -789,6 +789,24 @@ pub fn terminate_session(
     session_id: String,
     state: State<'_, AgentState>,
 ) -> Result<(), String> {
+    eprintln!("🗑️  Terminating session: {}", session_id);
+
+    // Close any windows associated with this session (before terminating)
+    // Get WindowRegistry from app state
+    if let Some(window_registry) = app_handle.try_state::<crate::window::WindowRegistry>() {
+        if let Some(window_label) = window_registry.get_window_label(&session_id) {
+            eprintln!("  🪟 Closing window for session: {}", window_label);
+
+            // Close the window
+            if let Some(window) = app_handle.get_webview_window(&window_label) {
+                let _ = window.close();
+            }
+
+            // Unregister from WindowRegistry
+            window_registry.unregister_by_session(&session_id);
+        }
+    }
+
     // Remove session and get the process handle
     let child = {
         let mut sessions = state.sessions.lock().unwrap();

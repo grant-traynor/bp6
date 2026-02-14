@@ -344,6 +344,51 @@ export async function createSessionWindow(sessionId: string): Promise<string> {
 }
 
 // ============================================================================
+// Window State Persistence (bp6-643.005.5)
+// ============================================================================
+
+export interface WindowState {
+  sessionId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isMaximized: boolean;
+  lastUpdated: number;
+}
+
+/**
+ * Save window state for a session
+ */
+export async function saveWindowState(
+  sessionId: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  isMaximized: boolean
+): Promise<void> {
+  try {
+    await invoke('save_window_state', { sessionId, x, y, width, height, isMaximized });
+  } catch (error) {
+    console.error('Failed to save window state:', error);
+    throw error;
+  }
+}
+
+/**
+ * Load window state for a session
+ */
+export async function loadWindowState(sessionId: string): Promise<WindowState | null> {
+  try {
+    return await invoke<WindowState | null>('load_window_state', { sessionId });
+  } catch (error) {
+    console.error('Failed to load window state:', error);
+    return null;
+  }
+}
+
+// ============================================================================
 // Session History API (bp6-643.004.5)
 // ============================================================================
 

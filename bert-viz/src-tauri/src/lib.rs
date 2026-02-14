@@ -2172,7 +2172,8 @@ pub fn run() {
             agent::session::start_agent_session, agent::session::send_agent_message, agent::session::stop_agent_session, agent::session::approve_suggestion,
             agent::session::list_active_sessions, agent::session::get_active_session_id, agent::session::switch_active_session, agent::session::terminate_session,
             settings::get_cli_preference, settings::set_cli_preference,
-            window::create_session_window, window::get_window_session_id, window::close_session_window, window::list_session_windows
+            window::create_session_window, window::get_window_session_id, window::close_session_window, window::list_session_windows,
+            window::save_window_state, window::load_window_state
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -2185,7 +2186,8 @@ pub fn run() {
             app.manage(SettingsState::new());
 
             // Initialize window registry
-            app.manage(window::WindowRegistry::new());
+            let window_registry = window::WindowRegistry::new();
+            app.manage(window_registry);
 
             // Initialize file watcher (lazy - will watch when first project is opened)
             let beads_watcher = BeadsWatcher::new(handle.clone())
@@ -2223,6 +2225,27 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Handle window close events for cleanup
+            if let tauri::WindowEvent::Destroyed = event {
+                let window_label = window.label();
+                eprintln!("🗑️  Window closed: {}", window_label);
+
+                // Get WindowRegistry and unregister this window
+                let app_handle = window.app_handle();
+                if let Some(registry) = app_handle.try_state::<window::WindowRegistry>() {
+                    if let Some(session_id) = registry.unregister_by_window(window_label) {
+                        eprintln!("  ✅ Unregistered window for session: {}", session_id);
+
+                        // Emit window-closed event for UI sync
+                        let _ = app_handle.emit(
+                            "window-closed",
+                            serde_json::json!({ "sessionId": session_id, "windowLabel": window_label }),
+                        );
+                    }
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
