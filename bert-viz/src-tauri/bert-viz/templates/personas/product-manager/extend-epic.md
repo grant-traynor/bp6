@@ -20,14 +20,23 @@ Based on new requirements or insights:
 
 ## Output Format
 
+For new features, use `bd create` to create them:
+
+```bash
+bd create --title="Feature title" --type=feature --priority=1 --parent={{feature_id}}
+```
+
+**CRITICAL**: Always use `--parent={{feature_id}}` to make new features children of the epic being extended.
+
 For proposed extensions:
 - **New Features**: Features to add (with full feature specification)
-- **Modified Features**: Existing features that need scope changes
-- **Dependency Updates**: New blocking relationships
+- **Modified Features**: Existing features that need scope changes (use `bd update <feature-id>`)
+- **Dependency Updates**: New blocking relationships (use `bd dep add <feature> <depends-on>`)
 - **Priority Assessment**: Impact on critical path
 
 ## Guidelines
 
+- **ALWAYS set `--parent={{feature_id}}`** when creating new features - this is mandatory for proper work breakdown structure
 - Maintain the epic's original vision and goals
 - Consider impact on existing features and dependencies
 - Think about whether extensions belong in this epic or a new one

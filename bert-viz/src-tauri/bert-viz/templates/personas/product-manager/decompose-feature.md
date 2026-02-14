@@ -20,12 +20,20 @@ Decompose the feature into 3-10 granular tasks that:
 
 ## Output Format
 
+For each task, use `bd create` to create the task:
+
+```bash
+bd create --title="Task title" --type=task --priority=1 --parent={{feature_id}}
+```
+
+**CRITICAL**: Always use `--parent={{feature_id}}` to make each task a child of the feature being decomposed.
+
 For each task, provide:
 - **Title**: Specific, implementation-focused (e.g., "Add user_id column to profiles table")
 - **Description**: Technical details of what to implement
 - **Acceptance Criteria**: Code-level verification (e.g., "Column exists in schema, migration runs successfully")
 - **Files/Components**: Which parts of the codebase will change
-- **Dependencies**: Which tasks must complete first
+- **Dependencies**: Which tasks must complete first (use `bd dep add <task> <depends-on>` after creation)
 
 ## Task Types to Consider
 
@@ -37,10 +45,12 @@ For each task, provide:
 
 ## Guidelines
 
+- **ALWAYS set `--parent={{feature_id}}`** when creating tasks - this is mandatory for proper work breakdown structure
 - Each task should modify 1-3 files ideally
 - Define task boundaries clearly to avoid scope creep
 - Consider rollback/migration strategies for DB changes
 - Think about error handling and edge cases
 - Include testing as separate tasks, not afterthoughts
+- Use `bd dep add` to set task-to-task dependencies AFTER creating all tasks
 
 Review the feature context below and propose the task breakdown.

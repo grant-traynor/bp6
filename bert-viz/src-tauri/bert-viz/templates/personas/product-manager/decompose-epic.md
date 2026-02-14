@@ -20,19 +20,29 @@ Break down the epic into 3-8 features that:
 
 ## Output Format
 
+For each feature, use `bd create` to create the feature:
+
+```bash
+bd create --title="Feature title" --type=feature --priority=1 --parent={{feature_id}}
+```
+
+**CRITICAL**: Always use `--parent={{feature_id}}` to make each feature a child of the epic being decomposed.
+
 For each feature, provide:
 - **Title**: Clear, action-oriented feature name
 - **Description**: What does this feature do and why?
 - **Acceptance Criteria**: Specific, testable success conditions
-- **Dependencies**: Which other features must be complete first?
+- **Dependencies**: Which other features must be complete first? (use `bd dep add <feature> <depends-on>` after creation)
 - **Priority**: Critical path vs. nice-to-have
 
 ## Guidelines
 
+- **ALWAYS set `--parent={{feature_id}}`** when creating features - this is mandatory for proper work breakdown structure
 - Keep features small enough to complete in 1-3 days
 - Ensure each feature delivers testable value
 - Minimize inter-feature dependencies where possible
 - Consider technical architecture and data model implications
 - Think about testing and quality assurance needs
+- Use `bd dep add` to set feature-to-feature dependencies AFTER creating all features
 
 Begin by reviewing the epic context below, then propose the feature breakdown.

@@ -20,13 +20,22 @@ Based on implementation discoveries or new requirements:
 
 ## Output Format
 
+For new tasks, use `bd create` to create them:
+
+```bash
+bd create --title="Task title" --type=task --priority=1 --parent={{feature_id}}
+```
+
+**CRITICAL**: Always use `--parent={{feature_id}}` to make new tasks children of the feature being extended.
+
 - **New Tasks**: Additional tasks with full specification
-- **Modified Tasks**: Changes to existing tasks (describe what changed and why)
-- **Dependency Updates**: New or changed blocking relationships
+- **Modified Tasks**: Changes to existing tasks (use `bd update <task-id>` to modify)
+- **Dependency Updates**: New or changed blocking relationships (use `bd dep add <task> <depends-on>`)
 - **Acceptance Criteria Updates**: Changes to feature-level success criteria
 
 ## Guidelines
 
+- **ALWAYS set `--parent={{feature_id}}`** when creating new tasks - this is mandatory for proper work breakdown structure
 - Keep tasks granular (2-6 hours each)
 - Don't expand scope unnecessarily
 - Consider if changes belong in this feature or a new one
