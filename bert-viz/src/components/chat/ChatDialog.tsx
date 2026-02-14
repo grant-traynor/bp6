@@ -43,16 +43,28 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   const unlistenChunkRef = useRef<(() => void) | undefined>(undefined);
   const unlistenStderrRef = useRef<(() => void) | undefined>(undefined);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
   };
 
   const scrollDebugToBottom = () => {
-    debugEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    debugEndRef.current?.scrollIntoView({ behavior: 'auto' });
+  };
+
+  // Only auto-scroll if user is already at bottom (within 100px threshold)
+  const isNearBottom = (element: HTMLElement | null | undefined) => {
+    if (!element) return true;
+    const threshold = 100;
+    return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
   };
 
   useEffect(() => {
-    if (!showDebug) scrollToBottom();
+    if (!showDebug) {
+      const scrollContainer = messagesEndRef.current?.parentElement;
+      if (isNearBottom(scrollContainer)) {
+        scrollToBottom('auto'); // Instant scroll, no animation
+      }
+    }
   }, [messages, streamingMessage, showDebug]);
 
   useEffect(() => {
