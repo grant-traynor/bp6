@@ -2,9 +2,10 @@ import { cn } from "../../utils";
 
 interface ResizeHandleProps {
   className?: string;
+  onMouseDown?: (e: React.MouseEvent) => void;
 }
 
-export const ResizeHandle = ({ className }: ResizeHandleProps) => {
+export const ResizeHandle = ({ className, onMouseDown }: ResizeHandleProps) => {
   return (
     <div
       className={cn(
@@ -13,6 +14,7 @@ export const ResizeHandle = ({ className }: ResizeHandleProps) => {
       )}
       style={{ width: '4px' }}
       title="Drag to resize"
+      onMouseDown={onMouseDown}
     >
       {/* Visual indicator dots on hover */}
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 opacity-0 hover:opacity-100 transition-opacity">

@@ -50,7 +50,7 @@ export const WBSTreeItem = ({
       data-bead-id={node.id}
       data-testid={`bead-item-${node.id}`}
       className={cn(
-        "select-none h-[48px] flex flex-col justify-center border-b border-[var(--border-primary)]/50 relative transition-colors duration-200",
+        "h-[48px] flex flex-col justify-center border-b border-[var(--border-primary)]/50 relative transition-colors duration-200",
         isSelected ? "bg-[var(--accent-primary)]/10" : ""
       )}
       style={{ backgroundColor: !isSelected ? `var(--level-${Math.min(depth, 4)})` : undefined }}

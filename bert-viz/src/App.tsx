@@ -20,9 +20,11 @@ import {
   type CliBackend,
   onBeadsUpdated,
   onProjectsUpdated,
-  saveWindowState
+  saveWindowState,
+  loadStartupState,
+  saveStartupState,
 } from "./api";
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window';
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
 import './stores/sessionStoreDiagnostics'; // Enable diagnostics
 
@@ -218,6 +220,11 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'none'>('none');
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  // WBS Panel resize state (bp6-j33p.5.2)
+  const [panelWidth, setPanelWidth] = useState(300);
+  const MIN_PANEL_WIDTH = 200;
+  const MAX_PANEL_WIDTH = 600;
+
   // The view model tree already includes isExpanded and isVisible state from backend
   // No need for complex frontend processing - just access viewModel.tree directly
 
@@ -271,7 +278,40 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
     const init = async () => {
       try {
-        // Load projects list from ~/.bert-viz/projects.json
+        // Load startup state from ~/.bp6/startup.json (bp6-j33p.2.4)
+        const startupState = await loadStartupState();
+        if (startupState) {
+          console.log('✅ Loaded startup state:', startupState);
+
+          // Restore window state
+          const window = getCurrentWindow();
+          if (startupState.window.isMaximized) {
+            await window.maximize();
+          } else {
+            if (startupState.window.x !== undefined && startupState.window.y !== undefined) {
+              await window.setPosition(new PhysicalPosition(startupState.window.x, startupState.window.y));
+            }
+            await window.setSize(new PhysicalSize(startupState.window.width, startupState.window.height));
+          }
+
+          // Restore filter state
+          setFilterText(startupState.filters.filterText);
+          setHideClosed(startupState.filters.hideClosed);
+          setClosedTimeFilter(startupState.filters.closedTimeFilter as ClosedTimeFilter);
+          setIncludeHierarchy(startupState.filters.includeHierarchy);
+
+          // Restore sort state
+          setSortBy(startupState.sort.sortBy as any);
+          setSortOrder(startupState.sort.sortOrder as any);
+
+          // Restore UI state
+          setZoom(startupState.ui.zoom);
+          setCollapsedIds(new Set(startupState.ui.collapsedIds));
+        } else {
+          console.log('📂 No startup state file found, using defaults');
+        }
+
+        // Load projects list from ~/.bp6/projects.json
         const projs = await fetchProjects();
         setProjects(projs);
 
@@ -341,6 +381,79 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     };
     loadCliPreference();
   }, []);
+
+  // Main window state persistence (bp6-j33p.2.2)
+  // Save window position/size on resize/move with 500ms debounce
+  useEffect(() => {
+    // Only set up for main window (not session windows)
+    if (isSessionWindow) return;
+
+    const saveCurrentWindowState = async () => {
+      try {
+        const window = getCurrentWindow();
+        const position = await window.outerPosition();
+        const size = await window.outerSize();
+        const isMaximized = await window.isMaximized();
+
+        // Build complete startup state by merging current UI state with new window state
+        const state = {
+          window: {
+            width: size.width,
+            height: size.height,
+            x: position.x,
+            y: position.y,
+            isMaximized
+          },
+          filters: {
+            filterText,
+            hideClosed,
+            closedTimeFilter,
+            includeHierarchy
+          },
+          sort: {
+            sortBy,
+            sortOrder
+          },
+          ui: {
+            zoom,
+            collapsedIds: Array.from(collapsedIds)
+          }
+        };
+
+        await saveStartupState(state);
+      } catch (error) {
+        console.error('Failed to save main window state:', error);
+      }
+    };
+
+    // Debounced save - wait 500ms after last event
+    let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+    const debouncedSave = () => {
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = setTimeout(saveCurrentWindowState, 500);
+    };
+
+    // Listen to window resize and move events
+    let unlistenResize: (() => void) | null = null;
+    let unlistenMove: (() => void) | null = null;
+
+    const setupListeners = async () => {
+      const window = getCurrentWindow();
+      unlistenResize = await window.onResized(debouncedSave);
+      unlistenMove = await window.onMoved(debouncedSave);
+    };
+
+    setupListeners();
+
+    // Cleanup
+    return () => {
+      if (saveTimeout) clearTimeout(saveTimeout);
+      if (unlistenResize) unlistenResize();
+      if (unlistenMove) unlistenMove();
+      // Save final state on unmount (window close)
+      saveCurrentWindowState();
+    };
+  }, [isSessionWindow, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds]);
 
   // Helper: Flatten tree to array of beads for backward compatibility
   const flattenTree = useCallback((nodes: BeadNode[]): BeadNode[] => {
@@ -551,6 +664,50 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     localStorage.setItem("closedTimeFilter", closedTimeFilter);
   }, [closedTimeFilter]);
 
+  // Save filter and sort state to startup.json (bp6-j33p.2.3)
+  useEffect(() => {
+    // Skip saving during initial load
+    if (!hasProject) return;
+
+    const saveState = async () => {
+      try {
+        // Get current window state
+        const window = getCurrentWindow();
+        const position = await window.outerPosition();
+        const size = await window.outerSize();
+        const isMaximized = await window.isMaximized();
+
+        await saveStartupState({
+          window: {
+            width: size.width,
+            height: size.height,
+            x: position.x,
+            y: position.y,
+            isMaximized
+          },
+          filters: {
+            filterText: filterText,
+            hideClosed: hideClosed,
+            closedTimeFilter: closedTimeFilter,
+            includeHierarchy: includeHierarchy
+          },
+          sort: {
+            sortBy: sortBy,
+            sortOrder: sortOrder
+          },
+          ui: {
+            zoom: zoom,
+            collapsedIds: Array.from(collapsedIds)
+          }
+        });
+      } catch (error) {
+        console.error('Failed to save startup state:', error);
+      }
+    };
+
+    saveState();
+  }, [hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, filterText, zoom, collapsedIds, hasProject]);
+
   useEffect(() => {
     if (isDark) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
@@ -709,6 +866,28 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   };
 
+  // WBS Panel resize drag handler (bp6-j33p.5.2)
+  // TODO: Wire this up to ResizeHandle component
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handlePanelResizeStart = useCallback((e: React.MouseEvent) => {
+    const startX = e.clientX;
+    const startWidth = panelWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, startWidth + delta));
+      setPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }, [panelWidth, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH]);
+
   useEffect(() => {
     if (!loading) {
       const savedScroll = localStorage.getItem("scrollTop");
@@ -845,7 +1024,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
-                <div className="w-[40%] min-w-[525px] border-r-2 border-[var(--border-primary)] flex flex-col">
+                <div className="border-r-2 border-[var(--border-primary)] flex flex-col" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
                   <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
                     <h2 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Task Breakdown</h2>
                     <div className="flex items-center gap-1">
@@ -927,7 +1106,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 </div>
               </div>
               <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
-                <div className="w-[40%] min-w-[525px] border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em] select-none">
+                <div className="border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em] select-none" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
                   <div className="w-10 shrink-0" />
                   <div 
                     className={cn(
@@ -987,7 +1166,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 </div>
               </div>
               <div className="flex-1 flex overflow-hidden">
-                <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="w-[40%] border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[525px] overflow-y-auto custom-scrollbar relative">
+                <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] overflow-y-auto custom-scrollbar relative" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
                   <div className="p-0">
                     {(loading || processingData) ? <WBSSkeleton /> : (
                       <div className="flex flex-col">
@@ -1001,7 +1180,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                       </div>
                     )}
                   </div>
-                  <ResizeHandle />
+                  <ResizeHandle onMouseDown={handlePanelResizeStart} />
                 </div>
                 <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
                   <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>

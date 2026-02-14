@@ -384,6 +384,66 @@ export interface WindowState {
   lastUpdated: number;
 }
 
+// ============================================================================
+// Startup State Persistence (bp6-j33p.2)
+// ============================================================================
+
+export interface MainWindowState {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  isMaximized: boolean;
+}
+
+export interface FilterStateData {
+  filterText: string;
+  hideClosed: boolean;
+  closedTimeFilter: string;
+  includeHierarchy: boolean;
+}
+
+export interface SortStateData {
+  sortBy: string;
+  sortOrder: string;
+}
+
+export interface UiStateData {
+  zoom: number;
+  collapsedIds: string[];
+}
+
+export interface StartupState {
+  window: MainWindowState;
+  filters: FilterStateData;
+  sort: SortStateData;
+  ui: UiStateData;
+}
+
+/**
+ * Load startup state from ~/.bp6/startup.json
+ */
+export async function loadStartupState(): Promise<StartupState | null> {
+  try {
+    return await invoke<StartupState | null>('load_startup_state');
+  } catch (error) {
+    console.error('Failed to load startup state:', error);
+    return null;
+  }
+}
+
+/**
+ * Save startup state to ~/.bp6/startup.json
+ */
+export async function saveStartupState(state: StartupState): Promise<void> {
+  try {
+    await invoke('save_startup_state', { state });
+  } catch (error) {
+    console.error('Failed to save startup state:', error);
+    throw error;
+  }
+}
+
 /**
  * Save window state for a session
  */

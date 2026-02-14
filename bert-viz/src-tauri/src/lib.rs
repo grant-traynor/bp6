@@ -2042,6 +2042,39 @@ fn generate_gantt_layout(
     }
 }
 
+/// Migrate projects.json from ~/.bert_viz to ~/.bp6 if needed
+fn migrate_projects_file(new_path: &PathBuf) -> Result<(), String> {
+    // Only migrate if the new file doesn't exist yet
+    if new_path.exists() {
+        return Ok(());
+    }
+
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Could not locate home directory for migration".to_string())?;
+
+    let old_path = PathBuf::from(home).join(".bert_viz").join("projects.json");
+
+    // If old file doesn't exist, nothing to migrate
+    if !old_path.exists() {
+        eprintln!("ℹ️  No existing ~/.bert_viz/projects.json found - starting fresh");
+        return Ok(());
+    }
+
+    // Copy the old file to the new location
+    match std::fs::copy(&old_path, new_path) {
+        Ok(bytes) => {
+            eprintln!("✅ Migrated {} bytes from {} to {}", bytes, old_path.display(), new_path.display());
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("⚠️  Failed to migrate projects.json from {} to {}: {}", old_path.display(), new_path.display(), e);
+            eprintln!("   Continuing with empty projects list");
+            Ok(()) // Don't fail the entire operation
+        }
+    }
+}
+
 fn get_projects_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -2051,7 +2084,13 @@ fn get_projects_path() -> Result<PathBuf, String> {
     if !dir.exists() {
         std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create directory {}: {}", dir.display(), e))?;
     }
-    Ok(dir.join("projects.json"))
+
+    let projects_path = dir.join("projects.json");
+
+    // Attempt migration on first run
+    migrate_projects_file(&projects_path)?;
+
+    Ok(projects_path)
 }
 
 #[tauri::command]
