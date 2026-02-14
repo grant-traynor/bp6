@@ -117,6 +117,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
 
   useEffect(() => {
     if (isOpen) {
+      // Reset drag state when dialog opens to prevent layout issues
+      setIsDragging(false);
+
       // Only clear state if context changed (different bead/persona combination)
       const currentContext = `${beadId}-${persona}-${task}`;
       const shouldReset = prevContextRef.current !== currentContext;
@@ -443,7 +446,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
 
   return (
     <div
-      className="fixed w-[650px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
+      className="fixed w-[650px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
       style={{
         left: `${position.x}px`,
         top: `${position.y}px`
