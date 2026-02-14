@@ -15,6 +15,8 @@ import {
 import { listen } from '@tauri-apps/api/event';
 import { Terminal, MessageSquare, Trash2, X, Square } from 'lucide-react';
 import { SessionList } from '../session/SessionList';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -400,15 +402,15 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
 
   const renderContent = (content: string) => {
     // Check if content contains `bd` commands that need special handling
-    const bdCommandRegex = /<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`/g;
+    const bdCommandRegex = /`bd\s+[^`]+`/g;
     const hasBdCommand = bdCommandRegex.test(content);
 
     if (hasBdCommand) {
       // Extract and render bd commands with approve/edit buttons
-      const parts = content.split(/(<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`)/g);
+      const parts = content.split(/(`bd\s+[^`]+`)/g);
 
       return parts.map((part, index) => {
-        const bdMatch = part.match(/<code>(bd\s+[^<]+)<\/code>/) || part.match(/`(bd\s+[^`]+)`/);
+        const bdMatch = part.match(/`(bd\s+[^`]+)`/);
 
         if (bdMatch) {
           const command = bdMatch[1].trim();
@@ -433,13 +435,25 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
           );
         }
 
-        // Render other HTML parts
-        return <span key={index} dangerouslySetInnerHTML={{ __html: part }} />;
+        // Render other markdown parts
+        return (
+          <div key={index} className="prose prose-sm dark:prose-invert max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {part}
+            </ReactMarkdown>
+          </div>
+        );
       });
     }
 
-    // No bd commands - render HTML directly
-    return <div dangerouslySetInnerHTML={{ __html: content }} className="prose prose-sm dark:prose-invert max-w-none" />;
+    // No bd commands - render markdown directly
+    return (
+      <div className="prose prose-sm dark:prose-invert max-w-none">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    );
   };
 
   if (!isOpen) return null;
