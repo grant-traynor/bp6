@@ -1,0 +1,265 @@
+/// Window management module for multi-window session support
+///
+/// This module provides Tauri commands to create, manage, and track session-specific windows.
+/// Each window is associated with a session ID and can display an independent agent conversation.
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// WindowInfo contains metadata about a session window
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowInfo {
+    pub window_label: String,
+    pub session_id: String,
+    pub created_at: String,
+}
+
+/// WindowRegistry tracks session ID to window label mappings
+/// Thread-safe using RwLock for concurrent access
+pub struct WindowRegistry {
+    /// Map from session_id to window_label
+    session_to_window: Arc<RwLock<HashMap<String, String>>>,
+    /// Map from window_label to session_id (reverse lookup)
+    window_to_session: Arc<RwLock<HashMap<String, String>>>,
+}
+
+impl WindowRegistry {
+    pub fn new() -> Self {
+        WindowRegistry {
+            session_to_window: Arc::new(RwLock::new(HashMap::new())),
+            window_to_session: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Register a new window-session mapping
+    pub fn register(&self, session_id: String, window_label: String) {
+        let mut session_map = self.session_to_window.write().unwrap();
+        let mut window_map = self.window_to_session.write().unwrap();
+
+        session_map.insert(session_id.clone(), window_label.clone());
+        window_map.insert(window_label, session_id);
+    }
+
+    /// Unregister a window by session ID
+    pub fn unregister_by_session(&self, session_id: &str) -> Option<String> {
+        let mut session_map = self.session_to_window.write().unwrap();
+        let mut window_map = self.window_to_session.write().unwrap();
+
+        if let Some(window_label) = session_map.remove(session_id) {
+            window_map.remove(&window_label);
+            Some(window_label)
+        } else {
+            None
+        }
+    }
+
+    /// Unregister a window by window label
+    #[allow(dead_code)]
+    pub fn unregister_by_window(&self, window_label: &str) -> Option<String> {
+        let mut session_map = self.session_to_window.write().unwrap();
+        let mut window_map = self.window_to_session.write().unwrap();
+
+        if let Some(session_id) = window_map.remove(window_label) {
+            session_map.remove(&session_id);
+            Some(session_id)
+        } else {
+            None
+        }
+    }
+
+    /// Get window label for a session ID
+    pub fn get_window_label(&self, session_id: &str) -> Option<String> {
+        let session_map = self.session_to_window.read().unwrap();
+        session_map.get(session_id).cloned()
+    }
+
+    /// Get session ID for a window label
+    pub fn get_session_id(&self, window_label: &str) -> Option<String> {
+        let window_map = self.window_to_session.read().unwrap();
+        window_map.get(window_label).cloned()
+    }
+
+    /// Get all window-session mappings
+    pub fn get_all_windows(&self) -> Vec<WindowInfo> {
+        let window_map = self.window_to_session.read().unwrap();
+        window_map
+            .iter()
+            .map(|(window_label, session_id)| WindowInfo {
+                window_label: window_label.clone(),
+                session_id: session_id.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            })
+            .collect()
+    }
+
+    /// Check if a session already has a window
+    pub fn has_window_for_session(&self, session_id: &str) -> bool {
+        let session_map = self.session_to_window.read().unwrap();
+        session_map.contains_key(session_id)
+    }
+}
+
+/// Create a new window for a specific session
+///
+/// # Arguments
+/// * `app` - Tauri AppHandle
+/// * `session_id` - UUID of the session to display in this window
+///
+/// # Returns
+/// The window label (e.g., "agent-session-{uuid}")
+#[tauri::command]
+pub async fn create_session_window(
+    app: AppHandle,
+    session_id: String,
+) -> Result<String, String> {
+    eprintln!("🪟 create_session_window: session_id={}", session_id);
+
+    // Generate window label from session ID
+    let window_label = format!("agent-session-{}", session_id);
+
+    // Get WindowRegistry from managed state
+    let registry = app.state::<WindowRegistry>();
+
+    // Check if window already exists for this session (duplicate prevention)
+    if registry.has_window_for_session(&session_id) {
+        let existing_label = registry.get_window_label(&session_id).unwrap();
+        eprintln!("⚠️  Window already exists for session {}: {}", session_id, existing_label);
+
+        // Try to focus existing window
+        if let Some(window) = app.get_webview_window(&existing_label) {
+            let _ = window.set_focus();
+            return Ok(existing_label);
+        }
+    }
+
+    // Create new window with session context
+    let url = WebviewUrl::App(format!("index.html?session_id={}", session_id).into());
+
+    let _window = WebviewWindowBuilder::new(&app, &window_label, url)
+        .title(format!("Agent Session - {}", session_id))
+        .inner_size(800.0, 600.0)
+        .resizable(true)
+        .build()
+        .map_err(|e| format!("Failed to create window: {}", e))?;
+
+    eprintln!("✅ Created window: {}", window_label);
+
+    // Register window in registry
+    registry.register(session_id.clone(), window_label.clone());
+
+    // Emit window-created event
+    let _ = app.emit("window-created", WindowInfo {
+        window_label: window_label.clone(),
+        session_id,
+        created_at: chrono::Utc::now().to_rfc3339(),
+    });
+
+    Ok(window_label)
+}
+
+/// Get the session ID associated with a window label
+///
+/// # Arguments
+/// * `app` - Tauri AppHandle
+/// * `window_label` - The window label to lookup
+///
+/// # Returns
+/// Optional session ID if window exists in registry
+#[tauri::command]
+pub async fn get_window_session_id(
+    app: AppHandle,
+    window_label: String,
+) -> Result<Option<String>, String> {
+    let registry = app.state::<WindowRegistry>();
+    Ok(registry.get_session_id(&window_label))
+}
+
+/// Close a session window by session ID
+///
+/// # Arguments
+/// * `app` - Tauri AppHandle
+/// * `session_id` - The session ID whose window should be closed
+///
+/// # Returns
+/// Unit result
+#[tauri::command]
+pub async fn close_session_window(
+    app: AppHandle,
+    session_id: String,
+) -> Result<(), String> {
+    eprintln!("🗑️  close_session_window: session_id={}", session_id);
+
+    let registry = app.state::<WindowRegistry>();
+
+    // Get window label for session
+    let window_label = registry.get_window_label(&session_id)
+        .ok_or_else(|| format!("No window found for session {}", session_id))?;
+
+    // Close the window
+    if let Some(window) = app.get_webview_window(&window_label) {
+        window.close().map_err(|e| format!("Failed to close window: {}", e))?;
+        eprintln!("✅ Closed window: {}", window_label);
+    } else {
+        eprintln!("⚠️  Window {} not found (may already be closed)", window_label);
+    }
+
+    // Unregister from registry
+    registry.unregister_by_session(&session_id);
+
+    // Emit window-closed event
+    let _ = app.emit("window-closed", session_id);
+
+    Ok(())
+}
+
+/// List all session windows
+///
+/// # Returns
+/// Vector of WindowInfo for all tracked windows
+#[tauri::command]
+pub async fn list_session_windows(
+    app: AppHandle,
+) -> Result<Vec<WindowInfo>, String> {
+    let registry = app.state::<WindowRegistry>();
+    Ok(registry.get_all_windows())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_window_registry_register() {
+        let registry = WindowRegistry::new();
+        registry.register("session-1".to_string(), "window-1".to_string());
+
+        assert_eq!(registry.get_window_label("session-1"), Some("window-1".to_string()));
+        assert_eq!(registry.get_session_id("window-1"), Some("session-1".to_string()));
+    }
+
+    #[test]
+    fn test_window_registry_unregister() {
+        let registry = WindowRegistry::new();
+        registry.register("session-1".to_string(), "window-1".to_string());
+
+        let removed = registry.unregister_by_session("session-1");
+        assert_eq!(removed, Some("window-1".to_string()));
+        assert_eq!(registry.get_window_label("session-1"), None);
+        assert_eq!(registry.get_session_id("window-1"), None);
+    }
+
+    #[test]
+    fn test_window_registry_has_window() {
+        let registry = WindowRegistry::new();
+        assert!(!registry.has_window_for_session("session-1"));
+
+        registry.register("session-1".to_string(), "window-1".to_string());
+        assert!(registry.has_window_for_session("session-1"));
+
+        registry.unregister_by_session("session-1");
+        assert!(!registry.has_window_for_session("session-1"));
+    }
+}
