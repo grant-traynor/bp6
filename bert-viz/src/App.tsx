@@ -37,7 +37,7 @@ import { GanttBar } from "./components/gantt/GanttBar";
 import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
 import { WBSSkeleton, GanttSkeleton } from "./components/shared/Skeleton";
 import { ResizeHandle } from "./components/shared/ResizeHandle";
-import ChatDialog2 from "./components/chat/ChatDialog2";
+import ChatDialog from "./components/chat/ChatDialog";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -163,7 +163,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans">
         {/* Session window: fullscreen ChatDialog */}
         {/* TODO (bp6-643.005.4): Connect to existing session instead of creating new */}
-        <ChatDialog2
+        <ChatDialog
           isOpen={true}
           onClose={() => {
             // Session windows can't be closed from within - only via window close
@@ -1298,7 +1298,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             {sidebarOpen && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} onOpenChat={handleOpenChat} />}
           </div>
         )}
-        <ChatDialog2 isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} task={chatTask} beadId={chatBeadId} cliBackend={currentCli} />
+        <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} task={chatTask} beadId={chatBeadId} cliBackend={currentCli} />
       </main>
     </div>
   );

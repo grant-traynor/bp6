@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, memo, useCallback } from 'react';
 import { X, ExternalLink } from 'lucide-react';
 import { SessionInfo, getPersonaIcon, formatSessionRuntime, createSessionWindow } from '../../api';
 import { cn } from '../../utils';
@@ -7,7 +7,7 @@ import { cn } from '../../utils';
  * Format timestamp as relative time (e.g., "2m ago", "just now")
  */
 function formatRelativeTime(timestamp: number): string {
-  const now = Date.now() / 1000; // Current time in seconds
+  const now = Date.now() / 1000;
   const diff = now - timestamp;
 
   if (diff < 10) return 'just now';
@@ -26,7 +26,19 @@ interface SessionItemProps {
   className?: string;
 }
 
-export const SessionItem = React.memo<SessionItemProps>(({
+/**
+ * SessionItem - Clean rewrite with proper architecture
+ *
+ * Features:
+ * - Displays session metadata (persona, bead, runtime, last activity)
+ * - Session selection and termination with confirmation
+ * - Open in new window support
+ * - Unread indicator with animation
+ * - Auto-updating runtime and last activity (10s interval)
+ * - Proper event bubbling control
+ * - Clean TypeScript interfaces
+ */
+export const SessionItem = memo<SessionItemProps>(({
   session,
   isActive,
   beadTitle,
@@ -34,32 +46,32 @@ export const SessionItem = React.memo<SessionItemProps>(({
   onTerminate,
   className
 }) => {
-  // Only render running sessions
-  if (session.status !== 'running') {
-    return null;
-  }
-
   const [runtime, setRuntime] = useState(formatSessionRuntime(session.createdAt));
   const [lastActivity, setLastActivity] = useState(formatRelativeTime(session.lastActivity));
 
-  // Update runtime and last activity every 10 seconds (reduce flashing)
+  // Update runtime and last activity every 10 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       setRuntime(formatSessionRuntime(session.createdAt));
       setLastActivity(formatRelativeTime(session.lastActivity));
-    }, 10000); // 10 seconds instead of 1 second
+    }, 10000);
 
     return () => clearInterval(interval);
   }, [session.createdAt, session.lastActivity]);
 
-  const handleTerminate = (e: React.MouseEvent) => {
+  // Event handlers - memoized to prevent recreation
+  const handleSelect = useCallback(() => {
+    onSelect(session.sessionId, session.beadId);
+  }, [onSelect, session.sessionId, session.beadId]);
+
+  const handleTerminate = useCallback((e: React.MouseEvent) => {
     e.stopPropagation(); // Don't trigger onSelect
     if (window.confirm(`Terminate session ${session.sessionId}? This will stop the agent.`)) {
       onTerminate(session.sessionId);
     }
-  };
+  }, [onTerminate, session.sessionId]);
 
-  const handleOpenInWindow = async (e: React.MouseEvent) => {
+  const handleOpenInWindow = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't trigger onSelect
     try {
       const windowLabel = await createSessionWindow(session.sessionId);
@@ -68,11 +80,14 @@ export const SessionItem = React.memo<SessionItemProps>(({
       console.error('Failed to open session in new window:', error);
       alert(`Failed to open window: ${error}`);
     }
-  };
+  }, [session.sessionId]);
 
-  const handleSelect = () => {
-    onSelect(session.sessionId, session.beadId);
-  };
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleSelect();
+    }
+  }, [handleSelect]);
 
   const personaIcon = getPersonaIcon(session.persona);
   const personaLabel = session.persona.replace(/-/g, ' ').toUpperCase();
@@ -83,26 +98,21 @@ export const SessionItem = React.memo<SessionItemProps>(({
         'session-item',
         'group/session-item',
         'cursor-pointer',
-        'transition-colors duration-150',  // Only transition colors, not layout
+        'transition-colors duration-150',
         isActive && 'session-item-active',
         className
       )}
       onClick={handleSelect}
+      onKeyDown={handleKeyDown}
       role="button"
       tabIndex={0}
       aria-label={`Session for ${beadTitle} - ${personaLabel} - ${session.backendId}`}
       aria-current={isActive ? 'true' : 'false'}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          handleSelect();
-        }
-      }}
     >
-      {/* Header: Persona icon + Activity indicator + Terminate button */}
+      {/* Header: Persona icon + Activity indicator + Actions */}
       <div className="session-item-header">
         <div className="session-item-title">
-          {/* Pulsing dot for unread indicator */}
+          {/* Unread indicator with pulsing animation */}
           {session.hasUnread && (
             <span className="session-unread-dot" aria-label="Has unread messages" title="Unread activity">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
@@ -115,6 +125,7 @@ export const SessionItem = React.memo<SessionItemProps>(({
           <span className="session-persona-label">{personaLabel}</span>
         </div>
 
+        {/* Action buttons */}
         <div className="session-actions">
           <button
             className="session-window-btn"
@@ -159,7 +170,7 @@ export const SessionItem = React.memo<SessionItemProps>(({
         </span>
       </div>
 
-      {/* Activity Badge: Message count */}
+      {/* Message count badge */}
       {session.messageCount > 0 && (
         <div className="session-item-status">
           <span className="session-message-count-badge" title={`${session.messageCount} messages`}>
@@ -170,3 +181,5 @@ export const SessionItem = React.memo<SessionItemProps>(({
     </div>
   );
 });
+
+SessionItem.displayName = 'SessionItem';

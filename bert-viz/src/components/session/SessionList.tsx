@@ -1,4 +1,4 @@
-import { useState, memo } from 'react';
+import { useState, memo, useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { SessionItem } from './SessionItem';
 import { BeadNode } from '../../api';
@@ -9,51 +9,66 @@ interface SessionListProps {
   activeSessionId: string | null;
   onSessionSelect: (sessionId: string, beadId: string | null) => void;
   onSessionTerminate: (sessionId: string) => void;
-  beads?: Map<string, BeadNode>;  // For looking up bead titles
+  beads?: Map<string, BeadNode>;
 }
 
+/**
+ * SessionList - Clean rewrite with proper architecture
+ *
+ * Features:
+ * - Uses Zustand store (useSessionStore) for reactive session data
+ * - Collapsible sidebar with chevron toggle
+ * - Displays running sessions only
+ * - Memoized to prevent unnecessary re-renders
+ * - Clean event handlers (no inline functions)
+ * - Proper TypeScript interfaces
+ */
 const SessionListComponent: React.FC<SessionListProps> = ({
   activeSessionId,
   onSessionSelect,
   onSessionTerminate,
   beads
 }) => {
-  // Get sessions from Zustand store (no local state or event listeners needed)
   const sessions = useSessionStore(state => state.sessions);
   const [isCollapsed, setIsCollapsed] = useState(false);
 
-  console.log('📋 SessionList render:', { sessionsCount: sessions.length, sessions });
+  // Memoize bead title lookup to avoid recalculation on every render
+  const getBeadTitle = useMemo(() => {
+    return (beadId: string | null): string => {
+      if (!beadId) return 'No Bead';
+      return beads?.get(beadId)?.title || beadId;
+    };
+  }, [beads]);
 
-  // Get bead title helper
-  const getBeadTitle = (beadId: string | null): string => {
-    if (!beadId) return 'No Bead';
-    return beads?.get(beadId)?.title || beadId;
+  const handleToggleCollapse = () => {
+    setIsCollapsed(prev => !prev);
   };
 
-  const toggleCollapse = () => {
-    setIsCollapsed(!isCollapsed);
-  };
-
-  // Safety check: ensure sessions is always an array
-  const safeSessions = sessions || [];
+  // Filter running sessions only
+  const runningSessions = useMemo(() => {
+    return sessions.filter(s => s.status === 'running');
+  }, [sessions]);
 
   return (
     <div className={cn('session-list', isCollapsed && 'session-list-collapsed')}>
+      {/* Header */}
       <div className="session-list-header">
-        <span>Active Sessions ({safeSessions.length})</span>
+        <span>Active Sessions ({runningSessions.length})</span>
         <button
-          onClick={toggleCollapse}
+          onClick={handleToggleCollapse}
           aria-label={isCollapsed ? 'Expand session list' : 'Collapse session list'}
           title={isCollapsed ? 'Expand' : 'Collapse'}
         >
           {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
+
+      {/* Body - Session List */}
       <div className="session-list-body">
-        {safeSessions.length === 0 ? (
+        {runningSessions.length === 0 ? (
           <div className="session-list-empty">No active sessions</div>
         ) : (
-          safeSessions.map(session => (
+          runningSessions.map(session => (
             <SessionItem
               key={session.sessionId}
               session={session}
@@ -69,5 +84,5 @@ const SessionListComponent: React.FC<SessionListProps> = ({
   );
 };
 
-// Memoize to prevent unnecessary re-renders
+// Memoize to prevent unnecessary re-renders when parent updates
 export const SessionList = memo(SessionListComponent);
