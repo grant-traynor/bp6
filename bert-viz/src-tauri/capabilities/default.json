@@ -7,9 +7,18 @@
     "core:default",
     "opener:default",
     "dialog:allow-open",
+    "dialog:allow-message",
     "fs:allow-read",
     "fs:allow-write",
     "fs:allow-exists",
-    "fs:allow-watch"
+    "fs:allow-watch",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/.bp6/**" }
+      ]
+    }
   ]
 }
