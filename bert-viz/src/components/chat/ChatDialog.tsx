@@ -61,10 +61,11 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     let unlistenStderr: (() => void) | undefined;
 
     if (isOpen) {
+      // Clear state when opening or switching beads
       setMessages([]);
       setStreamingMessage('');
       setDebugLogs(['[System] Starting agent session...']);
-      
+
       const setup = async () => {
         try {
           setIsLoading(true);
@@ -102,8 +103,12 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
             setDebugLogs(prev => [...prev, `[Stderr] ${event.payload}`]);
           });
 
-          if (task && beadId) {
-            setMessages([{ role: 'user', content: `Task: ${task.replace('_', ' ')} (${beadId})` }]);
+          // Set initial message to show context
+          if (beadId) {
+            const taskName = task ? task.replace('_', ' ') : 'general assistance';
+            setMessages([{ role: 'user', content: `Task: ${taskName} for ${beadId}` }]);
+          } else if (task) {
+            setMessages([{ role: 'user', content: `Task: ${task.replace('_', ' ')}` }]);
           }
 
         } catch (error) {
