@@ -1,8 +1,28 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, PanelRight } from "lucide-react";
 import { cn } from "./utils";
-import { fetchProjectViewModel, updateBead, createBead, closeBead, reopenBead, claimBead, beadNodeToBead, type BeadNode, type Project, type ProjectViewModel, fetchProjects, removeProject, openProject, toggleFavoriteProject, getCliPreference, type CliBackend } from "./api";
+import { 
+  fetchProjectViewModel, 
+  updateBead, 
+  createBead, 
+  closeBead, 
+  reopenBead, 
+  claimBead, 
+  beadNodeToBead, 
+  type BeadNode, 
+  type Project, 
+  type ProjectViewModel, 
+  fetchProjects, 
+  removeProject, 
+  openProject, 
+  toggleFavoriteProject, 
+  getCliPreference, 
+  type CliBackend, 
+  type SessionInfo,
+  onBeadsUpdated,
+  onProjectsUpdated,
+  onSessionListChanged
+} from "./api";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -24,7 +44,13 @@ type ClosedTimeFilter =
   | '30d'           // Closed within last 30 days
   | 'older_than_6h'; // Closed more than 6 hours ago
 
-function App() {
+interface AppProps {
+  isSessionWindow?: boolean;
+  sessionId?: string | null;
+  windowLabel?: string;
+}
+
+function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }: AppProps = {}) {
   // Unified View Model State (replaces beads + processedData)
   const [viewModel, setViewModel] = useState<ProjectViewModel | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -52,6 +78,9 @@ function App() {
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Agent Session State
+  const [sessionsByBead, setSessionsByBead] = useState<Record<string, SessionInfo[]>>({});
+
   // Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatPersona, setChatPersona] = useState("product-manager");
@@ -67,6 +96,30 @@ function App() {
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
   const hasInitialized = useRef(false);
   const lastToggledNode = useRef<{ id: string; offsetTop: number } | null>(null);
+
+  // Early return for session windows - render only ChatDialog
+  // Note: Full session connection implementation is in bp6-643.005.4
+  if (isSessionWindow && sessionId) {
+    console.log('📱 Session window mode:', { sessionId, windowLabel });
+
+    return (
+      <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans">
+        {/* Session window: fullscreen ChatDialog */}
+        {/* TODO (bp6-643.005.4): Connect to existing session instead of creating new */}
+        <ChatDialog
+          isOpen={true}
+          onClose={() => {
+            // Session windows can't be closed from within - only via window close
+            console.log('Session window ChatDialog close requested (no-op)');
+          }}
+          persona="product-manager"
+          task={`Session window for session ${sessionId}`}
+          beadId={null}
+          cliBackend={currentCli}
+        />
+      </div>
+    );
+  }
 
   const loadProjects = useCallback(async () => {
     const data = await fetchProjects();
@@ -184,29 +237,37 @@ function App() {
     console.log('🔧 Setting up event listeners...');
     init();
 
-    listen("beads-updated", (event) => {
-      console.log('🎉 beads-updated event received!', event);
-      loadData();
-      setRefetchTrigger(prev => prev + 1);
-    }).then((unlisten) => {
-      console.log('✅ beads-updated listener registered');
-      return unlisten;
-    }).catch((err) => {
-      console.error('❌ Failed to register beads-updated listener:', err);
-    });
-
-    listen("projects-updated", (event) => {
-      console.log('🎉 projects-updated event received!', event);
-      loadProjects();
-    }).then((unlisten) => {
-      console.log('✅ projects-updated listener registered');
-      return unlisten;
-    }).catch((err) => {
-      console.error('❌ Failed to register projects-updated listener:', err);
-    });
+    const unlistenPromises = [
+      onBeadsUpdated(() => {
+        console.log('🎉 beads-updated event received!');
+        loadData();
+        setRefetchTrigger(prev => prev + 1);
+      }),
+      onProjectsUpdated(() => {
+        console.log('🎉 projects-updated event received!');
+        loadProjects();
+      }),
+      onSessionListChanged((sessions) => {
+        console.log('🎉 session-list-changed event received!', sessions);
+        const grouped: Record<string, SessionInfo[]> = {};
+        sessions.forEach(s => {
+          if (!grouped[s.bead_id]) grouped[s.bead_id] = [];
+          grouped[s.bead_id].push(s);
+        });
+        setSessionsByBead(grouped);
+      })
+    ];
 
     return () => {
       console.log('🧹 Cleaning up event listeners');
+      unlistenPromises.forEach(async (p) => {
+        try {
+          const unlisten = await p;
+          unlisten();
+        } catch (err) {
+          console.error('❌ Failed to unlisten:', err);
+        }
+      });
     };
   }, [handleOpenProject, loadData, loadProjects]);
 
@@ -868,7 +929,13 @@ function App() {
                   <div className="p-0">
                     {(loading || processingData) ? <WBSSkeleton /> : (
                       <div className="flex flex-col">
-                        <WBSTreeList nodes={viewModel?.tree || []} onToggle={toggleNode} onClick={handleBeadClick} selectedId={selectedBead?.id} />
+                        <WBSTreeList 
+                          nodes={viewModel?.tree || []} 
+                          onToggle={toggleNode} 
+                          onClick={handleBeadClick} 
+                          selectedId={selectedBead?.id} 
+                          sessionsByBead={sessionsByBead}
+                        />
                       </div>
                     )}
                   </div>
