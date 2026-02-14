@@ -205,6 +205,7 @@ export function getPersonaIcon(persona: string): string {
 export interface AgentChunk {
   content: string;
   isDone: boolean;
+  sessionId?: string;  // Session ID for multi-window routing
 }
 
 /**

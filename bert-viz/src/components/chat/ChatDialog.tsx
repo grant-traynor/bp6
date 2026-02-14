@@ -73,8 +73,13 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
           setDebugLogs(prev => [...prev, `[System] Session ID: ${newSessionId}`]);
           
           unlistenChunk = await listen<AgentChunk>('agent-chunk', (event) => {
-            const { content, isDone } = event.payload;
-            
+            const { content, isDone, sessionId: chunkSessionId } = event.payload;
+
+            // Filter: Only process chunks for THIS session (multi-window support)
+            if (chunkSessionId && chunkSessionId !== newSessionId) {
+              return; // Ignore chunks from other sessions
+            }
+
             if (content) {
               setDebugLogs(prev => [...prev, `[Stdout] ${content}`]);
             }
