@@ -203,7 +203,9 @@ export function formatSessionRuntime(createdAt: number): string {
  * @returns Emoji icon for the persona, or ❓ if unknown
  */
 export function getPersonaIcon(persona: string): string {
-  return PERSONA_ICONS[persona] || '❓';
+  // Normalize hyphen-separated to underscore (backend uses hyphens, mapping uses underscores)
+  const normalized = persona.replace(/-/g, '_');
+  return PERSONA_ICONS[normalized] || '❓';
 }
 
 export interface AgentChunk {
