@@ -164,12 +164,13 @@ export async function fetchProjectViewModel(params: FilterParams): Promise<Proje
 // ============================================================================
 
 export interface SessionInfo {
-  session_id: string;
-  bead_id: string;
+  sessionId: string;
+  beadId: string | null;  // Optional bead ID
   persona: string;        // PersonaType as string
-  backend_id: string;     // BackendId as string
+  backendId: string;      // BackendId as string
   status: 'running' | 'paused';
-  created_at: number;     // Unix timestamp
+  createdAt: number;      // Unix timestamp in seconds (Rust u64)
+  cliSessionId?: string | null;  // CLI session ID for resume capability
 }
 
 // Persona icon mapping (aligned with PersonaType enum from 6dk)
@@ -182,14 +183,14 @@ export const PERSONA_ICONS: Record<string, string> = {
 
 /**
  * Format session runtime from created_at timestamp to "Xm Ys" format.
- * @param createdAt Unix timestamp in milliseconds
+ * @param createdAt Unix timestamp in seconds (Rust u64)
  * @returns Formatted runtime string (e.g., "5m 32s")
  */
 export function formatSessionRuntime(createdAt: number): string {
-  const elapsed = Date.now() - createdAt;
-  const seconds = Math.floor(elapsed / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const elapsed = nowSeconds - createdAt;
+  const minutes = Math.floor(elapsed / 60);
+  const remainingSeconds = elapsed % 60;
   return `${minutes}m ${remainingSeconds}s`;
 }
 

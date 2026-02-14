@@ -7,7 +7,7 @@ interface SessionItemProps {
   session: SessionInfo;
   isActive: boolean;
   beadTitle: string;
-  onSelect: (sessionId: string, beadId: string) => void;
+  onSelect: (sessionId: string, beadId: string | null) => void;
   onTerminate: (sessionId: string) => void;
   className?: string;
 }
@@ -25,29 +25,29 @@ export const SessionItem: React.FC<SessionItemProps> = ({
     return null;
   }
 
-  const [runtime, setRuntime] = useState(formatSessionRuntime(session.created_at));
+  const [runtime, setRuntime] = useState(formatSessionRuntime(session.createdAt));
 
   // Update runtime every second
   useEffect(() => {
     const interval = setInterval(() => {
-      setRuntime(formatSessionRuntime(session.created_at));
+      setRuntime(formatSessionRuntime(session.createdAt));
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [session.created_at]);
+  }, [session.createdAt]);
 
   const handleTerminate = (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't trigger onSelect
-    if (window.confirm(`Terminate session ${session.session_id}? This will stop the agent.`)) {
-      onTerminate(session.session_id);
+    if (window.confirm(`Terminate session ${session.sessionId}? This will stop the agent.`)) {
+      onTerminate(session.sessionId);
     }
   };
 
   const handleOpenInWindow = async (e: React.MouseEvent) => {
     e.stopPropagation(); // Don't trigger onSelect
     try {
-      const windowLabel = await createSessionWindow(session.session_id);
-      console.log(`Opened session ${session.session_id} in new window: ${windowLabel}`);
+      const windowLabel = await createSessionWindow(session.sessionId);
+      console.log(`Opened session ${session.sessionId} in new window: ${windowLabel}`);
     } catch (error) {
       console.error('Failed to open session in new window:', error);
       alert(`Failed to open window: ${error}`);
@@ -55,7 +55,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
   };
 
   const handleSelect = () => {
-    onSelect(session.session_id, session.bead_id);
+    onSelect(session.sessionId, session.beadId);
   };
 
   const personaIcon = getPersonaIcon(session.persona);
@@ -74,7 +74,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
       onClick={handleSelect}
       role="button"
       tabIndex={0}
-      aria-label={`Session for ${beadTitle} - ${personaLabel} - ${session.backend_id}`}
+      aria-label={`Session for ${beadTitle} - ${personaLabel} - ${session.backendId}`}
       aria-current={isActive ? 'true' : 'false'}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -98,7 +98,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
           <button
             className="session-window-btn"
             onClick={handleOpenInWindow}
-            aria-label={`Open session ${session.session_id} in new window`}
+            aria-label={`Open session ${session.sessionId} in new window`}
             title="Open in new window"
           >
             <ExternalLink size={14} />
@@ -106,7 +106,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
           <button
             className="session-terminate-btn"
             onClick={handleTerminate}
-            aria-label={`Terminate session ${session.session_id}`}
+            aria-label={`Terminate session ${session.sessionId}`}
             title="Terminate session"
           >
             <X size={14} />
@@ -116,7 +116,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
 
       {/* Details: Backend + Runtime */}
       <div className="session-item-details">
-        <span className="session-backend">{session.backend_id}</span>
+        <span className="session-backend">{session.backendId}</span>
         <span className="session-runtime-separator">·</span>
         <span className="session-runtime">{runtime}</span>
       </div>

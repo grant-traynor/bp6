@@ -7,7 +7,7 @@ import { cn } from '../../utils';
 
 interface SessionListProps {
   activeSessionId: string | null;
-  onSessionSelect: (sessionId: string, beadId: string) => void;
+  onSessionSelect: (sessionId: string, beadId: string | null) => void;
   onSessionTerminate: (sessionId: string) => void;
   beads?: Map<string, BeadNode>;  // For looking up bead titles
 }
@@ -22,7 +22,8 @@ export const SessionList: React.FC<SessionListProps> = ({
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Get bead title helper
-  const getBeadTitle = (beadId: string): string => {
+  const getBeadTitle = (beadId: string | null): string => {
+    if (!beadId) return 'No Bead';
     return beads?.get(beadId)?.title || beadId;
   };
 
@@ -78,10 +79,10 @@ export const SessionList: React.FC<SessionListProps> = ({
         ) : (
           safeSessions.map(session => (
             <SessionItem
-              key={session.session_id}
+              key={session.sessionId}
               session={session}
-              isActive={session.session_id === activeSessionId}
-              beadTitle={getBeadTitle(session.bead_id)}
+              isActive={session.sessionId === activeSessionId}
+              beadTitle={getBeadTitle(session.beadId)}
               onSelect={onSessionSelect}
               onTerminate={onSessionTerminate}
             />

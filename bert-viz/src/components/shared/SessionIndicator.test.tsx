@@ -22,20 +22,20 @@ describe('SessionIndicator', () => {
     it('should render nothing when no sessions have running status', () => {
       const pausedSessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'paused',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'paused',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -46,12 +46,12 @@ describe('SessionIndicator', () => {
     it('should render pulsing dot for single active session', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -66,12 +66,12 @@ describe('SessionIndicator', () => {
     it('should render persona icon for single session', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -84,20 +84,20 @@ describe('SessionIndicator', () => {
     it('should render count badge for multiple sessions', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
       ];
 
@@ -112,12 +112,12 @@ describe('SessionIndicator', () => {
     it('should not render count badge for single session', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -131,12 +131,12 @@ describe('SessionIndicator', () => {
     it('should apply custom className when provided', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -156,12 +156,12 @@ describe('SessionIndicator', () => {
     it('should display correct icon for product_manager', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -172,12 +172,12 @@ describe('SessionIndicator', () => {
     it('should display correct icon for qa_engineer', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -188,12 +188,12 @@ describe('SessionIndicator', () => {
     it('should display correct icon for specialist', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'specialist',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -204,12 +204,12 @@ describe('SessionIndicator', () => {
     it('should display fallback icon for unknown persona', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'unknown_persona',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -220,20 +220,20 @@ describe('SessionIndicator', () => {
     it('should use first active session persona when multiple sessions', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
       ];
 
@@ -253,12 +253,12 @@ describe('SessionIndicator', () => {
     it('should show persona name in tooltip for single session', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -273,28 +273,28 @@ describe('SessionIndicator', () => {
     it('should show count and multiple personas for multiple sessions', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
         {
-          session_id: 'session-3',
-          bead_id: 'bp6-test',
+          sessionId: 'session-3',
+          beadId: 'bp6-test',
           persona: 'specialist',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 2000,
+          createdAt: Date.now() + 2000,
         },
       ];
 
@@ -310,20 +310,20 @@ describe('SessionIndicator', () => {
     it('should use plural sessions in tooltip when count > 1', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
       ];
 
@@ -336,12 +336,12 @@ describe('SessionIndicator', () => {
     it('should use singular session in tooltip when count = 1', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -354,12 +354,12 @@ describe('SessionIndicator', () => {
     it('should replace underscores with spaces in persona names', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
       ];
 
@@ -379,28 +379,28 @@ describe('SessionIndicator', () => {
     it('should only show running sessions, not paused sessions', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'paused',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
         {
-          session_id: 'session-3',
-          bead_id: 'bp6-test',
+          sessionId: 'session-3',
+          beadId: 'bp6-test',
           persona: 'specialist',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'paused',
-          created_at: Date.now() + 2000,
+          createdAt: Date.now() + 2000,
         },
       ];
 
@@ -417,28 +417,28 @@ describe('SessionIndicator', () => {
     it('should filter out paused sessions before counting', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
         {
-          session_id: 'session-3',
-          bead_id: 'bp6-test',
+          sessionId: 'session-3',
+          beadId: 'bp6-test',
           persona: 'specialist',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'paused',
-          created_at: Date.now() + 2000,
+          createdAt: Date.now() + 2000,
         },
       ];
 
@@ -452,36 +452,36 @@ describe('SessionIndicator', () => {
     it('should handle mixed status sessions correctly', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'paused',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
         {
-          session_id: 'session-3',
-          bead_id: 'bp6-test',
+          sessionId: 'session-3',
+          beadId: 'bp6-test',
           persona: 'specialist',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'paused',
-          created_at: Date.now() + 2000,
+          createdAt: Date.now() + 2000,
         },
         {
-          session_id: 'session-4',
-          bead_id: 'bp6-test',
+          sessionId: 'session-4',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 3000,
+          createdAt: Date.now() + 3000,
         },
       ];
 
@@ -509,20 +509,20 @@ describe('SessionIndicator', () => {
     it('should handle sessions with same persona', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
       ];
 
@@ -539,12 +539,12 @@ describe('SessionIndicator', () => {
 
     it('should handle large number of sessions', () => {
       const sessions: SessionInfo[] = Array.from({ length: 10 }, (_, i) => ({
-        session_id: `session-${i}`,
-        bead_id: 'bp6-test',
+        sessionId: `session-${i}`,
+        beadId: 'bp6-test',
         persona: i % 3 === 0 ? 'product_manager' : i % 3 === 1 ? 'qa_engineer' : 'specialist',
-        backend_id: 'gemini',
+        backendId: 'gemini',
         status: 'running' as const,
-        created_at: Date.now() + i * 1000,
+        createdAt: Date.now() + i * 1000,
       }));
 
       const { container } = render(<SessionIndicator sessions={sessions} />);
@@ -558,23 +558,23 @@ describe('SessionIndicator', () => {
       expect(indicator).toBeTruthy();
     });
 
-    it('should handle sessions with different backend_ids', () => {
+    it('should handle sessions with different backendIds', () => {
       const sessions: SessionInfo[] = [
         {
-          session_id: 'session-1',
-          bead_id: 'bp6-test',
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
           persona: 'product_manager',
-          backend_id: 'gemini',
+          backendId: 'gemini',
           status: 'running',
-          created_at: Date.now(),
+          createdAt: Date.now(),
         },
         {
-          session_id: 'session-2',
-          bead_id: 'bp6-test',
+          sessionId: 'session-2',
+          beadId: 'bp6-test',
           persona: 'qa_engineer',
-          backend_id: 'claude',
+          backendId: 'claude',
           status: 'running',
-          created_at: Date.now() + 1000,
+          createdAt: Date.now() + 1000,
         },
       ];
 
