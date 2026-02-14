@@ -243,6 +243,7 @@ body {
 /* Session List Container */
 .session-list {
   width: 200px;
+  flex-shrink: 0; /* Prevent shrinking in flex layout */
   border-right: 1px solid var(--border-primary);
   display: flex;
   flex-direction: column;

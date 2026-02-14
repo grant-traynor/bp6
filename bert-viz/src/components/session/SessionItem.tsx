@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, ExternalLink } from 'lucide-react';
 import { SessionInfo, getPersonaIcon, formatSessionRuntime, createSessionWindow } from '../../api';
 import { cn } from '../../utils';
@@ -26,7 +26,7 @@ interface SessionItemProps {
   className?: string;
 }
 
-export const SessionItem: React.FC<SessionItemProps> = ({
+export const SessionItem = React.memo<SessionItemProps>(({
   session,
   isActive,
   beadTitle,
@@ -42,12 +42,12 @@ export const SessionItem: React.FC<SessionItemProps> = ({
   const [runtime, setRuntime] = useState(formatSessionRuntime(session.createdAt));
   const [lastActivity, setLastActivity] = useState(formatRelativeTime(session.lastActivity));
 
-  // Update runtime and last activity every second
+  // Update runtime and last activity every 10 seconds (reduce flashing)
   useEffect(() => {
     const interval = setInterval(() => {
       setRuntime(formatSessionRuntime(session.createdAt));
       setLastActivity(formatRelativeTime(session.lastActivity));
-    }, 1000);
+    }, 10000); // 10 seconds instead of 1 second
 
     return () => clearInterval(interval);
   }, [session.createdAt, session.lastActivity]);
@@ -158,4 +158,4 @@ export const SessionItem: React.FC<SessionItemProps> = ({
       )}
     </div>
   );
-};
+});
