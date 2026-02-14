@@ -93,6 +93,18 @@ pub struct LogEvent {
     pub metadata: Option<serde_json::Value>,
 }
 
+/// Conversation message for UI display (reconstructed from log events)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationMessage {
+    /// Message role (user, assistant, system)
+    pub role: String,
+    /// Message content
+    pub content: String,
+    /// Timestamp (ISO 8601 format)
+    pub timestamp: String,
+}
+
 /// Session logger for conversation persistence
 ///
 /// Logs all agent conversations to ~/.bp6/sessions/<bead-id>/<session-id>-<timestamp>.jsonl
@@ -897,4 +909,124 @@ pub fn terminate_session(
     }
 
     Ok(())
+}
+
+/// Get session conversation history from JSONL log files
+///
+/// Reads conversation logs from ~/.bp6/sessions/<bead-id>/<session-id>-*.jsonl
+/// and reconstructs the conversation history for UI display.
+///
+/// # Arguments
+/// * `session_id` - The session UUID to load history for
+/// * `bead_id` - Optional bead ID (if None, checks 'untracked' directory)
+///
+/// # Returns
+/// A chronologically ordered vector of conversation messages
+///
+/// # Errors
+/// Returns an error if the log file cannot be found or parsed
+#[tauri::command]
+pub fn get_session_history(
+    session_id: String,
+    bead_id: Option<String>,
+) -> Result<Vec<ConversationMessage>, String> {
+    // Get home directory
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| "Could not find home directory".to_string())?;
+
+    // Build path: ~/.bp6/sessions/<bead-id>/
+    let bp6_dir = home_dir.join(".bp6").join("sessions");
+    let session_dir = if let Some(bid) = bead_id.as_ref() {
+        bp6_dir.join(bid)
+    } else {
+        bp6_dir.join("untracked")
+    };
+
+    // Find the log file for this session
+    let log_file = if session_dir.exists() {
+        fs::read_dir(&session_dir)
+            .map_err(|e| format!("Failed to read session directory: {}", e))?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with(&format!("{}-", session_id)) && name.ends_with(".jsonl"))
+                    .unwrap_or(false)
+            })
+    } else {
+        None
+    };
+
+    let log_file_path = log_file.ok_or_else(|| {
+        format!(
+            "No log file found for session {} in {}",
+            session_id,
+            session_dir.display()
+        )
+    })?;
+
+    // Read and parse JSONL file
+    let file = File::open(&log_file_path)
+        .map_err(|e| format!("Failed to open log file: {}", e))?;
+    let reader = BufReader::new(file);
+
+    let mut messages = Vec::new();
+    let mut current_assistant_message: Option<String> = None;
+    let mut current_timestamp: Option<String> = None;
+
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+
+        // Parse LogEvent
+        let event: LogEvent = serde_json::from_str(&line)
+            .map_err(|e| format!("Failed to parse log event: {}", e))?;
+
+        match event.event_type {
+            LogEventType::Message => {
+                // User message - add directly
+                messages.push(ConversationMessage {
+                    role: "user".to_string(),
+                    content: event.content,
+                    timestamp: event.timestamp,
+                });
+            }
+            LogEventType::Chunk => {
+                // Assistant chunk - accumulate until done
+                if current_assistant_message.is_none() {
+                    current_assistant_message = Some(String::new());
+                    current_timestamp = Some(event.timestamp);
+                }
+
+                if let Some(ref mut msg) = current_assistant_message {
+                    msg.push_str(&event.content);
+                }
+            }
+            LogEventType::SessionEnd => {
+                // Flush accumulated assistant message
+                if let Some(content) = current_assistant_message.take() {
+                    messages.push(ConversationMessage {
+                        role: "assistant".to_string(),
+                        content,
+                        timestamp: current_timestamp.take().unwrap_or_else(|| event.timestamp.clone()),
+                    });
+                }
+            }
+            LogEventType::SessionStart => {
+                // Metadata event - skip
+                continue;
+            }
+        }
+    }
+
+    // Flush any remaining assistant message
+    if let Some(content) = current_assistant_message.take() {
+        messages.push(ConversationMessage {
+            role: "assistant".to_string(),
+            content,
+            timestamp: current_timestamp.take().unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+        });
+    }
+
+    Ok(messages)
 }

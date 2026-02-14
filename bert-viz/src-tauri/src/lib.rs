@@ -2171,6 +2171,7 @@ pub fn run() {
             get_current_dir,
             agent::session::start_agent_session, agent::session::send_agent_message, agent::session::stop_agent_session, agent::session::approve_suggestion,
             agent::session::list_active_sessions, agent::session::get_active_session_id, agent::session::switch_active_session, agent::session::terminate_session,
+            agent::session::get_session_history,
             settings::get_cli_preference, settings::set_cli_preference,
             window::create_session_window, window::get_window_session_id, window::close_session_window, window::list_session_windows,
             window::save_window_state, window::load_window_state
