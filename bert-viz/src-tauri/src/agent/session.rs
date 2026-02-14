@@ -35,6 +35,12 @@ pub struct SessionState {
     pub created_at: SystemTime,
     /// The CLI-provided session ID for resume capability (if available)
     pub cli_session_id: Option<String>,
+    /// Timestamp of last activity (last chunk received)
+    pub last_activity: SystemTime,
+    /// Whether this session has unread messages
+    pub has_unread: bool,
+    /// Number of messages in this session
+    pub message_count: usize,
 }
 
 /// Serializable session information for UI display (excludes process handle)
@@ -55,6 +61,12 @@ pub struct SessionInfo {
     pub created_at: u64,
     /// The CLI-provided session ID for resume capability (if available)
     pub cli_session_id: Option<String>,
+    /// Timestamp of last activity (seconds since UNIX epoch)
+    pub last_activity: u64,
+    /// Whether this session has unread messages
+    pub has_unread: bool,
+    /// Number of messages in this session
+    pub message_count: usize,
 }
 
 /// Type of log event
@@ -99,6 +111,8 @@ impl SessionLogger {
     /// # Returns
     /// A new SessionLogger instance or an IO error
     pub fn new(bead_id: Option<&str>, session_id: &str) -> std::io::Result<Self> {
+        use std::fs::OpenOptions;
+
         // Get home directory
         let home_dir = dirs::home_dir()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not find home directory"))?;
@@ -115,16 +129,35 @@ impl SessionLogger {
         // Create directory if it doesn't exist
         fs::create_dir_all(&session_dir)?;
 
-        // Generate filename with timestamp
-        let timestamp = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let filename = format!("{}-{}.jsonl", session_id, timestamp);
-        let file_path = session_dir.join(filename);
+        // Look for existing log file for this session
+        let existing_file = fs::read_dir(&session_dir)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.starts_with(&format!("{}-", session_id)))
+                    .unwrap_or(false)
+            });
 
-        // Open file for writing (append mode)
-        let file = File::create(&file_path)?;
+        let file_path = if let Some(existing) = existing_file {
+            // Reuse existing file
+            existing
+        } else {
+            // Generate new filename with timestamp
+            let timestamp = SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let filename = format!("{}-{}.jsonl", session_id, timestamp);
+            session_dir.join(filename)
+        };
+
+        // Open file in append mode (create if it doesn't exist)
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&file_path)?;
         let writer = BufWriter::new(file);
 
         Ok(SessionLogger { file_path, writer })
@@ -266,6 +299,13 @@ fn list_active_sessions_internal(sessions: &HashMap<String, SessionState>) -> Ve
                 .unwrap_or_default()
                 .as_secs(),
             cli_session_id: state.cli_session_id.clone(),
+            last_activity: state
+                .last_activity
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            has_unread: state.has_unread,
+            message_count: state.message_count,
         })
         .collect()
 }
@@ -572,6 +612,7 @@ pub fn start_agent_session(
     )?;
 
     // Start the CLI process for this session
+    // Pass our session_id to the CLI backend so it uses the same UUID
     let child = run_cli_command_for_session(
         backend,
         app_handle.clone(),
@@ -581,18 +622,22 @@ pub fn start_agent_session(
         persona.clone(),
         prompt,
         false, // resume = false for new session
-        None,  // No CLI session ID for new session
+        Some(session_id.clone()),  // Pass our session_id to the CLI backend
     )?;
 
     // Create SessionState and store in HashMap
+    let now = SystemTime::now();
     let session_state = SessionState {
         process: child,
         bead_id: bead_id.clone(),
         persona: persona.clone(),
         backend_id: backend,
         status: SessionStatus::Running,
-        created_at: SystemTime::now(),
-        cli_session_id: None,
+        created_at: now,
+        cli_session_id: Some(session_id.clone()),  // Store the session ID for resuming
+        last_activity: now,
+        has_unread: false,
+        message_count: 0,
     };
 
     {
@@ -643,17 +688,26 @@ pub fn send_agent_message(
     };
 
     // Resume the session with the message
-    let _child = run_cli_command_for_session(
+    let child = run_cli_command_for_session(
         backend_id,
-        app_handle,
+        app_handle.clone(),
         &state,
-        session_id,
+        session_id.clone(),
         bead_id,
         persona,
         message,
         true, // resume = true
         cli_session_id,
     )?;
+
+    // Update the SessionState with the new process handle
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        if let Some(session_state) = sessions.get_mut(&session_id) {
+            session_state.process = child;
+            session_state.status = SessionStatus::Running;
+        }
+    }
 
     Ok(())
 }
