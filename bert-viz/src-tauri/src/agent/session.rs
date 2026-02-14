@@ -461,8 +461,9 @@ fn run_cli_command_for_session(
                                     }
                                 }
 
-                                // Re-emit session list with updated activity
-                                emit_session_list_changed(&handle_clone, &sessions);
+                                // NOTE: Don't emit session-list-changed on every chunk - causes constant flashing
+                                // Activity indicators will update on next session-list-changed event
+                                // (triggered by session create/terminate/mark-read)
                             }
 
                             // Emit to session-specific channel
