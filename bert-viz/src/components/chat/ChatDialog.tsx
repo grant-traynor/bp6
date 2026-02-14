@@ -136,14 +136,6 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     console.log('Clear chat requested - consider adding this to useAgentSession hook');
   }, []);
 
-  console.log('🗨️ ChatDialog render:', {
-    isOpen,
-    sessionId,
-    messagesCount: messages.length,
-    streamingMessage: streamingMessage.length,
-    showDebug
-  });
-
   if (!isOpen) return null;
 
   return (
