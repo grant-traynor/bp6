@@ -1049,3 +1049,37 @@ pub fn get_session_history(
 
     Ok(messages)
 }
+
+/// Mark a session as read (clear unread indicator)
+///
+/// Clears the has_unread flag for a session when the user views it.
+/// Re-emits session-list-changed to update UI indicators.
+///
+/// # Arguments
+/// * `app_handle` - Tauri app handle for event emission
+/// * `session_id` - The session ID to mark as read
+/// * `state` - AgentState containing sessions
+///
+/// # Returns
+/// Ok(()) on success, or error if session not found
+#[tauri::command]
+pub fn mark_session_read(
+    app_handle: AppHandle,
+    session_id: String,
+    state: State<'_, AgentState>,
+) -> Result<(), String> {
+    // Update has_unread flag
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
+
+        session.has_unread = false;
+
+        // Re-emit session list with updated state
+        emit_session_list_changed(&app_handle, &sessions);
+    }
+
+    Ok(())
+}
