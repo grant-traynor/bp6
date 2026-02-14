@@ -288,16 +288,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           if (startupState.window.isMaximized) {
             await window.maximize();
           } else {
-            // Validate window position is on-screen (handle disconnected monitors)
+            // Restore window position (supports multi-monitor setups with negative coordinates)
             if (startupState.window.x !== undefined && startupState.window.y !== undefined) {
-              const x = startupState.window.x;
-              const y = startupState.window.y;
-              // Only restore position if it's reasonable (not too far off-screen)
-              if (x > -1000 && x < 10000 && y > -500 && y < 10000) {
-                await window.setPosition(new PhysicalPosition(x, y));
-              } else {
-                console.warn('Window position out of range, skipping:', { x, y });
-              }
+              await window.setPosition(new PhysicalPosition(startupState.window.x, startupState.window.y));
             }
             await window.setSize(new PhysicalSize(startupState.window.width, startupState.window.height));
           }
