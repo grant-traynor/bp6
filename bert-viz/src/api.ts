@@ -164,16 +164,16 @@ export async function fetchProjectViewModel(params: FilterParams): Promise<Proje
 // ============================================================================
 
 export interface SessionInfo {
-  sessionId: string;
-  beadId: string | null;  // Optional bead ID
+  session_id: string;
+  bead_id: string | null;  // Optional bead ID
   persona: string;        // PersonaType as string
-  backendId: string;      // BackendId as string
+  backend_id: string;      // BackendId as string
   status: 'running' | 'paused';
-  createdAt: number;      // Unix timestamp in seconds (Rust u64)
-  cliSessionId?: string | null;  // CLI session ID for resume capability
-  lastActivity: number;   // Unix timestamp of last activity (Rust u64)
-  hasUnread: boolean;     // Whether session has unread messages
-  messageCount: number;   // Number of messages in session
+  created_at: number;      // Unix timestamp in seconds (Rust u64)
+  cli_session_id?: string | null;  // CLI session ID for resume capability
+  last_activity: number;   // Unix timestamp of last activity (Rust u64)
+  has_unread: boolean;     // Whether session has unread messages
+  message_count: number;   // Number of messages in session
 }
 
 // Persona icon mapping (aligned with PersonaType enum from 6dk)

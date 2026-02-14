@@ -304,7 +304,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         console.log('🎉 session-list-changed event received!', sessions);
         const grouped: Record<string, SessionInfo[]> = {};
         sessions.forEach(s => {
-          const key = s.beadId || 'untracked';
+          const key = s.bead_id || 'untracked';
           if (!grouped[key]) grouped[key] = [];
           grouped[key].push(s);
         });

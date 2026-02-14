@@ -79,10 +79,10 @@ export const SessionList: React.FC<SessionListProps> = ({
         ) : (
           safeSessions.map(session => (
             <SessionItem
-              key={session.sessionId}
+              key={session.session_id}
               session={session}
-              isActive={session.sessionId === activeSessionId}
-              beadTitle={getBeadTitle(session.beadId)}
+              isActive={session.session_id === activeSessionId}
+              beadTitle={getBeadTitle(session.bead_id)}
               onSelect={onSessionSelect}
               onTerminate={onSessionTerminate}
             />
