@@ -198,6 +198,7 @@ pub struct AgentState {
     /// Registry of available CLI backends (Gemini, ClaudeCode, etc.)
     pub backend_registry: crate::agent::registry::BackendRegistry,
     /// Default backend for new sessions (DEPRECATED: kept for backward compatibility with single-session code)
+    #[allow(dead_code)]
     pub current_backend: Mutex<crate::agent::plugin::BackendId>,
     /// CLI session ID for resume capability (DEPRECATED: kept for backward compatibility with single-session code)
     pub current_session_id: Arc<Mutex<Option<String>>>,
@@ -446,6 +447,7 @@ fn run_cli_command_for_session(
 
 /// DEPRECATED: Single-session CLI command runner (use run_cli_command_for_session for multi-session)
 /// This wrapper is kept for backward compatibility with existing callers
+#[allow(dead_code)]
 fn run_cli_command(
     backend_id: crate::agent::plugin::BackendId,
     app_handle: AppHandle,
