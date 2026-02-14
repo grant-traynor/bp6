@@ -91,7 +91,7 @@ export async function fetchBeads(): Promise<Bead[]> {
 
 export async function updateBead(bead: Bead): Promise<void> {
   try {
-    await invoke("update_bead", { updated_bead: bead });
+    await invoke("update_bead", { updatedBead: bead });
   } catch (error) {
     console.error("Failed to update bead:", error);
     throw error;
@@ -112,7 +112,7 @@ export async function createBead(bead: Bead): Promise<string> {
 
 export async function closeBead(beadId: string, reason?: string): Promise<void> {
   try {
-    await invoke("close_bead", { bead_id: beadId, reason });
+    await invoke("close_bead", { beadId, reason });
   } catch (error) {
     console.error("Failed to close bead:", error);
     throw error;
@@ -121,7 +121,7 @@ export async function closeBead(beadId: string, reason?: string): Promise<void> 
 
 export async function reopenBead(beadId: string): Promise<void> {
   try {
-    await invoke("reopen_bead", { bead_id: beadId });
+    await invoke("reopen_bead", { beadId });
   } catch (error) {
     console.error("Failed to reopen bead:", error);
     throw error;
@@ -130,7 +130,7 @@ export async function reopenBead(beadId: string): Promise<void> {
 
 export async function claimBead(beadId: string): Promise<void> {
   try {
-    await invoke("claim_bead", { bead_id: beadId });
+    await invoke("claim_bead", { beadId });
   } catch (error) {
     console.error("Failed to claim bead:", error);
     throw error;
@@ -244,7 +244,7 @@ export async function startAgentSession(
  */
 export async function sendAgentMessage(sessionId: string, message: string): Promise<void> {
   try {
-    await invoke("send_agent_message", { session_id: sessionId, message });
+    await invoke("send_agent_message", { sessionId, message });
   } catch (error) {
     console.error("Failed to send agent message:", error);
     throw error;
@@ -257,7 +257,7 @@ export async function sendAgentMessage(sessionId: string, message: string): Prom
  */
 export async function stopAgentSession(sessionId: string): Promise<void> {
   try {
-    await invoke("stop_agent_session", { session_id: sessionId });
+    await invoke("stop_agent_session", { sessionId });
   } catch (error) {
     console.error("Failed to stop agent session:", error);
     throw error;
@@ -285,7 +285,7 @@ export async function getCliPreference(): Promise<string> {
  */
 export async function setCliPreference(cliBackend: string): Promise<void> {
   try {
-    await invoke("set_cli_preference", { cli_backend: cliBackend });
+    await invoke("set_cli_preference", { cliBackend });
   } catch (error) {
     console.error("Failed to set CLI preference:", error);
     throw new Error(`Unable to save CLI preference: ${error}`);
@@ -310,7 +310,7 @@ export async function listActiveSessions(): Promise<SessionInfo[]> {
  * @param sessionId - The session ID to switch to
  */
 export async function switchActiveSession(sessionId: string): Promise<void> {
-  await invoke('switch_active_session', { session_id: sessionId });
+  await invoke('switch_active_session', { sessionId });
 }
 
 /**
@@ -326,7 +326,7 @@ export async function getActiveSessionId(): Promise<string | null> {
  * @param sessionId - The session ID to terminate
  */
 export async function terminateSession(sessionId: string): Promise<void> {
-  await invoke('terminate_session', { session_id: sessionId });
+  await invoke('terminate_session', { sessionId });
 }
 
 /**
@@ -336,7 +336,7 @@ export async function terminateSession(sessionId: string): Promise<void> {
  */
 export async function createSessionWindow(sessionId: string): Promise<string> {
   try {
-    return await invoke<string>('create_session_window', { session_id: sessionId });
+    return await invoke<string>('create_session_window', { sessionId });
   } catch (error) {
     console.error('Failed to create session window:', error);
     throw error;
@@ -369,7 +369,7 @@ export async function saveWindowState(
   isMaximized: boolean
 ): Promise<void> {
   try {
-    await invoke('save_window_state', { session_id: sessionId, x, y, width, height, is_maximized: isMaximized });
+    await invoke('save_window_state', { sessionId, x, y, width, height, isMaximized });
   } catch (error) {
     console.error('Failed to save window state:', error);
     throw error;
@@ -381,7 +381,7 @@ export async function saveWindowState(
  */
 export async function loadWindowState(sessionId: string): Promise<WindowState | null> {
   try {
-    return await invoke<WindowState | null>('load_window_state', { session_id: sessionId });
+    return await invoke<WindowState | null>('load_window_state', { sessionId });
   } catch (error) {
     console.error('Failed to load window state:', error);
     return null;

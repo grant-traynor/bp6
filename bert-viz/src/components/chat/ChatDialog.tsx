@@ -121,9 +121,11 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     }
 
     return () => {
+      // Clean up event listeners when switching sessions
       if (unlistenChunk) unlistenChunk();
       if (unlistenStderr) unlistenStderr();
-      if (sessionId) stopAgentSession(sessionId);
+      // DO NOT stop the session here - this would kill it when switching epics!
+      // Sessions should only be terminated via explicit user action (SessionItem terminate button)
     };
   }, [isOpen, persona, task, beadId]);
 
