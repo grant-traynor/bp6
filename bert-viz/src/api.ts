@@ -160,6 +160,23 @@ export async function fetchProjectViewModel(params: FilterParams): Promise<Proje
 // Agent API (bp6-5s4.2.5)
 // ============================================================================
 
+export interface SessionInfo {
+  session_id: string;
+  bead_id: string;
+  persona: string;        // PersonaType as string
+  backend_id: string;     // BackendId as string
+  status: 'running' | 'paused';
+  created_at: number;     // Unix timestamp
+}
+
+// Persona icon mapping (aligned with PersonaType enum from 6dk)
+export const PERSONA_ICONS: Record<string, string> = {
+  'product_manager': '📋',
+  'qa_engineer': '🧪',
+  'specialist': '⚡',
+  // Future: architect, security, etc.
+};
+
 export interface AgentChunk {
   content: string;
   isDone: boolean;
@@ -178,33 +195,43 @@ export type CliBackend = 'gemini' | 'claude' | 'claude-code';
  * @param task - Optional task type for the persona
  * @param beadId - Optional bead ID for context
  * @param cliBackend - Optional CLI backend to use (defaults to 'gemini' if not provided)
+ * @returns The session ID (UUID) of the newly created session
  */
 export async function startAgentSession(
   persona: string,
   task?: string,
   beadId?: string,
   cliBackend?: CliBackend
-): Promise<void> {
+): Promise<string> {
   try {
-    await invoke("start_agent_session", { persona, task, beadId, cliBackend });
+    return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend });
   } catch (error) {
     console.error("Failed to start agent session:", error);
     throw error;
   }
 }
 
-export async function sendAgentMessage(message: string): Promise<void> {
+/**
+ * Send a message to a specific agent session.
+ * @param sessionId - The session ID to send the message to
+ * @param message - The message content
+ */
+export async function sendAgentMessage(sessionId: string, message: string): Promise<void> {
   try {
-    await invoke("send_agent_message", { message });
+    await invoke("send_agent_message", { sessionId, message });
   } catch (error) {
     console.error("Failed to send agent message:", error);
     throw error;
   }
 }
 
-export async function stopAgentSession(): Promise<void> {
+/**
+ * Stop a specific agent session.
+ * @param sessionId - The session ID to stop
+ */
+export async function stopAgentSession(sessionId: string): Promise<void> {
   try {
-    await invoke("stop_agent_session");
+    await invoke("stop_agent_session", { sessionId });
   } catch (error) {
     console.error("Failed to stop agent session:", error);
     throw error;

@@ -24,6 +24,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   const [streamingMessage, setStreamingMessage] = useState('');
   const [showDebug, setShowDebug] = useState(false);
   const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const debugEndRef = useRef<HTMLDivElement>(null);
 
@@ -55,7 +56,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       const setup = async () => {
         try {
           setIsLoading(true);
-          await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend);
+          const newSessionId = await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend);
+          setSessionId(newSessionId);
+          setDebugLogs(prev => [...prev, `[System] Session ID: ${newSessionId}`]);
           
           unlistenChunk = await listen<AgentChunk>('agent-chunk', (event) => {
             const { content, isDone } = event.payload;
@@ -98,14 +101,15 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     return () => {
       if (unlistenChunk) unlistenChunk();
       if (unlistenStderr) unlistenStderr();
-      stopAgentSession();
+      if (sessionId) stopAgentSession(sessionId);
     };
   }, [isOpen, persona, task, beadId]);
 
   const handleStop = async () => {
+    if (!sessionId) return;
     try {
       setDebugLogs(prev => [...prev, '[System] Interrupting agent...']);
-      await stopAgentSession();
+      await stopAgentSession(sessionId);
       setIsLoading(false);
       setStreamingMessage('');
       setDebugLogs(prev => [...prev, '[System] Agent session stopped.']);
@@ -115,7 +119,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   };
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !sessionId) return;
 
     const userMessage = input.trim();
     setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
@@ -124,7 +128,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     setDebugLogs(prev => [...prev, `[Input] ${userMessage}`]);
 
     try {
-      await sendAgentMessage(userMessage);
+      await sendAgentMessage(sessionId, userMessage);
     } catch (error) {
       console.error('Failed to send message:', error);
       setIsLoading(false);
