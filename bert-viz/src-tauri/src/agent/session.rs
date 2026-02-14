@@ -1103,10 +1103,10 @@ pub fn get_session_history(
 
         match event.event_type {
             LogEventType::Message => {
-                // User message - add directly
+                // User message - convert markdown to HTML
                 messages.push(ConversationMessage {
                     role: "user".to_string(),
-                    content: event.content,
+                    content: markdown_to_html(&event.content),
                     timestamp: event.timestamp,
                 });
             }
@@ -1122,11 +1122,11 @@ pub fn get_session_history(
                 }
             }
             LogEventType::SessionEnd => {
-                // Flush accumulated assistant message
+                // Flush accumulated assistant message - convert markdown to HTML
                 if let Some(content) = current_assistant_message.take() {
                     messages.push(ConversationMessage {
                         role: "assistant".to_string(),
-                        content,
+                        content: markdown_to_html(&content),
                         timestamp: current_timestamp.take().unwrap_or_else(|| event.timestamp.clone()),
                     });
                 }
