@@ -270,6 +270,20 @@ export async function stopAgentSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * Interrupt a specific agent session without terminating it.
+ * Sends SIGINT to stop the current streaming response but keeps the session alive.
+ * @param sessionId - The session ID to interrupt
+ */
+export async function interruptAgentSession(sessionId: string): Promise<void> {
+  try {
+    await invoke("interrupt_agent_session", { sessionId });
+  } catch (error) {
+    console.error("Failed to interrupt agent session:", error);
+    throw error;
+  }
+}
+
+/**
  * Get the current CLI backend preference from persistent storage.
  * @returns The current CLI backend ('gemini', 'claude', or 'claude-code')
  * @throws Error if unable to read CLI preference from storage

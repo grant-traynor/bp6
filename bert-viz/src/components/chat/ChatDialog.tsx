@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   startAgentSession,
-  stopAgentSession,
+  interruptAgentSession,
   sendAgentMessage,
   approveSuggestion,
   switchActiveSession,
@@ -182,12 +182,12 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     if (!sessionId) return;
     try {
       setDebugLogs(prev => [...prev, '[System] Interrupting agent...']);
-      await stopAgentSession(sessionId);
+      await interruptAgentSession(sessionId);
       setIsLoading(false);
       setStreamingMessage('');
-      setDebugLogs(prev => [...prev, '[System] Agent session stopped.']);
+      setDebugLogs(prev => [...prev, '[System] Agent interrupted (session remains alive).']);
     } catch (error) {
-      console.error('Failed to stop agent session:', error);
+      console.error('Failed to interrupt agent session:', error);
     }
   };
 

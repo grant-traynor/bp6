@@ -2169,7 +2169,7 @@ pub fn run() {
             bd::get_beads, get_processed_data, get_project_view_model, bd::update_bead, bd::create_bead, bd::close_bead, bd::reopen_bead, bd::claim_bead,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir,
-            agent::session::start_agent_session, agent::session::send_agent_message, agent::session::stop_agent_session, agent::session::approve_suggestion,
+            agent::session::start_agent_session, agent::session::send_agent_message, agent::session::stop_agent_session, agent::session::interrupt_agent_session, agent::session::approve_suggestion,
             agent::session::list_active_sessions, agent::session::get_active_session_id, agent::session::switch_active_session, agent::session::terminate_session,
             agent::session::get_session_history, agent::session::mark_session_read,
             settings::get_cli_preference, settings::set_cli_preference,

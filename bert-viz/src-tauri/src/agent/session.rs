@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use pulldown_cmark::{Parser, html, Options};
 
 /// Status of an agent session
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -103,6 +104,29 @@ pub struct ConversationMessage {
     pub content: String,
     /// Timestamp (ISO 8601 format)
     pub timestamp: String,
+}
+
+/// Convert markdown text to HTML
+///
+/// Uses pulldown-cmark to parse markdown and convert to safe HTML.
+/// Enables tables, strikethrough, and footnotes extensions.
+///
+/// # Arguments
+/// * `markdown` - The markdown text to convert
+///
+/// # Returns
+/// HTML string with markdown rendered
+fn markdown_to_html(markdown: &str) -> String {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_FOOTNOTES);
+    options.insert(Options::ENABLE_TASKLISTS);
+
+    let parser = Parser::new_ext(markdown, options);
+    let mut html_output = String::new();
+    html::push_html(&mut html_output, parser);
+    html_output
 }
 
 /// Session logger for conversation persistence
@@ -283,6 +307,17 @@ fn kill_process_group(pid: u32) {
     }
 }
 
+fn interrupt_process_group(pid: u32) {
+    #[cfg(unix)]
+    {
+        unsafe {
+            // Send SIGINT (2) to simulate CTRL-C and interrupt the current operation
+            // Does NOT send SIGKILL - allows process to handle the interrupt gracefully
+            libc::kill(-(pid as i32), libc::SIGINT);
+        }
+    }
+}
+
 // Multi-session helper functions
 
 /// Convert all sessions to SessionInfo and emit session-list-changed event
@@ -291,8 +326,15 @@ fn emit_session_list_changed(
     sessions: &HashMap<String, SessionState>,
 ) {
     let session_list = list_active_sessions_internal(sessions);
+    println!("📡 Emitting session-list-changed with {} sessions", session_list.len());
+    for session in &session_list {
+        println!("  - Session {}: beadId={:?}", session.session_id, session.bead_id);
+    }
     // Wrap in object to match TypeScript interface: { sessions: SessionInfo[] }
-    let _ = app_handle.emit("session-list-changed", serde_json::json!({ "sessions": session_list }));
+    let payload = serde_json::json!({ "sessions": session_list });
+    println!("📡 Payload: {}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+    // Broadcast to ALL windows using Emitter trait
+    let _ = app_handle.emit_to(tauri::EventTarget::Any, "session-list-changed", payload);
 }
 
 /// Convert HashMap<String, SessionState> to Vec<SessionInfo> for UI consumption
@@ -466,9 +508,20 @@ fn run_cli_command_for_session(
                                 // (triggered by session create/terminate/mark-read)
                             }
 
+                            // Convert markdown content to HTML before emitting
+                            let html_chunk = crate::agent::plugin::AgentChunk {
+                                content: if !chunk.content.is_empty() && !chunk.is_done {
+                                    markdown_to_html(&chunk.content)
+                                } else {
+                                    chunk.content.clone()
+                                },
+                                is_done: chunk.is_done,
+                                session_id: chunk.session_id.clone(),
+                            };
+
                             // Emit to session-specific channel
                             let event_name = format!("agent-chunk-{}", session_id_clone);
-                            let _ = handle_clone.emit(&event_name, chunk);
+                            let _ = handle_clone.emit(&event_name, html_chunk);
                         }
                     }
                 }
@@ -699,17 +752,18 @@ pub fn start_agent_session(
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn send_agent_message(
     app_handle: AppHandle,
-    session_id: String,
+    sessionId: String,
     message: String,
     state: State<'_, AgentState>
 ) -> Result<(), String> {
     // Get session info from HashMap
     let (backend_id, cli_session_id, bead_id, persona) = {
         let sessions = state.sessions.lock().unwrap();
-        let session = sessions.get(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
+        let session = sessions.get(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
 
         (
             session.backend_id,
@@ -724,7 +778,7 @@ pub fn send_agent_message(
         backend_id,
         app_handle.clone(),
         &state,
-        session_id.clone(),
+        sessionId.clone(),
         bead_id,
         persona,
         message,
@@ -735,7 +789,7 @@ pub fn send_agent_message(
     // Update the SessionState with the new process handle
     {
         let mut sessions = state.sessions.lock().unwrap();
-        if let Some(session_state) = sessions.get_mut(&session_id) {
+        if let Some(session_state) = sessions.get_mut(&sessionId) {
             session_state.process = child;
             session_state.status = SessionStatus::Running;
         }
@@ -745,16 +799,17 @@ pub fn send_agent_message(
 }
 
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn stop_agent_session(
     app_handle: AppHandle,
-    session_id: String,
+    sessionId: String,
     state: State<'_, AgentState>
 ) -> Result<(), String> {
     // Remove session from HashMap and get the Child handle
     let child = {
         let mut sessions = state.sessions.lock().unwrap();
-        let session_state = sessions.remove(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
+        let session_state = sessions.remove(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
         session_state.process
     };
 
@@ -764,19 +819,54 @@ pub fn stop_agent_session(
     // Update active session if this was the active one
     {
         let mut active = state.active_session_id.lock().unwrap();
-        if active.as_ref() == Some(&session_id) {
+        if active.as_ref() == Some(&sessionId) {
             *active = None;
         }
     }
 
     // Emit session-terminated event
-    let _ = app_handle.emit("session-terminated", session_id);
+    let _ = app_handle.emit("session-terminated", sessionId);
 
     // Emit session-list-changed event
     {
         let sessions = state.sessions.lock().unwrap();
         emit_session_list_changed(&app_handle, &sessions);
     }
+
+    Ok(())
+}
+
+/// Interrupt an agent session without terminating it
+///
+/// Sends SIGINT to the running CLI process to interrupt the current streaming response,
+/// but keeps the session alive in the sessions HashMap for follow-up messages.
+/// This is the equivalent of pressing CTRL-C in the CLI.
+///
+/// # Arguments
+/// * `sessionId` - The session ID to interrupt
+///
+/// # Errors
+/// Returns an error if the session doesn't exist
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn interrupt_agent_session(
+    sessionId: String,
+    state: State<'_, AgentState>
+) -> Result<(), String> {
+    eprintln!("⏸️  Interrupting session: {}", sessionId);
+
+    // Get the process ID without removing the session from HashMap
+    let pid = {
+        let sessions = state.sessions.lock().unwrap();
+        let session_state = sessions.get(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
+        session_state.process.id()
+    };
+
+    // Send SIGINT to interrupt (but not kill) the process
+    interrupt_process_group(pid);
+
+    eprintln!("⏸️  Session {} interrupted (session remains alive)", sessionId);
 
     Ok(())
 }
@@ -803,7 +893,13 @@ pub fn approve_suggestion(command: String) -> Result<String, String> {
 #[tauri::command]
 pub fn list_active_sessions(state: State<'_, AgentState>) -> Result<Vec<SessionInfo>, String> {
     let sessions = state.sessions.lock().unwrap();
+    println!("🔍 list_active_sessions: HashMap has {} entries", sessions.len());
+    for (id, session) in sessions.iter() {
+        println!("  - Session {}: bead_id={:?}, persona={}, status={:?}",
+            id, session.bead_id, session.persona, session.status);
+    }
     let mut session_list = list_active_sessions_internal(&sessions);
+    println!("🔍 list_active_sessions: Returning {} sessions", session_list.len());
 
     // Sort by creation time (oldest first)
     session_list.sort_by_key(|s| s.created_at);
@@ -831,29 +927,30 @@ pub fn get_active_session_id(state: State<'_, AgentState>) -> Result<Option<Stri
 /// # Errors
 /// Returns an error if the session doesn't exist
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn switch_active_session(
     app_handle: AppHandle,
-    session_id: String,
+    sessionId: String,
     state: State<'_, AgentState>,
 ) -> Result<(), String> {
     // Validate that the session exists
     {
         let sessions = state.sessions.lock().unwrap();
-        if !sessions.contains_key(&session_id) {
-            return Err(format!("Session {} not found", session_id));
+        if !sessions.contains_key(&sessionId) {
+            return Err(format!("Session {} not found", sessionId));
         }
     }
 
     // Update active session ID
     {
         let mut active_id = state.active_session_id.lock().unwrap();
-        *active_id = Some(session_id.clone());
+        *active_id = Some(sessionId.clone());
     }
 
     // Emit event to notify UI
     let _ = app_handle.emit(
         "active-session-changed",
-        serde_json::json!({ "sessionId": session_id }),
+        serde_json::json!({ "sessionId": sessionId }),
     );
 
     Ok(())
@@ -871,17 +968,18 @@ pub fn switch_active_session(
 /// # Errors
 /// Returns an error if the session doesn't exist
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn terminate_session(
     app_handle: AppHandle,
-    session_id: String,
+    sessionId: String,
     state: State<'_, AgentState>,
 ) -> Result<(), String> {
-    eprintln!("🗑️  Terminating session: {}", session_id);
+    eprintln!("🗑️  Terminating session: {}", sessionId);
 
     // Close any windows associated with this session (before terminating)
     // Get WindowRegistry from app state
     if let Some(window_registry) = app_handle.try_state::<crate::window::WindowRegistry>() {
-        if let Some(window_label) = window_registry.get_window_label(&session_id) {
+        if let Some(window_label) = window_registry.get_window_label(&sessionId) {
             eprintln!("  🪟 Closing window for session: {}", window_label);
 
             // Close the window
@@ -890,7 +988,7 @@ pub fn terminate_session(
             }
 
             // Unregister from WindowRegistry
-            window_registry.unregister_by_session(&session_id);
+            window_registry.unregister_by_session(&sessionId);
         }
     }
 
@@ -898,8 +996,8 @@ pub fn terminate_session(
     let child = {
         let mut sessions = state.sessions.lock().unwrap();
         let session_state = sessions
-            .remove(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
+            .remove(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
         session_state.process
     };
 
@@ -909,7 +1007,7 @@ pub fn terminate_session(
     // Update active session if needed
     {
         let mut active_id = state.active_session_id.lock().unwrap();
-        if active_id.as_ref() == Some(&session_id) {
+        if active_id.as_ref() == Some(&sessionId) {
             // Find another session to make active
             let sessions = state.sessions.lock().unwrap();
             *active_id = sessions.keys().next().cloned();
@@ -919,7 +1017,7 @@ pub fn terminate_session(
     // Emit events
     let _ = app_handle.emit(
         "session-terminated",
-        serde_json::json!({ "sessionId": session_id }),
+        serde_json::json!({ "sessionId": sessionId }),
     );
 
     // Emit session list changed event
@@ -946,9 +1044,10 @@ pub fn terminate_session(
 /// # Errors
 /// Returns an error if the log file cannot be found or parsed
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn get_session_history(
-    session_id: String,
-    bead_id: Option<String>,
+    sessionId: String,
+    beadId: Option<String>,
 ) -> Result<Vec<ConversationMessage>, String> {
     // Get home directory
     let home_dir = dirs::home_dir()
@@ -956,7 +1055,7 @@ pub fn get_session_history(
 
     // Build path: ~/.bp6/sessions/<bead-id>/
     let bp6_dir = home_dir.join(".bp6").join("sessions");
-    let session_dir = if let Some(bid) = bead_id.as_ref() {
+    let session_dir = if let Some(bid) = beadId.as_ref() {
         bp6_dir.join(bid)
     } else {
         bp6_dir.join("untracked")
@@ -971,7 +1070,7 @@ pub fn get_session_history(
             .find(|path| {
                 path.file_name()
                     .and_then(|name| name.to_str())
-                    .map(|name| name.starts_with(&format!("{}-", session_id)) && name.ends_with(".jsonl"))
+                    .map(|name| name.starts_with(&format!("{}-", sessionId)) && name.ends_with(".jsonl"))
                     .unwrap_or(false)
             })
     } else {
@@ -981,7 +1080,7 @@ pub fn get_session_history(
     let log_file_path = log_file.ok_or_else(|| {
         format!(
             "No log file found for session {} in {}",
-            session_id,
+            sessionId,
             session_dir.display()
         )
     })?;
@@ -1039,14 +1138,10 @@ pub fn get_session_history(
         }
     }
 
-    // Flush any remaining assistant message
-    if let Some(content) = current_assistant_message.take() {
-        messages.push(ConversationMessage {
-            role: "assistant".to_string(),
-            content,
-            timestamp: current_timestamp.take().unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
-        });
-    }
+    // DO NOT flush remaining assistant message - it means the session is still streaming
+    // and that message will come through live via agent-chunk events.
+    // Only completed messages (with SessionEnd markers) should be in history.
+    // This prevents duplicate messages when switching to an active session.
 
     Ok(messages)
 }
@@ -1064,17 +1159,18 @@ pub fn get_session_history(
 /// # Returns
 /// Ok(()) on success, or error if session not found
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn mark_session_read(
     app_handle: AppHandle,
-    session_id: String,
+    sessionId: String,
     state: State<'_, AgentState>,
 ) -> Result<(), String> {
     // Update has_unread flag
     {
         let mut sessions = state.sessions.lock().unwrap();
         let session = sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
+            .get_mut(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
 
         session.has_unread = false;
 
