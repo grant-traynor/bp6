@@ -8,6 +8,7 @@ import {
   listActiveSessions,
   terminateSession,
   loadSessionHistory,
+  markSessionRead,
   AgentChunk,
   CliBackend
 } from '../../api';
@@ -227,6 +228,14 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       }
 
       setSessionId(targetSessionId);
+
+      // Mark the session as read (clear unread indicator)
+      try {
+        await markSessionRead(targetSessionId);
+      } catch (error) {
+        console.error('Failed to mark session as read:', error);
+        // Non-critical error, don't block the UI
+      }
 
       setDebugLogs(prev => [...prev, `[System] Switched to session ${targetSessionId}`]);
     } catch (error) {

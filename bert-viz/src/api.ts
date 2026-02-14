@@ -171,6 +171,9 @@ export interface SessionInfo {
   status: 'running' | 'paused';
   createdAt: number;      // Unix timestamp in seconds (Rust u64)
   cliSessionId?: string | null;  // CLI session ID for resume capability
+  lastActivity: number;   // Unix timestamp of last activity (Rust u64)
+  hasUnread: boolean;     // Whether session has unread messages
+  messageCount: number;   // Number of messages in session
 }
 
 // Persona icon mapping (aligned with PersonaType enum from 6dk)
@@ -328,6 +331,14 @@ export async function getActiveSessionId(): Promise<string | null> {
  */
 export async function terminateSession(sessionId: string): Promise<void> {
   await invoke('terminate_session', { sessionId });
+}
+
+/**
+ * Mark a session as read (clear the unread indicator).
+ * @param sessionId - The session ID to mark as read
+ */
+export async function markSessionRead(sessionId: string): Promise<void> {
+  await invoke('mark_session_read', { sessionId });
 }
 
 /**
