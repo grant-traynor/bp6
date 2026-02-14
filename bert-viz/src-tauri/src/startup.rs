@@ -48,6 +48,8 @@ pub struct SortState {
 pub struct UiState {
     pub zoom: f64,
     pub collapsed_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wbs_panel_width: Option<f64>,
 }
 
 /// Complete startup state containing all restorable application state
@@ -101,6 +103,7 @@ impl Default for UiState {
         UiState {
             zoom: 1.0,
             collapsed_ids: Vec::new(),
+            wbs_panel_width: None,
         }
     }
 }
