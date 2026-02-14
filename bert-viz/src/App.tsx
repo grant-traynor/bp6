@@ -307,6 +307,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           // Restore UI state
           setZoom(startupState.ui.zoom);
           setCollapsedIds(new Set(startupState.ui.collapsedIds));
+          if (startupState.ui.wbsPanelWidth) {
+            setPanelWidth(startupState.ui.wbsPanelWidth);
+          }
         } else {
           console.log('📂 No startup state file found, using defaults');
         }
@@ -416,7 +419,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           },
           ui: {
             zoom,
-            collapsedIds: Array.from(collapsedIds)
+            collapsedIds: Array.from(collapsedIds),
+            wbsPanelWidth: panelWidth
           }
         };
 
@@ -453,7 +457,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       // Save final state on unmount (window close)
       saveCurrentWindowState();
     };
-  }, [isSessionWindow, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds]);
+  }, [isSessionWindow, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds, panelWidth]);
 
   // Helper: Flatten tree to array of beads for backward compatibility
   const flattenTree = useCallback((nodes: BeadNode[]): BeadNode[] => {
@@ -697,7 +701,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           },
           ui: {
             zoom: zoom,
-            collapsedIds: Array.from(collapsedIds)
+            collapsedIds: Array.from(collapsedIds),
+            wbsPanelWidth: panelWidth
           }
         });
       } catch (error) {
@@ -707,6 +712,49 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
     saveState();
   }, [hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, filterText, zoom, collapsedIds, hasProject]);
+
+  // Save WBS panel width to startup.json with debouncing (bp6-j33p.5.3)
+  useEffect(() => {
+    if (!hasProject) return;
+
+    const saveTimeout = setTimeout(async () => {
+      try {
+        const window = getCurrentWindow();
+        const position = await window.outerPosition();
+        const size = await window.outerSize();
+        const isMaximized = await window.isMaximized();
+
+        await saveStartupState({
+          window: {
+            width: size.width,
+            height: size.height,
+            x: position.x,
+            y: position.y,
+            isMaximized
+          },
+          filters: {
+            filterText,
+            hideClosed,
+            closedTimeFilter,
+            includeHierarchy
+          },
+          sort: {
+            sortBy,
+            sortOrder
+          },
+          ui: {
+            zoom,
+            collapsedIds: Array.from(collapsedIds),
+            wbsPanelWidth: panelWidth
+          }
+        });
+      } catch (error) {
+        console.error('Failed to save panel width:', error);
+      }
+    }, 500); // 500ms debounce for panel width changes
+
+    return () => clearTimeout(saveTimeout);
+  }, [panelWidth, hasProject, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds]);
 
   useEffect(() => {
     if (isDark) document.documentElement.classList.add('dark');
@@ -1106,7 +1154,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 </div>
               </div>
               <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
-                <div className="border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em] select-none" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
+                <div className="border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em]" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
                   <div className="w-10 shrink-0" />
                   <div 
                     className={cn(

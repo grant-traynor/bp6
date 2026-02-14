@@ -411,6 +411,7 @@ export interface SortStateData {
 export interface UiStateData {
   zoom: number;
   collapsedIds: string[];
+  wbsPanelWidth?: number;
 }
 
 export interface StartupState {
