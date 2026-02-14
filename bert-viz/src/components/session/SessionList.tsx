@@ -32,14 +32,19 @@ export const SessionList: React.FC<SessionListProps> = ({
 
     // Load initial session list
     listActiveSessions().then(initialSessions => {
-      setSessions(initialSessions);
+      setSessions(initialSessions || []);
+    }).catch(error => {
+      console.error('Failed to load sessions:', error);
+      setSessions([]);
     });
 
     // Subscribe to session list changes (event-driven)
     onSessionListChanged((updatedSessions) => {
-      setSessions(updatedSessions);
+      setSessions(updatedSessions || []);
     }).then(fn => {
       unlisten = fn;
+    }).catch(error => {
+      console.error('Failed to subscribe to session changes:', error);
     });
 
     // Cleanup: unsubscribe on unmount
@@ -52,10 +57,13 @@ export const SessionList: React.FC<SessionListProps> = ({
     setIsCollapsed(!isCollapsed);
   };
 
+  // Safety check: ensure sessions is always an array
+  const safeSessions = sessions || [];
+
   return (
     <div className={cn('session-list', isCollapsed && 'session-list-collapsed')}>
       <div className="session-list-header">
-        <span>Active Sessions ({sessions.length})</span>
+        <span>Active Sessions ({safeSessions.length})</span>
         <button
           onClick={toggleCollapse}
           aria-label={isCollapsed ? 'Expand session list' : 'Collapse session list'}
@@ -65,10 +73,10 @@ export const SessionList: React.FC<SessionListProps> = ({
         </button>
       </div>
       <div className="session-list-body">
-        {sessions.length === 0 ? (
+        {safeSessions.length === 0 ? (
           <div className="session-list-empty">No active sessions</div>
         ) : (
-          sessions.map(session => (
+          safeSessions.map(session => (
             <SessionItem
               key={session.session_id}
               session={session}
