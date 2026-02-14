@@ -226,3 +226,255 @@ body {
 .animate-glow {
   animation: glow-pulse 2s ease-in-out infinite;
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1.0; }
+}
+
+.animate-pulse-slow {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* ============================================================================
+ * Session List & Session Item Styles (bp6-643.004.8)
+ * ============================================================================ */
+
+/* Session List Container */
+.session-list {
+  width: 200px;
+  border-right: 1px solid var(--border-primary);
+  display: flex;
+  flex-direction: column;
+  background: var(--background-secondary);
+  transition: width 0.2s ease;
+  overflow: hidden;
+}
+
+.session-list-collapsed {
+  width: 48px;
+}
+
+/* Session List Header */
+.session-list-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  position: sticky;
+  top: 0;
+  background: var(--background-secondary);
+  z-index: 10;
+  color: var(--text-secondary);
+}
+
+/* Session List Body */
+.session-list-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Empty State */
+.session-list-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Session Item */
+.session-item {
+  padding: 12px;
+  border-bottom: 1px solid var(--border-primary);
+  cursor: pointer;
+  transition: background 0.15s ease, border-left-color 0.15s ease;
+  border-left: 2px solid transparent;
+  user-select: none;
+}
+
+.session-item:hover {
+  background: var(--level-2);
+}
+
+.session-item-active {
+  border-left-color: var(--accent-primary);
+  background: var(--level-3);
+}
+
+.session-item:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+/* Session Item Header */
+.session-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+  gap: 4px;
+}
+
+.session-item-title {
+  font-weight: 500;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1.4;
+}
+
+.session-persona-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.session-persona-label {
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.session-bead-separator {
+  color: var(--text-muted);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+.session-bead-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+/* Session Item Details */
+.session-item-details {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-backend {
+  font-weight: 500;
+}
+
+.session-runtime-separator {
+  color: var(--text-muted);
+}
+
+.session-runtime {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+/* Session Item Status */
+.session-item-status {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-block;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.session-status-running {
+  background: rgba(16, 185, 129, 0.15);
+  color: rgb(5, 150, 105);
+}
+
+.dark .session-status-running {
+  background: rgba(16, 185, 129, 0.2);
+  color: rgb(52, 211, 153);
+}
+
+.session-status-paused {
+  background: rgba(245, 158, 11, 0.15);
+  color: rgb(217, 119, 6);
+}
+
+.dark .session-status-paused {
+  background: rgba(245, 158, 11, 0.2);
+  color: rgb(251, 191, 36);
+}
+
+/* Terminate Button */
+.session-terminate-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.session-item:hover .session-terminate-btn {
+  opacity: 1;
+}
+
+.session-terminate-btn:hover {
+  color: #ef4444;
+}
+
+.session-terminate-btn:active {
+  transform: scale(0.95);
+}
+
+/* Chat Dialog Layout Helpers */
+.chat-dialog-container {
+  display: flex;
+  height: 100%;
+}
+
+.chat-main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* Fix flex overflow */
+}
+
+/* Responsive Behavior */
+@media (max-width: 768px) {
+  .session-list {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 100%;
+    z-index: 20;
+    box-shadow: var(--shadow-lg);
+  }
+
+  .session-list-collapsed {
+    transform: translateX(-100%);
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .session-list {
+    width: 150px;
+  }
+}

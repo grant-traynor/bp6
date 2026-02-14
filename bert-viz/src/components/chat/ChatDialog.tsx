@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { startAgentSession, stopAgentSession, sendAgentMessage, approveSuggestion, AgentChunk, CliBackend } from '../../api';
+import {
+  startAgentSession,
+  stopAgentSession,
+  sendAgentMessage,
+  approveSuggestion,
+  switchActiveSession,
+  listActiveSessions,
+  terminateSession,
+  loadSessionHistory,
+  AgentChunk,
+  CliBackend
+} from '../../api';
 import { listen } from '@tauri-apps/api/event';
 import { Terminal, MessageSquare, Trash2, X, Square } from 'lucide-react';
+import { SessionList } from '../session/SessionList';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -152,6 +164,63 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     }
   };
 
+  const handleSessionSwitch = async (targetSessionId: string) => {
+    if (targetSessionId === sessionId) return; // Same session check
+
+    try {
+      setIsLoading(true);
+      await switchActiveSession(targetSessionId);
+
+      // Load conversation history from JSONL
+      const history = await loadSessionHistory(targetSessionId, beadId || '');
+
+      // Convert ConversationMessage[] to Message[]
+      const messages: Message[] = history.map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
+      setMessages(messages);
+      setSessionId(targetSessionId);
+
+      setDebugLogs(prev => [...prev, `[System] Switched to session ${targetSessionId}`]);
+    } catch (error) {
+      console.error('Failed to switch session:', error);
+      setDebugLogs(prev => [...prev, `[Error] Switch failed: ${error}`]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // @ts-ignore - Used in bp6-643.004.6 SessionList integration
+  const handleSessionTerminate = async (targetSessionId: string) => {
+    // Confirmation already handled by SessionItem, but add here for safety
+    const confirmed = window.confirm(
+      `Terminate session ${targetSessionId}? This will stop the agent and close the session.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await terminateSession(targetSessionId);
+
+      // If we terminated the active session, switch to another or clear
+      if (targetSessionId === sessionId) {
+        const sessions = await listActiveSessions();
+        if (sessions.length > 0) {
+          await handleSessionSwitch(sessions[0].session_id);
+        } else {
+          setMessages([]);
+          setSessionId(null);
+        }
+      }
+
+      setDebugLogs(prev => [...prev, `[System] Terminated session ${targetSessionId}`]);
+    } catch (error) {
+      console.error('Failed to terminate session:', error);
+      setDebugLogs(prev => [...prev, `[Error] Termination failed: ${error}`]);
+    }
+  };
+
   const renderContent = (content: string) => {
     const parts = content.split(/(```[\s\S]*?```|`bd .*?`|^bd .*$)/m);
     
@@ -188,7 +257,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 w-[450px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+    <div className="fixed bottom-4 right-4 w-[650px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
       {/* Header */}
       <div className="p-4 border-b-2 border-slate-200 dark:border-slate-700 flex justify-between items-center bg-indigo-600 text-white">
         <div className="flex items-center gap-3">
@@ -235,8 +304,17 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 overflow-hidden relative">
+      {/* Main Content Area with SessionList */}
+      <div className="flex-1 overflow-hidden relative flex">
+        {/* Session List Sidebar */}
+        <SessionList
+          activeSessionId={sessionId}
+          onSessionSelect={handleSessionSwitch}
+          onSessionTerminate={handleSessionTerminate}
+        />
+
+        {/* Chat Content */}
+        <div className="flex-1 overflow-hidden relative">
         {/* Chat View */}
         <div className={`absolute inset-0 flex flex-col p-4 space-y-4 overflow-y-auto custom-scrollbar transition-opacity duration-300 ${showDebug ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
           {messages.length === 0 && !streamingMessage && (
@@ -300,6 +378,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
             })}
             <div ref={debugEndRef} />
           </div>
+        </div>
         </div>
       </div>
 

@@ -1,4 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export type { UnlistenFn };
 
 export interface Dependency {
   issue_id: string;
@@ -177,6 +180,28 @@ export const PERSONA_ICONS: Record<string, string> = {
   // Future: architect, security, etc.
 };
 
+/**
+ * Format session runtime from created_at timestamp to "Xm Ys" format.
+ * @param createdAt Unix timestamp in milliseconds
+ * @returns Formatted runtime string (e.g., "5m 32s")
+ */
+export function formatSessionRuntime(createdAt: number): string {
+  const elapsed = Date.now() - createdAt;
+  const seconds = Math.floor(elapsed / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}m ${remainingSeconds}s`;
+}
+
+/**
+ * Get persona icon for a given persona type.
+ * @param persona PersonaType as string
+ * @returns Emoji icon for the persona, or ❓ if unknown
+ */
+export function getPersonaIcon(persona: string): string {
+  return PERSONA_ICONS[persona] || '❓';
+}
+
 export interface AgentChunk {
   content: string;
   isDone: boolean;
@@ -266,6 +291,178 @@ export async function setCliPreference(cliBackend: string): Promise<void> {
   }
 }
 
+/**
+ * List all active agent sessions.
+ * @returns Array of SessionInfo for all currently active sessions
+ */
+export async function listActiveSessions(): Promise<SessionInfo[]> {
+  try {
+    return await invoke<SessionInfo[]>('list_active_sessions');
+  } catch (error) {
+    console.error('Failed to list active sessions:', error);
+    return [];
+  }
+}
+
+/**
+ * Switch the active session to a different session.
+ * @param sessionId - The session ID to switch to
+ */
+export async function switchActiveSession(sessionId: string): Promise<void> {
+  await invoke('switch_active_session', { sessionId });
+}
+
+/**
+ * Get the currently active session ID.
+ * @returns The active session ID, or null if no session is active
+ */
+export async function getActiveSessionId(): Promise<string | null> {
+  return await invoke<string | null>('get_active_session_id');
+}
+
+/**
+ * Terminate a specific agent session.
+ * @param sessionId - The session ID to terminate
+ */
+export async function terminateSession(sessionId: string): Promise<void> {
+  await invoke('terminate_session', { sessionId });
+}
+
+// ============================================================================
+// Session History API (bp6-643.004.5)
+// ============================================================================
+
+/**
+ * Log event structure from JSONL files.
+ * Matches the Rust LogEvent structure in session.rs.
+ */
+export interface LogEvent {
+  timestamp: string;
+  session_id: string;
+  bead_id: string | null;
+  persona: string;
+  backend: string;
+  event_type: 'sessionstart' | 'message' | 'chunk' | 'sessionend';
+  content: string;
+  metadata?: Record<string, any>;
+}
+
+/**
+ * Message structure for conversation history.
+ * Simplified from LogEvent for UI display.
+ */
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+}
+
+/**
+ * Load session conversation history from JSONL log files.
+ * Reads from ~/.bp6/sessions/<bead-id>/<session-id>-*.jsonl
+ *
+ * @param sessionId - The session UUID to load history for
+ * @param beadId - The bead ID (used for directory organization)
+ * @returns Array of conversation messages (user and assistant)
+ */
+export async function loadSessionHistory(
+  sessionId: string,
+  beadId: string
+): Promise<ConversationMessage[]> {
+  try {
+    // Import Tauri fs API dynamically to avoid circular dependencies
+    const { readTextFile } = await import('@tauri-apps/plugin-fs');
+    const { homeDir } = await import('@tauri-apps/api/path');
+    const { readDir } = await import('@tauri-apps/plugin-fs');
+
+    // Build path to session directory
+    const home = await homeDir();
+    const sessionDir = `${home}/.bp6/sessions/${beadId}`;
+
+    // Find the JSONL file for this session (pattern: <session-id>-<timestamp>.jsonl)
+    let logFilePath: string | null = null;
+    try {
+      const entries = await readDir(sessionDir);
+      for (const entry of entries) {
+        if (entry.name.startsWith(sessionId) && entry.name.endsWith('.jsonl')) {
+          logFilePath = `${sessionDir}/${entry.name}`;
+          break;
+        }
+      }
+    } catch (error) {
+      console.warn(`Session directory not found: ${sessionDir}`, error);
+      return [];
+    }
+
+    if (!logFilePath) {
+      console.warn(`No log file found for session ${sessionId} in ${sessionDir}`);
+      return [];
+    }
+
+    // Read and parse JSONL file
+    const content = await readTextFile(logFilePath);
+    const lines = content.split('\n').filter(l => l.trim());
+
+    const messages: ConversationMessage[] = [];
+    let currentAssistantMessage = '';
+
+    for (const line of lines) {
+      try {
+        const event: LogEvent = JSON.parse(line);
+
+        // Process based on event type
+        switch (event.event_type) {
+          case 'message':
+            // User message - add directly
+            messages.push({
+              role: 'user',
+              content: event.content,
+              timestamp: event.timestamp,
+            });
+            break;
+
+          case 'chunk':
+            // Assistant chunk - accumulate
+            currentAssistantMessage += event.content;
+            break;
+
+          case 'sessionend':
+            // End of assistant response - flush accumulated message
+            if (currentAssistantMessage.trim()) {
+              messages.push({
+                role: 'assistant',
+                content: currentAssistantMessage,
+                timestamp: event.timestamp,
+              });
+              currentAssistantMessage = '';
+            }
+            break;
+
+          case 'sessionstart':
+            // Metadata event - skip
+            break;
+        }
+      } catch (parseError) {
+        console.warn('Failed to parse JSONL line:', line, parseError);
+      }
+    }
+
+    // Flush any remaining assistant message
+    if (currentAssistantMessage.trim()) {
+      messages.push({
+        role: 'assistant',
+        content: currentAssistantMessage,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return messages;
+  } catch (error) {
+    console.error('Failed to load session history:', error);
+    return [];
+  }
+}
+
 export async function approveSuggestion(command: string): Promise<string> {
   try {
     return await invoke<string>("approve_suggestion", { command });
@@ -273,6 +470,45 @@ export async function approveSuggestion(command: string): Promise<string> {
     console.error("Failed to approve suggestion:", error);
     throw error;
   }
+}
+
+// ============================================================================
+// Event Listeners (bp6-b8n)
+// ============================================================================
+
+/**
+ * Listen for session list changes from the backend.
+ * @param callback - Function to call with the updated session list
+ * @returns A promise that resolves to an unlisten function for cleanup
+ */
+export async function onSessionListChanged(
+  callback: (sessions: SessionInfo[]) => void
+): Promise<UnlistenFn> {
+  return listen<{ sessions: SessionInfo[] }>("session-list-changed", (event) => {
+    callback(event.payload.sessions);
+  });
+}
+
+/**
+ * Listen for bead update events from the backend.
+ * @param callback - Function to call when beads are updated
+ * @returns A promise that resolves to an unlisten function for cleanup
+ */
+export async function onBeadsUpdated(callback: () => void): Promise<UnlistenFn> {
+  return listen("beads-updated", () => {
+    callback();
+  });
+}
+
+/**
+ * Listen for project list update events from the backend.
+ * @param callback - Function to call when projects are updated
+ * @returns A promise that resolves to an unlisten function for cleanup
+ */
+export async function onProjectsUpdated(callback: () => void): Promise<UnlistenFn> {
+  return listen("projects-updated", () => {
+    callback();
+  });
 }
 
 // buildWBSTree function removed - now handled by Rust backend in get_processed_data
