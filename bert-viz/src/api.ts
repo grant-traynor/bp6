@@ -329,6 +329,20 @@ export async function terminateSession(sessionId: string): Promise<void> {
   await invoke('terminate_session', { sessionId });
 }
 
+/**
+ * Create a new window for a specific session (multi-window support).
+ * @param sessionId - The session ID to open in a new window
+ * @returns The window label (e.g., "agent-session-{uuid}")
+ */
+export async function createSessionWindow(sessionId: string): Promise<string> {
+  try {
+    return await invoke<string>('create_session_window', { sessionId });
+  } catch (error) {
+    console.error('Failed to create session window:', error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // Session History API (bp6-643.004.5)
 // ============================================================================

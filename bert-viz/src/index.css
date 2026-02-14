@@ -417,6 +417,42 @@ body {
   color: rgb(251, 191, 36);
 }
 
+/* Session Actions Container */
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Window Button */
+.session-window-btn {
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background-color 0.15s ease;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.session-item:hover .session-window-btn {
+  opacity: 1;
+}
+
+.session-window-btn:hover {
+  color: #3b82f6;
+  background-color: rgba(59, 130, 246, 0.1);
+}
+
+.session-window-btn:active {
+  transform: scale(0.95);
+}
+
 /* Terminate Button */
 .session-terminate-btn {
   opacity: 0;

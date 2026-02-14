@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
-import { SessionInfo, getPersonaIcon, formatSessionRuntime } from '../../api';
+import { X, ExternalLink } from 'lucide-react';
+import { SessionInfo, getPersonaIcon, formatSessionRuntime, createSessionWindow } from '../../api';
 import { cn } from '../../utils';
 
 interface SessionItemProps {
@@ -40,6 +40,17 @@ export const SessionItem: React.FC<SessionItemProps> = ({
     e.stopPropagation(); // Don't trigger onSelect
     if (window.confirm(`Terminate session ${session.session_id}? This will stop the agent.`)) {
       onTerminate(session.session_id);
+    }
+  };
+
+  const handleOpenInWindow = async (e: React.MouseEvent) => {
+    e.stopPropagation(); // Don't trigger onSelect
+    try {
+      const windowLabel = await createSessionWindow(session.session_id);
+      console.log(`Opened session ${session.session_id} in new window: ${windowLabel}`);
+    } catch (error) {
+      console.error('Failed to open session in new window:', error);
+      alert(`Failed to open window: ${error}`);
     }
   };
 
@@ -83,14 +94,24 @@ export const SessionItem: React.FC<SessionItemProps> = ({
           <span className="session-bead-title">{beadTitle}</span>
         </div>
 
-        <button
-          className="session-terminate-btn"
-          onClick={handleTerminate}
-          aria-label={`Terminate session ${session.session_id}`}
-          title="Terminate session"
-        >
-          <X size={14} />
-        </button>
+        <div className="session-actions">
+          <button
+            className="session-window-btn"
+            onClick={handleOpenInWindow}
+            aria-label={`Open session ${session.session_id} in new window`}
+            title="Open in new window"
+          >
+            <ExternalLink size={14} />
+          </button>
+          <button
+            className="session-terminate-btn"
+            onClick={handleTerminate}
+            aria-label={`Terminate session ${session.session_id}`}
+            title="Terminate session"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Details: Backend + Runtime */}
