@@ -2169,6 +2169,7 @@ pub fn run() {
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir,
             agent::session::start_agent_session, agent::session::send_agent_message, agent::session::stop_agent_session, agent::session::approve_suggestion,
+            agent::session::list_active_sessions, agent::session::get_active_session_id, agent::session::switch_active_session, agent::session::terminate_session,
             settings::get_cli_preference, settings::set_cli_preference
         ])
         .setup(|app| {

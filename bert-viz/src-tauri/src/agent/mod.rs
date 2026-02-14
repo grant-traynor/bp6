@@ -19,5 +19,13 @@ pub use plugin::{AgentChunk, BackendId, CliBackendPlugin};
 #[allow(unused_imports)]
 pub use persona::{PersonaContext, PersonaPlugin, PersonaRegistry, PersonaType};
 
-// Re-export existing agent session functionality
+// Re-export agent session types
 pub use session::AgentState;
+
+// Re-export multi-session types
+#[allow(unused_imports)]
+pub use session::{SessionInfo, SessionState, SessionStatus};
+
+// Re-export logging types
+#[allow(unused_imports)]
+pub use session::{LogEvent, LogEventType};
