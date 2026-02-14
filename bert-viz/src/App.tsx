@@ -223,7 +223,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   // WBS Panel resize state (bp6-j33p.5.2)
   const [panelWidth, setPanelWidth] = useState(300);
   const MIN_PANEL_WIDTH = 200;
-  const MAX_PANEL_WIDTH = 600;
+  const MAX_PANEL_WIDTH = 1200;
 
   // The view model tree already includes isExpanded and isVisible state from backend
   // No need for complex frontend processing - just access viewModel.tree directly
