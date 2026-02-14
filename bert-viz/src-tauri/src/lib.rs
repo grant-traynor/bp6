@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 mod agent;
 mod bd;
 mod settings;
+mod startup;
 mod window;
 
 use std::collections::hash_map::DefaultHasher;
@@ -2045,8 +2046,8 @@ fn get_projects_path() -> Result<PathBuf, String> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| "Could not locate home directory (neither HOME nor USERPROFILE is set)".to_string())?;
-    
-    let dir = PathBuf::from(home).join(".bert-viz");
+
+    let dir = PathBuf::from(home).join(".bp6");
     if !dir.exists() {
         std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create directory {}: {}", dir.display(), e))?;
     }
@@ -2173,6 +2174,7 @@ pub fn run() {
             agent::session::list_active_sessions, agent::session::get_active_session_id, agent::session::switch_active_session, agent::session::terminate_session,
             agent::session::get_session_history, agent::session::mark_session_read,
             settings::get_cli_preference, settings::set_cli_preference,
+            startup::save_startup_state, startup::load_startup_state,
             window::create_session_window, window::get_window_session_id, window::close_session_window, window::list_session_windows,
             window::save_window_state, window::load_window_state
         ])

@@ -297,7 +297,6 @@ body {
   cursor: pointer;
   transition: background 0.15s ease, border-left-color 0.15s ease;
   border-left: 2px solid transparent;
-  user-select: none;
 }
 
 .session-item:hover {

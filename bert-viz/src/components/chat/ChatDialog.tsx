@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   startAgentSession,
   interruptAgentSession,
@@ -44,6 +44,11 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   const unlistenStderrRef = useRef<(() => void) | undefined>(undefined);
   const isSwitchingSession = useRef(false);
 
+  // Drag state
+  const [position, setPosition] = useState({ x: 100, y: 100 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
   };
@@ -59,6 +64,28 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
   };
 
+  // Drag event handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragOffset({
+      x: e.clientX - position.x,
+      y: e.clientY - position.y
+    });
+  };
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDragging) return;
+
+    const newX = Math.max(0, Math.min(e.clientX - dragOffset.x, window.innerWidth - 800));
+    const newY = Math.max(0, Math.min(e.clientY - dragOffset.y, window.innerHeight - 600));
+
+    setPosition({ x: newX, y: newY });
+  }, [isDragging, dragOffset]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
   useEffect(() => {
     // Don't auto-scroll while switching sessions to prevent aggressive scrolling
     if (!showDebug && !isSwitchingSession.current) {
@@ -72,6 +99,18 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   useEffect(() => {
     if (showDebug) scrollDebugToBottom();
   }, [debugLogs, showDebug]);
+
+  // Drag event listeners
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragOffset, handleMouseMove, handleMouseUp]);
 
   // Track previous bead/persona to prevent unnecessary resets
   const prevContextRef = useRef<string>('');
@@ -403,9 +442,18 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 w-[650px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
+    <div
+      className="fixed w-[650px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
+      style={{
+        left: `${position.x}px`,
+        top: `${position.y}px`
+      }}
+    >
       {/* Header */}
-      <div className="p-4 border-b-2 border-slate-200 dark:border-slate-700 flex justify-between items-center bg-indigo-600 text-white">
+      <div
+        className="p-4 border-b-2 border-slate-200 dark:border-slate-700 flex justify-between items-center bg-indigo-600 text-white cursor-move"
+        onMouseDown={handleMouseDown}
+      >
         <div className="flex items-center gap-3">
           <span className="text-lg">🤖</span>
           <div className="flex flex-col">

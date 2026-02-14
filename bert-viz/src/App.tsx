@@ -34,6 +34,7 @@ import { WBSTreeList } from "./components/wbs/WBSTreeItem";
 import { GanttBar } from "./components/gantt/GanttBar";
 import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
 import { WBSSkeleton, GanttSkeleton } from "./components/shared/Skeleton";
+import { ResizeHandle } from "./components/shared/ResizeHandle";
 import ChatDialog from "./components/chat/ChatDialog";
 
 // Time-based filter options for closed tasks
@@ -523,6 +524,11 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         }
         return;
       }
+      // Don't intercept keyboard shortcuts with modifiers (Cmd/Ctrl/Alt)
+      // This allows CMD+C, CMD+V, etc. to work normally
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
       switch (e.key) {
         case '/': e.preventDefault(); searchInputRef.current?.focus(); break;
         case 'Escape': setSelectedBead(null); setIsCreating(false); setIsEditing(false); setIsChatOpen(false); break;
@@ -981,20 +987,21 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 </div>
               </div>
               <div className="flex-1 flex overflow-hidden">
-                <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="w-[40%] border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[525px] overflow-y-auto custom-scrollbar">
+                <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="w-[40%] border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] min-w-[525px] overflow-y-auto custom-scrollbar relative">
                   <div className="p-0">
                     {(loading || processingData) ? <WBSSkeleton /> : (
                       <div className="flex flex-col">
-                        <WBSTreeList 
-                          nodes={viewModel?.tree || []} 
-                          onToggle={toggleNode} 
-                          onClick={handleBeadClick} 
-                          selectedId={selectedBead?.id} 
+                        <WBSTreeList
+                          nodes={viewModel?.tree || []}
+                          onToggle={toggleNode}
+                          onClick={handleBeadClick}
+                          selectedId={selectedBead?.id}
                           sessionsByBead={sessionsByBead}
                         />
                       </div>
                     )}
                   </div>
+                  <ResizeHandle />
                 </div>
                 <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
                   <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>

@@ -98,8 +98,10 @@ export const WBSTreeItem = ({
         >
           <span className={cn(
             "text-sm truncate font-black tracking-tight transition-colors",
+            node.status === 'closed' && "italic font-bold opacity-60",
+            isSelected && node.status === 'closed' ? "text-[var(--accent-primary)]" :
             isSelected ? "text-[var(--accent-primary)]" :
-            node.status === 'closed' ? "text-[var(--text-muted)] italic font-bold" : "text-[var(--text-primary)] group-hover:text-[var(--accent-primary)]"
+            node.status === 'closed' ? "text-[var(--text-muted)]" : "text-[var(--text-primary)] group-hover:text-[var(--accent-primary)]"
           )}>
             {node.title}
           </span>
