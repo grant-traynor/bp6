@@ -198,6 +198,11 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       if (unlistenChunkRef.current) unlistenChunkRef.current();
       if (unlistenStderrRef.current) unlistenStderrRef.current();
 
+      // CRITICAL: Clear messages immediately to prevent race condition
+      // where new chunks append to old session's messages
+      setMessages([]);
+      setStreamingMessage('');
+
       await switchActiveSession(targetSessionId);
 
       // Set up new listeners for the target session
@@ -276,7 +281,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       if (targetSessionId === sessionId) {
         const sessions = await listActiveSessions();
         if (sessions.length > 0) {
-          await handleSessionSwitch(sessions[0].sessionId, sessions[0].beadId);
+          await handleSessionSwitch(sessions[0].session_id, sessions[0].bead_id);
         } else {
           setMessages([]);
           setSessionId(null);
