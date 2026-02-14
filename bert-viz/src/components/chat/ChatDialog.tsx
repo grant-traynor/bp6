@@ -469,9 +469,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
         </div>
         <div className="flex items-center gap-2">
           {isLoading && (
-            <button 
+            <button
               onClick={handleStop}
-              className="p-2 bg-rose-500 hover:bg-rose-400 text-white rounded-lg transition-all animate-pulse"
+              className="p-2 bg-rose-500 hover:bg-rose-400 text-white rounded-lg transition-all"
               title="Stop Agent"
             >
               <Square size={18} fill="currentColor" />
@@ -542,7 +542,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
             <div className="flex justify-start">
               <div className="max-w-[85%] p-3 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600 text-sm font-bold leading-relaxed">
                 {renderContent(streamingMessage)}
-                <span className="inline-block w-2 h-4 ml-1 bg-indigo-400 animate-pulse"></span>
+                <span className="inline-block w-2 h-4 ml-1 bg-indigo-400 opacity-50"></span>
               </div>
             </div>
           )}
@@ -550,9 +550,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
             <div className="flex justify-start">
               <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
                 <div className="flex space-x-1">
-                  <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:-.3s]"></div>
-                  <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce [animation-delay:-.5s]"></div>
+                  <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
+                  <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
+                  <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
                 </div>
               </div>
             </div>
