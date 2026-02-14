@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { useSessionStore } from './sessionStore';
+import { useSessionStore, groupSessionsByBead } from './sessionStore';
 import type { SessionInfo } from '../api';
 
 // Mock the API functions
@@ -102,7 +102,7 @@ describe('sessionStore', () => {
 
     useSessionStore.getState().setSessions(mockSessions);
 
-    const sessionsByBead = useSessionStore.getState().sessionsByBead();
+    const sessionsByBead = groupSessionsByBead(useSessionStore.getState().sessions);
 
     // bp6-123 should have 2 sessions
     expect(sessionsByBead['bp6-123']).toHaveLength(2);
@@ -119,7 +119,7 @@ describe('sessionStore', () => {
   });
 
   it('should handle empty sessions in sessionsByBead', () => {
-    const sessionsByBead = useSessionStore.getState().sessionsByBead();
+    const sessionsByBead = groupSessionsByBead(useSessionStore.getState().sessions);
     expect(sessionsByBead).toEqual({});
   });
 

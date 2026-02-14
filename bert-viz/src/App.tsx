@@ -23,7 +23,7 @@ import {
   saveWindowState
 } from "./api";
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { useSessionStore } from "./stores/sessionStore";
+import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
 
 // Components
 import { Navigation } from "./components/layout/Navigation";
@@ -80,7 +80,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Agent Session State (from Zustand store - single source of truth)
-  const sessionsByBead = useSessionStore(state => state.sessionsByBead());
+  const sessions = useSessionStore(state => state.sessions);
+  const sessionsByBead = useMemo(() => groupSessionsByBead(sessions), [sessions]);
 
   // Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);

@@ -6,9 +6,6 @@ interface SessionStore {
   sessions: SessionInfo[];
   isInitialized: boolean;
 
-  // Computed values
-  sessionsByBead: () => Record<string, SessionInfo[]>;
-
   // Actions
   setSessions: (sessions: SessionInfo[]) => void;
   loadSessions: () => Promise<void>;
@@ -16,23 +13,22 @@ interface SessionStore {
   cleanup: () => void;
 }
 
+// Helper function to group sessions by bead ID (use in components with useMemo)
+export const groupSessionsByBead = (sessions: SessionInfo[]): Record<string, SessionInfo[]> => {
+  const grouped: Record<string, SessionInfo[]> = {};
+  sessions.forEach(s => {
+    const key = s.beadId || 'untracked';
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(s);
+  });
+  return grouped;
+};
+
 // Store instance
 export const useSessionStore = create<SessionStore>((set, get) => ({
   // Initial state
   sessions: [],
   isInitialized: false,
-
-  // Computed: Group sessions by bead ID
-  sessionsByBead: () => {
-    const sessions = get().sessions;
-    const grouped: Record<string, SessionInfo[]> = {};
-    sessions.forEach(s => {
-      const key = s.beadId || 'untracked';
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(s);
-    });
-    return grouped;
-  },
 
   // Actions
   setSessions: (sessions) => set({ sessions }),
