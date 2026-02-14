@@ -513,7 +513,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
         {/* Chat Content */}
         <div className="flex-1 overflow-hidden relative">
         {/* Chat View */}
-        <div className={`absolute inset-0 flex flex-col gap-4 p-4 overflow-y-auto custom-scrollbar transition-opacity duration-300 ${showDebug ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+        <div className={`absolute inset-0 flex flex-col justify-end gap-4 p-4 overflow-y-auto custom-scrollbar transition-opacity duration-300 ${showDebug ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
           {messages.length === 0 && !streamingMessage && (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
               <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
