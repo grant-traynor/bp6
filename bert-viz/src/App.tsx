@@ -165,6 +165,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         {/* TODO (bp6-643.005.4): Connect to existing session instead of creating new */}
         <ChatDialog
           isOpen={true}
+          isSessionWindow={true}
           onClose={() => {
             // Session windows can't be closed from within - only via window close
             console.log('Session window ChatDialog close requested (no-op)');

@@ -13,6 +13,7 @@ interface ChatDialogProps {
   task: string | null;
   beadId: string | null;
   cliBackend: CliBackend;
+  isSessionWindow?: boolean;  // True for fullscreen pop-out windows
 }
 
 /**
@@ -32,7 +33,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   persona,
   task,
   beadId,
-  cliBackend
+  cliBackend,
+  isSessionWindow = false
 }) => {
   const [input, setInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
@@ -140,18 +142,22 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
   return (
     <div
-      className="fixed w-[850px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
-      style={{
+      className={
+        isSessionWindow
+          ? "h-screen w-screen bg-white dark:bg-slate-800 flex flex-col overflow-hidden"
+          : "fixed w-[850px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
+      }
+      style={isSessionWindow ? undefined : {
         left: `${position.x}px`,
         top: `${position.y}px`
       }}
     >
-      {/* Header - Draggable */}
+      {/* Header */}
       <div
         className={`p-4 border-b-2 border-slate-200 dark:border-slate-700 flex justify-between items-center bg-indigo-600 text-white ${
-          isDragging ? 'cursor-grabbing' : 'cursor-grab'
+          !isSessionWindow && isDragging ? 'cursor-grabbing' : !isSessionWindow ? 'cursor-grab' : ''
         }`}
-        onMouseDown={handleMouseDown}
+        onMouseDown={isSessionWindow ? undefined : handleMouseDown}
       >
         <div className="flex items-center gap-3">
           <span className="text-lg">🤖</span>
@@ -189,24 +195,30 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           >
             <Trash2 size={18} />
           </button>
-          <div className="w-px h-4 bg-white/20 mx-1" />
-          <button
-            onClick={onClose}
-            className="hover:bg-rose-500 p-2 rounded-lg transition-colors"
-          >
-            <X size={18} />
-          </button>
+          {!isSessionWindow && (
+            <>
+              <div className="w-px h-4 bg-white/20 mx-1" />
+              <button
+                onClick={onClose}
+                className="hover:bg-rose-500 p-2 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {/* Main Content - Flex Layout */}
       <div className="flex-1 overflow-hidden flex">
-        {/* Session List Sidebar */}
-        <SessionList
-          activeSessionId={sessionId}
-          onSessionSelect={switchSession}
-          onSessionTerminate={handleSessionTerminate}
-        />
+        {/* Session List Sidebar - Hidden in session window mode */}
+        {!isSessionWindow && (
+          <SessionList
+            activeSessionId={sessionId}
+            onSessionSelect={switchSession}
+            onSessionTerminate={handleSessionTerminate}
+          />
+        )}
 
         {/* Chat Content */}
         <div className="flex-1 flex flex-col overflow-hidden">
