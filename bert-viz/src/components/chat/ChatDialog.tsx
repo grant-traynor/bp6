@@ -39,6 +39,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   const [sessionId, setSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const debugEndRef = useRef<HTMLDivElement>(null);
+  const unlistenChunkRef = useRef<(() => void) | undefined>(undefined);
+  const unlistenStderrRef = useRef<(() => void) | undefined>(undefined);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -57,9 +59,6 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
   }, [debugLogs, showDebug]);
 
   useEffect(() => {
-    let unlistenChunk: (() => void) | undefined;
-    let unlistenStderr: (() => void) | undefined;
-
     if (isOpen) {
       // Clear state when opening or switching beads
       setMessages([]);
@@ -72,14 +71,11 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
           const newSessionId = await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend);
           setSessionId(newSessionId);
           setDebugLogs(prev => [...prev, `[System] Session ID: ${newSessionId}`]);
-          
-          unlistenChunk = await listen<AgentChunk>('agent-chunk', (event) => {
-            const { content, isDone, sessionId: chunkSessionId } = event.payload;
 
-            // Filter: Only process chunks for THIS session (multi-window support)
-            if (chunkSessionId && chunkSessionId !== newSessionId) {
-              return; // Ignore chunks from other sessions
-            }
+          // Subscribe to session-specific event channel
+          const eventName = `agent-chunk-${newSessionId}`;
+          unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
+            const { content, isDone } = event.payload;
 
             if (content) {
               setDebugLogs(prev => [...prev, `[Stdout] ${content}`]);
@@ -99,7 +95,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
             }
           });
 
-          unlistenStderr = await listen<string>('agent-stderr', (event) => {
+          unlistenStderrRef.current = await listen<string>('agent-stderr', (event) => {
             setDebugLogs(prev => [...prev, `[Stderr] ${event.payload}`]);
           });
 
@@ -122,8 +118,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
 
     return () => {
       // Clean up event listeners when switching sessions
-      if (unlistenChunk) unlistenChunk();
-      if (unlistenStderr) unlistenStderr();
+      if (unlistenChunkRef.current) unlistenChunkRef.current();
+      if (unlistenStderrRef.current) unlistenStderrRef.current();
       // DO NOT stop the session here - this would kill it when switching epics!
       // Sessions should only be terminated via explicit user action (SessionItem terminate button)
     };
@@ -181,7 +177,39 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
 
     try {
       setIsLoading(true);
+
+      // Clean up old listeners
+      if (unlistenChunkRef.current) unlistenChunkRef.current();
+      if (unlistenStderrRef.current) unlistenStderrRef.current();
+
       await switchActiveSession(targetSessionId);
+
+      // Set up new listeners for the target session
+      const eventName = `agent-chunk-${targetSessionId}`;
+      unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
+        const { content, isDone } = event.payload;
+
+        if (content) {
+          setDebugLogs(prev => [...prev, `[Stdout] ${content}`]);
+        }
+
+        if (isDone) {
+          setStreamingMessage((current) => {
+            if (current) {
+              setMessages(prev => [...prev, { role: 'assistant', content: current }]);
+            }
+            return '';
+          });
+          setIsLoading(false);
+          setDebugLogs(prev => [...prev, '[System] Agent finished response.']);
+        } else {
+          setStreamingMessage((prev) => prev + content);
+        }
+      });
+
+      unlistenStderrRef.current = await listen<string>('agent-stderr', (event) => {
+        setDebugLogs(prev => [...prev, `[Stderr] ${event.payload}`]);
+      });
 
       // Load conversation history from JSONL using the target session's bead_id
       if (targetBeadId) {
