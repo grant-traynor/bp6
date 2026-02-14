@@ -73,7 +73,18 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
           setSessionId(newSessionId);
           setDebugLogs(prev => [...prev, `[System] Session ID: ${newSessionId}`]);
 
-          // Subscribe to session-specific event channel
+          // Load conversation history from JSONL (will be empty for new sessions)
+          if (beadId) {
+            const history = await loadSessionHistory(newSessionId, beadId);
+            const messages: Message[] = history.map(m => ({
+              role: m.role as 'user' | 'assistant',
+              content: m.content
+            }));
+            setMessages(messages);
+            setDebugLogs(prev => [...prev, `[System] Loaded ${messages.length} messages from history`]);
+          }
+
+          // Subscribe to session-specific event channel for live updates
           const eventName = `agent-chunk-${newSessionId}`;
           unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
             const { content, isDone } = event.payload;
@@ -99,14 +110,6 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
           unlistenStderrRef.current = await listen<string>('agent-stderr', (event) => {
             setDebugLogs(prev => [...prev, `[Stderr] ${event.payload}`]);
           });
-
-          // Set initial message to show context
-          if (beadId) {
-            const taskName = task ? task.replace('_', ' ') : 'general assistance';
-            setMessages([{ role: 'user', content: `Task: ${taskName} for ${beadId}` }]);
-          } else if (task) {
-            setMessages([{ role: 'user', content: `Task: ${task.replace('_', ' ')}` }]);
-          }
 
         } catch (error) {
           console.error('Failed to start agent session:', error);

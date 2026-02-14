@@ -431,104 +431,21 @@ export interface ConversationMessage {
 
 /**
  * Load session conversation history from JSONL log files.
- * Reads from ~/.bp6/sessions/<bead-id>/<session-id>-*.jsonl
+ * Calls the backend get_session_history Tauri command.
  *
  * @param sessionId - The session UUID to load history for
- * @param beadId - The bead ID (used for directory organization)
+ * @param beadId - The bead ID (used for directory organization, can be null for untracked sessions)
  * @returns Array of conversation messages (user and assistant)
  */
 export async function loadSessionHistory(
   sessionId: string,
-  beadId: string
+  beadId: string | null
 ): Promise<ConversationMessage[]> {
   try {
-    // Import Tauri fs API dynamically to avoid circular dependencies
-    const { readTextFile } = await import('@tauri-apps/plugin-fs');
-    const { homeDir } = await import('@tauri-apps/api/path');
-    const { readDir } = await import('@tauri-apps/plugin-fs');
-
-    // Build path to session directory
-    const home = await homeDir();
-    const sessionDir = `${home}/.bp6/sessions/${beadId}`;
-
-    // Find the JSONL file for this session (pattern: <session-id>-<timestamp>.jsonl)
-    let logFilePath: string | null = null;
-    try {
-      const entries = await readDir(sessionDir);
-      for (const entry of entries) {
-        if (entry.name.startsWith(sessionId) && entry.name.endsWith('.jsonl')) {
-          logFilePath = `${sessionDir}/${entry.name}`;
-          break;
-        }
-      }
-    } catch (error) {
-      console.warn(`Session directory not found: ${sessionDir}`, error);
-      return [];
-    }
-
-    if (!logFilePath) {
-      console.warn(`No log file found for session ${sessionId} in ${sessionDir}`);
-      return [];
-    }
-
-    // Read and parse JSONL file
-    const content = await readTextFile(logFilePath);
-    const lines = content.split('\n').filter(l => l.trim());
-
-    const messages: ConversationMessage[] = [];
-    let currentAssistantMessage = '';
-
-    for (const line of lines) {
-      try {
-        const event: LogEvent = JSON.parse(line);
-
-        // Process based on event type
-        switch (event.event_type) {
-          case 'message':
-            // User message - add directly
-            messages.push({
-              role: 'user',
-              content: event.content,
-              timestamp: event.timestamp,
-            });
-            break;
-
-          case 'chunk':
-            // Assistant chunk - accumulate
-            currentAssistantMessage += event.content;
-            break;
-
-          case 'sessionend':
-            // End of assistant response - flush accumulated message
-            if (currentAssistantMessage.trim()) {
-              messages.push({
-                role: 'assistant',
-                content: currentAssistantMessage,
-                timestamp: event.timestamp,
-              });
-              currentAssistantMessage = '';
-            }
-            break;
-
-          case 'sessionstart':
-            // Metadata event - skip
-            break;
-        }
-      } catch (parseError) {
-        console.warn('Failed to parse JSONL line:', line, parseError);
-      }
-    }
-
-    // Flush any remaining assistant message
-    if (currentAssistantMessage.trim()) {
-      messages.push({
-        role: 'assistant',
-        content: currentAssistantMessage,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    return messages;
+    return await invoke<ConversationMessage[]>('get_session_history', {
+      sessionId,
+      beadId
+    });
   } catch (error) {
     console.error('Failed to load session history:', error);
     return [];
