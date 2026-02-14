@@ -159,51 +159,52 @@ pub fn get_bead_by_id(id: &str) -> Result<Bead, String> {
 }
 
 #[tauri::command]
-pub fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), String> {
+#[allow(non_snake_case)]
+pub fn update_bead(updatedBead: Bead, app_handle: AppHandle) -> Result<(), String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
     let mut cmd = Command::new("bd");
     cmd.arg("update")
-        .arg(&updated_bead.id)
-        .arg("--title").arg(&updated_bead.title)
-        .arg("--status").arg(&updated_bead.status)
-        .arg("--priority").arg(updated_bead.priority.to_string())
-        .arg("--type").arg(&updated_bead.issue_type);
+        .arg(&updatedBead.id)
+        .arg("--title").arg(&updatedBead.title)
+        .arg("--status").arg(&updatedBead.status)
+        .arg("--priority").arg(updatedBead.priority.to_string())
+        .arg("--type").arg(&updatedBead.issue_type);
 
-    if let Some(desc) = &updated_bead.description {
+    if let Some(desc) = &updatedBead.description {
         cmd.arg("--description").arg(desc);
     }
-    if let Some(est) = updated_bead.estimate {
+    if let Some(est) = updatedBead.estimate {
         cmd.arg("--estimate").arg(est.to_string());
     }
-    if let Some(owner) = &updated_bead.owner {
+    if let Some(owner) = &updatedBead.owner {
         cmd.arg("--assignee").arg(owner);
     }
-    if let Some(labels) = &updated_bead.labels {
+    if let Some(labels) = &updatedBead.labels {
         if !labels.is_empty() {
             cmd.arg("--set-labels").arg(labels.join(","));
         }
     }
-    if let Some(ac) = &updated_bead.acceptance_criteria {
+    if let Some(ac) = &updatedBead.acceptance_criteria {
         if !ac.is_empty() {
             cmd.arg("--acceptance").arg(ac.join("\n"));
         }
     }
-    if let Some(parent) = &updated_bead.parent {
+    if let Some(parent) = &updatedBead.parent {
         cmd.arg("--parent").arg(parent);
     }
-    if let Some(ext_ref) = &updated_bead.external_reference {
+    if let Some(ext_ref) = &updatedBead.external_reference {
         cmd.arg("--external-ref").arg(ext_ref);
     }
-    if let Some(design) = &updated_bead.design {
+    if let Some(design) = &updatedBead.design {
         cmd.arg("--design").arg(design);
     }
-    if let Some(notes) = &updated_bead.notes {
+    if let Some(notes) = &updatedBead.notes {
         cmd.arg("--notes").arg(notes);
     }
 
-    let metadata_json = serde_json::to_string(&updated_bead).map_err(|e| e.to_string())?;
+    let metadata_json = serde_json::to_string(&updatedBead).map_err(|e| e.to_string())?;
     cmd.arg("--metadata").arg(metadata_json);
 
     let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
@@ -217,12 +218,13 @@ pub fn update_bead(updated_bead: Bead, app_handle: AppHandle) -> Result<(), Stri
 }
 
 #[tauri::command]
-pub fn close_bead(bead_id: String, reason: Option<String>, app_handle: AppHandle) -> Result<(), String> {
+#[allow(non_snake_case)]
+pub fn close_bead(beadId: String, reason: Option<String>, app_handle: AppHandle) -> Result<(), String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
     let mut cmd = Command::new("bd");
-    cmd.arg("close").arg(&bead_id);
+    cmd.arg("close").arg(&beadId);
 
     if let Some(r) = reason {
         cmd.arg("--reason").arg(r);
@@ -239,12 +241,13 @@ pub fn close_bead(bead_id: String, reason: Option<String>, app_handle: AppHandle
 }
 
 #[tauri::command]
-pub fn reopen_bead(bead_id: String, app_handle: AppHandle) -> Result<(), String> {
+#[allow(non_snake_case)]
+pub fn reopen_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
     let mut cmd = Command::new("bd");
-    cmd.arg("reopen").arg(&bead_id);
+    cmd.arg("reopen").arg(&beadId);
 
     let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
 
@@ -257,13 +260,14 @@ pub fn reopen_bead(bead_id: String, app_handle: AppHandle) -> Result<(), String>
 }
 
 #[tauri::command]
-pub fn claim_bead(bead_id: String, app_handle: AppHandle) -> Result<(), String> {
+#[allow(non_snake_case)]
+pub fn claim_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
     let mut cmd = Command::new("bd");
     cmd.arg("update")
-        .arg(&bead_id)
+        .arg(&beadId)
         .arg("--status")
         .arg("in_progress");
 
@@ -278,46 +282,47 @@ pub fn claim_bead(bead_id: String, app_handle: AppHandle) -> Result<(), String> 
 }
 
 #[tauri::command]
-pub fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, String> {
+#[allow(non_snake_case)]
+pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
     let mut cmd = Command::new("bd");
     cmd.arg("create")
-        .arg(&new_bead.title)
-        .arg("--priority").arg(new_bead.priority.to_string())
-        .arg("--type").arg(&new_bead.issue_type)
+        .arg(&newBead.title)
+        .arg("--priority").arg(newBead.priority.to_string())
+        .arg("--type").arg(&newBead.issue_type)
         .arg("--silent");
 
-    if let Some(desc) = &new_bead.description {
+    if let Some(desc) = &newBead.description {
         cmd.arg("--description").arg(desc);
     }
-    if let Some(est) = new_bead.estimate {
+    if let Some(est) = newBead.estimate {
         cmd.arg("--estimate").arg(est.to_string());
     }
-    if let Some(owner) = &new_bead.owner {
+    if let Some(owner) = &newBead.owner {
         cmd.arg("--assignee").arg(owner);
     }
-    if let Some(labels) = &new_bead.labels {
+    if let Some(labels) = &newBead.labels {
         if !labels.is_empty() {
             cmd.arg("--labels").arg(labels.join(","));
         }
     }
-    if let Some(ac) = &new_bead.acceptance_criteria {
+    if let Some(ac) = &newBead.acceptance_criteria {
         if !ac.is_empty() {
             cmd.arg("--acceptance").arg(ac.join("\n"));
         }
     }
-    if let Some(parent) = &new_bead.parent {
+    if let Some(parent) = &newBead.parent {
         cmd.arg("--parent").arg(parent);
     }
-    if let Some(ext_ref) = &new_bead.external_reference {
+    if let Some(ext_ref) = &newBead.external_reference {
         cmd.arg("--external-ref").arg(ext_ref);
     }
-    if let Some(design) = &new_bead.design {
+    if let Some(design) = &newBead.design {
         cmd.arg("--design").arg(design);
     }
-    if let Some(notes) = &new_bead.notes {
+    if let Some(notes) = &newBead.notes {
         cmd.arg("--notes").arg(notes);
     }
 
@@ -336,9 +341,9 @@ pub fn create_bead(new_bead: Bead, app_handle: AppHandle) -> Result<String, Stri
     let mut update_cmd = Command::new("bd");
     update_cmd.arg("update")
         .arg(&new_id)
-        .arg("--status").arg(&new_bead.status);
+        .arg("--status").arg(&newBead.status);
 
-    let metadata_json = serde_json::to_string(&new_bead).map_err(|e| e.to_string())?;
+    let metadata_json = serde_json::to_string(&newBead).map_err(|e| e.to_string())?;
     update_cmd.arg("--metadata").arg(metadata_json);
 
     let update_output = update_cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;

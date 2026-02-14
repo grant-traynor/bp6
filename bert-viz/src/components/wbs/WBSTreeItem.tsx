@@ -11,17 +11,39 @@ interface WBSTreeItemProps {
   onClick: (bead: BeadNode) => void;
   isSelected?: boolean;
   sessions?: SessionInfo[];
+  onStartSession?: (beadId: string, persona: string) => void;
 }
 
-export const WBSTreeItem = ({ 
-  node, 
-  depth = 0, 
+export const WBSTreeItem = ({
+  node,
+  depth = 0,
   onToggle,
   onClick,
   isSelected,
-  sessions = []
+  sessions = [],
+  onStartSession
 }: WBSTreeItemProps) => {
   const hasChildren = node.children.length > 0;
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!onStartSession) return;
+
+    // Show browser-native context menu with custom options
+    const persona = window.prompt(
+      'Start Agent Session\n\nChoose persona:\n1. product-manager\n2. qa-engineer\n3. specialist\n\nEnter 1, 2, or 3:',
+      '1'
+    );
+
+    const personaMap: Record<string, string> = {
+      '1': 'product-manager',
+      '2': 'qa-engineer',
+      '3': 'specialist'
+    };
+
+    const selectedPersona = personaMap[persona || '1'] || 'product-manager';
+    onStartSession(node.id, selectedPersona);
+  };
 
   return (
     <div
@@ -40,7 +62,7 @@ export const WBSTreeItem = ({
           style={{ left: `${i * 1.5 + 0.75}rem` }}
         />
       ))}
-      <div 
+      <div
         className={cn(
           "flex items-center hover:bg-[var(--background-primary)] cursor-pointer group transition-all h-full",
           node.isCritical && !isSelected && "bg-[var(--status-blocked)]/[0.08]",
@@ -48,6 +70,7 @@ export const WBSTreeItem = ({
         )}
         style={{ paddingLeft: `${depth * 1.5}rem` }}
         onClick={() => onClick(node)}
+        onContextMenu={handleContextMenu}
       >
         <div
           className="w-10 shrink-0 flex items-center justify-center h-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
@@ -106,41 +129,45 @@ export const WBSTreeItem = ({
   );
 };
 
-export const WBSTreeList = ({ 
-  nodes, 
-  depth = 0, 
-  onToggle, 
-  onClick, 
+export const WBSTreeList = ({
+  nodes,
+  depth = 0,
+  onToggle,
+  onClick,
   selectedId,
-  sessionsByBead = {}
-}: { 
-  nodes: BeadNode[], 
-  depth?: number, 
-  onToggle: (id: string) => void, 
-  onClick: (bead: BeadNode) => void, 
+  sessionsByBead = {},
+  onStartSession
+}: {
+  nodes: BeadNode[],
+  depth?: number,
+  onToggle: (id: string) => void,
+  onClick: (bead: BeadNode) => void,
   selectedId?: string,
-  sessionsByBead?: Record<string, SessionInfo[]>
+  sessionsByBead?: Record<string, SessionInfo[]>,
+  onStartSession?: (beadId: string, persona: string) => void
 }) => {
   return (
     <>
       {nodes.map(node => (
         <div key={node.id}>
-          <WBSTreeItem 
-            node={node} 
-            depth={depth} 
-            onToggle={onToggle} 
-            onClick={onClick} 
-            isSelected={selectedId === node.id} 
+          <WBSTreeItem
+            node={node}
+            depth={depth}
+            onToggle={onToggle}
+            onClick={onClick}
+            isSelected={selectedId === node.id}
             sessions={sessionsByBead[node.id]}
+            onStartSession={onStartSession}
           />
           {node.isExpanded && node.children.length > 0 && (
-            <WBSTreeList 
-              nodes={node.children} 
-              depth={depth + 1} 
-              onToggle={onToggle} 
-              onClick={onClick} 
-              selectedId={selectedId} 
+            <WBSTreeList
+              nodes={node.children}
+              depth={depth + 1}
+              onToggle={onToggle}
+              onClick={onClick}
+              selectedId={selectedId}
               sessionsByBead={sessionsByBead}
+              onStartSession={onStartSession}
             />
           )}
         </div>

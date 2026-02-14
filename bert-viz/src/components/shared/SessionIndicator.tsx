@@ -18,7 +18,7 @@ export const SessionIndicator = ({ sessions, className }: SessionIndicatorProps)
   const count = activeSessions.length;
 
   const tooltipText = activeSessions
-    .map(s => `${PERSONA_ICONS[s.persona] || '🤖'} ${s.persona.replace('_', ' ')}`)
+    .map(s => `${PERSONA_ICONS[s.persona] || '🤖'} ${s.persona.replace(/-/g, ' ')}`)
     .join(', ');
 
   return (

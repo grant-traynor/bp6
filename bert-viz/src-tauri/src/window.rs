@@ -113,22 +113,23 @@ impl WindowRegistry {
 /// # Returns
 /// The window label (e.g., "agent-session-{uuid}")
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn create_session_window(
     app: AppHandle,
-    session_id: String,
+    sessionId: String,
 ) -> Result<String, String> {
-    eprintln!("🪟 create_session_window: session_id={}", session_id);
+    eprintln!("🪟 create_session_window: session_id={}", sessionId);
 
     // Generate window label from session ID
-    let window_label = format!("agent-session-{}", session_id);
+    let window_label = format!("agent-session-{}", sessionId);
 
     // Get WindowRegistry from managed state
     let registry = app.state::<WindowRegistry>();
 
     // Check if window already exists for this session (duplicate prevention)
-    if registry.has_window_for_session(&session_id) {
-        let existing_label = registry.get_window_label(&session_id).unwrap();
-        eprintln!("⚠️  Window already exists for session {}: {}", session_id, existing_label);
+    if registry.has_window_for_session(&sessionId) {
+        let existing_label = registry.get_window_label(&sessionId).unwrap();
+        eprintln!("⚠️  Window already exists for session {}: {}", sessionId, existing_label);
 
         // Try to focus existing window
         if let Some(window) = app.get_webview_window(&existing_label) {
@@ -138,14 +139,14 @@ pub async fn create_session_window(
     }
 
     // Load saved window state if it exists
-    let saved_state = load_window_state(session_id.clone()).await.ok().flatten();
+    let saved_state = load_window_state(sessionId.clone()).await.ok().flatten();
 
     // Create new window with session context
-    let url = WebviewUrl::App(format!("index.html?session_id={}", session_id).into());
+    let url = WebviewUrl::App(format!("index.html?session_id={}", sessionId).into());
 
     // Build window with saved state or defaults
     let mut builder = WebviewWindowBuilder::new(&app, &window_label, url)
-        .title(format!("Agent Session - {}", session_id))
+        .title(format!("Agent Session - {}", sessionId))
         .resizable(true);
 
     // Apply saved state if available
@@ -172,12 +173,12 @@ pub async fn create_session_window(
     eprintln!("✅ Created window: {}", window_label);
 
     // Register window in registry
-    registry.register(session_id.clone(), window_label.clone());
+    registry.register(sessionId.clone(), window_label.clone());
 
     // Emit window-created event
     let _ = app.emit("window-created", WindowInfo {
         window_label: window_label.clone(),
-        session_id,
+        session_id: sessionId,
         created_at: chrono::Utc::now().to_rfc3339(),
     });
 
@@ -188,39 +189,41 @@ pub async fn create_session_window(
 ///
 /// # Arguments
 /// * `app` - Tauri AppHandle
-/// * `window_label` - The window label to lookup
+/// * `windowLabel` - The window label to lookup
 ///
 /// # Returns
 /// Optional session ID if window exists in registry
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn get_window_session_id(
     app: AppHandle,
-    window_label: String,
+    windowLabel: String,
 ) -> Result<Option<String>, String> {
     let registry = app.state::<WindowRegistry>();
-    Ok(registry.get_session_id(&window_label))
+    Ok(registry.get_session_id(&windowLabel))
 }
 
 /// Close a session window by session ID
 ///
 /// # Arguments
 /// * `app` - Tauri AppHandle
-/// * `session_id` - The session ID whose window should be closed
+/// * `sessionId` - The session ID whose window should be closed
 ///
 /// # Returns
 /// Unit result
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn close_session_window(
     app: AppHandle,
-    session_id: String,
+    sessionId: String,
 ) -> Result<(), String> {
-    eprintln!("🗑️  close_session_window: session_id={}", session_id);
+    eprintln!("🗑️  close_session_window: session_id={}", sessionId);
 
     let registry = app.state::<WindowRegistry>();
 
     // Get window label for session
-    let window_label = registry.get_window_label(&session_id)
-        .ok_or_else(|| format!("No window found for session {}", session_id))?;
+    let window_label = registry.get_window_label(&sessionId)
+        .ok_or_else(|| format!("No window found for session {}", sessionId))?;
 
     // Close the window
     if let Some(window) = app.get_webview_window(&window_label) {
@@ -231,10 +234,10 @@ pub async fn close_session_window(
     }
 
     // Unregister from registry
-    registry.unregister_by_session(&session_id);
+    registry.unregister_by_session(&sessionId);
 
     // Emit window-closed event
-    let _ = app.emit("window-closed", session_id);
+    let _ = app.emit("window-closed", sessionId);
 
     Ok(())
 }
@@ -330,15 +333,16 @@ fn cleanup_stale_states(states: &mut HashMap<String, WindowState>) {
 /// * `y` - Window Y position
 /// * `width` - Window width
 /// * `height` - Window height
-/// * `is_maximized` - Whether window is maximized
+/// * `isMaximized` - Whether window is maximized
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn save_window_state(
-    session_id: String,
+    sessionId: String,
     x: i32,
     y: i32,
     width: u32,
     height: u32,
-    is_maximized: bool,
+    isMaximized: bool,
 ) -> Result<(), String> {
     let mut states = load_window_states()?;
 
@@ -350,13 +354,13 @@ pub async fn save_window_state(
         .unwrap()
         .as_secs();
 
-    states.insert(session_id.clone(), WindowState {
-        session_id,
+    states.insert(sessionId.clone(), WindowState {
+        session_id: sessionId,
         x,
         y,
         width,
         height,
-        is_maximized,
+        is_maximized: isMaximized,
         last_updated: now,
     });
 
@@ -368,16 +372,17 @@ pub async fn save_window_state(
 /// Load window state for a session
 ///
 /// # Arguments
-/// * `session_id` - The session ID to load state for
+/// * `sessionId` - The session ID to load state for
 ///
 /// # Returns
 /// Optional WindowState if saved state exists
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn load_window_state(
-    session_id: String,
+    sessionId: String,
 ) -> Result<Option<WindowState>, String> {
     let states = load_window_states()?;
-    Ok(states.get(&session_id).cloned())
+    Ok(states.get(&sessionId).cloned())
 }
 
 #[cfg(test)]

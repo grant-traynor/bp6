@@ -41,6 +41,10 @@ impl CliBackendPlugin for ClaudeCodeBackend {
             } else {
                 eprintln!("⚠️  Warning: Claude Code backend requires session ID for resume, but none provided");
             }
+        } else if let Some(sid) = session_id {
+            // For new sessions, use --session-id to specify the UUID
+            args.push("--session-id".to_string());
+            args.push(sid.to_string());
         }
 
         // Claude Code takes the prompt as a positional argument, not --prompt
@@ -157,6 +161,17 @@ mod tests {
     }
 
     #[test]
+    fn test_build_args_with_session_id() {
+        let backend = ClaudeCodeBackend::new();
+        let session_id = "550e8400-e29b-41d4-a716-446655440000";
+        let args = backend.build_args("test prompt", false, Some(session_id));
+
+        assert!(args.contains(&"--session-id".to_string()));
+        assert!(args.contains(&session_id.to_string()));
+        assert_eq!(args.last().unwrap(), "test prompt"); // Prompt still last
+    }
+
+    #[test]
     fn test_build_args_with_resume() {
         let backend = ClaudeCodeBackend::new();
         let session_id = "550e8400-e29b-41d4-a716-446655440000";
@@ -164,6 +179,8 @@ mod tests {
 
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&session_id.to_string()));
+        // Should NOT have --session-id when resuming
+        assert!(!args.contains(&"--session-id".to_string()));
         assert_eq!(args.last().unwrap(), "test prompt"); // Prompt still last
     }
 

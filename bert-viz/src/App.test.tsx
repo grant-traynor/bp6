@@ -89,18 +89,21 @@ describe('App Integration - Session Indicators', () => {
     // Initially no session indicator
     expect(screen.queryByTitle(/active session/)).toBeNull();
 
-    // Trigger the event
+    // Trigger the event (payload uses camelCase as serde transforms it)
     await act(async () => {
       eventHandler({
         payload: {
           sessions: [
             {
-              session_id: 'sess-1',
-              bead_id: mockBeadId,
-              persona: 'product_manager',
-              backend_id: 'gemini',
+              sessionId: 'sess-1',
+              beadId: mockBeadId,
+              persona: 'product-manager',
+              backendId: 'gemini',
               status: 'running',
-              created_at: Date.now(),
+              createdAt: Date.now(),
+              lastActivity: Date.now(),
+              hasUnread: false,
+              messageCount: 0
             }
           ]
         }

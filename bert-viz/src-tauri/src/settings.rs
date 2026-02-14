@@ -108,15 +108,16 @@ pub fn get_cli_preference(settings_state: State<'_, SettingsState>) -> Result<St
 
 /// Tauri command to set the CLI preference and persist to disk
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn set_cli_preference(
-    cli_backend: String,
+    cliBackend: String,
     settings_state: State<'_, SettingsState>
 ) -> Result<(), String> {
     // Parse and validate the CLI backend string
-    let backend = match cli_backend.to_lowercase().as_str() {
+    let backend = match cliBackend.to_lowercase().as_str() {
         "gemini" => BackendId::Gemini,
         "claude" | "claude-code" => BackendId::ClaudeCode,
-        _ => return Err(format!("Invalid CLI backend: '{}'. Valid options are: 'gemini', 'claude', 'claude-code'", cli_backend)),
+        _ => return Err(format!("Invalid CLI backend: '{}'. Valid options are: 'gemini', 'claude', 'claude-code'", cliBackend)),
     };
 
     // Update settings in state
@@ -129,7 +130,7 @@ pub fn set_cli_preference(
     let config_path = get_config_path()?;
     settings.save_to_file(&config_path)?;
 
-    eprintln!("✅ Updated CLI preference to: {}", cli_backend);
+    eprintln!("✅ Updated CLI preference to: {}", cliBackend);
     Ok(())
 }
 

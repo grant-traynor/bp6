@@ -99,7 +99,7 @@ export const SessionItem = React.memo<SessionItemProps>(({
         }
       }}
     >
-      {/* Header: Persona icon + Bead title + Activity indicator + Terminate button */}
+      {/* Header: Persona icon + Activity indicator + Terminate button */}
       <div className="session-item-header">
         <div className="session-item-title">
           {/* Pulsing dot for unread indicator */}
@@ -113,8 +113,6 @@ export const SessionItem = React.memo<SessionItemProps>(({
             {personaIcon}
           </span>
           <span className="session-persona-label">{personaLabel}</span>
-          <span className="session-bead-separator">·</span>
-          <span className="session-bead-title">{beadTitle}</span>
         </div>
 
         <div className="session-actions">
@@ -136,6 +134,19 @@ export const SessionItem = React.memo<SessionItemProps>(({
           </button>
         </div>
       </div>
+
+      {/* Bead ID and Title */}
+      {session.beadId && (
+        <div className="flex items-center gap-2 text-xs px-3 py-1">
+          <span className="font-mono font-bold text-indigo-400">{session.beadId}</span>
+          {beadTitle && beadTitle !== session.beadId && (
+            <>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-300 truncate">{beadTitle}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Details: Backend + Runtime + Last Activity */}
       <div className="session-item-details">
