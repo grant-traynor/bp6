@@ -7,7 +7,7 @@ import { cn } from '../../utils';
 
 interface SessionListProps {
   activeSessionId: string | null;
-  onSessionSelect: (sessionId: string) => void;
+  onSessionSelect: (sessionId: string, beadId: string) => void;
   onSessionTerminate: (sessionId: string) => void;
   beads?: Map<string, BeadNode>;  // For looking up bead titles
 }

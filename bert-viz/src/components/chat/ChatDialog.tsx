@@ -169,15 +169,15 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
     }
   };
 
-  const handleSessionSwitch = async (targetSessionId: string) => {
+  const handleSessionSwitch = async (targetSessionId: string, targetBeadId: string) => {
     if (targetSessionId === sessionId) return; // Same session check
 
     try {
       setIsLoading(true);
       await switchActiveSession(targetSessionId);
 
-      // Load conversation history from JSONL
-      const history = await loadSessionHistory(targetSessionId, beadId || '');
+      // Load conversation history from JSONL using the target session's bead_id
+      const history = await loadSessionHistory(targetSessionId, targetBeadId);
 
       // Convert ConversationMessage[] to Message[]
       const messages: Message[] = history.map(m => ({
@@ -212,7 +212,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({ isOpen, onClose, persona, task,
       if (targetSessionId === sessionId) {
         const sessions = await listActiveSessions();
         if (sessions.length > 0) {
-          await handleSessionSwitch(sessions[0].session_id);
+          await handleSessionSwitch(sessions[0].session_id, sessions[0].bead_id);
         } else {
           setMessages([]);
           setSessionId(null);

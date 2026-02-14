@@ -7,7 +7,7 @@ interface SessionItemProps {
   session: SessionInfo;
   isActive: boolean;
   beadTitle: string;
-  onSelect: (sessionId: string) => void;
+  onSelect: (sessionId: string, beadId: string) => void;
   onTerminate: (sessionId: string) => void;
   className?: string;
 }
@@ -55,7 +55,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
   };
 
   const handleSelect = () => {
-    onSelect(session.session_id);
+    onSelect(session.session_id, session.bead_id);
   };
 
   const personaIcon = getPersonaIcon(session.persona);
