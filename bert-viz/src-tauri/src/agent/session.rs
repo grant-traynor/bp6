@@ -246,7 +246,8 @@ fn emit_session_list_changed(
     sessions: &HashMap<String, SessionState>,
 ) {
     let session_list = list_active_sessions_internal(sessions);
-    let _ = app_handle.emit("session-list-changed", session_list);
+    // Wrap in object to match TypeScript interface: { sessions: SessionInfo[] }
+    let _ = app_handle.emit("session-list-changed", serde_json::json!({ "sessions": session_list }));
 }
 
 /// Convert HashMap<String, SessionState> to Vec<SessionInfo> for UI consumption
