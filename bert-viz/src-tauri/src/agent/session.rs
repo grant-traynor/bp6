@@ -450,7 +450,24 @@ fn run_cli_command_for_session(
                                 );
                             }
 
-                            let _ = handle_clone.emit("agent-chunk", chunk);
+                            // Update session activity tracking
+                            if let Some(agent_state) = handle_clone.try_state::<AgentState>() {
+                                let mut sessions = agent_state.sessions.lock().unwrap();
+                                if let Some(session) = sessions.get_mut(&session_id_clone) {
+                                    session.last_activity = SystemTime::now();
+                                    session.has_unread = true;
+                                    if !chunk.is_done {
+                                        session.message_count += 1;
+                                    }
+                                }
+
+                                // Re-emit session list with updated activity
+                                emit_session_list_changed(&handle_clone, &sessions);
+                            }
+
+                            // Emit to session-specific channel
+                            let event_name = format!("agent-chunk-{}", session_id_clone);
+                            let _ = handle_clone.emit(&event_name, chunk);
                         }
                     }
                 }
@@ -479,7 +496,9 @@ fn run_cli_command_for_session(
             let _ = logger.log_event(end_event);
         }
 
-        let _ = handle_clone.emit("agent-chunk", final_chunk);
+        // Emit to session-specific channel
+        let event_name = format!("agent-chunk-{}", session_id_clone);
+        let _ = handle_clone.emit(&event_name, final_chunk);
     });
 
     // Spawn stderr reader thread
