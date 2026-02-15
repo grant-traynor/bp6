@@ -147,7 +147,8 @@ pub async fn create_session_window(
     // Build window with saved state or defaults
     let mut builder = WebviewWindowBuilder::new(&app, &window_label, url)
         .title(format!("Agent Session - {}", sessionId))
-        .resizable(true);
+        .resizable(true)
+        .always_on_top(true);
 
     // Apply saved state if available
     if let Some(state) = saved_state {
