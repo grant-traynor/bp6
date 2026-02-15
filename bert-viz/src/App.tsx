@@ -18,18 +18,21 @@ import {
   toggleFavoriteProject,
   getCliPreference,
   type CliBackend,
+  startAgentSession,
+  createSessionWindow,
   onBeadsUpdated,
   onProjectsUpdated,
   saveWindowState,
   loadStartupState,
   saveStartupState,
+  fetchBeads,
 } from "./api";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window';
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
 import './stores/sessionStoreDiagnostics'; // Enable diagnostics
 
 // Components
-import { Navigation } from "./components/layout/Navigation";
+import { Navigation, ViewType } from "./components/layout/Navigation";
 import { Header } from "./components/layout/Header";
 import { Sidebar } from "./components/layout/Sidebar";
 import { WBSTreeList } from "./components/wbs/WBSTreeItem";
@@ -38,6 +41,7 @@ import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
 import { WBSSkeleton, GanttSkeleton } from "./components/shared/Skeleton";
 import { ResizeHandle } from "./components/shared/ResizeHandle";
 import ChatDialog from "./components/chat/ChatDialog";
+import { ListView } from "./components/list/ListView";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -78,7 +82,14 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   });
   const [includeHierarchy, setIncludeHierarchy] = useState(true);
   const [zoom, setZoom] = useState(1);
-  const [isDark, setIsDark] = useState(true);
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('theme');
+      if (stored === 'dark') return true;
+      if (stored === 'light') return false;
+    }
+    return true;
+  });
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -87,14 +98,56 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const sessions = useSessionStore(state => state.sessions);
   const sessionsByBead = useMemo(() => groupSessionsByBead(sessions), [sessions]);
 
-  // Chat state
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatPersona, setChatPersona] = useState("product-manager");
-  const [chatTask, setChatTask] = useState<string | null>(null);
-  const [chatBeadId, setChatBeadId] = useState<string | null>(null);
+  // Drop cached session id if backend no longer has it
+  // Chat session persistence (one chat session per window)
+  const [chatSessionMap, setChatSessionMap] = useState<Record<string, string>>(() => {
+    if (typeof localStorage === 'undefined') return {};
+    try {
+      return JSON.parse(localStorage.getItem('chatSessionMap') || '{}');
+    } catch {
+      return {};
+    }
+  });
+
+  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null }>>(() => {
+    if (typeof localStorage === 'undefined') return {};
+    try {
+      return JSON.parse(localStorage.getItem('chatSessionMeta') || '{}');
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    const activeIds = new Set(sessions.map(s => s.sessionId));
+    setChatSessionMap(prev => {
+      const next = { ...prev };
+      let changed = false;
+      Object.entries(prev).forEach(([key, sid]) => {
+        if (!activeIds.has(sid)) {
+          delete next[key];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+
+    setSessionMetaIndex(prev => {
+      const next = { ...prev };
+      let changed = false;
+      Object.keys(prev).forEach((sid) => {
+        if (!activeIds.has(sid)) {
+          delete next[sid];
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [sessions]);
 
   // CLI preference state
   const [currentCli, setCurrentCli] = useState<CliBackend>("gemini");
+  const [view, setView] = useState<ViewType>('gantt');
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
@@ -103,10 +156,58 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const hasInitialized = useRef(false);
   const lastToggledNode = useRef<{ id: string; offsetTop: number } | null>(null);
 
+  // Ensure session windows initialize the session store even though they short-circuit
+  useEffect(() => {
+    if (!isSessionWindow) return;
+
+    let cleanupFn: (() => void) | undefined;
+    useSessionStore.getState().initializeStore()
+      .then(unlisten => {
+        cleanupFn = unlisten;
+      })
+      .catch(err => console.error('Failed to init session store in session window:', err));
+
+    return () => {
+      cleanupFn?.();
+      useSessionStore.getState().cleanup();
+    };
+  }, [isSessionWindow]);
+
   // Early return for session windows - render only ChatDialog
   // Note: Full session connection implementation is in bp6-643.005.4
   if (isSessionWindow && sessionId) {
     console.log('📱 Session window mode:', { sessionId, windowLabel });
+
+    const sessionMeta = sessions.find(s => s.sessionId === sessionId);
+    const sessionPersona = sessionMeta?.persona || sessionMetaIndex[sessionId]?.persona || 'product-manager';
+    const sessionBeadId = sessionMeta?.beadId || sessionMetaIndex[sessionId]?.beadId || null;
+    const sessionTask = sessionMetaIndex[sessionId]?.task || 'chat';
+    const sessionBeadTitle = sessionMetaIndex[sessionId]?.beadTitle || null;
+
+    useEffect(() => {
+      if (!sessionBeadId || sessionBeadTitle) return;
+      fetchBeads()
+        .then(all => {
+          const title = all.find(b => b.id === sessionBeadId)?.title;
+          if (title) {
+            setSessionMetaIndex(prev => ({
+              ...prev,
+              [sessionId]: {
+                persona: sessionPersona,
+                task: sessionTask,
+                beadId: sessionBeadId,
+                beadTitle: title,
+              }
+            }));
+          }
+        })
+        .catch(err => console.error('Failed to fetch beads for title:', err));
+    }, [sessionBeadId, sessionBeadTitle, sessionId, sessionPersona, sessionTask]);
+
+    useEffect(() => {
+      const title = `${sessionBeadId || 'Untracked'} · ${sessionBeadTitle || 'Chat'} · ${sessionPersona}${sessionTask ? ` · ${sessionTask}` : ''}`;
+      getCurrentWindow().setTitle(title).catch(err => console.error('Failed to set window title:', err));
+    }, [sessionBeadId, sessionBeadTitle, sessionPersona, sessionTask]);
 
     // Window state persistence hook (bp6-643.005.5)
     useEffect(() => {
@@ -166,13 +267,15 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         <ChatDialog
           isOpen={true}
           isSessionWindow={true}
+          sessionIdOverride={sessionId}
           onClose={() => {
             // Session windows can't be closed from within - only via window close
             console.log('Session window ChatDialog close requested (no-op)');
           }}
-          persona="product-manager"
-          task={`Session window for session ${sessionId}`}
-          beadId={null}
+          persona={sessionPersona}
+          task={sessionTask || `Session window for session ${sessionId}`}
+          beadId={sessionBeadId}
+          beadTitle={sessionBeadTitle}
           cliBackend={currentCli}
         />
       </div>
@@ -386,6 +489,13 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     };
     loadCliPreference();
   }, []);
+
+  // Persist last chat session id so reopening chat reuses the same session
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem('chatSessionMap', JSON.stringify(chatSessionMap));
+    localStorage.setItem('chatSessionMeta', JSON.stringify(sessionMetaIndex));
+  }, [chatSessionMap, sessionMetaIndex]);
 
   // Main window state persistence (bp6-j33p.2.2)
   // Save window position/size on resize/move with 500ms debounce
@@ -627,12 +737,41 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     setCollapsedIds(allParentIds);
   }, [viewModel]);
 
-  const handleOpenChat = useCallback((persona: string, task?: string, beadId?: string) => {
-    setChatPersona(persona);
-    setChatTask(task ?? null);
-    setChatBeadId(beadId ?? null);
-    setIsChatOpen(true);
-  }, []);
+  const handleOpenChat = useCallback(async (persona: string, task?: string, beadId?: string, role?: string) => {
+    const key = `${persona}::${task || 'chat'}::${beadId || 'untracked'}::${role || 'default'}`;
+    const beadTitle = beadId ? beads.find(b => b.id === beadId)?.title || null : null;
+
+    try {
+      let targetSessionId = chatSessionMap[key];
+
+      const sessionExists = targetSessionId
+        ? sessions.some(s => s.sessionId === targetSessionId)
+        : false;
+
+      if (!sessionExists) {
+        targetSessionId = await startAgentSession(persona, task ?? undefined, beadId ?? undefined, currentCli, role);
+
+        setChatSessionMap(prev => ({ ...prev, [key]: targetSessionId! }));
+        setSessionMetaIndex(prev => ({
+          ...prev,
+          [targetSessionId!]: {
+            persona,
+            task: task ?? null,
+            beadId: beadId ?? null,
+            beadTitle,
+          }
+        }));
+
+        await useSessionStore.getState().refreshSessions();
+      }
+
+      if (targetSessionId) {
+        await createSessionWindow(targetSessionId);
+      }
+    } catch (error) {
+      console.error('Failed to open chat window:', error);
+    }
+  }, [chatSessionMap, sessions, currentCli, beads]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -650,12 +789,12 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       }
       switch (e.key) {
         case '/': e.preventDefault(); searchInputRef.current?.focus(); break;
-        case 'Escape': setSelectedBead(null); setIsCreating(false); setIsEditing(false); setIsChatOpen(false); break;
+        case 'Escape': setSelectedBead(null); setIsCreating(false); setIsEditing(false); break;
         case '+': case '=': e.preventDefault(); expandAll(); break;
         case '-': case '_': e.preventDefault(); collapseAll(); break;
         case 'n': e.preventDefault(); handleStartCreate(); break;
         case 'r': e.preventDefault(); loadData(); break;
-        case 'c': e.preventDefault(); handleOpenChat('product-manager'); break;
+        case 'c': e.preventDefault(); handleOpenChat('product-manager').catch(err => console.error('Chat open failed:', err)); break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -761,6 +900,10 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   useEffect(() => {
     if (isDark) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
+
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    }
   }, [isDark]);
 
   // Keep selectedBead synchronized with the latest bead data
@@ -1047,7 +1190,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
-      <Navigation />
+      <Navigation currentView={view} onViewChange={setView} />
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
         <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} onOpenChat={handleOpenChat} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} currentCli={currentCli} setCurrentCli={setCurrentCli} />
         {!hasProject ? (
@@ -1155,151 +1298,164 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                   </div>
                 </div>
               </div>
-              <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
-                <div className="border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em]" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
-                  <div className="w-10 shrink-0" />
-                  <div 
-                    className={cn(
-                      "w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                      sortBy === 'priority' && sortOrder !== 'none' && "text-indigo-500"
-                    )}
-                    onClick={() => handleHeaderClick('priority')}
-                  >
-                    <span>P</span>
-                    {sortBy === 'priority' && sortOrder !== 'none' && (
-                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                    )}
-                  </div>
-                  <div 
-                    className={cn(
-                      "flex-1 px-4 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                      sortBy === 'title' && sortOrder !== 'none' && "text-indigo-500"
-                    )}
-                    onClick={() => handleHeaderClick('title')}
-                  >
-                    <span>Name</span>
-                    {sortBy === 'title' && sortOrder !== 'none' && (
-                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                    )}
-                  </div>
-                  <div 
-                    className={cn(
-                      "w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                      sortBy === 'type' && sortOrder !== 'none' && "text-indigo-500"
-                    )}
-                    onClick={() => handleHeaderClick('type')}
-                  >
-                    <span>Type</span>
-                    {sortBy === 'type' && sortOrder !== 'none' && (
-                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                    )}
-                  </div>
-                  <div 
-                    className={cn(
-                      "w-24 shrink-0 px-2 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                      sortBy === 'id' && sortOrder !== 'none' && "text-indigo-500"
-                    )}
-                    onClick={() => handleHeaderClick('id')}
-                  >
-                    <span>ID</span>
-                    {sortBy === 'id' && sortOrder !== 'none' && (
-                      sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
-                  <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
-                    <div style={{ width: Math.max(5000 * zoom, ((viewModel?.metadata.distributions.length || 0) * 100 * zoom)) }}>
-                      <GanttStateHeader distributions={viewModel?.metadata.distributions || []} zoom={zoom} />
+              {view === 'gantt' ? (
+                <>
+                  <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
+                    <div className="border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em]" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
+                      <div className="w-10 shrink-0" />
+                      <div 
+                        className={cn(
+                          "w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                          sortBy === 'priority' && sortOrder !== 'none' && "text-indigo-500"
+                        )}
+                        onClick={() => handleHeaderClick('priority')}
+                      >
+                        <span>P</span>
+                        {sortBy === 'priority' && sortOrder !== 'none' && (
+                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                        )}
+                      </div>
+                      <div 
+                        className={cn(
+                          "flex-1 px-4 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                          sortBy === 'title' && sortOrder !== 'none' && "text-indigo-500"
+                        )}
+                        onClick={() => handleHeaderClick('title')}
+                      >
+                        <span>Name</span>
+                        {sortBy === 'title' && sortOrder !== 'none' && (
+                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                        )}
+                      </div>
+                      <div 
+                        className={cn(
+                          "w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                          sortBy === 'type' && sortOrder !== 'none' && "text-indigo-500"
+                        )}
+                        onClick={() => handleHeaderClick('type')}
+                      >
+                        <span>Type</span>
+                        {sortBy === 'type' && sortOrder !== 'none' && (
+                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                        )}
+                      </div>
+                      <div 
+                        className={cn(
+                          "w-24 shrink-0 px-2 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
+                          sortBy === 'id' && sortOrder !== 'none' && "text-indigo-500"
+                        )}
+                        onClick={() => handleHeaderClick('id')}
+                      >
+                        <span>ID</span>
+                        {sortBy === 'id' && sortOrder !== 'none' && (
+                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
+                      <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
+                        <div style={{ width: Math.max(5000 * zoom, ((viewModel?.metadata.distributions.length || 0) * 100 * zoom)) }}>
+                          <GanttStateHeader distributions={viewModel?.metadata.distributions || []} zoom={zoom} />
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-              <div className="flex-1 flex overflow-hidden">
-                <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] overflow-y-auto custom-scrollbar relative" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
-                  <div className="p-0">
-                    {(loading || processingData) ? <WBSSkeleton /> : (
-                      <div className="flex flex-col">
-                        <WBSTreeList
-                          nodes={viewModel?.tree || []}
-                          onToggle={toggleNode}
-                          onClick={handleBeadClick}
-                          selectedId={selectedBead?.id}
-                          sessionsByBead={sessionsByBead}
-                        />
+                  <div className="flex-1 flex overflow-hidden">
+                    <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] overflow-y-auto custom-scrollbar relative" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
+                      <div className="p-0">
+                        {(loading || processingData) ? <WBSSkeleton /> : (
+                          <div className="flex flex-col">
+                            <WBSTreeList
+                              nodes={viewModel?.tree || []}
+                              onToggle={toggleNode}
+                              onClick={handleBeadClick}
+                              selectedId={selectedBead?.id}
+                              sessionsByBead={sessionsByBead}
+                            />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <ResizeHandle onMouseDown={handlePanelResizeStart} />
-                </div>
-                <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
-                  <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>
-                    {loading && <GanttSkeleton />}
-                    {/* Background grid */}
-                    <div className="absolute inset-0 pointer-events-none">
-                      {ganttLayout.rowDepths.map((depth, i) => (
-                        <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
-                      ))}
-                      <div className="absolute inset-0 flex">
-                        {Array.from({ length: 50 }).map((_, i) => (
-                          <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
+                      <ResizeHandle onMouseDown={handlePanelResizeStart} />
+                    </div>
+                    <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
+                      <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>
+                        {loading && <GanttSkeleton />}
+                        {/* Background grid */}
+                        <div className="absolute inset-0 pointer-events-none">
+                          {ganttLayout.rowDepths.map((depth, i) => (
+                            <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
+                          ))}
+                          <div className="absolute inset-0 flex">
+                            {Array.from({ length: 50 }).map((_, i) => (
+                              <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
+                            ))}
+                          </div>
+                        </div>
+                        {/* Dependency connectors */}
+                        <svg
+                          className="absolute inset-0 pointer-events-none"
+                          style={{ zIndex: 30 }}
+                          width={5000 * zoom}
+                          height={Math.max(800, ganttLayout.rowCount * 48)}
+                        >
+                          {ganttLayout.connectors.map((conn, idx) => {
+                            // Keep vertical segment in connector channel (first 20px of each cell)
+                            // Place it 10px into the channel immediately after the blocker
+                            const channelOffset = 10 * zoom;
+                            const verticalX = conn.fromX + channelOffset;
+
+                            const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
+                            return (
+                              <path
+                                key={`${conn.fromId}-${conn.toId}-${idx}`}
+                                d={path}
+                                stroke={conn.isCritical ? "#ef4444" : "#94a3b8"}
+                                strokeWidth="3"
+                                fill="none"
+                                opacity="0.9"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            );
+                          })}
+                        </svg>
+                        {/* Gantt bars */}
+                        {ganttLayout.items.map((item) => (
+                          <div key={item.bead.id} style={{ position: 'absolute', top: item.row * 48, height: 48, left: 0, right: 0 }}>
+                            <GanttBar
+                              item={{
+                                bead: item.bead,
+                                x: item.x,
+                                width: item.width,
+                                row: item.row,
+                                depth: item.depth,
+                                isCritical: item.isCritical,
+                                isBlocked: item.bead.isBlocked,
+                              }}
+                              onClick={handleBeadClick}
+                              isSelected={selectedBead?.id === item.bead.id}
+                            />
+                          </div>
                         ))}
                       </div>
                     </div>
-                    {/* Dependency connectors */}
-                    <svg
-                      className="absolute inset-0 pointer-events-none"
-                      style={{ zIndex: 30 }}
-                      width={5000 * zoom}
-                      height={Math.max(800, ganttLayout.rowCount * 48)}
-                    >
-                      {ganttLayout.connectors.map((conn, idx) => {
-                        // Keep vertical segment in connector channel (first 20px of each cell)
-                        // Place it 10px into the channel immediately after the blocker
-                        const channelOffset = 10 * zoom;
-                        const verticalX = conn.fromX + channelOffset;
-
-                        const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
-                        return (
-                          <path
-                            key={`${conn.fromId}-${conn.toId}-${idx}`}
-                            d={path}
-                            stroke={conn.isCritical ? "#ef4444" : "#94a3b8"}
-                            strokeWidth="3"
-                            fill="none"
-                            opacity="0.9"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        );
-                      })}
-                    </svg>
-                    {/* Gantt bars */}
-                    {ganttLayout.items.map((item) => (
-                      <div key={item.bead.id} style={{ position: 'absolute', top: item.row * 48, height: 48, left: 0, right: 0 }}>
-                        <GanttBar
-                          item={{
-                            bead: item.bead,
-                            x: item.x,
-                            width: item.width,
-                            row: item.row,
-                            depth: item.depth,
-                            isCritical: item.isCritical,
-                            isBlocked: item.bead.isBlocked,
-                          }}
-                          onClick={handleBeadClick}
-                          isSelected={selectedBead?.id === item.bead.id}
-                        />
-                      </div>
-                    ))}
                   </div>
-                </div>
-              </div>
+                </>
+              ) : (
+                <ListView 
+                  beads={beads}
+                  onBeadClick={handleBeadClick}
+                  selectedBeadId={selectedBead?.id}
+                  sortBy={sortBy}
+                  sortOrder={sortOrder}
+                  onHeaderClick={handleHeaderClick}
+                  sessionsByBead={sessionsByBead}
+                />
+              )}
             </div>
             {sidebarOpen && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} onOpenChat={handleOpenChat} />}
           </div>
         )}
-        <ChatDialog isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} persona={chatPersona} task={chatTask} beadId={chatBeadId} cliBackend={currentCli} />
       </main>
     </div>
   );

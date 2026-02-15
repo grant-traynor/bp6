@@ -226,16 +226,18 @@ export type CliBackend = 'gemini' | 'claude' | 'claude-code';
  * @param task - Optional task type for the persona
  * @param beadId - Optional bead ID for context
  * @param cliBackend - Optional CLI backend to use (defaults to 'gemini' if not provided)
+ * @param role - Optional specialist role ('web', 'rust', 'flutter', etc.) - only used with 'specialist' persona
  * @returns The session ID (UUID) of the newly created session
  */
 export async function startAgentSession(
   persona: string,
   task?: string,
   beadId?: string,
-  cliBackend?: CliBackend
+  cliBackend?: CliBackend,
+  role?: string
 ): Promise<string> {
   try {
-    return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend });
+    return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend, role });
   } catch (error) {
     console.error("Failed to start agent session:", error);
     throw error;

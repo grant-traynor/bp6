@@ -52,7 +52,6 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
   // Custom hooks
   const {
-    sessionId,
     messages,
     streamingMessage,
     isLoading,
@@ -182,7 +181,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           <div className="flex flex-col">
             <h3 className="font-black text-xs uppercase tracking-[0.2em]">
               {persona === 'product-manager' ? 'Product Manager' :
-               persona === 'qa-engineer' ? 'QA Engineer' : 'AI Assistant'}
+               persona === 'qa-engineer' ? 'QA Engineer' :
+               persona === 'specialist' ? 'Specialist' :
+               persona === 'architect' ? 'Architect' : 'AI Assistant'}
             </h3>
             <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest">
               {task || 'Active Session'}
@@ -252,7 +253,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           {/* Messages View */}
           {!showDebug && (
             <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-              <div className="flex flex-col gap-4 px-4 py-4">
+              <div className="flex flex-col gap-1 px-4 py-4">
                 {messages.length === 0 && !streamingMessage && (
                   <div className="py-12 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
                     <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">

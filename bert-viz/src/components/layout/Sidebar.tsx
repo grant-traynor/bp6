@@ -25,7 +25,7 @@ interface SidebarProps {
   handleReopenBead: (beadId: string) => Promise<void>;
   handleClaimBead: (beadId: string) => Promise<void>;
   toggleFavorite: (bead: BeadNode) => Promise<void>;
-  onOpenChat: (persona: string, task?: string, beadId?: string) => void;
+  onOpenChat: (persona: string, task?: string, beadId?: string, role?: string) => void;
 }
 
 export const Sidebar = ({
@@ -87,7 +87,7 @@ export const Sidebar = ({
       (original.notes || '') !== (current.notes || '') ||
       (original.externalReference || '') !== (current.externalReference || '') ||
       JSON.stringify(original.labels || []) !== JSON.stringify(current.labels || []) ||
-      JSON.stringify(original.acceptance_criteria || []) !== JSON.stringify(current.acceptance_criteria || [])
+      JSON.stringify(original.acceptanceCriteria || []) !== JSON.stringify(current.acceptanceCriteria || [])
     );
   }, [formData, selectedBead, isCreating]);
 
@@ -381,23 +381,23 @@ export const Sidebar = ({
           onToggle={() => toggleSection('ac')}
         >
           <div className="flex flex-col gap-2.5">
-            {(formData.acceptance_criteria || []).map((ac: string, i: number) => (
+            {(formData.acceptanceCriteria || []).map((ac: string, i: number) => (
               <div key={i} className="flex items-center gap-2.5 group">
                 <CheckSquare size={16} className="text-emerald-600 dark:text-emerald-400 shrink-0" strokeWidth={2.5} />
                 <input
                   className="flex-1 bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-lg px-3 py-2.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none shadow-sm"
                   value={ac}
                   onChange={e => {
-                    const newAC = [...(formData.acceptance_criteria || [])];
+                    const newAC = [...(formData.acceptanceCriteria || [])];
                     newAC[i] = e.target.value;
-                    setFormData({...formData, acceptance_criteria: newAC});
+                    setFormData({...formData, acceptanceCriteria: newAC});
                   }}
                   placeholder={`Criterion ${i + 1}...`}
                 />
                 <button
                   onClick={() => {
-                    const newAC = (formData.acceptance_criteria || []).filter((_: string, idx: number) => idx !== i);
-                    setFormData({...formData, acceptance_criteria: newAC});
+                    const newAC = (formData.acceptanceCriteria || []).filter((_: string, idx: number) => idx !== i);
+                    setFormData({...formData, acceptanceCriteria: newAC});
                   }}
                   className="text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 p-2 rounded-lg transition-colors border border-transparent hover:border-rose-500/20 active:scale-90 opacity-0 group-hover:opacity-100"
                 >
@@ -406,7 +406,7 @@ export const Sidebar = ({
               </div>
             ))}
             <button
-              onClick={() => setFormData({...formData, acceptance_criteria: [...(formData.acceptance_criteria || []), ""]})}
+              onClick={() => setFormData({...formData, acceptanceCriteria: [...(formData.acceptanceCriteria || []), ""]})}
               className="text-xs font-black text-indigo-700 dark:text-indigo-400 hover:text-indigo-800 self-start flex items-center gap-2.5 bg-indigo-500/10 px-4 py-2.5 rounded-xl border border-indigo-500/20 transition-all hover:bg-indigo-500/20 active:scale-95 uppercase tracking-widest"
             >
               <Plus size={14} strokeWidth={3} /> ADD CRITERION
