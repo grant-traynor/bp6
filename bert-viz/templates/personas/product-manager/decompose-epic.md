@@ -146,7 +146,8 @@ bd create --parent {{feature_id}} \
   --priority 1 \
   --description "Users can sign in using Google or GitHub for faster onboarding and reduced password management burden. Implements OAuth2 flow with Passport.js, stores JWT in HTTP-only cookies. UI in src/components/auth/." \
   --design "Passport.js strategies for Google/GitHub. JWT token generation on callback. Session middleware in src/middleware/auth.js. Login buttons in LoginView component." \
-  --acceptance "- Users can click 'Sign in with Google/GitHub' and complete OAuth flow
+  --acceptance="
+- Users can click 'Sign in with Google/GitHub' and complete OAuth flow
 - Sessions land on dashboard with active session
 - Sessions persist across browser restarts
 - Auth flows have >80% test coverage"
@@ -157,7 +158,8 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Users can view and edit their profile information (name, email, avatar, bio). Essential for personalization and account management. CRUD operations via REST API with Prisma ORM." \
   --design "PostgreSQL users table with Prisma schema in prisma/schema.prisma. Repository pattern in src/data/UserRepository.ts. REST endpoints in src/api/profile.ts. UI in src/components/profile/ProfileView.tsx." \
-  --acceptance "- Users can view profile and edit all fields
+  --acceptance="
+- Users can view profile and edit all fields
 - Users can upload avatar image
 - Changes persist after save
 - Validation prevents invalid emails

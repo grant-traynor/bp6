@@ -150,7 +150,8 @@ bd create --parent {{feature_id}} \
   --priority 1 \
   --description "Define User and Profile database models using Prisma ORM. Foundation for authentication feature - stores user credentials, profile data, and session information. Models in prisma/schema.prisma." \
   --design "Prisma schema with User (id, email, password_hash, created_at) and Profile (id, user_id, name, avatar_url, bio) tables. One-to-one relationship. Follow existing schema patterns in prisma/schema.prisma." \
-  --acceptance "- User and Profile models defined
+  --acceptance="
+- User and Profile models defined
 - Migrations generated and run successfully
 - Relationships work correctly
 - Can create/read users via Prisma client
@@ -162,7 +163,8 @@ bd create --parent {{feature_id}} \
   --priority 1 \
   --description "Implement repository pattern for User data access. Abstracts database operations from business logic, enables easier testing and potential DB swaps. Implements UserRepository class." \
   --design "Create src/data/UserRepository.ts with methods: create, findById, findByEmail, update, delete. Use Prisma client. Follow repository pattern from existing code. Handle errors gracefully." \
-  --acceptance "- UserRepository class exists with all CRUD methods
+  --acceptance="
+- UserRepository class exists with all CRUD methods
 - Methods use Prisma client correctly
 - Errors throw custom exceptions
 - Unit tests cover all methods with mocked Prisma
@@ -174,7 +176,8 @@ bd create --parent {{feature_id}} \
   --priority 2 \
   --description "Create REST endpoints for user CRUD operations. Enables frontend to manage user data via HTTP API. Routes in src/api/users.ts with authentication middleware." \
   --design "Add routes: POST /api/users (create), GET /api/users/:id (read), PUT /api/users/:id (update), DELETE /api/users/:id (delete). Use UserRepository for data access. Apply auth middleware. Validate inputs with Zod schemas." \
-  --acceptance "- All CRUD endpoints work via Postman/curl
+  --acceptance="
+- All CRUD endpoints work via Postman/curl
 - Authentication required (401 if missing)
 - Input validation returns 400 for invalid data
 - Repository layer used (no direct DB calls)
