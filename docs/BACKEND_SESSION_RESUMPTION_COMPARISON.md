@@ -6,17 +6,18 @@
 
 ## Executive Summary
 
-**Both Claude Code and Gemini CLI fully support session resumption** with different but complementary approaches:
+**Both Claude Code and Gemini CLI fully support session resumption** with nearly identical capabilities:
 
 | Feature | Claude Code | Gemini CLI |
 |---------|-------------|------------|
-| **Session Creation** | Explicit UUID required | Auto-generated, indexed |
-| **Resume Method** | `--resume <uuid>` | `--resume <index>` or `latest` |
+| **Session ID Control** | ✅ User-specified UUID | ✅ **User-specified string** |
+| **Resume Method** | `--resume <uuid>` | `--resume <string>` or `latest` |
 | **Headless Mode** | `--print` flag | `--prompt` flag |
 | **State Preservation** | ✅ Full | ✅ Full |
-| **Session ID Control** | ✅ User-specified | ❌ Auto-generated only |
 | **Session Picker** | ✅ Built-in | ✅ Built-in |
-| **Best For** | Multi-session orchestration | Single-user workflows |
+| **Best For** | UUID-strict workflows | Flexible session naming |
+
+**🎯 Key Discovery (2026-02-15):** Gemini CLI supports `--session-id "custom-string"` for user-specified session IDs, making implementation identical to Claude Code.
 
 ---
 
@@ -70,10 +71,26 @@ claude --resume $SESSION  # Enters interactive mode
 
 ## Gemini CLI Session Management
 
-### Auto-Generated Sessions
+### User-Specified Session IDs ✅
 
 ```bash
-# Create session (auto-generates ID)
+# Create session with explicit ID (any string format)
+gemini "Read README.md" --session-id "my-custom-session-01"
+
+# Resume with same ID
+gemini "What did you read?" --resume "my-custom-session-01"
+```
+
+**Key Characteristics:**
+- ✅ **User controls session ID** (any string format, not just UUID)
+- ✅ **Predictable resumption** (use same string)
+- ✅ **Flexible naming** (UUIDs, slugs, or descriptive names)
+- ✅ **Also supports auto-generation** (omit --session-id for auto UUID)
+
+### Alternative: Auto-Generated Sessions
+
+```bash
+# Create session (auto-generates UUID)
 gemini --prompt "Read README.md"
 
 # List sessions
@@ -82,12 +99,6 @@ gemini --list-sessions
 #   1. Read README.md and tell me... (Just now) [7f30af9b-...]
 #   2. Another session (5 minutes ago) [f8b811b0-...]
 ```
-
-**Key Characteristics:**
-- ✅ **Zero config** (auto-generates UUIDs)
-- ✅ **Human-readable list** (indexed by recency)
-- ✅ **Session descriptions** (uses first prompt as title)
-- ⚠️ **No explicit ID control** (can't pre-specify UUID)
 
 ### Session Resume
 
@@ -162,135 +173,109 @@ gemini --resume latest --prompt "What file did you just read?"
 
 ## Architecture Differences
 
-### Claude Code: UUID-First Design
+### Unified Session Management Approach
 
-```
-User Workflow:
-1. Generate UUID: uuidgen
-2. Start session: --session-id <uuid>
-3. Resume session: --resume <uuid>
-4. Manage multiple UUIDs in parallel
-```
+**Both CLIs now support user-specified session IDs**, simplifying implementation:
 
-**Pros:**
-- ✅ Explicit session IDs for programmatic control
-- ✅ Multi-session orchestration (multiple UUIDs tracked)
-- ✅ Predictable resume (same UUID always)
-- ✅ Session forking/branching
+```bash
+# Generate UUID for session
+SESSION_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 
-**Cons:**
-- ⚠️ UUID generation required
-- ⚠️ UUIDs harder for humans to track
-- ⚠️ Strict format enforcement
+# Claude Code
+claude --print --session-id $SESSION_ID "Command"
 
-**Best For:**
-- Automated workflows
-- Multi-agent systems
-- Programmatic session management
-- **bp6-643.7 use case: Perfect fit**
-
----
-
-### Gemini CLI: Index-First Design
-
-```
-User Workflow:
-1. Start session: gemini --prompt "..."
-2. List sessions: gemini --list-sessions
-3. Resume by index: --resume 1 (or "latest")
-4. Human-readable session titles
+# Gemini CLI (same UUID!)
+gemini "Command" --session-id $SESSION_ID
 ```
 
-**Pros:**
-- ✅ Zero configuration (auto-generates IDs)
-- ✅ Human-readable session list
-- ✅ Simple resume by index
-- ✅ Session descriptions (first prompt)
+**Shared Capabilities:**
+- ✅ **Explicit session IDs** for programmatic control
+- ✅ **Multi-session orchestration** (manage multiple IDs)
+- ✅ **Predictable resumption** (use same ID)
+- ✅ **Session pickers** for interactive discovery
 
-**Cons:**
-- ⚠️ No explicit ID control (can't pre-specify)
-- ⚠️ Index changes as sessions are created/deleted
-- ⚠️ Harder for programmatic multi-session tracking
+**Format Differences:**
+- **Claude Code:** Requires UUID v4 format (strict)
+- **Gemini CLI:** Accepts any string (UUIDs, slugs, descriptive names)
 
-**Best For:**
-- Interactive user workflows
-- Single-user development
-- Quick prototyping
-- Session browsing and discovery
+**Best Practice for bp6-643.7:**
+- Use UUIDs for session IDs (works with both backends)
+- Leverage flexible Gemini naming for human-readable alternatives
+- Single backend abstraction handles both CLIs identically
 
 ---
 
 ## Integration Strategy for bp6-643.7
 
-### Recommended Approach: Hybrid Design
+### ✅ Simplified Unified Implementation
 
-**Use Claude Code for multi-session orchestration:**
-- Explicit UUID control for backend tracking
-- Predictable session resumption
-- Multi-session management in `SessionState`
+**Both backends now support user-specified session IDs** - no need for separate logic!
 
-**Optionally support Gemini CLI:**
-- Use Gemini's auto-generated UUIDs (extract from output)
-- Track session index → UUID mapping
-- Provide fallback for users without Claude Code
-
-### Implementation Pattern
-
-**Claude Code (Primary):**
 ```rust
-// Generate session ID
+// Single pattern for both backends
 let cli_session_id = Uuid::new_v4().to_string();
 
-// Headless mode
-Command::new("claude")
-    .arg("--print")
-    .arg("--session-id")
-    .arg(&cli_session_id)
-    .arg(&command)
-    .spawn()?
+match backend_id {
+    BackendId::ClaudeCode => {
+        // Headless mode
+        Command::new("claude")
+            .arg("--print")
+            .arg("--session-id")
+            .arg(&cli_session_id)
+            .arg(&command)
+            .spawn()?;
 
-// Resume
-Command::new("claude")
-    .arg("--print")
-    .arg("--resume")
-    .arg(&cli_session_id)
-    .arg(&next_command)
-    .spawn()?
+        // Resume
+        Command::new("claude")
+            .arg("--print")
+            .arg("--resume")
+            .arg(&cli_session_id)
+            .arg(&next_command)
+            .spawn()?;
 
-// Interactive handover
-Command::new("claude")
-    .arg("--resume")
-    .arg(&cli_session_id)
-    // No --print = interactive
-    .spawn()?
+        // Interactive handover
+        Command::new("claude")
+            .arg("--resume")
+            .arg(&cli_session_id)
+            .spawn()?;
+    }
+
+    BackendId::Gemini => {
+        // Headless mode (same pattern!)
+        Command::new("gemini")
+            .arg(&command)
+            .arg("--session-id")
+            .arg(&cli_session_id)
+            .spawn()?;
+
+        // Resume (same pattern!)
+        Command::new("gemini")
+            .arg(&next_command)
+            .arg("--resume")
+            .arg(&cli_session_id)
+            .spawn()?;
+
+        // Interactive handover
+        Command::new("gemini")
+            .arg("--resume")
+            .arg(&cli_session_id)
+            .spawn()?;
+    }
+}
 ```
 
-**Gemini CLI (Alternative):**
-```rust
-// Create session (auto-generates UUID)
-let output = Command::new("gemini")
-    .arg("--prompt")
-    .arg(&command)
-    .output()?;
+### Key Simplifications
 
-// Extract UUID from --list-sessions (parse output)
-let cli_session_id = extract_latest_session_uuid()?;
+**Before (based on incorrect assumptions):**
+- ❌ Parse Gemini output to extract auto-generated UUIDs
+- ❌ Track session index → UUID mappings
+- ❌ Different logic for each backend
 
-// Resume by UUID (or "latest")
-Command::new("gemini")
-    .arg("--resume")
-    .arg(&cli_session_id) // or "latest"
-    .arg("--prompt")
-    .arg(&next_command)
-    .spawn()?
-
-// Interactive handover
-Command::new("gemini")
-    .arg("--resume")
-    .arg(&cli_session_id) // or "latest"
-    // No --prompt = interactive
-    .spawn()?
-```
+**After (with user-specified IDs):**
+- ✅ Generate UUID once, use everywhere
+- ✅ Same resumption pattern for both backends
+- ✅ Single `SessionState.cli_session_id` field
+- ✅ Minimal backend-specific code (just flag differences)
 
 ---
 
@@ -298,40 +283,27 @@ Command::new("gemini")
 
 | Capability | Claude Code | Gemini CLI |
 |------------|-------------|------------|
-| **Session ID Control** | ✅ User-specified UUID | ❌ Auto-generated only |
+| **Session ID Control** | ✅ User-specified UUID | ✅ **User-specified string** |
 | **Resume by Index** | ❌ UUID only | ✅ Index or "latest" |
-| **Resume by UUID** | ✅ Direct | ✅ Supported |
+| **Resume by String** | ✅ UUID v4 format | ✅ Any string format |
 | **Session Picker** | ✅ Interactive fuzzy search | ✅ List with descriptions |
 | **Session Descriptions** | ❌ UUID only | ✅ First prompt as title |
-| **Headless Mode** | `--print` | `--prompt` |
-| **Interactive Mode** | Default (no `--print`) | Default (no `--prompt`) |
+| **Headless Mode** | `--print` | Default (use with `"prompt"`) |
+| **Interactive Mode** | Default (no `--print`) | Default (omit prompt arg) |
 | **State Preservation** | ✅ Full | ✅ Full |
 | **Session Forking** | ✅ `--fork-session` | ❌ Not available |
 | **Continue Recent** | ✅ `--continue` | ✅ `--resume latest` |
-| **Multi-Session Orchestration** | ✅ Excellent (UUID tracking) | ⚠️ Limited (index unstable) |
-| **User-Friendly Browsing** | ⚠️ UUID-based | ✅ Excellent (titles) |
+| **Multi-Session Orchestration** | ✅ Excellent | ✅ **Excellent (same as Claude)** |
+| **ID Format Flexibility** | ⚠️ UUID v4 only | ✅ Any string |
 
 ---
 
 ## Recommendation for bp6-643.7
 
-### Primary: Use Claude Code
+### ✅ Unified Backend Support
 
-**Rationale:**
-- ✅ Explicit UUID control for multi-session tracking
-- ✅ Predictable resumption across session manager restarts
-- ✅ Easier to map `SessionState.cli_session_id` to backend
-- ✅ Session forking for advanced features
+**Both CLIs are now first-class citizens** with identical capabilities:
 
-### Optional: Support Gemini CLI
-
-**If Gemini support is needed:**
-1. Use `--list-sessions` to extract latest UUID after creation
-2. Store UUID in `SessionState.cli_session_id`
-3. Resume using UUID (not index, for stability)
-4. Accept trade-off: no pre-specified session IDs
-
-**Hybrid Approach:**
 ```rust
 pub enum BackendId {
     ClaudeCode,
@@ -344,24 +316,30 @@ impl SessionManager {
         backend: BackendId,
         commands: Vec<String>,
     ) -> Result<SessionInfo> {
-        let cli_session_id = match backend {
+        // Generate UUID for both backends
+        let cli_session_id = Uuid::new_v4().to_string();
+
+        // Spawn with same session ID pattern
+        match backend {
             BackendId::ClaudeCode => {
-                // User-specified UUID
-                let uuid = Uuid::new_v4().to_string();
-                self.spawn_claude_with_id(&uuid, &commands[0])?;
-                uuid
+                self.spawn_claude(&cli_session_id, &commands[0])?;
             }
             BackendId::Gemini => {
-                // Auto-generated, extract after spawn
-                self.spawn_gemini_and_extract_id(&commands[0])?
+                self.spawn_gemini(&cli_session_id, &commands[0])?;
             }
-        };
+        }
 
         // Store in SessionState for resume
-        Ok(SessionInfo { cli_session_id, ... })
+        Ok(SessionInfo { cli_session_id, backend, ... })
     }
 }
 ```
+
+**Benefits:**
+- ✅ No backend-specific session ID logic
+- ✅ Same UUID works for both CLIs
+- ✅ Simplified state management
+- ✅ User can switch backends without losing session control
 
 ---
 
