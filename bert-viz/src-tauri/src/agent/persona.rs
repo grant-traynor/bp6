@@ -94,6 +94,7 @@ pub enum PersonaType {
     QaEngineer,
     Specialist,
     Architect,
+    Customer,
 }
 
 impl PersonaType {
@@ -103,6 +104,7 @@ impl PersonaType {
             PersonaType::QaEngineer => "qa-engineer",
             PersonaType::Specialist => "specialist",
             PersonaType::Architect => "architect",
+            PersonaType::Customer => "customer",
         }
     }
 }
@@ -212,7 +214,7 @@ impl PersonaRegistry {
 
     /// Register all built-in persona implementations
     pub fn register_defaults(&self) {
-        use crate::agent::personas::{ArchitectPersona, ProductManagerPersona, QaEngineerPersona, SpecialistPersona};
+        use crate::agent::personas::{ArchitectPersona, CustomerPersona, ProductManagerPersona, QaEngineerPersona, SpecialistPersona};
 
         // SAFETY: We're using interior mutability pattern similar to BackendRegistry
         // This is safe because registration only happens during initialization
@@ -226,6 +228,7 @@ impl PersonaRegistry {
             (*personas_ptr).insert(PersonaType::QaEngineer, Arc::new(QaEngineerPersona::new()));
             (*personas_ptr).insert(PersonaType::Specialist, Arc::new(SpecialistPersona::new()));
             (*personas_ptr).insert(PersonaType::Architect, Arc::new(ArchitectPersona::new()));
+            (*personas_ptr).insert(PersonaType::Customer, Arc::new(CustomerPersona::new()));
         }
     }
 
