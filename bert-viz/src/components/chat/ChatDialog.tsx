@@ -155,9 +155,6 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     }
   }, [isAlwaysOnTop]);
 
-  // Diagnostic: Track component renders
-  console.log('🎨 RENDER: ChatDialog rendering | persona:', persona, '| beadId:', beadId, '| sessionIdOverride:', sessionIdOverride);
-
   if (!isOpen) return null;
 
   return (
@@ -278,7 +275,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                 ))}
                 {streamingMessage && (
                   <div className="flex justify-start">
-                    <div className="max-w-[85%] p-3 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600 text-sm font-bold leading-relaxed whitespace-pre-wrap">
+                    <div className="max-w-[85%] p-3 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600 text-sm font-bold leading-relaxed">
                       <div dangerouslySetInnerHTML={{ __html: safeStreamingMessage }} />
                       <span className="inline-block w-2 h-4 ml-1 bg-indigo-400 opacity-50"></span>
                     </div>

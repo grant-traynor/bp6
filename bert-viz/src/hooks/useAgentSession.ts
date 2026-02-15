@@ -74,8 +74,10 @@ export function useAgentSession({
 
   // Setup event listeners for a session
   const setupEventListeners = useCallback(async (sid: string) => {
-    // Skip if we're already listening to this exact session
-    if (currentListenerSessionRef.current === sid && unlistenChunkRef.current) {
+    // Skip if we're already setting up or have set up listeners for this exact session
+    // We only check currentListenerSessionRef because unlistenChunkRef is set asynchronously
+    // after the await listen() call, creating a race condition with React cleanup
+    if (currentListenerSessionRef.current === sid) {
       console.log('✓ GUARD HIT: Already listening to session:', sid);
       return;
     }
@@ -279,7 +281,7 @@ export function useAgentSession({
 
     return () => {
       console.log('🗑️ EFFECT CLEANUP: Running cleanup for session:', sessionId);
-      // Cleanup event listeners when switching sessions
+      // Cleanup event listeners
       if (unlistenChunkRef.current) {
         console.log('🗑️ EFFECT CLEANUP: Unlistening chunk listener');
         unlistenChunkRef.current();
@@ -290,8 +292,11 @@ export function useAgentSession({
         unlistenStderrRef.current();
         unlistenStderrRef.current = undefined;
       }
-      currentListenerSessionRef.current = null; // Clear tracking ref
-      console.log('🗑️ EFFECT CLEANUP: Cleanup complete');
+      // CRITICAL FIX: Don't clear the ref here!
+      // The ref should persist across effect re-runs for the same session.
+      // It will be updated in setupEventListeners when switching to a different session.
+      // Clearing it here causes the guard to fail when React Strict Mode re-runs the effect.
+      console.log('🗑️ EFFECT CLEANUP: Cleanup complete (ref preserved)');
     };
   }, [isOpen, persona, task, beadId, cliBackend, sessionId, setupEventListeners]);
 

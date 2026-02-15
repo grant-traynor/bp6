@@ -61,7 +61,11 @@ function renderContent(
   return (
     <div
       dangerouslySetInnerHTML={{ __html: safeContent }}
-      className="prose prose-sm dark:prose-invert max-w-none [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&>h1]:mt-2 [&>h1]:mb-1 [&>h2]:mt-2 [&>h2]:mb-1 [&>h3]:mt-2 [&>h3]:mb-1"
+      className="prose prose-sm dark:prose-invert max-w-none
+        [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1
+        [&>h1]:mt-2 [&>h1]:mb-1 [&>h2]:mt-2 [&>h2]:mb-1 [&>h3]:mt-2 [&>h3]:mb-1
+        [&_li]:my-0 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1
+        [&_li>p]:my-0 [&_li>ul]:my-1 [&_li>ol]:my-1"
       style={{ contain: 'layout style' }}
     />
   );
@@ -85,9 +89,9 @@ export const MessageBubble = memo<MessageBubbleProps>(({
   return (
     <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] p-3 rounded-2xl text-sm font-bold leading-relaxed whitespace-pre-wrap ${
+        className={`max-w-[85%] p-3 rounded-2xl text-sm font-bold leading-relaxed ${
           role === 'user'
-            ? 'bg-indigo-600 text-white rounded-br-none shadow-md'
+            ? 'bg-indigo-600 text-white rounded-br-none shadow-md whitespace-pre-wrap'
             : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600'
         }`}
       >
