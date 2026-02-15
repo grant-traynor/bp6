@@ -1,5 +1,4 @@
 /// QA Engineer persona implementation
-
 use crate::agent::persona::{PersonaContext, PersonaPlugin, PersonaType};
 
 /// QA Engineer persona for testing, validation, and dependency management

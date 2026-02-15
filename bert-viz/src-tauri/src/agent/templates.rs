@@ -1,5 +1,4 @@
 /// Template loading and variable substitution for persona prompts
-
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -18,8 +17,8 @@ impl TemplateLoader {
     /// Looks for templates relative to the binary location in `../../templates/personas/`
     pub fn new() -> Result<Self, String> {
         // Get the directory containing the binary
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("Failed to get executable path: {}", e))?;
+        let exe_path =
+            std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
 
         // Templates are located at: binary/../../../templates/personas/
         // (binary is in target/debug/ or target/release/)

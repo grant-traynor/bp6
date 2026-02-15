@@ -1,5 +1,4 @@
 /// Product Manager persona implementation
-
 use crate::agent::persona::{PersonaContext, PersonaPlugin, PersonaType};
 
 /// Product Manager persona for decomposition, extension, and implementation

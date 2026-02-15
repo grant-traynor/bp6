@@ -1,5 +1,4 @@
 /// Google Gemini CLI backend implementation
-
 use crate::agent::plugin::{AgentChunk, CliBackendPlugin};
 use serde_json::Value;
 
@@ -45,6 +44,18 @@ impl CliBackendPlugin for GeminiBackend {
     }
 
     fn parse_stdout_line(&self, json: &Value) -> Option<AgentChunk> {
+        // Handle Gemini init message: {"type": "init", "session_id": "...", "model": "..."}
+        // This captures the Gemini CLI's session ID for resume capability
+        if json["type"] == "init" {
+            if let Some(session_id) = json["session_id"].as_str() {
+                return Some(AgentChunk {
+                    content: String::new(),
+                    is_done: false,
+                    session_id: Some(session_id.to_string()),
+                });
+            }
+        }
+
         // Handle Gemini message format: {"type": "message", "role": "assistant", "content": "..."}
         if json["type"] == "message" && json["role"] == "assistant" {
             if let Some(content) = json["content"].as_str() {
@@ -84,7 +95,9 @@ impl CliBackendPlugin for GeminiBackend {
         // Handle completion: {"type": "result"}
         if json["type"] == "result" {
             // Check for errors in result
-            if json["subtype"] == "error_during_execution" || json["is_error"].as_bool().unwrap_or(false) {
+            if json["subtype"] == "error_during_execution"
+                || json["is_error"].as_bool().unwrap_or(false)
+            {
                 if let Some(errors) = json["errors"].as_array() {
                     let error_messages: Vec<String> = errors
                         .iter()
@@ -152,6 +165,22 @@ mod tests {
 
         assert!(args.contains(&"--resume".to_string()));
         assert!(args.contains(&"latest".to_string()));
+    }
+
+    #[test]
+    fn test_parse_init_message() {
+        let backend = GeminiBackend::new();
+        let json = json!({
+            "type": "init",
+            "timestamp": "2026-02-14T23:37:34.747Z",
+            "session_id": "e75e39b2-392e-4748-83ed-80fbd7c82994",
+            "model": "auto-gemini-3"
+        });
+
+        let chunk = backend.parse_stdout_line(&json).unwrap();
+        assert_eq!(chunk.content, "");
+        assert!(!chunk.is_done);
+        assert_eq!(chunk.session_id, Some("e75e39b2-392e-4748-83ed-80fbd7c82994".to_string()));
     }
 
     #[test]

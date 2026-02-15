@@ -1,5 +1,4 @@
 /// Backend plugin registry for dynamic backend lookup and management
-
 use crate::agent::backends::{ClaudeCodeBackend, GeminiBackend};
 use crate::agent::plugin::{BackendId, CliBackendPlugin};
 use std::collections::HashMap;

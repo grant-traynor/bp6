@@ -2,7 +2,6 @@
 ///
 /// This module contains concrete implementations of the CliBackendPlugin trait
 /// for various AI CLI backends (Gemini, Claude Code, etc.)
-
 pub mod claude;
 pub mod gemini;
 

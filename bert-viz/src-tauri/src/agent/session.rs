@@ -1,14 +1,14 @@
-use std::collections::HashMap;
-use std::process::{Command, Stdio, Child};
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::time::SystemTime;
-use std::path::PathBuf;
-use std::fs::{self, File};
-use tauri::{AppHandle, Emitter, Manager, State};
-use std::sync::{Arc, Mutex};
+use pulldown_cmark::{html, Options, Parser};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
-use pulldown_cmark::{Parser, html, Options};
 
 /// Status of an agent session
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -150,8 +150,12 @@ impl SessionLogger {
         use std::fs::OpenOptions;
 
         // Get home directory
-        let home_dir = dirs::home_dir()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Could not find home directory"))?;
+        let home_dir = dirs::home_dir().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Could not find home directory",
+            )
+        })?;
 
         // Build path: ~/.bp6/sessions/<bead-id>/<session-id>-<timestamp>.jsonl
         let bp6_dir = home_dir.join(".bp6").join("sessions");
@@ -209,14 +213,25 @@ impl SessionLogger {
     }
 
     /// Log an agent chunk
-    pub fn log_chunk(&mut self, session_id: &str, bead_id: Option<&str>, persona: &str, backend: &str, chunk: &crate::agent::plugin::AgentChunk) -> std::io::Result<()> {
+    pub fn log_chunk(
+        &mut self,
+        session_id: &str,
+        bead_id: Option<&str>,
+        persona: &str,
+        backend: &str,
+        chunk: &crate::agent::plugin::AgentChunk,
+    ) -> std::io::Result<()> {
         let event = LogEvent {
             timestamp: chrono::Utc::now().to_rfc3339(),
             session_id: session_id.to_string(),
             bead_id: bead_id.map(String::from),
             persona: persona.to_string(),
             backend: backend.to_string(),
-            event_type: if chunk.is_done { LogEventType::SessionEnd } else { LogEventType::Chunk },
+            event_type: if chunk.is_done {
+                LogEventType::SessionEnd
+            } else {
+                LogEventType::Chunk
+            },
             content: chunk.content.clone(),
             metadata: None,
         };
@@ -230,12 +245,6 @@ impl SessionLogger {
 }
 
 // Old template constants and CliBackend enum removed - now using PersonaPlugin system
-
-
-
-
-
-
 
 /// Helper function to extract the specialist role from a bead.
 /// First checks labels for 'specialist:<role>' pattern, then falls back to extra_metadata['role'].
@@ -321,18 +330,24 @@ fn interrupt_process_group(pid: u32) {
 // Multi-session helper functions
 
 /// Convert all sessions to SessionInfo and emit session-list-changed event
-fn emit_session_list_changed(
-    app_handle: &AppHandle,
-    sessions: &HashMap<String, SessionState>,
-) {
+fn emit_session_list_changed(app_handle: &AppHandle, sessions: &HashMap<String, SessionState>) {
     let session_list = list_active_sessions_internal(sessions);
-    println!("📡 Emitting session-list-changed with {} sessions", session_list.len());
+    println!(
+        "📡 Emitting session-list-changed with {} sessions",
+        session_list.len()
+    );
     for session in &session_list {
-        println!("  - Session {}: beadId={:?}", session.session_id, session.bead_id);
+        println!(
+            "  - Session {}: beadId={:?}",
+            session.session_id, session.bead_id
+        );
     }
     // Wrap in object to match TypeScript interface: { sessions: SessionInfo[] }
     let payload = serde_json::json!({ "sessions": session_list });
-    println!("📡 Payload: {}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+    println!(
+        "📡 Payload: {}",
+        serde_json::to_string_pretty(&payload).unwrap_or_default()
+    );
     // Broadcast to ALL windows using Emitter trait
     let _ = app_handle.emit_to(tauri::EventTarget::Any, "session-list-changed", payload);
 }
@@ -382,10 +397,16 @@ fn run_cli_command_for_session(
     resume: bool,
     cli_session_id: Option<String>,
 ) -> Result<Child, String> {
-    let repo_root = crate::bd::find_repo_root()
-        .ok_or_else(|| "Could not locate project root (.beads directory). Please ensure a project is loaded.".to_string())?;
+    let repo_root = crate::bd::find_repo_root().ok_or_else(|| {
+        "Could not locate project root (.beads directory). Please ensure a project is loaded."
+            .to_string()
+    })?;
 
-    eprintln!("🎯 Starting session {} in directory: {}", session_id, repo_root.display());
+    eprintln!(
+        "🎯 Starting session {} in directory: {}",
+        session_id,
+        repo_root.display()
+    );
 
     let backend = state
         .backend_registry
@@ -415,19 +436,35 @@ fn run_cli_command_for_session(
         .map_err(|e| {
             let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
                 let install_cmd = match backend_id {
-                    crate::agent::plugin::BackendId::Gemini => "npm install -g @google/generative-ai-cli",
-                    crate::agent::plugin::BackendId::ClaudeCode => "See https://docs.anthropic.com/en/docs/claude-code for installation",
+                    crate::agent::plugin::BackendId::Gemini => {
+                        "npm install -g @google/generative-ai-cli"
+                    }
+                    crate::agent::plugin::BackendId::ClaudeCode => {
+                        "See https://docs.anthropic.com/en/docs/claude-code for installation"
+                    }
                 };
-                format!("{} CLI not found. Please install it first: {}", backend.command_name(), install_cmd)
+                format!(
+                    "{} CLI not found. Please install it first: {}",
+                    backend.command_name(),
+                    install_cmd
+                )
             } else {
-                format!("Failed to spawn {} in {}: {}", backend.command_name(), repo_root.display(), e)
+                format!(
+                    "Failed to spawn {} in {}: {}",
+                    backend.command_name(),
+                    repo_root.display(),
+                    e
+                )
             };
             let _ = app_handle.emit("agent-stderr", format!("[Error] {}", error_msg));
             error_msg
         })?;
 
     eprintln!("🚀 Session {} - Sending prompt:\n{}", session_id, prompt);
-    let _ = app_handle.emit("agent-stderr", format!("[Session {}] Sending prompt:\n{}", session_id, prompt));
+    let _ = app_handle.emit(
+        "agent-stderr",
+        format!("[Session {}] Sending prompt:\n{}", session_id, prompt),
+    );
 
     // Extract stdout/stderr before spawning threads
     let stdout = child.stdout.take().unwrap();
@@ -445,7 +482,11 @@ fn run_cli_command_for_session(
         // Initialize session logger
         let mut logger = match SessionLogger::new(bead_id_clone.as_deref(), &session_id_clone) {
             Ok(logger) => {
-                eprintln!("📝 Session {} logging to: {}", session_id_clone, logger.file_path().display());
+                eprintln!(
+                    "📝 Session {} logging to: {}",
+                    session_id_clone,
+                    logger.file_path().display()
+                );
                 Some(logger)
             }
             Err(e) => {
@@ -478,7 +519,19 @@ fn run_cli_command_for_session(
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line_str) {
                         // Parse using backend plugin
                         if let Some(mut chunk) = backend_clone.parse_stdout_line(&json) {
-                            // Add session ID to chunk
+                            // If chunk contains a CLI session ID (e.g., from Gemini init message),
+                            // store it in the SessionState for future resume operations
+                            if let Some(ref cli_session_id) = chunk.session_id {
+                                if let Some(agent_state) = handle_clone.try_state::<AgentState>() {
+                                    let mut sessions = agent_state.sessions.lock().unwrap();
+                                    if let Some(session) = sessions.get_mut(&session_id_clone) {
+                                        eprintln!("📝 Captured CLI session ID for {}: {}", session_id_clone, cli_session_id);
+                                        session.cli_session_id = Some(cli_session_id.clone());
+                                    }
+                                }
+                            }
+
+                            // Set session ID to internal session ID for event routing
                             chunk.session_id = Some(session_id_clone.clone());
 
                             // Log the chunk
@@ -563,7 +616,10 @@ fn run_cli_command_for_session(
         for line in reader.lines() {
             if let Ok(line_str) = line {
                 eprintln!("🤖 Session {} Stderr: {}", session_id_clone, line_str);
-                let _ = handle_clone_stderr.emit("agent-stderr", format!("[{}] {}", session_id_clone, line_str));
+                let _ = handle_clone_stderr.emit(
+                    "agent-stderr",
+                    format!("[{}] {}", session_id_clone, line_str),
+                );
             }
         }
     });
@@ -593,8 +649,8 @@ fn run_cli_command(
         app_handle,
         state,
         temp_session_id,
-        None,  // No bead_id for deprecated single-session mode
-        "unknown".to_string(),  // Default persona for deprecated mode
+        None,                  // No bead_id for deprecated single-session mode
+        "unknown".to_string(), // Default persona for deprecated mode
         prompt,
         resume,
         cli_session_id,
@@ -609,6 +665,7 @@ fn build_prompt_with_persona(
     persona: &str,
     task: Option<&str>,
     bead_id: Option<&str>,
+    explicit_role: Option<&str>,
 ) -> Result<String, String> {
     use crate::agent::persona::{PersonaContext, PersonaType};
 
@@ -627,7 +684,7 @@ fn build_prompt_with_persona(
         .ok_or_else(|| format!("Persona {:?} not registered", persona_type))?;
 
     // Get bead and extract information
-    let (bead_json, issue_type, role) = if let Some(bid) = bead_id {
+    let (bead_json, issue_type, bead_role) = if let Some(bid) = bead_id {
         let bead = crate::bd::get_bead_by_id(bid).map_err(|e| e.to_string())?;
         let json = serde_json::to_string_pretty(&bead).ok();
         let issue_type = Some(bead.issue_type.clone());
@@ -636,6 +693,9 @@ fn build_prompt_with_persona(
     } else {
         (None, None, None)
     };
+
+    // Use explicit role if provided, otherwise fall back to bead role
+    let role = explicit_role.map(String::from).or(bead_role);
 
     // Build context for persona plugin
     let context = PersonaContext {
@@ -668,7 +728,8 @@ pub fn start_agent_session(
     persona: String,
     task: Option<String>,
     bead_id: Option<String>,
-    cli_backend: Option<String>
+    cli_backend: Option<String>,
+    role: Option<String>,
 ) -> Result<String, String> {
     // Generate unique session ID
     let session_id = Uuid::new_v4().to_string();
@@ -689,12 +750,7 @@ pub fn start_agent_session(
     };
 
     // Build initial prompt using persona plugin system
-    let prompt = build_prompt_with_persona(
-        &state,
-        &persona,
-        task.as_deref(),
-        bead_id.as_deref(),
-    )?;
+    let prompt = build_prompt_with_persona(&state, &persona, task.as_deref(), bead_id.as_deref(), role.as_deref())?;
 
     // Start the CLI process for this session
     // Pass our session_id to the CLI backend so it uses the same UUID
@@ -706,8 +762,8 @@ pub fn start_agent_session(
         bead_id.clone(),
         persona.clone(),
         prompt,
-        false, // resume = false for new session
-        Some(session_id.clone()),  // Pass our session_id to the CLI backend
+        false,                    // resume = false for new session
+        Some(session_id.clone()), // Pass our session_id to the CLI backend
     )?;
 
     // Create SessionState and store in HashMap
@@ -719,7 +775,7 @@ pub fn start_agent_session(
         backend_id: backend,
         status: SessionStatus::Running,
         created_at: now,
-        cli_session_id: Some(session_id.clone()),  // Store the session ID for resuming
+        cli_session_id: Some(session_id.clone()), // Store the session ID for resuming
         last_activity: now,
         has_unread: false,
         message_count: 0,
@@ -757,12 +813,13 @@ pub fn send_agent_message(
     app_handle: AppHandle,
     sessionId: String,
     message: String,
-    state: State<'_, AgentState>
+    state: State<'_, AgentState>,
 ) -> Result<(), String> {
     // Get session info from HashMap
     let (backend_id, cli_session_id, bead_id, persona) = {
         let sessions = state.sessions.lock().unwrap();
-        let session = sessions.get(&sessionId)
+        let session = sessions
+            .get(&sessionId)
             .ok_or_else(|| format!("Session {} not found", sessionId))?;
 
         (
@@ -803,12 +860,13 @@ pub fn send_agent_message(
 pub fn stop_agent_session(
     app_handle: AppHandle,
     sessionId: String,
-    state: State<'_, AgentState>
+    state: State<'_, AgentState>,
 ) -> Result<(), String> {
     // Remove session from HashMap and get the Child handle
     let child = {
         let mut sessions = state.sessions.lock().unwrap();
-        let session_state = sessions.remove(&sessionId)
+        let session_state = sessions
+            .remove(&sessionId)
             .ok_or_else(|| format!("Session {} not found", sessionId))?;
         session_state.process
     };
@@ -851,14 +909,15 @@ pub fn stop_agent_session(
 #[allow(non_snake_case)]
 pub fn interrupt_agent_session(
     sessionId: String,
-    state: State<'_, AgentState>
+    state: State<'_, AgentState>,
 ) -> Result<(), String> {
     eprintln!("⏸️  Interrupting session: {}", sessionId);
 
     // Get the process ID without removing the session from HashMap
     let pid = {
         let sessions = state.sessions.lock().unwrap();
-        let session_state = sessions.get(&sessionId)
+        let session_state = sessions
+            .get(&sessionId)
             .ok_or_else(|| format!("Session {} not found", sessionId))?;
         session_state.process.id()
     };
@@ -866,7 +925,10 @@ pub fn interrupt_agent_session(
     // Send SIGINT to interrupt (but not kill) the process
     interrupt_process_group(pid);
 
-    eprintln!("⏸️  Session {} interrupted (session remains alive)", sessionId);
+    eprintln!(
+        "⏸️  Session {} interrupted (session remains alive)",
+        sessionId
+    );
 
     Ok(())
 }
@@ -893,13 +955,21 @@ pub fn approve_suggestion(command: String) -> Result<String, String> {
 #[tauri::command]
 pub fn list_active_sessions(state: State<'_, AgentState>) -> Result<Vec<SessionInfo>, String> {
     let sessions = state.sessions.lock().unwrap();
-    println!("🔍 list_active_sessions: HashMap has {} entries", sessions.len());
+    println!(
+        "🔍 list_active_sessions: HashMap has {} entries",
+        sessions.len()
+    );
     for (id, session) in sessions.iter() {
-        println!("  - Session {}: bead_id={:?}, persona={}, status={:?}",
-            id, session.bead_id, session.persona, session.status);
+        println!(
+            "  - Session {}: bead_id={:?}, persona={}, status={:?}",
+            id, session.bead_id, session.persona, session.status
+        );
     }
     let mut session_list = list_active_sessions_internal(&sessions);
-    println!("🔍 list_active_sessions: Returning {} sessions", session_list.len());
+    println!(
+        "🔍 list_active_sessions: Returning {} sessions",
+        session_list.len()
+    );
 
     // Sort by creation time (oldest first)
     session_list.sort_by_key(|s| s.created_at);
@@ -1050,8 +1120,7 @@ pub fn get_session_history(
     beadId: Option<String>,
 ) -> Result<Vec<ConversationMessage>, String> {
     // Get home directory
-    let home_dir = dirs::home_dir()
-        .ok_or_else(|| "Could not find home directory".to_string())?;
+    let home_dir = dirs::home_dir().ok_or_else(|| "Could not find home directory".to_string())?;
 
     // Build path: ~/.bp6/sessions/<bead-id>/
     let bp6_dir = home_dir.join(".bp6").join("sessions");
@@ -1070,7 +1139,9 @@ pub fn get_session_history(
             .find(|path| {
                 path.file_name()
                     .and_then(|name| name.to_str())
-                    .map(|name| name.starts_with(&format!("{}-", sessionId)) && name.ends_with(".jsonl"))
+                    .map(|name| {
+                        name.starts_with(&format!("{}-", sessionId)) && name.ends_with(".jsonl")
+                    })
                     .unwrap_or(false)
             })
     } else {
@@ -1086,8 +1157,7 @@ pub fn get_session_history(
     })?;
 
     // Read and parse JSONL file
-    let file = File::open(&log_file_path)
-        .map_err(|e| format!("Failed to open log file: {}", e))?;
+    let file = File::open(&log_file_path).map_err(|e| format!("Failed to open log file: {}", e))?;
     let reader = BufReader::new(file);
 
     let mut messages = Vec::new();
@@ -1098,8 +1168,8 @@ pub fn get_session_history(
         let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
 
         // Parse LogEvent
-        let event: LogEvent = serde_json::from_str(&line)
-            .map_err(|e| format!("Failed to parse log event: {}", e))?;
+        let event: LogEvent =
+            serde_json::from_str(&line).map_err(|e| format!("Failed to parse log event: {}", e))?;
 
         match event.event_type {
             LogEventType::Message => {
@@ -1127,7 +1197,9 @@ pub fn get_session_history(
                     messages.push(ConversationMessage {
                         role: "assistant".to_string(),
                         content: markdown_to_html(&content),
-                        timestamp: current_timestamp.take().unwrap_or_else(|| event.timestamp.clone()),
+                        timestamp: current_timestamp
+                            .take()
+                            .unwrap_or_else(|| event.timestamp.clone()),
                     });
                 }
             }
@@ -1178,5 +1250,77 @@ pub fn mark_session_read(
         emit_session_list_changed(&app_handle, &sessions);
     }
 
+    Ok(())
+}
+
+// ============================================================================
+// Session Resume Index Commands
+// ============================================================================
+
+/// Check if there's a recent session for a bead/persona combination
+///
+/// This allows the UI to automatically resume conversations when reopening
+/// a chat for the same bead and persona.
+///
+/// # Arguments
+/// * `bead_id` - Optional bead ID (None for untracked)
+/// * `persona` - The persona (product-manager, qa-engineer, etc.)
+///
+/// # Returns
+/// The session metadata if found, None otherwise
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn find_recent_session(
+    beadId: Option<String>,
+    persona: String,
+) -> Result<Option<super::session_index::SessionMetadata>, String> {
+    let index = super::session_index::SessionIndex::load()?;
+    Ok(index.get_session(beadId.as_deref(), &persona).cloned())
+}
+
+/// Record a session in the resume index
+///
+/// Called when a session is created or becomes active to enable
+/// automatic resumption later.
+///
+/// # Arguments
+/// * `bead_id` - Optional bead ID (None for untracked)
+/// * `persona` - The persona
+/// * `session_id` - The session UUID
+/// * `cli_session_id` - The CLI-provided session ID (for resume)
+/// * `backend_id` - The backend being used (gemini, claude-code)
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn record_session_for_resume(
+    beadId: Option<String>,
+    persona: String,
+    sessionId: String,
+    cliSessionId: Option<String>,
+    backendId: String,
+) -> Result<(), String> {
+    let mut index = super::session_index::SessionIndex::load()?;
+    index.record_session(
+        beadId.as_deref(),
+        &persona,
+        sessionId,
+        cliSessionId,
+        backendId,
+    );
+    index.save()?;
+    Ok(())
+}
+
+/// Update the last active timestamp for a session
+///
+/// Called when a message is sent to keep the session fresh for resumption.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn touch_session(
+    beadId: Option<String>,
+    persona: String,
+) -> Result<(), String> {
+    let mut index = super::session_index::SessionIndex::load()?;
+    index.touch_session(beadId.as_deref(), &persona);
+    index.save()?;
     Ok(())
 }

@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -15,13 +16,15 @@ function renderContent(
   onApprove?: (command: string) => void,
   onEdit?: (command: string) => void
 ): React.ReactNode {
+  const safeContent = sanitizeAgentHtml(content);
+
   // Check if content contains bd commands
   const bdCommandRegex = /<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`/g;
-  const hasBdCommand = bdCommandRegex.test(content);
+  const hasBdCommand = bdCommandRegex.test(safeContent);
 
   if (hasBdCommand && onApprove && onEdit) {
     // Extract and render bd commands with approve/edit buttons
-    const parts = content.split(/(<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`)/g);
+    const parts = safeContent.split(/(<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`)/g);
 
     return parts.map((part, index) => {
       const bdMatch = part.match(/<code>(bd\s+[^<]+)<\/code>/) || part.match(/`(bd\s+[^`]+)`/);
@@ -57,8 +60,8 @@ function renderContent(
   // No bd commands - render HTML directly with contained styling
   return (
     <div
-      dangerouslySetInnerHTML={{ __html: content }}
-      className="prose prose-sm dark:prose-invert max-w-none"
+      dangerouslySetInnerHTML={{ __html: safeContent }}
+      className="prose prose-sm dark:prose-invert max-w-none [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&>h1]:mt-2 [&>h1]:mb-1 [&>h2]:mt-2 [&>h2]:mb-1 [&>h3]:mt-2 [&>h3]:mb-1"
       style={{ contain: 'layout style' }}
     />
   );
@@ -82,7 +85,7 @@ export const MessageBubble = memo<MessageBubbleProps>(({
   return (
     <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] p-3 rounded-2xl text-sm font-bold leading-relaxed ${
+        className={`max-w-[85%] p-3 rounded-2xl text-sm font-bold leading-relaxed whitespace-pre-wrap ${
           role === 'user'
             ? 'bg-indigo-600 text-white rounded-br-none shadow-md'
             : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600'

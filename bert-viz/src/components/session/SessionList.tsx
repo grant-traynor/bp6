@@ -30,7 +30,9 @@ const SessionListComponent: React.FC<SessionListProps> = ({
   beads
 }) => {
   const sessions = useSessionStore(state => state.sessions);
+
   const [isCollapsed, setIsCollapsed] = useState(false);
+
 
   // Memoize bead title lookup to avoid recalculation on every render
   const getBeadTitle = useMemo(() => {
@@ -50,7 +52,7 @@ const SessionListComponent: React.FC<SessionListProps> = ({
   }, [sessions]);
 
   return (
-    <div className={cn('session-list', isCollapsed && 'session-list-collapsed')}>
+    <div className={cn('session-list h-full min-h-0', isCollapsed && 'session-list-collapsed')}>
       {/* Header */}
       <div className="session-list-header">
         <span>Active Sessions ({runningSessions.length})</span>
@@ -64,7 +66,7 @@ const SessionListComponent: React.FC<SessionListProps> = ({
       </div>
 
       {/* Body - Session List */}
-      <div className="session-list-body">
+      <div className="session-list-body flex-1 min-h-0">
         {runningSessions.length === 0 ? (
           <div className="session-list-empty">No active sessions</div>
         ) : (

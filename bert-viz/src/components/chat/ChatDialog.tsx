@@ -155,6 +155,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     }
   }, [isAlwaysOnTop]);
 
+  // Diagnostic: Track component renders
+  console.log('🎨 RENDER: ChatDialog rendering | persona:', persona, '| beadId:', beadId, '| sessionIdOverride:', sessionIdOverride);
+
   if (!isOpen) return null;
 
   return (
@@ -253,7 +256,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           {/* Messages View */}
           {!showDebug && (
             <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-              <div className="flex flex-col gap-1 px-4 py-4">
+              <div className="flex flex-col gap-2 px-4 py-4">
                 {messages.length === 0 && !streamingMessage && (
                   <div className="py-12 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
                     <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">

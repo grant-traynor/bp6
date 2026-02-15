@@ -50,6 +50,12 @@ pub struct UiState {
     pub collapsed_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wbs_panel_width: Option<f64>,
+    #[serde(default = "default_view")]
+    pub current_view: String,
+}
+
+fn default_view() -> String {
+    "gantt".to_string()
 }
 
 /// Complete startup state containing all restorable application state
@@ -104,6 +110,7 @@ impl Default for UiState {
             zoom: 1.0,
             collapsed_ids: Vec::new(),
             wbs_panel_width: None,
+            current_view: default_view(),
         }
     }
 }
@@ -157,8 +164,6 @@ pub async fn save_startup_state(state: StartupState) -> Result<(), String> {
 
     fs::write(&path, contents)
         .map_err(|e| format!("Failed to write startup state file: {}", e))?;
-
-    eprintln!("✅ Saved startup state to {}", path.display());
     Ok(())
 }
 
@@ -211,6 +216,7 @@ mod tests {
 
         assert_eq!(state.ui.zoom, 1.0);
         assert_eq!(state.ui.collapsed_ids.len(), 0);
+        assert_eq!(state.ui.current_view, "gantt");
     }
 
     #[test]
@@ -236,6 +242,8 @@ mod tests {
             ui: UiState {
                 zoom: 1.5,
                 collapsed_ids: vec!["id1".to_string(), "id2".to_string()],
+                wbs_panel_width: Some(300.0),
+                current_view: "gantt".to_string(),
             },
         };
 
@@ -315,6 +323,8 @@ mod tests {
         let state = UiState {
             zoom: 1.0,
             collapsed_ids: Vec::new(),
+            wbs_panel_width: None,
+            current_view: "gantt".to_string(),
         };
 
         let json = serde_json::to_string(&state).unwrap();

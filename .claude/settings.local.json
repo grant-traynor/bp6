@@ -49,7 +49,9 @@
       "Bash(cargo add:*)",
       "Bash(npm test:*)",
       "Bash(bd view:*)",
-      "Bash(bd:*)"
+      "Bash(bd:*)",
+      "Bash(./test_migration:*)",
+      "Bash(gemini:*)"
     ]
   }
 }

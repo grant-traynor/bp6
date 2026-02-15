@@ -2,13 +2,13 @@
 ///
 /// This module provides a plugin-based architecture for integrating different
 /// CLI backends (Gemini, Claude Code, etc.) and persona templates.
-
 pub mod backends;
 pub mod persona;
 pub mod personas;
 pub mod plugin;
 pub mod registry;
 pub mod session;
+pub mod session_index;
 pub mod templates;
 
 // Re-export commonly used types from plugin module (for future use)

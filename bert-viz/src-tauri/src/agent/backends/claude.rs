@@ -1,5 +1,4 @@
 /// Anthropic Claude Code CLI backend implementation
-
 use crate::agent::plugin::{AgentChunk, CliBackendPlugin};
 use serde_json::Value;
 
@@ -74,9 +73,8 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                         // Handle tool use - emit notification so UI shows activity
                         if content_block["type"] == "tool_use" {
                             if let Some(tool_name) = content_block["name"].as_str() {
-                                let description = content_block["input"]["description"]
-                                    .as_str()
-                                    .unwrap_or("");
+                                let description =
+                                    content_block["input"]["description"].as_str().unwrap_or("");
 
                                 let message = if !description.is_empty() {
                                     format!("🔧 {}: {}", tool_name, description)

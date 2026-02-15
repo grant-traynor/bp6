@@ -4,6 +4,18 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import App from "./App";
 import "./index.css";
 
+// Apply saved theme ASAP to avoid flash/mismatch
+const savedTheme = (() => {
+  try {
+    return localStorage.getItem('theme');
+  } catch {
+    return null;
+  }
+})();
+
+if (savedTheme === 'dark') document.documentElement.classList.add('dark');
+else if (savedTheme === 'light') document.documentElement.classList.remove('dark');
+
 // Detect window type on initialization
 const currentWindow = getCurrentWindow();
 const windowLabel = currentWindow.label;

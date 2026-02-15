@@ -6,7 +6,6 @@
 /// This module defines the trait-based plugin system that allows different
 /// CLI backends (Gemini, Claude Code, etc.) to be implemented independently
 /// and registered dynamically.
-
 use serde::{Deserialize, Serialize};
 
 /// Type-safe identifier for CLI backends

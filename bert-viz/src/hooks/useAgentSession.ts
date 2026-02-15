@@ -76,28 +76,36 @@ export function useAgentSession({
   const setupEventListeners = useCallback(async (sid: string) => {
     // Skip if we're already listening to this exact session
     if (currentListenerSessionRef.current === sid && unlistenChunkRef.current) {
-      console.log('✓ Already listening to session:', sid);
+      console.log('✓ GUARD HIT: Already listening to session:', sid);
       return;
     }
 
-    console.log('🎧 Setting up listeners for session:', sid);
+    console.log('🎧 SETUP: Setting up listeners for session:', sid, '| Current ref:', currentListenerSessionRef.current);
 
     // Clean up existing listeners - ensure cleanup completes
     if (unlistenChunkRef.current) {
+      console.log('🧹 CLEANUP: Removing old chunk listener');
       unlistenChunkRef.current();
       unlistenChunkRef.current = undefined;
     }
     if (unlistenStderrRef.current) {
+      console.log('🧹 CLEANUP: Removing old stderr listener');
       unlistenStderrRef.current();
       unlistenStderrRef.current = undefined;
     }
 
-    currentListenerSessionRef.current = null; // Clear before setting up new
+    // CRITICAL: Mark this session as active BEFORE async listen() calls
+    // This prevents race conditions where setupEventListeners is called
+    // multiple times before the first call completes
+    currentListenerSessionRef.current = sid;
 
     const eventName = `agent-chunk-${sid}`;
+    const listenerId = `L-${Math.random().toString(36).substr(2, 9)}`;
 
     unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
       const { content, isDone } = event.payload;
+
+      console.log(`📨 LISTENER ${listenerId}: Event received | content length:`, content?.length || 0, '| isDone:', isDone);
 
       if (content) {
         setDebugLogs(prev => [...prev, `[Stdout] ${content}`]);
@@ -107,18 +115,29 @@ export function useAgentSession({
       setIsAwaitingFirstChunk(false);
 
       if (isDone) {
+        // Fix for message duplication: Capture the final streaming content BEFORE any state updates
+        // This prevents the race condition where the component renders with both streamingMessage
+        // and the new message in the messages array simultaneously
         setStreamingMessage((current) => {
-          if (current) {
+          const finalContent = current;
+
+          // Clear streaming message FIRST (React will batch this with the next update)
+          // This ensures when the component renders, streamingMessage will be empty
+
+          // Add to permanent messages using the captured value
+          if (finalContent) {
             setMessages(prev => {
-              // Prevent duplicate messages
+              // Deduplication check - prevent adding if already present
               const lastMsg = prev[prev.length - 1];
-              if (lastMsg && lastMsg.role === 'assistant' && lastMsg.content === current) {
+              if (lastMsg?.role === 'assistant' && lastMsg.content === finalContent) {
                 console.warn('Prevented duplicate message from being added');
                 return prev;
               }
-              return [...prev, { role: 'assistant', content: current }];
+              return [...prev, { role: 'assistant', content: finalContent }];
             });
           }
+
+          // Return empty string to clear streaming message
           return '';
         });
         setIsLoading(false);
@@ -132,13 +151,13 @@ export function useAgentSession({
       setDebugLogs(prev => [...prev, `[Stderr] ${event.payload}`]);
     });
 
-    // Mark this session as having active listeners
-    currentListenerSessionRef.current = sid;
     console.log('✓ Listeners ready for session:', sid);
   }, []);
 
   // Initialize session on mount or context change
   useEffect(() => {
+    console.log('⚡ EFFECT RUN: useEffect triggered | isOpen:', isOpen, '| sessionId:', sessionId, '| sessionIdOverride:', sessionIdOverride);
+
     if (!isOpen) return;
 
     const currentContext = sessionIdOverride
@@ -146,6 +165,8 @@ export function useAgentSession({
       : `${beadId}-${persona}-${task}`;
     const shouldReset = prevContextRef.current !== currentContext;
     prevContextRef.current = currentContext;
+
+    console.log('⚡ EFFECT RUN: Context check | currentContext:', currentContext, '| shouldReset:', shouldReset);
 
     if (shouldReset) {
       setMessages([]);
@@ -257,16 +278,20 @@ export function useAgentSession({
     setup();
 
     return () => {
+      console.log('🗑️ EFFECT CLEANUP: Running cleanup for session:', sessionId);
       // Cleanup event listeners when switching sessions
       if (unlistenChunkRef.current) {
+        console.log('🗑️ EFFECT CLEANUP: Unlistening chunk listener');
         unlistenChunkRef.current();
         unlistenChunkRef.current = undefined;
       }
       if (unlistenStderrRef.current) {
+        console.log('🗑️ EFFECT CLEANUP: Unlistening stderr listener');
         unlistenStderrRef.current();
         unlistenStderrRef.current = undefined;
       }
       currentListenerSessionRef.current = null; // Clear tracking ref
+      console.log('🗑️ EFFECT CLEANUP: Cleanup complete');
     };
   }, [isOpen, persona, task, beadId, cliBackend, sessionId, setupEventListeners]);
 
