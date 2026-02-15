@@ -1306,8 +1306,13 @@ fn filter_by_status_and_time(
     beads
         .iter()
         .filter(|b| {
-            // Apply hide_closed filter (also filters tombstones - effectively deleted beads)
-            if hide_closed && (b.status == "closed" || b.status == "tombstone") {
+            // Always drop tombstones (soft-deleted tasks)
+            if b.status == "tombstone" {
+                return false;
+            }
+
+            // Apply hide_closed filter for closed tasks
+            if hide_closed && b.status == "closed" {
                 return false;
             }
 
@@ -2205,6 +2210,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_pty::init())
         .invoke_handler(tauri::generate_handler![
             bd::get_beads, get_processed_data, get_project_view_model, bd::update_bead, bd::create_bead, bd::close_bead, bd::reopen_bead, bd::claim_bead,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
@@ -2212,10 +2218,11 @@ pub fn run() {
             agent::session::start_agent_session, agent::session::send_agent_message, agent::session::stop_agent_session, agent::session::interrupt_agent_session, agent::session::approve_suggestion,
             agent::session::list_active_sessions, agent::session::get_active_session_id, agent::session::switch_active_session, agent::session::terminate_session,
             agent::session::get_session_history, agent::session::mark_session_read,
+            agent::session::find_recent_session, agent::session::record_session_for_resume, agent::session::touch_session,
             settings::get_cli_preference, settings::set_cli_preference,
             startup::save_startup_state, startup::load_startup_state,
             window::create_session_window, window::get_window_session_id, window::close_session_window, window::list_session_windows,
-            window::save_window_state, window::load_window_state
+            window::save_window_state, window::load_window_state, window::toggle_window_always_on_top
         ])
         .setup(|app| {
             let handle = app.handle().clone();

@@ -370,6 +370,23 @@ export async function createSessionWindow(sessionId: string): Promise<string> {
   }
 }
 
+/**
+ * Toggle always-on-top for a window.
+ * @param windowLabel - The window label to toggle
+ * @param alwaysOnTop - Whether to enable always-on-top
+ */
+export async function toggleWindowAlwaysOnTop(
+  windowLabel: string,
+  alwaysOnTop: boolean
+): Promise<void> {
+  try {
+    await invoke("toggle_window_always_on_top", { windowLabel, alwaysOnTop });
+  } catch (error) {
+    console.error("Failed to toggle always-on-top:", error);
+    throw error;
+  }
+}
+
 // ============================================================================
 // Window State Persistence (bp6-643.005.5)
 // ============================================================================
@@ -750,3 +767,90 @@ export function beadNodeToBead(node: Partial<BeadNode>): Partial<Bead> {
 // calculateStateDistribution function removed - now handled by Rust backend in get_processed_data
 
 // calculateGanttLayout function removed - now handled by Rust backend in get_processed_data
+
+// ============================================================================
+// Session Resume Index (bp6-6nj.20)
+// ============================================================================
+
+/**
+ * Session metadata for resuming conversations
+ */
+export interface SessionMetadata {
+  sessionId: string;
+  cliSessionId: string | null;
+  lastActive: number;
+  backendId: string;
+}
+
+/**
+ * Find the most recent session for a bead/persona combination.
+ * This allows automatic session resumption when reopening a chat.
+ *
+ * @param beadId - The bead ID (null for untracked)
+ * @param persona - The persona (product-manager, qa-engineer, etc.)
+ * @returns Session metadata if found, null otherwise
+ */
+export async function findRecentSession(
+  beadId: string | null,
+  persona: string
+): Promise<SessionMetadata | null> {
+  try {
+    return await invoke<SessionMetadata | null>('find_recent_session', {
+      beadId,
+      persona
+    });
+  } catch (error) {
+    console.error('Failed to find recent session:', error);
+    return null;
+  }
+}
+
+/**
+ * Record a session in the resume index for future automatic resumption.
+ *
+ * @param beadId - The bead ID (null for untracked)
+ * @param persona - The persona
+ * @param sessionId - The session UUID
+ * @param cliSessionId - The CLI-provided session ID (for resume)
+ * @param backendId - The backend being used (gemini, claude-code)
+ */
+export async function recordSessionForResume(
+  beadId: string | null,
+  persona: string,
+  sessionId: string,
+  cliSessionId: string | null,
+  backendId: string
+): Promise<void> {
+  try {
+    await invoke('record_session_for_resume', {
+      beadId,
+      persona,
+      sessionId,
+      cliSessionId,
+      backendId
+    });
+  } catch (error) {
+    console.error('Failed to record session for resume:', error);
+  }
+}
+
+/**
+ * Update the last active timestamp for a session.
+ * Called when sending messages to keep the session fresh.
+ *
+ * @param beadId - The bead ID (null for untracked)
+ * @param persona - The persona
+ */
+export async function touchSession(
+  beadId: string | null,
+  persona: string
+): Promise<void> {
+  try {
+    await invoke('touch_session', {
+      beadId,
+      persona
+    });
+  } catch (error) {
+    console.error('Failed to touch session:', error);
+  }
+}

@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Terminal, MessageSquare, Trash2, X, Square } from 'lucide-react';
-import { SessionList } from '../session/SessionList';
+import { Terminal, MessageSquare, Trash2, X, Square, Pin, PinOff } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { useAgentSession } from '../../hooks/useAgentSession';
 import { useDraggable } from '../../hooks/useDraggable';
-import { approveSuggestion, terminateSession, listActiveSessions, CliBackend } from '../../api';
+import { approveSuggestion, CliBackend, toggleWindowAlwaysOnTop } from '../../api';
+import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 interface ChatDialogProps {
   isOpen: boolean;
@@ -12,8 +13,10 @@ interface ChatDialogProps {
   persona: string;
   task: string | null;
   beadId: string | null;
+  beadTitle?: string | null;
   cliBackend: CliBackend;
   isSessionWindow?: boolean;  // True for fullscreen pop-out windows
+  sessionIdOverride?: string | null; // Use existing session instead of creating a new one
 }
 
 /**
@@ -33,11 +36,19 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   persona,
   task,
   beadId,
+  beadTitle = null,
   cliBackend,
-  isSessionWindow = false
+  isSessionWindow = false,
+  sessionIdOverride = null
 }) => {
   const [input, setInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
+  const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true); // Default is true per current implementation
+
+  // Refs for auto-scroll and input
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const debugEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Custom hooks
   const {
@@ -45,17 +56,15 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     messages,
     streamingMessage,
     isLoading,
+    isAwaitingFirstChunk,
     debugLogs,
     sendMessage,
-    stopAgent,
-    switchSession
-  } = useAgentSession({ persona, task, beadId, cliBackend, isOpen });
+    stopAgent
+  } = useAgentSession({ persona, task, beadId, cliBackend, isOpen, sessionIdOverride });
+
+  const safeStreamingMessage = sanitizeAgentHtml(streamingMessage);
 
   const { position, isDragging, handleMouseDown } = useDraggable({ x: 100, y: 100 });
-
-  // Refs for auto-scroll
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const debugEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll logic
   const isNearBottom = (element: HTMLElement | null | undefined) => {
@@ -87,6 +96,23 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     if (showDebug) scrollDebugToBottom();
   }, [debugLogs, showDebug]);
 
+  // Auto-expand textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 128)}px`;
+    }
+  }, [input]);
+
+  // Auto-focus textarea on mount or when opening
+  useEffect(() => {
+    if (isOpen && !isLoading) {
+      // Small timeout to ensure the dialog is fully rendered/positioned
+      const timer = setTimeout(() => textareaRef.current?.focus(), 50);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, isLoading]);
+
   // Event handlers
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
@@ -110,33 +136,25 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     setInput(command);
   }, []);
 
-  const handleSessionTerminate = useCallback(async (targetSessionId: string) => {
-    const confirmed = window.confirm(
-      `Terminate session ${targetSessionId}? This will stop the agent and close the session.`
-    );
-    if (!confirmed) return;
-
-    try {
-      await terminateSession(targetSessionId);
-
-      // If we terminated the active session, switch to another or clear
-      if (targetSessionId === sessionId) {
-        const sessions = await listActiveSessions();
-        if (sessions.length > 0) {
-          await switchSession(sessions[0].sessionId, sessions[0].beadId);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to terminate session:', error);
-    }
-  }, [sessionId, switchSession]);
-
   const handleClearChat = useCallback(() => {
     // Note: This only clears the UI, not the actual session history
     // The original implementation had setDebugLogs([]) and setMessages([])
     // but those are managed by the hook now
     console.log('Clear chat requested - consider adding this to useAgentSession hook');
   }, []);
+
+  const handleToggleAlwaysOnTop = useCallback(async () => {
+    try {
+      const currentWindow = getCurrentWindow();
+      const windowLabel = currentWindow.label;
+      const newState = !isAlwaysOnTop;
+
+      await toggleWindowAlwaysOnTop(windowLabel, newState);
+      setIsAlwaysOnTop(newState);
+    } catch (error) {
+      console.error("Failed to toggle always-on-top:", error);
+    }
+  }, [isAlwaysOnTop]);
 
   if (!isOpen) return null;
 
@@ -166,7 +184,12 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
               {persona === 'product-manager' ? 'Product Manager' :
                persona === 'qa-engineer' ? 'QA Engineer' : 'AI Assistant'}
             </h3>
-            <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest">Active Session</span>
+            <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest">
+              {task || 'Active Session'}
+            </span>
+            <span className="text-[11px] font-black tracking-tight opacity-80">
+              {(beadId || 'Untracked')}{beadTitle ? ` · ${beadTitle}` : ''}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -177,6 +200,19 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
               title="Stop Agent"
             >
               <Square size={18} fill="currentColor" />
+            </button>
+          )}
+          {isSessionWindow && (
+            <button
+              onClick={handleToggleAlwaysOnTop}
+              className={`p-2 rounded-lg transition-all ${
+                isAlwaysOnTop
+                  ? 'bg-blue-500 hover:bg-blue-400 text-white'
+                  : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
+              }`}
+              title={isAlwaysOnTop ? 'Unpin Window' : 'Pin Window on Top'}
+            >
+              {isAlwaysOnTop ? <Pin size={18} /> : <PinOff size={18} />}
             </button>
           )}
           <button
@@ -210,24 +246,15 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
       </div>
 
       {/* Main Content - Flex Layout */}
-      <div className="flex-1 overflow-hidden flex">
-        {/* Session List Sidebar - Hidden in session window mode */}
-        {!isSessionWindow && (
-          <SessionList
-            activeSessionId={sessionId}
-            onSessionSelect={switchSession}
-            onSessionTerminate={handleSessionTerminate}
-          />
-        )}
-
+      <div className="min-h-0 flex-1 overflow-hidden flex">
         {/* Chat Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="min-h-0 flex-1 flex flex-col overflow-hidden bg-[var(--background-primary)]">
           {/* Messages View */}
           {!showDebug && (
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-              <div className="min-h-full flex flex-col justify-end gap-4 p-4">
+            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+              <div className="flex flex-col gap-4 px-4 py-4">
                 {messages.length === 0 && !streamingMessage && (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
+                  <div className="py-12 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
                     <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
                       <MessageSquare size={32} className="opacity-50" />
                     </div>
@@ -247,19 +274,20 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                 ))}
                 {streamingMessage && (
                   <div className="flex justify-start">
-                    <div className="max-w-[85%] p-3 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600 text-sm font-bold leading-relaxed">
-                      <div dangerouslySetInnerHTML={{ __html: streamingMessage }} />
+                    <div className="max-w-[85%] p-3 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600 text-sm font-bold leading-relaxed whitespace-pre-wrap">
+                      <div dangerouslySetInnerHTML={{ __html: safeStreamingMessage }} />
                       <span className="inline-block w-2 h-4 ml-1 bg-indigo-400 opacity-50"></span>
                     </div>
                   </div>
                 )}
-                {isLoading && !streamingMessage && (
+                {(isLoading && (isAwaitingFirstChunk || !streamingMessage)) && (
                   <div className="flex justify-start">
-                    <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600">
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
-                        <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
-                        <div className="w-2 h-2 bg-indigo-400 rounded-full opacity-50"></div>
+                    <div className="px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-sm text-sm font-bold text-slate-600 dark:text-slate-200 flex items-center gap-3">
+                      <span>Thinking</span>
+                      <div className="flex items-center gap-1">
+                        <span className="inline-flex h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <span className="inline-flex h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '120ms' }} />
+                        <span className="inline-flex h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '240ms' }} />
                       </div>
                     </div>
                   </div>
@@ -271,7 +299,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
           {/* Debug View */}
           {showDebug && (
-            <div className="flex-1 bg-slate-900 text-emerald-400 p-4 font-mono text-[10px] overflow-y-auto custom-scrollbar">
+            <div className="min-h-0 flex-1 bg-slate-900 text-emerald-400 p-4 font-mono text-[10px] overflow-y-auto custom-scrollbar">
               <div className="space-y-1">
                 {debugLogs.map((log, i) => {
                   let color = 'text-slate-400';
@@ -292,14 +320,20 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
       {/* Input Area */}
       <div className="p-4 border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-        <div className="flex space-x-2">
-          <input
-            type="text"
+        <div className="flex items-end space-x-2">
+          <textarea
+            ref={textareaRef}
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             placeholder={showDebug ? "Debug input..." : "Type a message..."}
-            className="flex-1 p-3 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all shadow-inner"
+            className="flex-1 p-3 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all shadow-inner resize-none overflow-y-auto max-h-32"
             disabled={isLoading}
           />
           <button
@@ -309,7 +343,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
               isLoading
                 ? 'bg-rose-600 hover:bg-rose-700'
                 : 'bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400'
-            } text-white px-5 py-2 rounded-xl transition-all active:scale-95 shadow-lg font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2`}
+            } text-white px-5 py-3 rounded-xl transition-all active:scale-95 shadow-lg font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 h-[46px]`}
           >
             {isLoading ? (
               <>

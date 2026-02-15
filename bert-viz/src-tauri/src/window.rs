@@ -386,6 +386,31 @@ pub async fn load_window_state(
     Ok(states.get(&sessionId).cloned())
 }
 
+/// Toggle always-on-top for a window
+///
+/// # Arguments
+/// * `app` - Tauri AppHandle
+/// * `windowLabel` - The window label to toggle
+/// * `alwaysOnTop` - Whether to enable always-on-top
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn toggle_window_always_on_top(
+    app: AppHandle,
+    windowLabel: String,
+    alwaysOnTop: bool,
+) -> Result<(), String> {
+    eprintln!("🔄 toggle_window_always_on_top: window={}, state={}", windowLabel, alwaysOnTop);
+
+    if let Some(window) = app.get_webview_window(&windowLabel) {
+        window.set_always_on_top(alwaysOnTop)
+            .map_err(|e| format!("Failed to set always-on-top: {}", e))?;
+        eprintln!("✅ Set always-on-top={} for window: {}", alwaysOnTop, windowLabel);
+        Ok(())
+    } else {
+        Err(format!("Window not found: {}", windowLabel))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
