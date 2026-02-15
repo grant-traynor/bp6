@@ -1017,14 +1017,20 @@ pub fn stop_agent_session(
     sessionId: String,
     state: State<'_, AgentState>,
 ) -> Result<(), String> {
-    // Remove session from HashMap and get the Child handle
-    let child = {
+    // Remove session from HashMap and get the Child handle and PTY session ID
+    let (child, pty_session_id) = {
         let mut sessions = state.sessions.lock().unwrap();
         let session_state = sessions
             .remove(&sessionId)
             .ok_or_else(|| format!("Session {} not found", sessionId))?;
-        session_state.process
+        (session_state.process, session_state.pty_session_id)
     };
+
+    // Kill the PTY session if it exists
+    if let Some(pty_id) = pty_session_id {
+        eprintln!("🗑️  Cleaning up PTY session: {}", pty_id);
+        let _ = state.pty_manager.kill(&pty_id);
+    }
 
     // Kill the process
     kill_process_group(child.id());
@@ -1217,14 +1223,20 @@ pub fn terminate_session(
         }
     }
 
-    // Remove session and get the process handle
-    let child = {
+    // Remove session and get the process handle and PTY session ID
+    let (child, pty_session_id) = {
         let mut sessions = state.sessions.lock().unwrap();
         let session_state = sessions
             .remove(&sessionId)
             .ok_or_else(|| format!("Session {} not found", sessionId))?;
-        session_state.process
+        (session_state.process, session_state.pty_session_id)
     };
+
+    // Kill the PTY session if it exists
+    if let Some(pty_id) = pty_session_id {
+        eprintln!("🗑️  Cleaning up PTY session: {}", pty_id);
+        let _ = state.pty_manager.kill(&pty_id);
+    }
 
     // Kill the process
     kill_process_group(child.id());
@@ -1738,7 +1750,7 @@ pub fn resize_pty(
 }
 
 /// Spawn a PTY for an existing session (for terminal mode)
-/// This starts a shell that can be used to interact with the session
+/// This spawns the agent CLI with --resume in PTY mode (raw output, not JSON)
 #[tauri::command]
 pub fn spawn_pty_for_session(
     session_id: String,
@@ -1746,28 +1758,56 @@ pub fn spawn_pty_for_session(
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
-    
+
     let session = sessions
         .get_mut(&session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
-    
+
     // Check if already in terminal mode
     if session.pty_session_id.is_some() {
         return Err("Session already has a PTY".to_string());
     }
-    
+
+    // Get backend and CLI session ID for resuming
+    let backend_id = session.backend_id;
+    let cli_session_id = session
+        .cli_session_id
+        .clone()
+        .ok_or_else(|| "Session has no CLI session ID for resume".to_string())?;
+
+    // Get backend plugin
+    let backend = state
+        .backend_registry
+        .get(backend_id)
+        .ok_or_else(|| format!("Backend {:?} not registered", backend_id))?;
+
+    // Get repo root for working directory
+    let repo_root = crate::bd::find_repo_root()
+        .ok_or_else(|| "Could not locate project root (.beads directory)".to_string())?;
+
     // Generate PTY session ID
     let pty_session_id = format!("pty-{}", session_id);
-    
-    // Spawn a shell in PTY
-    // TODO: Make shell configurable (bash, zsh, sh)
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    
+
+    // Build args for PTY mode (resume without JSON output)
+    // Note: For PTY, we DON'T want --output-format stream-json
+    // We want raw terminal output
+    let mut args = Vec::new();
+
+    // Add resume args
+    args.push("--resume".to_string());
+    args.push(cli_session_id.clone());
+
+    // For Gemini, add --yolo flag if needed
+    if backend_id == crate::agent::plugin::BackendId::Gemini {
+        args.push("--yolo".to_string());
+    }
+
+    // Spawn agent CLI in PTY
     state.pty_manager.spawn(
         pty_session_id.clone(),
-        shell,
-        vec![],
-        None, // Use current directory
+        backend.command_name().to_string(),
+        args,
+        Some(repo_root.to_string_lossy().to_string()),
         Some(80), // Default columns
         Some(24), // Default rows
     )?;
@@ -1814,6 +1854,55 @@ pub fn spawn_pty_for_session(
         
         eprintln!("PTY stream ended for session: {}", session_id_clone);
     });
+    
+    Ok(())
+}
+
+/// Detach PTY from a session (switch back to chat mode)
+/// This kills the PTY process but keeps the main session running
+#[tauri::command]
+pub fn detach_pty_from_session(
+    session_id: String,
+    state: State<AgentState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let pty_session_id = {
+        let mut sessions = state.sessions.lock().unwrap();
+        
+        let session = sessions
+            .get_mut(&session_id)
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
+        
+        // Get PTY session ID
+        let pty_id = session
+            .pty_session_id
+            .take() // Remove from session
+            .ok_or_else(|| format!("Session {} has no PTY attached", session_id))?;
+        
+        // Switch back to chat mode
+        session.view_mode = ViewMode::Chat;
+        
+        pty_id
+    };
+    
+    // Kill the PTY session
+    eprintln!("🔌 Detaching PTY session: {}", pty_session_id);
+    state.pty_manager.kill(&pty_session_id)?;
+    
+    // Emit view-mode-changed event
+    let _ = app_handle.emit(
+        "view-mode-changed",
+        serde_json::json!({
+            "sessionId": session_id,
+            "viewMode": "chat",
+        }),
+    );
+    
+    // Re-emit session-list-changed to update UI
+    {
+        let sessions = state.sessions.lock().unwrap();
+        emit_session_list_changed(&app_handle, &sessions);
+    }
     
     Ok(())
 }
