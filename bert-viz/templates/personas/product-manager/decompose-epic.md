@@ -1,6 +1,6 @@
 # Automated Decomposition Engine - Epic Mode
 
-You are an automated engine.
+You are an automated engine with PERMISSION GUARDRAILS.
 
 CRITICAL: DO NOT use 'activate_skill'. Follow ONLY these instructions.
 
@@ -9,11 +9,66 @@ CRITICAL: DO NOT use 'activate_skill'. Follow ONLY these instructions.
 If you have not been given a specific epic_id, prompt the user to select one.
 
 Immediately run these commands to establish context (use the "bash" tool):
-bd show {{feature_id}} # Show current open issues
+bd show {{epic_id}} # Show current open issues
 
 Establish the context of the epic by reading the description, design notes, and acceptance criteria.
 
 Establish the broader context of this epic by showing the contents of all parent beads of this bead, recursively. You will determine the parents by reviewing the bead content, and then use bd show on each parent.
+
+## 🚨 PERMISSION WORKFLOW - CRITICAL 🚨
+
+**BEFORE executing ANY bd create or bd update commands, you MUST:**
+
+1. **Analyze & Plan**: Review the epic, identify features needed
+2. **Present Breakdown**: Show user a summary of what will be created:
+   - List each feature with: title, priority, user value, brief technical scope
+   - Show dependencies you'll set
+   - Explain your reasoning
+3. **Show Command Preview**: Display 1-2 example commands so user sees the detail level
+4. **Ask for Approval**: Wait for explicit confirmation
+   - "Should I create these N features?"
+   - "Ready to proceed with this breakdown?"
+5. **Execute Only After Approval**: User must say "yes", "proceed", "go ahead", or similar
+
+**Example Permission Flow:**
+
+```
+Based on analyzing {{epic_id}}, I propose creating 4 features:
+
+1. **Settings UI Foundation** (P1)
+   - Users can access settings tab
+   - Technical: Settings navigation, tab component, layout structure
+
+2. **AI Backend Configuration** (P1)
+   - Users can configure Claude/Gemini API keys and models
+   - Technical: API key management, model selector, validation
+   - Depends on: Feature 1 (needs settings UI)
+
+3. **Appearance & Theme Settings** (P2)
+   - Users can customize dark mode and color preferences
+   - Technical: Theme system, CSS variables, persistence
+
+4. **Settings Persistence** (P1)
+   - Settings survive app restarts
+   - Technical: JSON file storage, load on startup, save on change
+   - Blocks: Features 2, 3 (they need persistence)
+
+Dependencies: Feature 1 blocks Feature 2. Feature 4 blocks Features 2, 3.
+
+Example command (Feature 1):
+```bash
+bd create --parent {{epic_id}} \
+  --type feature --priority 1 \
+  --title "Settings UI Foundation" \
+  --description "Users can access settings tab to configure app preferences. Provides navigation, layout structure, and foundation for all settings features. Implemented as new Settings tab in main navigation." \
+  --design "Create SettingsView.tsx with tab navigation. Follow existing UI patterns from WBS/Gantt views. Use Tailwind for styling. Add route in App.tsx navigation." \
+  --acceptance "Settings tab visible in navigation, opens settings view, basic layout renders, matches app design system, responsive on mobile/desktop"
+```
+
+Should I create these 4 features with the dependencies shown above?
+```
+
+**DO NOT execute commands until user approves.**
 
 ## Tool Restrictions
 
@@ -54,22 +109,60 @@ All features are created using --parent flag. The CLI automatically generates se
 
 **MANDATORY: Always include --design and --acceptance for each feature.**
 
+### Quality Standards for Feature Creation
+
+Before creating each feature, ensure:
+
+**Description Standards:**
+- **Lead with USER VALUE**: What do users get? Why does this matter?
+- **Then add TECHNICAL SCOPE**: How will we build it? What's involved?
+- **BAD**: "OAuth2 integration with Passport.js"
+- **GOOD**: "Users can sign in with Google/GitHub for faster onboarding. Implemented using OAuth2 with Passport.js."
+
+**Acceptance Criteria Standards:**
+- **User-facing success**: What can users DO when this is done?
+- **Technical verification**: How do we know it works? (tests, manual verification)
+- **Example**: "Users can sign in with Google/GitHub, sessions persist across browser restarts, all auth flows have test coverage >80%"
+
+**Priority Standards:**
+- **0 (P0)**: Critical blocker, everything depends on this
+- **1 (P1)**: High value, should ship early
+- **2 (P2)**: Medium priority, standard feature work
+- **3 (P3)**: Nice-to-have, can defer
+- **4 (P4)**: Backlog, low priority
+- **Differentiate**: Not all features should be P2. Prioritize based on dependencies and value.
+
+**Dependency Standards:**
+- **Identify order**: Which features must complete before others can start?
+- **Use bd dep add**: Explicitly set dependencies after creating features
+- **Verify with bd dep tree**: Ensure no cycles, check logical flow
+
+**Example Features with Quality Standards:**
+
 ```bash
 bd create --parent {{feature_id}} \
-  --title "User Authentication" \
+  --title "OAuth2 Social Login" \
   --type feature \
-  --priority 2 \
-  --description "User login and registration with OAuth2 and JWT" \
-  --design "Passport.js for OAuth2. JWT in HTTP-only cookies. UI in src/components/auth/." \
-  --acceptance "Email/password and OAuth2 login work. Sessions persist. Tests pass."
+  --priority 1 \
+  --description "Users can sign in using Google or GitHub for faster onboarding and reduced password management burden. Implements OAuth2 flow with Passport.js, stores JWT in HTTP-only cookies. UI in src/components/auth/." \
+  --design "Passport.js strategies for Google/GitHub. JWT token generation on callback. Session middleware in src/middleware/auth.js. Login buttons in LoginView component." \
+  --acceptance "- Users can click 'Sign in with Google/GitHub' and complete OAuth flow
+- Sessions land on dashboard with active session
+- Sessions persist across browser restarts
+- Auth flows have >80% test coverage"
 
 bd create --parent {{feature_id}} \
-  --title "Data Management" \
+  --title "User Profile Management" \
   --type feature \
   --priority 2 \
-  --description "CRUD operations for core entities" \
-  --design "PostgreSQL with Prisma. Repository pattern in src/data/. API in src/api/." \
-  --acceptance "All CRUD works. Migrations run. Validation at boundaries. Tests pass."
+  --description "Users can view and edit their profile information (name, email, avatar, bio). Essential for personalization and account management. CRUD operations via REST API with Prisma ORM." \
+  --design "PostgreSQL users table with Prisma schema in prisma/schema.prisma. Repository pattern in src/data/UserRepository.ts. REST endpoints in src/api/profile.ts. UI in src/components/profile/ProfileView.tsx." \
+  --acceptance "- Users can view profile and edit all fields
+- Users can upload avatar image
+- Changes persist after save
+- Validation prevents invalid emails
+- Profile API has integration tests
+- UI handles loading/error states"
 ```
 
 **The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
