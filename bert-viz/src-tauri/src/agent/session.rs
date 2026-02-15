@@ -19,6 +19,20 @@ pub enum SessionStatus {
     Error,
 }
 
+/// Execution mode for a session (headless or interactive)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionMode {
+    Headless,
+    Interactive,
+}
+
+impl Default for ExecutionMode {
+    fn default() -> Self {
+        ExecutionMode::Interactive
+    }
+}
+
 /// Internal session state tracking a running agent process
 #[derive(Debug)]
 pub struct SessionState {
@@ -36,6 +50,12 @@ pub struct SessionState {
     pub created_at: SystemTime,
     /// The CLI-provided session ID for resume capability (if available)
     pub cli_session_id: Option<String>,
+    /// Execution mode (headless or interactive)
+    pub execution_mode: ExecutionMode,
+    /// Queue of pending commands for headless execution
+    pub command_queue: Option<Vec<String>>,
+    /// Total commands in original queue (for progress tracking)
+    pub total_commands: Option<usize>,
     /// Timestamp of last activity (last chunk received)
     pub last_activity: SystemTime,
     /// Whether this session has unread messages
@@ -62,6 +82,12 @@ pub struct SessionInfo {
     pub created_at: u64,
     /// The CLI-provided session ID for resume capability (if available)
     pub cli_session_id: Option<String>,
+    /// Execution mode (headless or interactive)
+    pub execution_mode: ExecutionMode,
+    /// Number of commands remaining in queue (for headless mode)
+    pub commands_remaining: Option<usize>,
+    /// Total commands in original queue (for headless mode)
+    pub total_commands: Option<usize>,
     /// Timestamp of last activity (seconds since UNIX epoch)
     pub last_activity: u64,
     /// Whether this session has unread messages
@@ -368,6 +394,9 @@ fn list_active_sessions_internal(sessions: &HashMap<String, SessionState>) -> Ve
                 .unwrap_or_default()
                 .as_secs(),
             cli_session_id: state.cli_session_id.clone(),
+            execution_mode: state.execution_mode.clone(),
+            commands_remaining: state.command_queue.as_ref().map(|q| q.len()),
+            total_commands: state.total_commands,
             last_activity: state
                 .last_activity
                 .duration_since(std::time::UNIX_EPOCH)
@@ -559,6 +588,102 @@ fn run_cli_command_for_session(
                                 // NOTE: Don't emit session-list-changed on every chunk - causes constant flashing
                                 // Activity indicators will update on next session-list-changed event
                                 // (triggered by session create/terminate/mark-read)
+                            }
+
+                            // Check if command is done and there are more commands in queue
+                            if chunk.is_done {
+                                if let Some(agent_state) = handle_clone.try_state::<AgentState>() {
+                                    // Check if this is a headless session with queued commands
+                                    let queue_info = {
+                                        let sessions = agent_state.sessions.lock().unwrap();
+                                        if let Some(session) = sessions.get(&session_id_clone) {
+                                            if session.execution_mode == ExecutionMode::Headless {
+                                                if let Some(ref queue) = session.command_queue {
+                                                    if !queue.is_empty() {
+                                                        Some((
+                                                            queue[0].clone(),
+                                                            session.cli_session_id.clone(),
+                                                            session.backend_id,
+                                                            session.bead_id.clone(),
+                                                            session.persona.clone(),
+                                                        ))
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    };
+
+                                    if let Some((next_command, cli_session_id, backend_id, bead_id, persona)) = queue_info {
+                                        eprintln!("📋 Command queue: executing next command for session {}", session_id_clone);
+
+                                        // Execute next command in queue
+                                        let handle_for_executor = handle_clone.clone();
+                                        let session_id_for_executor = session_id_clone.clone();
+
+                                        std::thread::spawn(move || {
+                                            if let Some(state) = handle_for_executor.try_state::<AgentState>() {
+                                                match run_cli_command_for_session(
+                                                    backend_id,
+                                                    handle_for_executor.clone(),
+                                                    &state,
+                                                    session_id_for_executor.clone(),
+                                                    bead_id,
+                                                    persona,
+                                                    next_command.clone(),
+                                                    true, // resume = true
+                                                    cli_session_id,
+                                                ) {
+                                                    Ok(child) => {
+                                                        // Update session state with new process
+                                                        let mut sessions = state.sessions.lock().unwrap();
+                                                        if let Some(session) = sessions.get_mut(&session_id_for_executor) {
+                                                            session.process = child;
+
+                                                            // Remove executed command from queue
+                                                            if let Some(ref mut queue) = session.command_queue {
+                                                                queue.remove(0);
+
+                                                                // Check if queue is now empty
+                                                                if queue.is_empty() {
+                                                                    eprintln!("✅ Command queue completed for session {}", session_id_for_executor);
+
+                                                                    // Emit queue-completed event
+                                                                    let _ = handle_for_executor.emit(
+                                                                        "headless-queue-completed",
+                                                                        serde_json::json!({
+                                                                            "sessionId": session_id_for_executor,
+                                                                        }),
+                                                                    );
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("❌ Failed to execute next command in queue: {}", e);
+
+                                                        // Emit error event
+                                                        let _ = handle_for_executor.emit(
+                                                            "command-error",
+                                                            serde_json::json!({
+                                                                "sessionId": session_id_for_executor,
+                                                                "command": next_command,
+                                                                "error": e,
+                                                            }),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
                             }
 
                             // Convert markdown content to HTML before emitting
@@ -776,6 +901,9 @@ pub fn start_agent_session(
         status: SessionStatus::Running,
         created_at: now,
         cli_session_id: Some(session_id.clone()), // Store the session ID for resuming
+        execution_mode: ExecutionMode::Interactive,
+        command_queue: None,
+        total_commands: None,
         last_activity: now,
         has_unread: false,
         message_count: 0,
@@ -1253,6 +1381,136 @@ pub fn mark_session_read(
     Ok(())
 }
 
+/// Start an agent session in headless mode with command queue
+///
+/// Creates a new session that runs commands non-interactively in the background.
+/// Useful for "warm-start" workflows where an agent pre-loads context before user interaction.
+///
+/// # Arguments
+/// * `app_handle` - Tauri app handle for event emission
+/// * `state` - AgentState containing session management
+/// * `settings_state` - Settings state for backend preference
+/// * `bead_id` - Optional bead/issue ID this session works on
+/// * `persona` - Persona type (specialist, product-manager, qa-engineer)
+/// * `backend_id` - CLI backend to use (gemini, claude-code)
+/// * `commands` - Queue of commands to execute sequentially
+///
+/// # Returns
+/// SessionInfo with session_id and cli_session_id
+///
+/// # Errors
+/// Returns error if backend not found, command queue empty, or process spawn fails
+#[tauri::command]
+pub fn start_agent_session_headless(
+    app_handle: AppHandle,
+    state: State<'_, AgentState>,
+    settings_state: State<'_, crate::SettingsState>,
+    bead_id: Option<String>,
+    persona: String,
+    backend_id: String,
+    commands: Vec<String>,
+) -> Result<SessionInfo, String> {
+    // Validate command queue
+    if commands.is_empty() {
+        return Err("Command queue cannot be empty".to_string());
+    }
+
+    // Generate unique session ID
+    let session_id = Uuid::new_v4().to_string();
+
+    // Parse backend ID
+    let backend = match backend_id.to_lowercase().as_str() {
+        "gemini" => crate::agent::plugin::BackendId::Gemini,
+        "claude" | "claude-code" => crate::agent::plugin::BackendId::ClaudeCode,
+        _ => {
+            // Fallback to settings preference
+            let settings = settings_state.settings.lock().map_err(|e| e.to_string())?;
+            settings.cli_backend
+        }
+    };
+
+    // Get first command from queue
+    let first_command = commands[0].clone();
+    let remaining_commands = if commands.len() > 1 {
+        Some(commands[1..].to_vec())
+    } else {
+        None
+    };
+
+    // Start the CLI process with first command
+    // Pass session_id so the CLI backend uses the same UUID
+    let child = run_cli_command_for_session(
+        backend,
+        app_handle.clone(),
+        &state,
+        session_id.clone(),
+        bead_id.clone(),
+        persona.clone(),
+        first_command,
+        false,                    // resume = false for new session
+        Some(session_id.clone()), // Pass our session_id to the CLI backend
+    )?;
+
+    // Create SessionState in headless mode
+    let now = SystemTime::now();
+    let total_commands_count = commands.len();
+    let session_state = SessionState {
+        process: child,
+        bead_id: bead_id.clone(),
+        persona: persona.clone(),
+        backend_id: backend,
+        status: SessionStatus::Running,
+        created_at: now,
+        cli_session_id: Some(session_id.clone()),
+        execution_mode: ExecutionMode::Headless,
+        command_queue: remaining_commands,
+        total_commands: Some(total_commands_count),
+        last_activity: now,
+        has_unread: false,
+        message_count: 0,
+    };
+
+    // Store in sessions map
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        sessions.insert(session_id.clone(), session_state);
+    }
+
+    // Build SessionInfo for return
+    let session_info = SessionInfo {
+        session_id: session_id.clone(),
+        bead_id,
+        persona,
+        backend_id: backend,
+        status: SessionStatus::Running,
+        created_at: now
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        cli_session_id: Some(session_id.clone()),
+        execution_mode: ExecutionMode::Headless,
+        commands_remaining: Some(total_commands_count - 1), // First command is already executing
+        total_commands: Some(total_commands_count),
+        last_activity: now
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        has_unread: false,
+        message_count: 0,
+    };
+
+    // Emit session-created event
+    let _ = app_handle.emit("session-created", session_id.clone());
+
+    // Emit session-list-changed event
+    {
+        let sessions = state.sessions.lock().unwrap();
+        emit_session_list_changed(&app_handle, &sessions);
+    }
+
+    Ok(session_info)
+}
+
 // ============================================================================
 // Session Resume Index Commands
 // ============================================================================
@@ -1322,5 +1580,74 @@ pub fn touch_session(
     let mut index = super::session_index::SessionIndex::load()?;
     index.touch_session(beadId.as_deref(), &persona);
     index.save()?;
+    Ok(())
+}
+
+// ============================================================================
+// Interactive Handover Commands
+// ============================================================================
+
+/// Handover headless session to interactive mode
+///
+/// Transitions a headless session to interactive mode, allowing the user to take control.
+/// The process continues running - this simply updates the execution mode and clears the
+/// command queue. Future messages will be sent interactively via send_agent_message.
+///
+/// # Arguments
+/// * `app_handle` - Tauri app handle for event emission
+/// * `session_id` - The session ID to transition to interactive mode
+/// * `state` - AgentState containing sessions
+///
+/// # Returns
+/// Ok(()) on success, or error if session not found or already interactive
+///
+/// # Errors
+/// - Session not found
+/// - Session is not in headless mode
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn handover_to_interactive(
+    app_handle: AppHandle,
+    sessionId: String,
+    state: State<'_, AgentState>,
+) -> Result<(), String> {
+    eprintln!("🔄 Handover to interactive: {}", sessionId);
+
+    // Update session state
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        let session = sessions
+            .get_mut(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
+
+        // Validate current mode
+        if session.execution_mode != ExecutionMode::Headless {
+            return Err("Session is not in headless mode".to_string());
+        }
+
+        // Update execution mode to Interactive
+        session.execution_mode = ExecutionMode::Interactive;
+
+        // Clear command queue
+        session.command_queue = None;
+
+        eprintln!("  ✅ Session {} now interactive", sessionId);
+    }
+
+    // Emit mode-changed event
+    let _ = app_handle.emit(
+        "mode-changed",
+        serde_json::json!({
+            "sessionId": sessionId,
+            "executionMode": "interactive",
+        }),
+    );
+
+    // Re-emit session-list-changed to update UI
+    {
+        let sessions = state.sessions.lock().unwrap();
+        emit_session_list_changed(&app_handle, &sessions);
+    }
+
     Ok(())
 }

@@ -42,6 +42,7 @@ import { WBSSkeleton, GanttSkeleton } from "./components/shared/Skeleton";
 import { ResizeHandle } from "./components/shared/ResizeHandle";
 import ChatDialog from "./components/chat/ChatDialog";
 import { ListView } from "./components/list/ListView";
+import { PalettePreviewDialog } from "./components/palette/PalettePreviewDialog";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -93,6 +94,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [refetchTrigger, setRefetchTrigger] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [showPalettePreview, setShowPalettePreview] = useState(false);
 
   // Agent Session State (from Zustand store - single source of truth)
   const sessions = useSessionStore(state => state.sessions);
@@ -328,6 +330,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const [panelWidth, setPanelWidth] = useState(300);
   const MIN_PANEL_WIDTH = 200;
   const MAX_PANEL_WIDTH = 1200;
+  const ROW_HEIGHT = 40;
 
   // The view model tree already includes isExpanded and isVisible state from backend
   // No need for complex frontend processing - just access viewModel.tree directly
@@ -671,15 +674,15 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           const CONNECTOR_PADDING = 20;
 
           // Connector from right edge of BLOCKER to left edge of BLOCKED task
-          const connector = {
-            fromId: dep.depends_on_id,
-            toId: item.bead.id,
-            fromX: blocker.x + blocker.width,      // Right edge of blocker cell
-            fromY: blocker.row * 48 + 24,
-            toX: item.x + CONNECTOR_PADDING,       // Left edge of blocked bar (after padding)
-            toY: item.row * 48 + 24,
-            isCritical: items.find(i => i.bead.id === dep.depends_on_id)?.isCritical && item.isCritical || false
-          };
+            const connector = {
+              fromId: dep.depends_on_id,
+              toId: item.bead.id,
+              fromX: blocker.x + blocker.width,      // Right edge of blocker cell
+              fromY: blocker.row * ROW_HEIGHT + ROW_HEIGHT / 2,
+              toX: item.x + CONNECTOR_PADDING,       // Left edge of blocked bar (after padding)
+              toY: item.row * ROW_HEIGHT + ROW_HEIGHT / 2,
+              isCritical: items.find(i => i.bead.id === dep.depends_on_id)?.isCritical && item.isCritical || false
+            };
           connectors.push(connector);
 
           // Enhanced debug logging
@@ -1202,8 +1205,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   }, [beads]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
-      <Navigation currentView={view} onViewChange={setView} onOpenChat={handleOpenChat} />
+    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans">
+      <Navigation currentView={view} onViewChange={setView} onOpenChat={handleOpenChat} onOpenPalettePreview={() => setShowPalettePreview(true)} />
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
         <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} currentCli={currentCli} setCurrentCli={setCurrentCli} />
         {!hasProject ? (
@@ -1302,8 +1305,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                         onClick={() => setSidebarOpen(!sidebarOpen)} 
                         className={cn(
                           "p-2 hover:bg-[var(--background-tertiary)] rounded-xl transition-all active:scale-90",
-                          sidebarOpen ? "text-indigo-500 bg-indigo-500/10" : "text-[var(--text-primary)]"
+                          sidebarOpen ? "text-[var(--accent-primary)]" : "text-[var(--text-primary)]"
                         )}
+                        style={sidebarOpen ? { backgroundColor: 'rgba(15,139,255,0.12)' } : undefined}
                         title={sidebarOpen ? "Close Sidebar" : "Open Sidebar"}
                       >
                         <PanelRight size={18} strokeWidth={2.5} />
@@ -1396,11 +1400,23 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                         {/* Background grid */}
                         <div className="absolute inset-0 pointer-events-none">
                           {ganttLayout.rowDepths.map((depth, i) => (
-                            <div key={i} className="w-full border-b-2 border-[var(--border-primary)]/40" style={{ height: '48px', backgroundColor: `var(--level-${Math.min(depth, 4)})` }} />
+                            <div
+                              key={i}
+                              className="w-full border-b-2"
+                              style={{
+                                height: '48px',
+                                backgroundColor: `var(--level-${Math.min(depth, 4)})`,
+                                borderColor: 'var(--gantt-gridline)'
+                              }}
+                            />
                           ))}
                           <div className="absolute inset-0 flex">
                             {Array.from({ length: 50 }).map((_, i) => (
-                              <div key={i} className="h-full border-r-2 border-[var(--border-primary)]/40" style={{ width: 100 * zoom }} />
+                              <div
+                                key={i}
+                                className="h-full border-r-2"
+                                style={{ width: 100 * zoom, borderColor: 'var(--gantt-gridline)' }}
+                              />
                             ))}
                           </div>
                         </div>
@@ -1422,7 +1438,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                               <path
                                 key={`${conn.fromId}-${conn.toId}-${idx}`}
                                 d={path}
-                                stroke={conn.isCritical ? "#ef4444" : "#94a3b8"}
+                                stroke={conn.isCritical ? "var(--gantt-connector-critical)" : "var(--gantt-connector)"}
                                 strokeWidth="3"
                                 fill="none"
                                 opacity="0.9"
@@ -1470,6 +1486,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           </div>
         )}
       </main>
+      {showPalettePreview && (
+        <PalettePreviewDialog onClose={() => setShowPalettePreview(false)} />
+      )}
     </div>
   );
 }

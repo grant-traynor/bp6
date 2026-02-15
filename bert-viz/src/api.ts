@@ -172,6 +172,9 @@ export interface SessionInfo {
   status: 'running' | 'paused';
   createdAt: number;      // Unix timestamp in seconds (Rust u64)
   cliSessionId?: string | null;  // CLI session ID for resume capability
+  executionMode: 'headless' | 'interactive';  // Execution mode
+  commandsRemaining?: number | null;  // Number of commands remaining in queue (headless only)
+  totalCommands?: number | null;      // Total commands in original queue (headless only)
   lastActivity: number;   // Unix timestamp of last activity (Rust u64)
   hasUnread: boolean;     // Whether session has unread messages
   messageCount: number;   // Number of messages in session
@@ -281,6 +284,20 @@ export async function interruptAgentSession(sessionId: string): Promise<void> {
     await invoke("interrupt_agent_session", { sessionId });
   } catch (error) {
     console.error("Failed to interrupt agent session:", error);
+    throw error;
+  }
+}
+
+/**
+ * Handover a headless session to interactive mode.
+ * Clears the command queue and allows user to take control.
+ * @param sessionId - The session ID to handover
+ */
+export async function handoverToInteractive(sessionId: string): Promise<void> {
+  try {
+    await invoke("handover_to_interactive", { sessionId });
+  } catch (error) {
+    console.error("Failed to handover session to interactive:", error);
     throw error;
   }
 }

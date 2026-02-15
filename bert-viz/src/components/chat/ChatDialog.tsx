@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Terminal, MessageSquare, Trash2, X, Square, Pin, PinOff } from 'lucide-react';
+import { Terminal, MessageSquare, Trash2, X, Square, Pin, PinOff, Hand } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { useAgentSession } from '../../hooks/useAgentSession';
 import { useDraggable } from '../../hooks/useDraggable';
-import { approveSuggestion, CliBackend, toggleWindowAlwaysOnTop } from '../../api';
+import { approveSuggestion, CliBackend, toggleWindowAlwaysOnTop, handoverToInteractive } from '../../api';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { useSessionStore } from '../../stores/sessionStore';
 
 interface ChatDialogProps {
   isOpen: boolean;
@@ -44,6 +45,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   const [input, setInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true); // Default is true per current implementation
+  const [isHandingOver, setIsHandingOver] = useState(false);
 
   // Refs for auto-scroll and input
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -52,6 +54,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
   // Custom hooks
   const {
+    sessionId,
     messages,
     streamingMessage,
     isLoading,
@@ -60,6 +63,11 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     sendMessage,
     stopAgent
   } = useAgentSession({ persona, task, beadId, cliBackend, isOpen, sessionIdOverride });
+
+  // Get session info from store to check execution mode
+  const sessions = useSessionStore(state => state.sessions);
+  const currentSession = sessionId ? sessions.find(s => s.sessionId === sessionId) : null;
+  const isHeadless = currentSession?.executionMode === 'headless';
 
   const safeStreamingMessage = sanitizeAgentHtml(streamingMessage);
 
@@ -154,6 +162,21 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
       console.error("Failed to toggle always-on-top:", error);
     }
   }, [isAlwaysOnTop]);
+
+  const handleTakeOver = useCallback(async () => {
+    if (!sessionId) return;
+
+    setIsHandingOver(true);
+    try {
+      await handoverToInteractive(sessionId);
+      console.log(`Handed over session ${sessionId} to interactive mode`);
+    } catch (error) {
+      console.error('Failed to handover session:', error);
+      alert(`Failed to take over session: ${error}`);
+    } finally {
+      setIsHandingOver(false);
+    }
+  }, [sessionId]);
 
   if (!isOpen) return null;
 
@@ -321,39 +344,69 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
       {/* Input Area */}
       <div className="p-4 border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-        <div className="flex items-end space-x-2">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder={showDebug ? "Debug input..." : "Type a message..."}
-            className="flex-1 p-3 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all shadow-inner resize-none overflow-y-auto max-h-32"
-            disabled={isLoading}
-          />
-          <button
-            onClick={isLoading ? stopAgent : handleSend}
-            disabled={!isLoading && !input.trim()}
-            className={`${
-              isLoading
-                ? 'bg-rose-600 hover:bg-rose-700'
-                : 'bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400'
-            } text-white px-5 py-3 rounded-xl transition-all active:scale-95 shadow-lg font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 h-[46px]`}
-          >
-            {isLoading ? (
-              <>
-                <div className="w-2 h-2 bg-white rounded-sm" />
-                Stop
-              </>
-            ) : 'Send'}
-          </button>
-        </div>
+        {isHeadless ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-4 px-6 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-600 rounded-xl">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+              <span className="text-2xl">🤖</span>
+              <div className="flex flex-col">
+                <span className="font-bold text-sm">Running in Headless Mode</span>
+                <span className="text-xs opacity-80">Commands are executing automatically</span>
+              </div>
+            </div>
+            {currentSession?.commandsRemaining !== undefined && currentSession?.commandsRemaining !== null && currentSession?.totalCommands && (() => {
+              const remaining = currentSession.commandsRemaining ?? 0;
+              const total = currentSession.totalCommands;
+              return (
+                <div className="text-xs text-amber-700 dark:text-amber-400 font-bold">
+                  Command {(total - remaining)}/{total}
+                  {remaining > 0 && ` • ${remaining} remaining`}
+                </div>
+              );
+            })()}
+            <button
+              onClick={handleTakeOver}
+              disabled={isHandingOver}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white rounded-lg font-bold text-sm transition-all active:scale-95"
+            >
+              <Hand size={14} />
+              {isHandingOver ? 'Taking Over...' : 'Take Over Session'}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-end space-x-2">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={showDebug ? "Debug input..." : "Type a message..."}
+              className="flex-1 p-3 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all shadow-inner resize-none overflow-y-auto max-h-32"
+              disabled={isLoading}
+            />
+            <button
+              onClick={isLoading ? stopAgent : handleSend}
+              disabled={!isLoading && !input.trim()}
+              className={`${
+                isLoading
+                  ? 'bg-rose-600 hover:bg-rose-700'
+                  : 'bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400'
+              } text-white px-5 py-3 rounded-xl transition-all active:scale-95 shadow-lg font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 h-[46px]`}
+            >
+              {isLoading ? (
+                <>
+                  <div className="w-2 h-2 bg-white rounded-sm" />
+                  Stop
+                </>
+              ) : 'Send'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

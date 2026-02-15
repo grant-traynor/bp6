@@ -24,7 +24,7 @@ pub use session::AgentState;
 
 // Re-export multi-session types
 #[allow(unused_imports)]
-pub use session::{SessionInfo, SessionState, SessionStatus};
+pub use session::{ExecutionMode, SessionInfo, SessionState, SessionStatus};
 
 // Re-export logging types
 #[allow(unused_imports)]
