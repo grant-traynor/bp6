@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-mod agent;
+pub mod agent;
 mod bd;
 mod settings;
 mod startup;

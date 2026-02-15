@@ -6,6 +6,7 @@ pub mod backends;
 pub mod persona;
 pub mod personas;
 pub mod plugin;
+pub mod pty;
 pub mod registry;
 pub mod session;
 pub mod session_index;

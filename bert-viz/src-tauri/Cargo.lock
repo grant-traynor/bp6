@@ -233,6 +233,7 @@ dependencies = [
  "dirs",
  "libc",
  "notify",
+ "portable-pty",
  "pulldown-cmark",
  "serde",
  "serde_json",
