@@ -2220,6 +2220,7 @@ pub fn run() {
             agent::session::get_session_history, agent::session::mark_session_read,
             agent::session::find_recent_session, agent::session::record_session_for_resume, agent::session::touch_session,
             agent::session::handover_to_interactive,
+            agent::session::write_to_pty, agent::session::resize_pty, agent::session::spawn_pty_for_session,
             settings::get_cli_preference, settings::set_cli_preference,
             startup::save_startup_state, startup::load_startup_state,
             window::create_session_window, window::get_window_session_id, window::close_session_window, window::list_session_windows,

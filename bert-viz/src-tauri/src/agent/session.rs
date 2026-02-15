@@ -33,6 +33,20 @@ impl Default for ExecutionMode {
     }
 }
 
+/// View mode for a session (chat or terminal/CLI)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewMode {
+    Chat,
+    Terminal,
+}
+
+impl Default for ViewMode {
+    fn default() -> Self {
+        ViewMode::Chat
+    }
+}
+
 /// Internal session state tracking a running agent process
 #[derive(Debug)]
 pub struct SessionState {
@@ -52,6 +66,10 @@ pub struct SessionState {
     pub cli_session_id: Option<String>,
     /// Execution mode (headless or interactive)
     pub execution_mode: ExecutionMode,
+    /// View mode (chat or terminal/CLI)
+    pub view_mode: ViewMode,
+    /// PTY session ID (if in terminal mode)
+    pub pty_session_id: Option<String>,
     /// Queue of pending commands for headless execution
     pub command_queue: Option<Vec<String>>,
     /// Total commands in original queue (for progress tracking)
@@ -84,6 +102,8 @@ pub struct SessionInfo {
     pub cli_session_id: Option<String>,
     /// Execution mode (headless or interactive)
     pub execution_mode: ExecutionMode,
+    /// View mode (chat or terminal/CLI)
+    pub view_mode: ViewMode,
     /// Number of commands remaining in queue (for headless mode)
     pub commands_remaining: Option<usize>,
     /// Total commands in original queue (for headless mode)
@@ -312,6 +332,8 @@ pub struct AgentState {
     pub persona_registry: crate::agent::persona::PersonaRegistry,
     /// Template loader for persona prompts
     pub template_loader: crate::agent::templates::TemplateLoader,
+    /// PTY manager for terminal sessions
+    pub pty_manager: crate::agent::pty::PtyManager,
 }
 
 impl AgentState {
@@ -325,6 +347,7 @@ impl AgentState {
             persona_registry: crate::agent::persona::PersonaRegistry::with_defaults(),
             template_loader: crate::agent::templates::TemplateLoader::new()
                 .expect("Failed to initialize template loader"),
+            pty_manager: crate::agent::pty::PtyManager::new(),
         }
     }
 }
@@ -395,6 +418,7 @@ fn list_active_sessions_internal(sessions: &HashMap<String, SessionState>) -> Ve
                 .as_secs(),
             cli_session_id: state.cli_session_id.clone(),
             execution_mode: state.execution_mode.clone(),
+            view_mode: state.view_mode.clone(),
             commands_remaining: state.command_queue.as_ref().map(|q| q.len()),
             total_commands: state.total_commands,
             last_activity: state
@@ -799,6 +823,7 @@ fn build_prompt_with_persona(
         "specialist" => PersonaType::Specialist,
         "product-manager" => PersonaType::ProductManager,
         "qa-engineer" => PersonaType::QaEngineer,
+        "customer" => PersonaType::Customer,
         _ => return Err(format!("Unknown persona: {}", persona)),
     };
 
@@ -902,6 +927,8 @@ pub fn start_agent_session(
         created_at: now,
         cli_session_id: Some(session_id.clone()), // Store the session ID for resuming
         execution_mode: ExecutionMode::Interactive,
+        view_mode: ViewMode::Chat, // Default to chat mode
+        pty_session_id: None, // No PTY session initially
         command_queue: None,
         total_commands: None,
         last_activity: now,
@@ -1463,6 +1490,8 @@ pub fn start_agent_session_headless(
         created_at: now,
         cli_session_id: Some(session_id.clone()),
         execution_mode: ExecutionMode::Headless,
+        view_mode: ViewMode::Chat, // Default to chat mode
+        pty_session_id: None, // No PTY session initially
         command_queue: remaining_commands,
         total_commands: Some(total_commands_count),
         last_activity: now,
@@ -1489,6 +1518,7 @@ pub fn start_agent_session_headless(
             .as_secs(),
         cli_session_id: Some(session_id.clone()),
         execution_mode: ExecutionMode::Headless,
+        view_mode: ViewMode::Chat,
         commands_remaining: Some(total_commands_count - 1), // First command is already executing
         total_commands: Some(total_commands_count),
         last_activity: now
@@ -1649,5 +1679,141 @@ pub fn handover_to_interactive(
         emit_session_list_changed(&app_handle, &sessions);
     }
 
+    Ok(())
+}
+
+// ============================================================================
+// PTY Terminal Interface Commands
+// ============================================================================
+
+/// Write data to a PTY session
+#[tauri::command]
+pub fn write_to_pty(
+    session_id: String,
+    data: String,
+    state: State<AgentState>,
+) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    
+    // Get PTY session ID
+    let pty_session_id = session
+        .pty_session_id
+        .as_ref()
+        .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?;
+    
+    // Write to PTY
+    state.pty_manager.write(pty_session_id, data.as_bytes())?;
+    
+    Ok(())
+}
+
+/// Resize a PTY session
+#[tauri::command]
+pub fn resize_pty(
+    session_id: String,
+    cols: u16,
+    rows: u16,
+    state: State<AgentState>,
+) -> Result<(), String> {
+    let sessions = state.sessions.lock().unwrap();
+    
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    
+    // Get PTY session ID
+    let pty_session_id = session
+        .pty_session_id
+        .as_ref()
+        .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?;
+    
+    // Resize PTY
+    state.pty_manager.resize(pty_session_id, cols, rows)?;
+    
+    Ok(())
+}
+
+/// Spawn a PTY for an existing session (for terminal mode)
+/// This starts a shell that can be used to interact with the session
+#[tauri::command]
+pub fn spawn_pty_for_session(
+    session_id: String,
+    state: State<AgentState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    let mut sessions = state.sessions.lock().unwrap();
+    
+    let session = sessions
+        .get_mut(&session_id)
+        .ok_or_else(|| format!("Session {} not found", session_id))?;
+    
+    // Check if already in terminal mode
+    if session.pty_session_id.is_some() {
+        return Err("Session already has a PTY".to_string());
+    }
+    
+    // Generate PTY session ID
+    let pty_session_id = format!("pty-{}", session_id);
+    
+    // Spawn a shell in PTY
+    // TODO: Make shell configurable (bash, zsh, sh)
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    
+    state.pty_manager.spawn(
+        pty_session_id.clone(),
+        shell,
+        vec![],
+        None, // Use current directory
+        Some(80), // Default columns
+        Some(24), // Default rows
+    )?;
+    
+    // Update session state
+    session.pty_session_id = Some(pty_session_id.clone());
+    session.view_mode = ViewMode::Terminal;
+    
+    // Spawn a thread to stream PTY output
+    let pty_manager = state.pty_manager.clone();
+    let app_handle_clone = app_handle.clone();
+    let session_id_clone = session_id.clone();
+    
+    std::thread::spawn(move || {
+        loop {
+            match pty_manager.read(&pty_session_id) {
+                Ok(data) => {
+                    if data.is_empty() {
+                        // EOF - PTY closed
+                        break;
+                    }
+                    
+                    // Convert to string (lossy for non-UTF8)
+                    let output = String::from_utf8_lossy(&data).to_string();
+                    
+                    // Emit pty-data event
+                    let _ = app_handle_clone.emit(
+                        "pty-data",
+                        serde_json::json!({
+                            "sessionId": session_id_clone,
+                            "data": output,
+                        }),
+                    );
+                }
+                Err(e) => {
+                    eprintln!("PTY read error for {}: {}", pty_session_id, e);
+                    break;
+                }
+            }
+            
+            // Small delay to avoid busy-waiting
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        
+        eprintln!("PTY stream ended for session: {}", session_id_clone);
+    });
+    
     Ok(())
 }

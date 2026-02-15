@@ -25,6 +25,7 @@ pub struct PtySession {
 }
 
 /// PtyManager handles spawning and cleanup of PTY processes
+#[derive(Clone)]
 pub struct PtyManager {
     /// Active PTY sessions, keyed by session ID
     sessions: Arc<Mutex<HashMap<String, Arc<Mutex<PtySession>>>>>,
