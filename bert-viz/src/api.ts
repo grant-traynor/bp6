@@ -173,6 +173,7 @@ export interface SessionInfo {
   createdAt: number;      // Unix timestamp in seconds (Rust u64)
   cliSessionId?: string | null;  // CLI session ID for resume capability
   executionMode: 'headless' | 'interactive';  // Execution mode
+  viewMode?: 'chat' | 'terminal';  // View mode (chat or terminal/CLI) - optional for backwards compatibility
   commandsRemaining?: number | null;  // Number of commands remaining in queue (headless only)
   totalCommands?: number | null;      // Total commands in original queue (headless only)
   lastActivity: number;   // Unix timestamp of last activity (Rust u64)

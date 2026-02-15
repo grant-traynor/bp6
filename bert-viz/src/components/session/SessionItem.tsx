@@ -161,6 +161,21 @@ export const SessionItem = memo<SessionItemProps>(({
           >
             {isHeadless ? '🤖' : '💬'}
           </span>
+
+          {/* View Mode Indicator */}
+          {session.viewMode && (
+            <span
+              className={cn(
+                "text-[10px] font-bold px-2 py-0.5 rounded",
+                session.viewMode === 'terminal'
+                  ? "bg-slate-600 text-white"
+                  : "bg-blue-500 text-white"
+              )}
+              title={session.viewMode === 'terminal' ? "Terminal mode" : "Chat mode"}
+            >
+              {session.viewMode === 'terminal' ? '🖥️' : '💬'}
+            </span>
+          )}
         </div>
 
         {/* Action buttons */}
