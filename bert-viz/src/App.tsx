@@ -748,30 +748,43 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         ? sessions.some(s => s.sessionId === targetSessionId)
         : false;
 
+      // Create new session if it doesn't exist
       if (!sessionExists) {
         targetSessionId = await startAgentSession(persona, task ?? undefined, beadId ?? undefined, currentCli, role);
+        await useSessionStore.getState().refreshSessions();
+      }
 
-        setChatSessionMap(prev => ({ ...prev, [key]: targetSessionId! }));
-        setSessionMetaIndex(prev => ({
-          ...prev,
-          [targetSessionId!]: {
+      // ALWAYS update metadata when opening chat (even for existing sessions)
+      // This ensures the window title and task display are always correct
+      if (targetSessionId) {
+        const updatedChatSessionMap = { ...chatSessionMap, [key]: targetSessionId };
+        const updatedSessionMetaIndex = {
+          ...sessionMetaIndex,
+          [targetSessionId]: {
             persona,
             task: task ?? null,
             beadId: beadId ?? null,
             beadTitle,
           }
-        }));
+        };
 
-        await useSessionStore.getState().refreshSessions();
-      }
+        // Update state
+        setChatSessionMap(updatedChatSessionMap);
+        setSessionMetaIndex(updatedSessionMetaIndex);
 
-      if (targetSessionId) {
+        // CRITICAL: Synchronously persist to localStorage BEFORE creating window
+        // This prevents race condition where new window reads stale data
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem('chatSessionMap', JSON.stringify(updatedChatSessionMap));
+          localStorage.setItem('chatSessionMeta', JSON.stringify(updatedSessionMetaIndex));
+        }
+
         await createSessionWindow(targetSessionId);
       }
     } catch (error) {
       console.error('Failed to open chat window:', error);
     }
-  }, [chatSessionMap, sessions, currentCli, beads]);
+  }, [chatSessionMap, sessionMetaIndex, sessions, currentCli, beads]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1190,9 +1203,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans selection:bg-indigo-100 dark:selection:bg-indigo-900/30">
-      <Navigation currentView={view} onViewChange={setView} />
+      <Navigation currentView={view} onViewChange={setView} onOpenChat={handleOpenChat} />
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
-        <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} onOpenChat={handleOpenChat} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} currentCli={currentCli} setCurrentCli={setCurrentCli} />
+        <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} currentCli={currentCli} setCurrentCli={setCurrentCli} />
         {!hasProject ? (
           <div className="flex-1 flex items-center justify-center">
             {loading ? (

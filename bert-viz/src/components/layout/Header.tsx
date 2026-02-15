@@ -9,7 +9,6 @@ interface HeaderProps {
   setIsDark: (dark: boolean) => void;
   handleStartCreate: () => void;
   loadData: () => void;
-  onOpenChat: (persona: string, task?: string, beadId?: string, role?: string) => void;
   projectMenuOpen: boolean;
   setProjectMenuOpen: (open: boolean) => void;
   favoriteProjects: Project[];
@@ -28,7 +27,6 @@ export const Header = ({
   setIsDark,
   handleStartCreate,
   loadData,
-  onOpenChat,
   projectMenuOpen,
   setProjectMenuOpen,
   favoriteProjects,
@@ -130,30 +128,6 @@ export const Header = ({
           )}
         </div>
 
-        <button
-          onClick={() => onOpenChat('product-manager', undefined, undefined)}
-          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-indigo-600 dark:text-indigo-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
-        >
-          <span className="text-base">🤖</span> PM
-        </button>
-        <button
-          onClick={() => onOpenChat('qa-engineer', 'fix_dependencies', undefined)}
-          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-emerald-600 dark:text-emerald-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
-        >
-          <span className="text-base">🛡️</span> QA
-        </button>
-        <button
-          onClick={() => onOpenChat('specialist', undefined, undefined, 'supabase-db')}
-          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-purple-600 dark:text-purple-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
-        >
-          <span className="text-base">🐘</span> DB
-        </button>
-        <button
-          onClick={() => onOpenChat('specialist', undefined, undefined, 'web')}
-          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-blue-600 dark:text-blue-400 px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
-        >
-          <span className="text-base">🌐</span> WEB
-        </button>
         <button
           onClick={() => setIsDark(!isDark)} 
           className="h-10 w-10 hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] rounded-xl flex items-center justify-center transition-all border-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-sm)] active:scale-90"
