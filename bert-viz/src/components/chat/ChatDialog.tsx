@@ -7,6 +7,7 @@ import { approveSuggestion, CliBackend, toggleWindowAlwaysOnTop, handoverToInter
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
+import { Terminal as TerminalComponent } from '../terminal/Terminal';
 
 interface ChatDialogProps {
   isOpen: boolean;
@@ -46,6 +47,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   const [showDebug, setShowDebug] = useState(false);
   const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true); // Default is true per current implementation
   const [isHandingOver, setIsHandingOver] = useState(false);
+  const [viewMode, setViewMode] = useState<'chat' | 'cli'>('chat');
 
   // Refs for auto-scroll and input
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -216,6 +218,31 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
             </span>
           </div>
         </div>
+
+        {/* View Mode Toggle */}
+        <div className="flex items-center gap-1 bg-white/10 p-1 rounded-lg">
+          <button
+            onClick={() => setViewMode('chat')}
+            className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded transition-all ${
+              viewMode === 'chat'
+                ? 'bg-white text-indigo-600 shadow-md'
+                : 'text-white/70 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            💬 Chat
+          </button>
+          <button
+            onClick={() => setViewMode('cli')}
+            className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded transition-all ${
+              viewMode === 'cli'
+                ? 'bg-white text-indigo-600 shadow-md'
+                : 'text-white/70 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            🖥️ CLI
+          </button>
+        </div>
+
         <div className="flex items-center gap-2">
           {isLoading && (
             <button
@@ -271,10 +298,11 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
       {/* Main Content - Flex Layout */}
       <div className="min-h-0 flex-1 overflow-hidden flex">
-        {/* Chat Content */}
-        <div className="min-h-0 flex-1 flex flex-col overflow-hidden bg-[var(--background-primary)]">
-          {/* Messages View */}
-          {!showDebug && (
+        {viewMode === 'chat' ? (
+          /* Chat Content */
+          <div className="min-h-0 flex-1 flex flex-col overflow-hidden bg-[var(--background-primary)]">
+            {/* Messages View */}
+            {!showDebug && (
             <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
               <div className="flex flex-col gap-2 px-4 py-4">
                 {messages.length === 0 && !streamingMessage && (
@@ -340,11 +368,18 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
             </div>
           )}
         </div>
+        ) : (
+          /* Terminal Content */
+          <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
+            {sessionId && <TerminalComponent sessionId={sessionId} />}
+          </div>
+        )}
       </div>
 
-      {/* Input Area */}
-      <div className="p-4 border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-        {isHeadless ? (
+      {/* Input Area - only show in chat mode */}
+      {viewMode === 'chat' && (
+        <div className="p-4 border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+          {isHeadless ? (
           <div className="flex flex-col items-center justify-center gap-3 py-4 px-6 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-600 rounded-xl">
             <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
               <span className="text-2xl">🤖</span>
@@ -408,6 +443,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           </div>
         )}
       </div>
+      )}
     </div>
   );
 };
