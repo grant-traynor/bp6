@@ -16,12 +16,13 @@ use std::sync::{Arc, Mutex};
 pub use portable_pty::{Child, ChildKiller, CommandBuilder, PtyPair, PtySize};
 
 /// Session holds a PTY pair and the child process
+/// Reader and writer are in separate mutexes to allow concurrent read/write
 pub struct PtySession {
     pub pair: PtyPair,
     pub child: Box<dyn Child + Send + Sync>,
     pub child_killer: Box<dyn ChildKiller + Send + Sync>,
-    pub writer: Box<dyn Write + Send>,
-    pub reader: Box<dyn Read + Send>,
+    pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    pub reader: Arc<Mutex<Box<dyn Read + Send>>>,
 }
 
 /// PtyManager handles spawning and cleanup of PTY processes
@@ -99,13 +100,13 @@ impl PtyManager {
 
         let child_killer = child.clone_killer();
 
-        // Create session
+        // Create session with separate mutexes for reader and writer
         let session = PtySession {
             pair,
             child,
             child_killer,
-            writer,
-            reader,
+            writer: Arc::new(Mutex::new(writer)),
+            reader: Arc::new(Mutex::new(reader)),
         };
 
         // Store in sessions map
@@ -126,18 +127,41 @@ impl PtyManager {
     /// * `Ok(())` if write succeeded
     /// * `Err(String)` if session not found or write failed
     pub fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
-        let sessions = self.sessions.lock().unwrap();
+        use std::time::Instant;
+        eprintln!("  🔷 PtyManager.write START: pty={}, data_len={}", session_id, data.len());
 
-        let session_arc = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("PTY session not found: {}", session_id))?;
+        // Get the writer Arc while holding the outer lock, then release it
+        let writer_arc = {
+            let lock_start = Instant::now();
+            let sessions = self.sessions.lock().unwrap();
+            eprintln!("  🔓 PtyManager.sessions lock acquired in {:?}", lock_start.elapsed());
 
-        let mut session = session_arc.lock().unwrap();
+            let session_arc = sessions
+                .get(session_id)
+                .ok_or_else(|| format!("PTY session not found: {}", session_id))?;
 
-        session
-            .writer
+            // Lock session briefly to clone the writer Arc
+            let session = session_arc.lock().unwrap();
+            let writer = session.writer.clone();
+
+            eprintln!("  🔓 PtyManager.sessions lock releasing after {:?}", lock_start.elapsed());
+            writer
+        }; // Outer locks released here
+
+        // Acquire the writer lock and perform I/O
+        let writer_lock_start = Instant::now();
+        let mut writer = writer_arc.lock().unwrap();
+        eprintln!("  🔓 Writer lock acquired in {:?}", writer_lock_start.elapsed());
+
+        let io_start = Instant::now();
+        let result = writer
             .write_all(data)
-            .map_err(|e| format!("Failed to write to PTY: {}", e))
+            .map_err(|e| format!("Failed to write to PTY: {}", e));
+
+        eprintln!("  💾 write_all I/O completed in {:?}", io_start.elapsed());
+        eprintln!("  🔷 PtyManager.write COMPLETE");
+
+        result
     }
 
     /// Read available data from a PTY session (blocking up to buffer size)
@@ -149,17 +173,25 @@ impl PtyManager {
     /// * `Ok(Vec<u8>)` - Data read from PTY (may be empty if EOF)
     /// * `Err(String)` if session not found or read failed
     pub fn read(&self, session_id: &str) -> Result<Vec<u8>, String> {
-        let sessions = self.sessions.lock().unwrap();
+        // Get the reader Arc while holding the outer lock, then release it
+        let reader_arc = {
+            let sessions = self.sessions.lock().unwrap();
 
-        let session_arc = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("PTY session not found: {}", session_id))?;
+            let session_arc = sessions
+                .get(session_id)
+                .ok_or_else(|| format!("PTY session not found: {}", session_id))?;
 
-        let mut session = session_arc.lock().unwrap();
+            // Lock session briefly to clone the reader Arc
+            let session = session_arc.lock().unwrap();
+            session.reader.clone()
+        }; // Outer locks released here
+
+        // Acquire the reader lock and perform I/O
+        let mut reader = reader_arc.lock().unwrap();
 
         // Read up to 4096 bytes
         let mut buf = vec![0u8; 4096];
-        match session.reader.read(&mut buf) {
+        match reader.read(&mut buf) {
             Ok(n) => {
                 buf.truncate(n);
                 Ok(buf)
@@ -179,14 +211,17 @@ impl PtyManager {
     /// * `Ok(())` if resize succeeded
     /// * `Err(String)` if session not found or resize failed
     pub fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<(), String> {
-        let sessions = self.sessions.lock().unwrap();
+        // Clone the session Arc while holding the outer lock, then release it
+        let session_arc = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions
+                .get(session_id)
+                .ok_or_else(|| format!("PTY session not found: {}", session_id))?
+                .clone()
+        }; // Outer lock released here
 
-        let session_arc = sessions
-            .get(session_id)
-            .ok_or_else(|| format!("PTY session not found: {}", session_id))?;
-
+        // Acquire the session lock and perform resize
         let session = session_arc.lock().unwrap();
-
         session
             .pair
             .master

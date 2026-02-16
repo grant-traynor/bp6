@@ -1705,24 +1705,39 @@ pub fn write_to_pty(
     data: String,
     state: State<AgentState>,
 ) -> Result<(), String> {
+    use std::time::Instant;
+    let start = Instant::now();
+    eprintln!("🔵 write_to_pty START: session={}, data_len={}", session_id, data.len());
+
     // Extract PTY session ID while holding lock, then release immediately
     let pty_session_id = {
+        let lock_start = Instant::now();
         let sessions = state.sessions.lock().unwrap();
+        eprintln!("🔓 AgentState.sessions lock acquired in {:?}", lock_start.elapsed());
 
         let session = sessions
             .get(&session_id)
             .ok_or_else(|| format!("Session {} not found", session_id))?;
 
         // Clone the PTY session ID to use after lock is released
-        session
+        let pty_id = session
             .pty_session_id
             .as_ref()
             .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?
-            .clone()
+            .clone();
+
+        eprintln!("🔓 AgentState.sessions lock releasing after {:?}", lock_start.elapsed());
+        pty_id
     }; // Lock released here
+
+    eprintln!("📝 Calling pty_manager.write for pty={}", pty_session_id);
+    let write_start = Instant::now();
 
     // Write to PTY without holding the sessions lock
     state.pty_manager.write(&pty_session_id, data.as_bytes())?;
+
+    eprintln!("✅ pty_manager.write completed in {:?}", write_start.elapsed());
+    eprintln!("🟢 write_to_pty COMPLETE: total {:?}", start.elapsed());
 
     Ok(())
 }
