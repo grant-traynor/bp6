@@ -32,6 +32,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const initialLoadRef = useRef<boolean>(true);
   const scrollTimeoutRef = useRef<number | null>(null);
+  const resizeTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     console.log('Terminal component mounting for session:', sessionId);
@@ -112,21 +113,42 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
       }
     });
 
-    // Handle window resize
+    // Handle window resize (debounced)
     const handleResize = () => {
-      fitAddon.fit();
+      if (!xtermRef.current) return;
 
-      // Notify backend of new terminal size
-      const dimensions = fitAddon.proposeDimensions();
-      if (dimensions) {
-        invoke('resize_pty', {
-          sessionId,
-          cols: dimensions.cols,
-          rows: dimensions.rows,
-        }).catch((error) => {
-          console.error('Failed to resize PTY:', error);
-        });
+      // Clear any existing resize timeout
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
       }
+
+      // Debounce resize to avoid rapid reflows
+      resizeTimeoutRef.current = setTimeout(() => {
+        if (!xtermRef.current) return;
+
+        // Save current scroll position
+        const wasAtBottom = xtermRef.current.buffer.active.viewportY === xtermRef.current.buffer.active.baseY;
+
+        // Resize the terminal display
+        fitAddon.fit();
+
+        // Restore scroll position: stay at bottom if we were at bottom
+        if (wasAtBottom) {
+          xtermRef.current.scrollToBottom();
+        }
+
+        // Notify backend of new terminal size
+        const dimensions = fitAddon.proposeDimensions();
+        if (dimensions) {
+          invoke('resize_pty', {
+            sessionId,
+            cols: dimensions.cols,
+            rows: dimensions.rows,
+          }).catch((error) => {
+            console.error('Failed to resize PTY:', error);
+          });
+        }
+      }, 150); // Wait 150ms after last resize event
     };
 
     // Set up resize observer
@@ -142,6 +164,9 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
     return () => {
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
+      }
+      if (resizeTimeoutRef.current) {
+        clearTimeout(resizeTimeoutRef.current);
       }
       unlistenPromise.then((unlisten) => unlisten());
       resizeObserver.disconnect();

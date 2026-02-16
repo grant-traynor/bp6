@@ -1870,9 +1870,9 @@ pub fn spawn_pty_for_session(
                     break;
                 }
             }
-            
-            // Throttle to ~10 events/sec to avoid overwhelming frontend
-            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Throttle to ~60 events/sec for smooth updates without overwhelming frontend
+            std::thread::sleep(std::time::Duration::from_millis(16));
         }
         
         eprintln!("PTY stream ended for session: {}", session_id_clone);
