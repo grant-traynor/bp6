@@ -1871,8 +1871,8 @@ pub fn spawn_pty_for_session(
                 }
             }
 
-            // Throttle to ~60 events/sec for smooth updates without overwhelming frontend
-            std::thread::sleep(std::time::Duration::from_millis(16));
+            // Minimal yield to prevent thread from hogging CPU, but allow fast data flow
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         
         eprintln!("PTY stream ended for session: {}", session_id_clone);
