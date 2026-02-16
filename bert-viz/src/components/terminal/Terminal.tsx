@@ -30,6 +30,8 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const initialLoadRef = useRef<boolean>(true);
+  const scrollTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     console.log('Terminal component mounting for session:', sessionId);
@@ -92,6 +94,21 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
       console.log('Received pty-data event:', event.payload.sessionId, event.payload.data.substring(0, 50));
       if (event.payload.sessionId === sessionId) {
         terminal.write(event.payload.data);
+
+        // On initial load, debounce scrolling to bottom to avoid watching the buffer fill
+        if (initialLoadRef.current) {
+          // Clear any existing timeout
+          if (scrollTimeoutRef.current) {
+            clearTimeout(scrollTimeoutRef.current);
+          }
+
+          // Set timeout to scroll to bottom after data stops flowing
+          scrollTimeoutRef.current = setTimeout(() => {
+            terminal.scrollToBottom();
+            initialLoadRef.current = false;
+            console.log('Initial load complete, scrolled to bottom');
+          }, 200); // Wait 200ms after last data chunk
+        }
       }
     });
 
@@ -123,6 +140,9 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
 
     // Cleanup
     return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
       unlistenPromise.then((unlisten) => unlisten());
       resizeObserver.disconnect();
       terminal.dispose();
