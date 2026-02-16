@@ -1705,21 +1705,25 @@ pub fn write_to_pty(
     data: String,
     state: State<AgentState>,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
-    
-    // Get PTY session ID
-    let pty_session_id = session
-        .pty_session_id
-        .as_ref()
-        .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?;
-    
-    // Write to PTY
-    state.pty_manager.write(pty_session_id, data.as_bytes())?;
-    
+    // Extract PTY session ID while holding lock, then release immediately
+    let pty_session_id = {
+        let sessions = state.sessions.lock().unwrap();
+
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
+
+        // Clone the PTY session ID to use after lock is released
+        session
+            .pty_session_id
+            .as_ref()
+            .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?
+            .clone()
+    }; // Lock released here
+
+    // Write to PTY without holding the sessions lock
+    state.pty_manager.write(&pty_session_id, data.as_bytes())?;
+
     Ok(())
 }
 
@@ -1731,21 +1735,25 @@ pub fn resize_pty(
     rows: u16,
     state: State<AgentState>,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock().unwrap();
-    
-    let session = sessions
-        .get(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
-    
-    // Get PTY session ID
-    let pty_session_id = session
-        .pty_session_id
-        .as_ref()
-        .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?;
-    
-    // Resize PTY
-    state.pty_manager.resize(pty_session_id, cols, rows)?;
-    
+    // Extract PTY session ID while holding lock, then release immediately
+    let pty_session_id = {
+        let sessions = state.sessions.lock().unwrap();
+
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
+
+        // Clone the PTY session ID to use after lock is released
+        session
+            .pty_session_id
+            .as_ref()
+            .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?
+            .clone()
+    }; // Lock released here
+
+    // Resize PTY without holding the sessions lock
+    state.pty_manager.resize(&pty_session_id, cols, rows)?;
+
     Ok(())
 }
 
@@ -1848,8 +1856,8 @@ pub fn spawn_pty_for_session(
                 }
             }
             
-            // Small delay to avoid busy-waiting
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            // Throttle to ~10 events/sec to avoid overwhelming frontend
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
         
         eprintln!("PTY stream ended for session: {}", session_id_clone);
