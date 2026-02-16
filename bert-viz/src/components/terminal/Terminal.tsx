@@ -197,11 +197,12 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
     fitAddonRef.current = fitAddon;
 
     // Notify backend of initial terminal size
+    // Subtract 2 cols to prevent overflow from scrollbar/padding
     const initialDimensions = fitAddon.proposeDimensions();
     if (initialDimensions) {
       invoke('resize_pty', {
         sessionId,
-        cols: initialDimensions.cols,
+        cols: Math.max(initialDimensions.cols - 2, 20),
         rows: initialDimensions.rows,
       }).catch((error) => {
         console.error('Failed to set initial PTY size:', error);
@@ -264,11 +265,12 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
         }
 
         // Notify backend of new terminal size
+        // Subtract 2 cols to prevent overflow from scrollbar/padding
         const dimensions = fitAddon.proposeDimensions();
         if (dimensions) {
           invoke('resize_pty', {
             sessionId,
-            cols: dimensions.cols,
+            cols: Math.max(dimensions.cols - 2, 20),
             rows: dimensions.rows,
           }).catch((error) => {
             console.error('Failed to resize PTY:', error);
