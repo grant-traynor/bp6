@@ -32,9 +32,11 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
   const fitAddonRef = useRef<FitAddon | null>(null);
 
   useEffect(() => {
+    console.log('Terminal component mounting for session:', sessionId);
     if (!terminalRef.current) return;
 
     // Initialize Xterm.js terminal
+    console.log('Initializing Xterm.js terminal');
     const terminal = new XTerm({
       cursorBlink: true,
       fontSize: 14,
@@ -85,7 +87,9 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
     });
 
     // Listen for PTY output from backend
+    console.log('Setting up pty-data event listener for session:', sessionId);
     const unlistenPromise = listen<PtyDataEvent>('pty-data', (event) => {
+      console.log('Received pty-data event:', event.payload.sessionId, event.payload.data.substring(0, 50));
       if (event.payload.sessionId === sessionId) {
         terminal.write(event.payload.data);
       }

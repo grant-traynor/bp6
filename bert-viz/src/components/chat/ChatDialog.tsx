@@ -8,6 +8,7 @@ import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
 import { Terminal as TerminalComponent } from '../terminal/Terminal';
+import { invoke } from '@tauri-apps/api/core';
 
 interface ChatDialogProps {
   isOpen: boolean;
@@ -222,7 +223,17 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
         {/* View Mode Toggle */}
         <div className="flex items-center gap-1 bg-white/10 p-1 rounded-lg">
           <button
-            onClick={() => setViewMode('chat')}
+            onClick={async () => {
+              if (!sessionId) return;
+              try {
+                await invoke('detach_pty_from_session', { session_id: sessionId });
+                setViewMode('chat');
+              } catch (error) {
+                console.error('Failed to switch to chat mode:', error);
+                // If PTY wasn't attached, just switch view
+                setViewMode('chat');
+              }
+            }}
             className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded transition-all ${
               viewMode === 'chat'
                 ? 'bg-white text-indigo-600 shadow-md'
@@ -232,7 +243,21 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
             💬 Chat
           </button>
           <button
-            onClick={() => setViewMode('cli')}
+            onClick={async () => {
+              if (!sessionId) {
+                console.error('No session ID available');
+                return;
+              }
+              console.log('Switching to CLI mode for session:', sessionId);
+              try {
+                await invoke('spawn_pty_for_session', { session_id: sessionId });
+                console.log('PTY spawned successfully');
+                setViewMode('cli');
+              } catch (error) {
+                console.error('Failed to switch to CLI mode:', error);
+                alert(`Failed to switch to terminal: ${error}`);
+              }
+            }}
             className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded transition-all ${
               viewMode === 'cli'
                 ? 'bg-white text-indigo-600 shadow-md'
