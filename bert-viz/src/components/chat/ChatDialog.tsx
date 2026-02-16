@@ -123,6 +123,45 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     }
   }, [isOpen, isLoading]);
 
+  // Keyboard shortcut: Ctrl+` (or Cmd+` on Mac) to toggle terminal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // Check for Ctrl+` or Cmd+` (backtick key)
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+
+        if (!sessionId) {
+          console.error('No session ID available for terminal toggle');
+          return;
+        }
+
+        // Toggle between chat and CLI modes
+        if (viewMode === 'chat') {
+          try {
+            await invoke('spawn_pty_for_session', { sessionId: sessionId });
+            setViewMode('cli');
+          } catch (error) {
+            console.error('Failed to switch to CLI mode:', error);
+          }
+        } else {
+          try {
+            await invoke('detach_pty_from_session', { sessionId: sessionId });
+            setViewMode('chat');
+          } catch (error) {
+            console.error('Failed to switch to chat mode:', error);
+            // If PTY wasn't attached, just switch view
+            setViewMode('chat');
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, sessionId, viewMode]);
+
   // Event handlers
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
@@ -226,7 +265,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
             onClick={async () => {
               if (!sessionId) return;
               try {
-                await invoke('detach_pty_from_session', { session_id: sessionId });
+                await invoke('detach_pty_from_session', { sessionId: sessionId });
                 setViewMode('chat');
               } catch (error) {
                 console.error('Failed to switch to chat mode:', error);
@@ -250,7 +289,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
               }
               console.log('Switching to CLI mode for session:', sessionId);
               try {
-                await invoke('spawn_pty_for_session', { session_id: sessionId });
+                await invoke('spawn_pty_for_session', { sessionId: sessionId });
                 console.log('PTY spawned successfully');
                 setViewMode('cli');
               } catch (error) {

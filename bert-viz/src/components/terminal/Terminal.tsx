@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import '@xterm/xterm/css/xterm.css';
@@ -25,6 +26,8 @@ interface PtyDataEvent {
  * - Handles keyboard input and sends to backend
  * - Auto-resizes with container
  * - Supports ANSI colors and formatting
+ * - Copy/paste with keyboard shortcuts (Cmd+C/V on macOS, Ctrl+C/V on Windows/Linux)
+ * - Right-click context menu for copy/paste
  */
 export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -33,39 +36,146 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
   const initialLoadRef = useRef<boolean>(true);
   const scrollTimeoutRef = useRef<number | null>(null);
   const resizeTimeoutRef = useRef<number | null>(null);
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    return document.documentElement.classList.contains('dark');
+  });
+
+  // Detect theme changes
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const newIsDark = document.documentElement.classList.contains('dark');
+      if (newIsDark !== isDark) {
+        setIsDark(newIsDark);
+      }
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+
+    return () => observer.disconnect();
+  }, [isDark]);
+
+  // Update terminal theme when dark mode changes
+  useEffect(() => {
+    if (!xtermRef.current) return;
+
+    const theme = isDark
+      ? {
+          background: '#0e1624',
+          foreground: '#e9f1ff',
+          cursor: '#5cf1ff',
+          cursorAccent: '#0e1624',
+          selectionBackground: 'rgba(59, 163, 255, 0.3)',
+          black: '#05070d',
+          red: '#f06d76',
+          green: '#2fc6a0',
+          yellow: '#f2a93b',
+          blue: '#3ba3ff',
+          magenta: '#9c5cff',
+          cyan: '#5cf1ff',
+          white: '#b6c4d9',
+          brightBlack: '#1f2a3a',
+          brightRed: '#ff8087',
+          brightGreen: '#3dd7b0',
+          brightYellow: '#ffba4a',
+          brightBlue: '#5cb6ff',
+          brightMagenta: '#b87cff',
+          brightCyan: '#7cf5ff',
+          brightWhite: '#e9f1ff',
+        }
+      : {
+          background: '#f6f9ff',
+          foreground: '#0c1a2a',
+          cursor: '#0f8bff',
+          cursorAccent: '#f6f9ff',
+          selectionBackground: 'rgba(15, 139, 255, 0.25)',
+          black: '#0c1a2a',
+          red: '#f06d76',
+          green: '#2fc6a0',
+          yellow: '#d97706',
+          blue: '#0f8bff',
+          magenta: '#9c5cff',
+          cyan: '#3bc8ff',
+          white: '#55657d',
+          brightBlack: '#24344d',
+          brightRed: '#ff8087',
+          brightGreen: '#3dd7b0',
+          brightYellow: '#f2a93b',
+          brightBlue: '#3ba3ff',
+          brightMagenta: '#b87cff',
+          brightCyan: '#5cf1ff',
+          brightWhite: '#0c1a2a',
+        };
+
+    xtermRef.current.options.theme = theme;
+  }, [isDark]);
 
   useEffect(() => {
     console.log('Terminal component mounting for session:', sessionId);
     if (!terminalRef.current) return;
 
+    // Get initial theme based on dark mode
+    const theme = isDark
+      ? {
+          background: '#0e1624',
+          foreground: '#e9f1ff',
+          cursor: '#5cf1ff',
+          cursorAccent: '#0e1624',
+          selectionBackground: 'rgba(59, 163, 255, 0.3)',
+          black: '#05070d',
+          red: '#f06d76',
+          green: '#2fc6a0',
+          yellow: '#f2a93b',
+          blue: '#3ba3ff',
+          magenta: '#9c5cff',
+          cyan: '#5cf1ff',
+          white: '#b6c4d9',
+          brightBlack: '#1f2a3a',
+          brightRed: '#ff8087',
+          brightGreen: '#3dd7b0',
+          brightYellow: '#ffba4a',
+          brightBlue: '#5cb6ff',
+          brightMagenta: '#b87cff',
+          brightCyan: '#7cf5ff',
+          brightWhite: '#e9f1ff',
+        }
+      : {
+          background: '#f6f9ff',
+          foreground: '#0c1a2a',
+          cursor: '#0f8bff',
+          cursorAccent: '#f6f9ff',
+          selectionBackground: 'rgba(15, 139, 255, 0.25)',
+          black: '#0c1a2a',
+          red: '#f06d76',
+          green: '#2fc6a0',
+          yellow: '#d97706',
+          blue: '#0f8bff',
+          magenta: '#9c5cff',
+          cyan: '#3bc8ff',
+          white: '#55657d',
+          brightBlack: '#24344d',
+          brightRed: '#ff8087',
+          brightGreen: '#3dd7b0',
+          brightYellow: '#f2a93b',
+          brightBlue: '#3ba3ff',
+          brightMagenta: '#b87cff',
+          brightCyan: '#5cf1ff',
+          brightWhite: '#0c1a2a',
+        };
+
     // Initialize Xterm.js terminal
     console.log('Initializing Xterm.js terminal');
     const terminal = new XTerm({
       cursorBlink: true,
-      fontSize: 14,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: {
-        background: '#1e1e1e',
-        foreground: '#d4d4d4',
-        cursor: '#ffffff',
-        selectionBackground: 'rgba(255, 255, 255, 0.3)',
-        black: '#000000',
-        red: '#cd3131',
-        green: '#0dbc79',
-        yellow: '#e5e510',
-        blue: '#2472c8',
-        magenta: '#bc3fbc',
-        cyan: '#11a8cd',
-        white: '#e5e5e5',
-        brightBlack: '#666666',
-        brightRed: '#f14c4c',
-        brightGreen: '#23d18b',
-        brightYellow: '#f5f543',
-        brightBlue: '#3b8eea',
-        brightMagenta: '#d670d6',
-        brightCyan: '#29b8db',
-        brightWhite: '#ffffff',
-      },
+      fontSize: 13,
+      fontFamily: 'SF Mono, Monaco, Menlo, "Courier New", monospace',
+      fontWeight: '400',
+      fontWeightBold: '700',
+      letterSpacing: 0,
+      lineHeight: 1.2,
+      theme,
       scrollback: 1000,
       convertEol: true,
     });
@@ -74,6 +184,10 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
 
+    // Initialize clipboard addon for copy/paste support
+    const clipboardAddon = new ClipboardAddon();
+    terminal.loadAddon(clipboardAddon);
+
     // Open terminal in DOM
     terminal.open(terminalRef.current);
     fitAddon.fit();
@@ -81,6 +195,18 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
     // Store refs
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    // Notify backend of initial terminal size
+    const initialDimensions = fitAddon.proposeDimensions();
+    if (initialDimensions) {
+      invoke('resize_pty', {
+        sessionId,
+        cols: initialDimensions.cols,
+        rows: initialDimensions.rows,
+      }).catch((error) => {
+        console.error('Failed to set initial PTY size:', error);
+      });
+    }
 
     // Handle terminal input (send to backend)
     terminal.onData((data) => {
@@ -174,7 +300,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [sessionId, onReady]);
+  }, [sessionId, onReady, isDark]);
 
   return (
     <div className="terminal-container">

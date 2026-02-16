@@ -19,6 +19,21 @@ complex projects.
 - **Search & Filter**: Quickly find tasks by ID, title, owner, or labels with real-time filtering.
 - **Smart Algorithms**: Topological sorting, critical path finding, and Gantt layout calculation all in Rust.
 
+## Keyboard Shortcuts
+
+### Main Window
+- `/` - Focus search bar
+- `Escape` - Clear selection / Cancel editing
+- `+` or `=` - Expand all beads
+- `-` or `_` - Collapse all beads
+- `n` - Create new bead
+- `r` - Reload data
+- `c` - Open chat with Product Manager
+
+### Chat & Terminal Window
+- `Ctrl/Cmd + \`` - Toggle between Chat and Terminal view
+- `Escape` - (in input field) Blur input field
+
 ## Screenshots
 
 ### Light Mode
