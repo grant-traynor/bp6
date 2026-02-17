@@ -176,6 +176,9 @@ bd update {{bead_id}} --status in_progress
 
 **2.3. Create Child Beads (if applicable)**
 If this work requires decomposition into smaller tasks:
+
+**CRITICAL**: Use `--parent` to create hierarchical relationships (Epic → Feature → Task).
+
 ```bash
 bd create --parent={{bead_id}} \
   --type=[task|feature] \
@@ -187,6 +190,7 @@ bd create --parent={{bead_id}} \
 
 **Example**:
 ```bash
+# Creating tasks under a feature (CORRECT)
 bd create --parent=bp6-abc \
   --type=task \
   --title="Implement user authentication service" \
@@ -195,26 +199,48 @@ bd create --parent=bp6-abc \
   --design="Use Supabase Auth with custom claims. Follow defensive RPC pattern from .agent/standards/supabase.md"
 ```
 
-**2.4. Add Dependencies (if applicable)**
-If this bead blocks or is blocked by other beads:
+**❌ WRONG - Do NOT do this**:
 ```bash
-# This bead depends on (is blocked by) another bead
+# DO NOT use bd dep add to model parent/child relationships
+bd dep add bp6-child-task bp6-parent-feature  # WRONG - this is a blocker, not a parent
+```
+
+**2.4. Add Sequential Dependencies (if applicable)**
+Use `bd dep add` ONLY for ordering **peer tasks at the SAME level**, NOT for parent/child relationships.
+
+**When to use `bd dep add`**:
+- Task A must complete before Task B can start (both are children of the same parent)
+- Feature X must complete before Feature Y can start (both are children of the same Epic)
+
+**When NOT to use `bd dep add`**:
+- ❌ Creating Epic → Feature hierarchy (use `--parent` instead)
+- ❌ Creating Feature → Task hierarchy (use `--parent` instead)
+
+```bash
+# This bead depends on (is blocked by) another bead AT THE SAME LEVEL
 bd dep add {{bead_id}} {{blocker_id}}
 
-# This bead blocks another bead
+# This bead blocks another bead AT THE SAME LEVEL
 bd dep add {{dependent_id}} {{bead_id}}
 
 # This bead is related to another bead (peer relationship)
 bd dep relate {{bead_id}} {{peer_id}}
 ```
 
-**Example**:
+**✅ CORRECT Example - Ordering sibling tasks**:
 ```bash
+# Both bp6-xyz and bp6-abc are tasks under the same feature
 # Task bp6-xyz depends on bp6-abc being completed first
 bd dep add bp6-xyz bp6-abc
 
-# Task bp6-xyz blocks bp6-def (bp6-def cannot start until bp6-xyz is done)
+# Task bp6-def cannot start until bp6-xyz is done (sequential ordering)
 bd dep add bp6-def bp6-xyz
+```
+
+**❌ WRONG Example - Modeling hierarchy with dependencies**:
+```bash
+# DO NOT use bd dep add for Epic → Feature or Feature → Task relationships
+bd dep add bp6-task bp6-feature  # WRONG - use --parent instead
 ```
 
 ---
@@ -437,14 +463,35 @@ bd reopen {{bead_id}}
 ```
 
 ### Managing Dependencies
+
+**CRITICAL DISTINCTION**: Parent/child vs. blocking dependencies
+
+**Parent/Child Hierarchy** (Epic → Feature → Task):
 ```bash
-# Add a blocking dependency (bead_id depends on blocker_id)
+# ✅ CORRECT: Use --parent to create hierarchical relationships
+bd create --parent=bp6-epic --type=feature --title="Feature under epic"
+bd create --parent=bp6-feature --type=task --title="Task under feature"
+```
+
+**Sequential Ordering** (Task A → Task B at same level):
+```bash
+# ✅ CORRECT: Use bd dep add for peer tasks that must run in order
+bd dep add {{bead_id}} {{blocker_id}}  # bead_id depends on blocker_id
+bd dep add {{dependent_id}} {{bead_id}}  # dependent_id depends on bead_id
+
+# ❌ WRONG: Do NOT use bd dep add to model parent/child hierarchy
+bd dep add bp6-task bp6-feature  # WRONG - this is not a hierarchy
+```
+
+**Full Dependency Commands**:
+```bash
+# Add a blocking dependency (bead_id depends on blocker_id - PEER LEVEL ONLY)
 bd dep add {{bead_id}} {{blocker_id}}
 
-# Add a blocking relationship (bead_id blocks dependent_id)
+# Add a blocking relationship (dependent_id depends on bead_id - PEER LEVEL ONLY)
 bd dep add {{dependent_id}} {{bead_id}}
 
-# Create a peer relationship
+# Create a peer relationship (related but not blocking)
 bd dep relate {{bead_id}} {{peer_id}}
 
 # Remove a dependency
@@ -452,6 +499,21 @@ bd dep remove {{bead_id}} {{blocker_id}}
 
 # Remove a peer relationship
 bd dep unrelate {{bead_id}} {{peer_id}}
+
+# List dependencies
+bd dep list {{bead_id}} --type depends-on  # What blocks this bead?
+bd dep list {{bead_id}} --type blocks      # What does this bead block?
+```
+
+**Visual Example**:
+```
+Epic: User Authentication (bp6-auth)
+  ├─ Feature: OAuth2 Login (bp6-auth-oauth) ← created with --parent=bp6-auth
+  │   ├─ Task: Google Strategy (bp6-auth-oauth.1) ← created with --parent=bp6-auth-oauth
+  │   └─ Task: GitHub Strategy (bp6-auth-oauth.2) ← created with --parent=bp6-auth-oauth
+  │       └─ depends on bp6-auth-oauth.1 ← bd dep add bp6-auth-oauth.2 bp6-auth-oauth.1
+  └─ Feature: JWT Tokens (bp6-auth-jwt) ← created with --parent=bp6-auth
+      └─ depends on bp6-auth-oauth ← bd dep add bp6-auth-jwt bp6-auth-oauth
 ```
 
 ### Searching & Querying
@@ -490,6 +552,69 @@ bd count --status open --type task
 3. Do NOT skip the Context Establishment Protocol (C-E-P)
 4. Use the exact `bd` commands provided - do NOT guess syntax
 5. If blocked or uncertain, ask the user for guidance rather than proceeding with assumptions
+
+---
+
+## COMMON MISTAKES TO AVOID
+
+### ❌ Mistake #1: Using `bd dep add` for Parent/Child Relationships
+
+**WRONG**:
+```bash
+# Creating a feature under an epic
+bd create --type=feature --title="OAuth Login"
+bd dep add bp6-oauth bp6-auth-epic  # WRONG - this creates a blocking dependency, not a hierarchy
+```
+
+**CORRECT**:
+```bash
+# Use --parent to create hierarchical relationships
+bd create --parent=bp6-auth-epic --type=feature --title="OAuth Login"
+```
+
+**Why it matters**: `bd dep add` is for **sequential ordering at the same level**, not for Epic → Feature → Task hierarchy.
+
+---
+
+### ❌ Mistake #2: Confusing "depends on" Direction
+
+**Remember**: `bd dep add A B` means "A depends on B" (B blocks A).
+
+**WRONG**:
+```bash
+# Task A must complete before Task B
+bd dep add bp6-task-a bp6-task-b  # WRONG - this makes A wait for B
+```
+
+**CORRECT**:
+```bash
+# Task A must complete before Task B
+bd dep add bp6-task-b bp6-task-a  # CORRECT - B depends on A (A blocks B)
+```
+
+**Mnemonic**: Think "B depends on A" → `bd dep add B A`
+
+---
+
+### ❌ Mistake #3: Skipping Context Establishment Protocol (C-E-P)
+
+**WRONG**:
+```bash
+# Starting work immediately
+bd update bp6-xyz --status in_progress
+# ... start coding without reading bead context
+```
+
+**CORRECT**:
+```bash
+# ALWAYS run C-E-P first
+bd show bp6-xyz
+bd show bp6-parent
+bd list --parent bp6-xyz
+bd dep list bp6-xyz --type depends-on
+# ... NOW start work
+bd update bp6-xyz --status in_progress
+```
 
 ---
 
