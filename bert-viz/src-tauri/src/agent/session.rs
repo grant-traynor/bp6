@@ -1796,6 +1796,15 @@ pub fn spawn_pty_for_session(
         return Err("Session already has a PTY".to_string());
     }
 
+    // CRITICAL FIX: Kill the existing chat process before spawning PTY
+    // The chat process is using the same session ID, which causes conflicts
+    eprintln!("🔄 Switching session {} to CLI mode - terminating chat process", sessionId);
+    let chat_process_pid = session.process.id();
+    kill_process_group(chat_process_pid);
+
+    // Give the process a moment to terminate cleanly
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
     // Get backend and CLI session ID for resuming
     let backend_id = session.backend_id;
     let cli_session_id = session
@@ -1878,7 +1887,7 @@ pub fn spawn_pty_for_session(
 }
 
 /// Detach PTY from a session (switch back to chat mode)
-/// This kills the PTY process but keeps the main session running
+/// This kills the PTY process and restarts the chat process
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn detach_pty_from_session(
@@ -1886,29 +1895,65 @@ pub fn detach_pty_from_session(
     state: State<AgentState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
-    let pty_session_id = {
+    eprintln!("🔄 Switching session {} from CLI to chat mode", sessionId);
+
+    // Extract session info and kill PTY
+    let (pty_session_id, backend_id, cli_session_id, bead_id, persona) = {
         let mut sessions = state.sessions.lock().unwrap();
-        
+
         let session = sessions
             .get_mut(&sessionId)
             .ok_or_else(|| format!("Session {} not found", sessionId))?;
-        
+
         // Get PTY session ID
         let pty_id = session
             .pty_session_id
             .take() // Remove from session
             .ok_or_else(|| format!("Session {} has no PTY attached", sessionId))?;
-        
+
+        // Get session info for restarting chat process
+        let backend = session.backend_id;
+        let cli_id = session.cli_session_id.clone()
+            .ok_or_else(|| "Session has no CLI session ID".to_string())?;
+        let bead = session.bead_id.clone();
+        let per = session.persona.clone();
+
         // Switch back to chat mode
         session.view_mode = ViewMode::Chat;
-        
-        pty_id
+
+        (pty_id, backend, cli_id, bead, per)
     };
-    
+
     // Kill the PTY session
-    eprintln!("🔌 Detaching PTY session: {}", pty_session_id);
+    eprintln!("🗑️  Killing PTY session: {}", pty_session_id);
     state.pty_manager.kill(&pty_session_id)?;
-    
+
+    // Give the PTY a moment to terminate cleanly
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    // CRITICAL FIX: Restart the chat process so the session can continue
+    // We start it in "empty prompt" mode - it will just resume the session without sending a message
+    eprintln!("🔄 Restarting chat process for session {}", sessionId);
+    let child = run_cli_command_for_session(
+        backend_id,
+        app_handle.clone(),
+        &state,
+        sessionId.clone(),
+        bead_id,
+        persona,
+        String::new(), // Empty prompt - just resume the session
+        true, // resume = true
+        Some(cli_session_id),
+    )?;
+
+    // Update the session with the new process
+    {
+        let mut sessions = state.sessions.lock().unwrap();
+        if let Some(session) = sessions.get_mut(&sessionId) {
+            session.process = child;
+        }
+    }
+
     // Emit view-mode-changed event
     let _ = app_handle.emit(
         "view-mode-changed",
