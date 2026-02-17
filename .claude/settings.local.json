@@ -51,7 +51,23 @@
       "Bash(bd view:*)",
       "Bash(bd:*)",
       "Bash(./test_migration:*)",
-      "Bash(gemini:*)"
+      "Bash(gemini:*)",
+      "Bash(cargo doc:*)",
+      "Bash(cargo tree:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(xargs:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo fix:*)",
+      "Bash(for parent in bp6-wc8 bp6-ha4 bp6-pee)",
+      "Bash(do)",
+      "Bash(echo:*)",
+      "Bash(done)",
+      "Bash(npm uninstall:*)",
+      "Bash(npm search:*)",
+      "Bash(git log:*)",
+      "Bash(npm info:*)"
     ]
   }
 }

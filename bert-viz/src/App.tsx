@@ -27,7 +27,7 @@ import {
   saveStartupState,
   fetchBeads,
 } from "./api";
-import { getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window';
+import { getCurrentWindow, PhysicalPosition, PhysicalSize, currentMonitor } from '@tauri-apps/api/window';
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
 import './stores/sessionStoreDiagnostics'; // Enable diagnostics
 
@@ -390,16 +390,37 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         if (startupState) {
           console.log('✅ Loaded startup state:', startupState);
 
-          // Restore window state
+          // Restore window state with safety clamps to avoid invalid/offscreen positions
           const window = getCurrentWindow();
+          const monitor = await currentMonitor().catch(() => null);
+          const minW = 960;
+          const minH = 640;
+
+          const savedW = startupState.window.width;
+          const savedH = startupState.window.height;
+          const savedX = startupState.window.x;
+          const savedY = startupState.window.y;
+
+          const monitorSize = monitor?.size;
+          const monitorPos = (monitor as any)?.position || { x: 0, y: 0 };
+
+          const maxW = monitorSize?.width || savedW || minW;
+          const maxH = monitorSize?.height || savedH || minH;
+
+          const targetW = Math.min(Math.max(savedW || maxW, minW), maxW);
+          const targetH = Math.min(Math.max(savedH || maxH, minH), maxH);
+
+          const maxX = monitorPos.x + (monitorSize?.width ?? targetW) - targetW;
+          const maxY = monitorPos.y + (monitorSize?.height ?? targetH) - targetH;
+
+          const targetX = Math.min(Math.max(savedX ?? monitorPos.x, monitorPos.x), maxX);
+          const targetY = Math.min(Math.max(savedY ?? monitorPos.y, monitorPos.y), maxY);
+
           if (startupState.window.isMaximized) {
             await window.maximize();
           } else {
-            // Restore window position (supports multi-monitor setups with negative coordinates)
-            if (startupState.window.x !== undefined && startupState.window.y !== undefined) {
-              await window.setPosition(new PhysicalPosition(startupState.window.x, startupState.window.y));
-            }
-            await window.setSize(new PhysicalSize(startupState.window.width, startupState.window.height));
+            await window.setSize(new PhysicalSize(targetW, targetH));
+            await window.setPosition(new PhysicalPosition(targetX, targetY));
           }
 
           // Restore filter state
@@ -1206,7 +1227,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans">
-      <Navigation currentView={view} onViewChange={setView} onOpenChat={handleOpenChat} onOpenPalettePreview={() => setShowPalettePreview(true)} />
+      <Navigation currentView={view} onViewChange={setView} onOpenChat={handleOpenChat} onOpenPalettePreview={() => setShowPalettePreview(true)} selectedBeadId={selectedBead?.id} />
       <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
         <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} currentCli={currentCli} setCurrentCli={setCurrentCli} />
         {!hasProject ? (
@@ -1395,16 +1416,16 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                       <ResizeHandle onMouseDown={handlePanelResizeStart} />
                     </div>
                     <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
-                      <div className="relative" style={{ height: Math.max(800, ganttLayout.rowCount * 48), width: 5000 * zoom }}>
+                      <div className="relative" style={{ height: Math.max(600, ganttLayout.rowCount * ROW_HEIGHT), width: 5000 * zoom }}>
                         {loading && <GanttSkeleton />}
                         {/* Background grid */}
-                        <div className="absolute inset-0 pointer-events-none">
+                          <div className="absolute inset-0 pointer-events-none">
                           {ganttLayout.rowDepths.map((depth, i) => (
                             <div
                               key={i}
                               className="w-full border-b-2"
                               style={{
-                                height: '48px',
+                                height: `${ROW_HEIGHT}px`,
                                 backgroundColor: `var(--level-${Math.min(depth, 4)})`,
                                 borderColor: 'var(--gantt-gridline)'
                               }}
@@ -1425,7 +1446,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                           className="absolute inset-0 pointer-events-none"
                           style={{ zIndex: 30 }}
                           width={5000 * zoom}
-                          height={Math.max(800, ganttLayout.rowCount * 48)}
+                          height={Math.max(600, ganttLayout.rowCount * ROW_HEIGHT)}
                         >
                           {ganttLayout.connectors.map((conn, idx) => {
                             // Keep vertical segment in connector channel (first 20px of each cell)
@@ -1433,7 +1454,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                             const channelOffset = 10 * zoom;
                             const verticalX = conn.fromX + channelOffset;
 
-                            const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
+                                const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
                             return (
                               <path
                                 key={`${conn.fromId}-${conn.toId}-${idx}`}
@@ -1450,7 +1471,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                         </svg>
                         {/* Gantt bars */}
                         {ganttLayout.items.map((item) => (
-                          <div key={item.bead.id} style={{ position: 'absolute', top: item.row * 48, height: 48, left: 0, right: 0 }}>
+                          <div key={item.bead.id} style={{ position: 'absolute', top: item.row * ROW_HEIGHT, height: ROW_HEIGHT, left: 0, right: 0 }}>
                             <GanttBar
                               item={{
                                 bead: item.bead,

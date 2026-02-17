@@ -1,75 +1,99 @@
 @import "tailwindcss";
 
 :root {
-  --background-primary: #f8f9fa;
-  --background-secondary: #f1f3f5;
-  --background-tertiary: #e9ecef;
-  --text-primary: #1a1d23;
-  --text-secondary: #343a40;
-  --text-muted: #495057;
-  --border-primary: #ced4da;
-  --accent-primary: #364fc7;
-  --accent-secondary: #4263eb;
+  --background-primary: #f6f9ff;
+  --background-secondary: #edf2fa;
+  --background-tertiary: #e5ebf5;
+  --text-primary: #0c1a2a;
+  --text-secondary: #24344d;
+  --text-muted: #55657d;
+  --border-primary: #c8d3e5;
+  --accent-primary: #0f8bff;
+  --accent-secondary: #3bc8ff;
+  --accent-violet: #9c5cff;
+  --accent-amber: #f2a93b;
   --level-0: transparent;
-  --level-1: rgba(0, 0, 0, 0.02);
-  --level-2: rgba(0, 0, 0, 0.04);
-  --level-3: rgba(0, 0, 0, 0.06);
-  --level-4: rgba(0, 0, 0, 0.08);
+  --level-1: rgba(12, 26, 42, 0.02);
+  --level-2: rgba(12, 26, 42, 0.04);
+  --level-3: rgba(12, 26, 42, 0.06);
+  --level-4: rgba(12, 26, 42, 0.08);
 
-  /* Shadow Scale - Brutalist Design */
+  /* Shadow Scale */
   --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.06);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-  --shadow-panel: 0 0 60px rgba(0, 0, 0, 0.15);
-  --shadow-glow-accent: 0 0 20px rgba(79, 70, 229, 0.3);
+  --shadow-md: 0 4px 8px rgba(0, 18, 46, 0.08);
+  --shadow-lg: 0 12px 28px rgba(0, 18, 46, 0.12);
+  --shadow-xl: 0 20px 40px rgba(0, 18, 46, 0.16);
+  --shadow-panel: 0 0 50px rgba(0, 18, 46, 0.14);
+  --shadow-glow-accent: 0 0 20px rgba(15, 139, 255, 0.18);
 
   /* Border Scale */
   --border-thin: 1px;
   --border-thick: 2px;
 
-  --status-open: #10b981;
-  --status-active: #f59e0b;
-  --status-blocked: #f43f5e;
-  --status-done: #71717a;
+  --status-open: #2fc6a0;
+  --status-active: #0f8bff;
+  --status-blocked: #f06d76;
+  --status-done: #6b768c;
+
+  /* Gantt + focus tokens */
+  --gantt-connector: #6b7a90;
+  --gantt-connector-critical: #ff6b6b;
+  --gantt-gridline: rgba(0, 23, 46, 0.08);
+  --gantt-summary: #4c6b8c;
+  --gantt-milestone: #0f8bff;
+  --focus-ring: rgba(15, 139, 255, 0.25);
+  --selection-bg: rgba(15, 139, 255, 0.15);
+  --logo-filter: none;
 
   color-scheme: light;
 }
 
 .dark {
-  --background-primary: #0b0e14;
-  --background-secondary: #141820;
-  --background-tertiary: #1c212c;
-  --text-primary: #f8f9fa;
-  --text-secondary: #dee2e6;
-  --text-muted: #adb5bd;
-  --border-primary: #343a40;
-  --accent-primary: #4c6ef5;
-  --accent-secondary: #748ffc;
+  --background-primary: #05070d;
+  --background-secondary: #0e1624;
+  --background-tertiary: #141e2d;
+  --text-primary: #e9f1ff;
+  --text-secondary: #b6c4d9;
+  --text-muted: #7d8aa3;
+  --border-primary: #1f2a3a;
+  --accent-primary: #3ba3ff;
+  --accent-secondary: #5cf1ff;
+  --accent-violet: #9c5cff;
+  --accent-amber: #f2a93b;
   --level-0: transparent;
-  --level-1: rgba(255, 255, 255, 0.015);
-  --level-2: rgba(255, 255, 255, 0.03);
-  --level-3: rgba(255, 255, 255, 0.045);
-  --level-4: rgba(255, 255, 255, 0.06);
+  --level-1: rgba(255, 255, 255, 0.02);
+  --level-2: rgba(255, 255, 255, 0.04);
+  --level-3: rgba(255, 255, 255, 0.06);
+  --level-4: rgba(255, 255, 255, 0.08);
 
-  /* Shadow Scale - Brutalist Design (Dark Mode) */
-  --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.2);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
-  --shadow-panel: 0 0 60px rgba(0, 0, 0, 0.4);
-  --shadow-glow-accent: 0 0 20px rgba(99, 102, 241, 0.4);
+  /* Shadow Scale */
+  --shadow-inset: inset 0 2px 4px rgba(0, 0, 0, 0.25);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.45);
+  --shadow-xl: 0 24px 50px rgba(0, 0, 0, 0.55);
+  --shadow-panel: 0 0 60px rgba(0, 0, 0, 0.5);
+  --shadow-glow-accent: 0 0 20px rgba(59, 163, 255, 0.2);
 
   /* Border Scale */
   --border-thin: 1px;
   --border-thick: 2px;
 
-  --status-open: #34d399;
-  --status-active: #fbbf24;
-  --status-blocked: #fb7185;
-  --status-done: #52525b;
+  --status-open: #2fc6a0;
+  --status-active: #3ba3ff;
+  --status-blocked: #f06d76;
+  --status-done: #6b768c;
+
+  /* Gantt + focus tokens */
+  --gantt-connector: #6b7a90;
+  --gantt-connector-critical: #ff6b6b;
+  --gantt-gridline: rgba(255, 255, 255, 0.06);
+  --gantt-summary: #94a9c5;
+  --gantt-milestone: #5cf1ff;
+  --focus-ring: rgba(92, 241, 255, 0.35);
+  --selection-bg: rgba(59, 163, 255, 0.14);
+  --logo-filter: invert(1) brightness(1.2);
 
   color-scheme: dark;
 }
@@ -111,6 +135,11 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--text-primary);
 }
 
 body {
@@ -169,8 +198,8 @@ body {
 
 /* Subtle pulse for focus states */
 @keyframes focus-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
-  50% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--focus-ring); }
+  50% { box-shadow: 0 0 0 4px var(--focus-ring); }
 }
 
 .focus-ring:focus {
@@ -234,6 +263,25 @@ body {
 
 .animate-pulse-slow {
   animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes gantt-shimmer {
+  0% { background-position: -40% 0; }
+  100% { background-position: 140% 0; }
+}
+
+.gantt-progress {
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.9;
+  background: linear-gradient(120deg,
+    rgba(255,255,255,0.12) 0%,
+    rgba(92,241,255,0.42) 18%,
+    rgba(15,139,255,0.52) 38%,
+    rgba(92,241,255,0.28) 58%,
+    rgba(255,255,255,0.12) 100%);
+  background-size: 200% 100%;
+  animation: gantt-shimmer 1.2s linear infinite;
 }
 
 /* ============================================================================

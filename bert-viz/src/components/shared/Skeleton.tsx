@@ -7,7 +7,7 @@ export const Skeleton = ({ className, style }: { className?: string; style?: Rea
 export const WBSSkeleton = () => (
   <div className="flex flex-col">
     {Array.from({ length: 15 }).map((_, i) => (
-      <div key={i} className="h-[48px] flex items-center px-4 border-b border-[var(--border-primary)]/50">
+      <div key={i} className="h-[40px] flex items-center px-4 border-b border-[var(--border-primary)]/50">
         <div className="w-10 shrink-0 flex items-center justify-center">
             <Skeleton className="w-4 h-4" />
         </div>
@@ -26,13 +26,13 @@ export const WBSSkeleton = () => (
 export const GanttSkeleton = () => (
   <div className="absolute inset-0 flex flex-col">
     {Array.from({ length: 15 }).map((_, i) => (
-      <div key={i} className="h-[48px] w-full border-b border-[var(--border-primary)]/30 relative">
+      <div key={i} className="h-[40px] w-full border-b border-[var(--border-primary)]/30 relative">
         <Skeleton 
           className="absolute h-6 rounded-md opacity-20" 
           style={{ 
             left: `${20 + (i * 15) % 40}%`, 
             width: `${10 + (i * 7) % 30}%`,
-            top: '11px'
+            top: '10px'
           }} 
         />
       </div>

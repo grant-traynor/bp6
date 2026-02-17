@@ -65,12 +65,12 @@ All application configuration has been successfully migrated from the old `~/.be
 ## References to "bert-viz" (Non-Config)
 
 ### Project Structure Reference
-- **Path**: `src-tauri/src/agent/templates.rs` (line 30)
-- **Reference**: `p.join("bert-viz/templates/personas")`
+- **Path**: `src-tauri/src/agent/templates.rs` (line 19)
+- **Reference**: Robust resolution via `while` loop walking up from `exe_path`
 - **Type**: Source code path (relative to binary location)
-- **Status**: ✅ NOT a config file - this is the correct project directory structure
-- **Purpose**: Locates persona template files in the source tree
-- **Note**: This is NOT a configuration directory and does not need to change
+- **Status**: ✅ NOT a config file - this correctly locates source tree templates
+- **Purpose**: Locates persona template files in the source tree by walking up from the binary
+- **Note**: This is NOT a configuration directory and is now more robust for different environments (dev/prod)
 
 ### Package Name References
 - **Cargo.toml**: Package name is `bert-viz` (line 2)

@@ -2,7 +2,7 @@
 use crate::agent::persona::{PersonaContext, PersonaPlugin, PersonaType};
 
 /// Specialist persona for domain-specific implementations
-/// (web, flutter, rust, supabase-db, supabase-edge, etc.)
+/// (flutter, tauri, supabase-db, supabase-edge)
 pub struct SpecialistPersona;
 
 impl SpecialistPersona {
@@ -17,18 +17,27 @@ impl PersonaPlugin for SpecialistPersona {
     }
 
     fn get_template_name(&self, context: &PersonaContext) -> Result<String, String> {
-        // Use role from context to determine template, fallback to chat
-        let template_name = match context.role.as_deref() {
-            Some("web") => "web",
-            Some("flutter") => "flutter",
-            Some("supabase-db") => "supabase-db",
-            Some("supabase-edge") => "supabase-edge",
-            Some("rust") | Some("rust-tauri") => "rust-tauri",
-            Some(role) => return Err(format!("Unknown specialist role: {}", role)),
-            None => "chat", // Fallback to interactive chat mode
-        };
+        let role = context.role.as_deref().unwrap_or("default");
 
-        Ok(template_name.to_string())
+        // Determine task: default to "chat" if not specified
+        let task = context.task.as_deref().unwrap_or("chat");
+
+        // Valid roles
+        let valid_roles = ["flutter", "tauri", "supabase-db", "supabase-edge"];
+        if !valid_roles.contains(&role) {
+            return Err(format!("Unknown specialist role: {}", role));
+        }
+
+        // Valid tasks
+        let valid_tasks = ["chat", "implement", "review"];
+        if !valid_tasks.contains(&task) {
+            return Err(format!("Unknown task for specialist: {}", task));
+        }
+
+        // Template path: role/task e.g., "tauri/implement"
+        let template_name = format!("{}/{}", role, task);
+
+        Ok(template_name)
     }
 }
 
@@ -37,21 +46,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_specialist_web_template() {
-        let persona = SpecialistPersona::new();
-        let context = PersonaContext {
-            task: None,
-            issue_type: None,
-            bead_id: Some("bp6-123".to_string()),
-            role: Some("web".to_string()),
-        };
-
-        let template_name = persona.get_template_name(&context).unwrap();
-        assert_eq!(template_name, "web");
-    }
-
-    #[test]
-    fn test_specialist_flutter_template() {
+    fn test_specialist_flutter_chat() {
         let persona = SpecialistPersona::new();
         let context = PersonaContext {
             task: None,
@@ -61,35 +56,49 @@ mod tests {
         };
 
         let template_name = persona.get_template_name(&context).unwrap();
-        assert_eq!(template_name, "flutter");
+        assert_eq!(template_name, "flutter/chat");
     }
 
     #[test]
-    fn test_specialist_rust_tauri_template() {
+    fn test_specialist_flutter_implement() {
+        let persona = SpecialistPersona::new();
+        let context = PersonaContext {
+            task: Some("implement".to_string()),
+            issue_type: None,
+            bead_id: Some("bp6-123".to_string()),
+            role: Some("flutter".to_string()),
+        };
+
+        let template_name = persona.get_template_name(&context).unwrap();
+        assert_eq!(template_name, "flutter/implement");
+    }
+
+    #[test]
+    fn test_specialist_tauri_chat() {
         let persona = SpecialistPersona::new();
         let context = PersonaContext {
             task: None,
             issue_type: None,
             bead_id: Some("bp6-123".to_string()),
-            role: Some("rust-tauri".to_string()),
+            role: Some("tauri".to_string()),
         };
 
         let template_name = persona.get_template_name(&context).unwrap();
-        assert_eq!(template_name, "rust-tauri");
+        assert_eq!(template_name, "tauri/chat");
     }
 
     #[test]
-    fn test_specialist_rust_template_maps_to_rust_tauri() {
+    fn test_specialist_tauri_implement() {
         let persona = SpecialistPersona::new();
         let context = PersonaContext {
-            task: None,
+            task: Some("implement".to_string()),
             issue_type: None,
             bead_id: Some("bp6-123".to_string()),
-            role: Some("rust".to_string()),
+            role: Some("tauri".to_string()),
         };
 
         let template_name = persona.get_template_name(&context).unwrap();
-        assert_eq!(template_name, "rust-tauri");
+        assert_eq!(template_name, "tauri/implement");
     }
 
     #[test]
@@ -103,11 +112,25 @@ mod tests {
         };
 
         let template_name = persona.get_template_name(&context).unwrap();
-        assert_eq!(template_name, "supabase-edge");
+        assert_eq!(template_name, "supabase-edge/chat");
     }
 
     #[test]
-    fn test_specialist_missing_role_fallback_to_chat() {
+    fn test_specialist_supabase_db_implement() {
+        let persona = SpecialistPersona::new();
+        let context = PersonaContext {
+            task: Some("implement".to_string()),
+            issue_type: None,
+            bead_id: Some("bp6-123".to_string()),
+            role: Some("supabase-db".to_string()),
+        };
+
+        let template_name = persona.get_template_name(&context).unwrap();
+        assert_eq!(template_name, "supabase-db/implement");
+    }
+
+    #[test]
+    fn test_specialist_missing_role_error() {
         let persona = SpecialistPersona::new();
         let context = PersonaContext {
             task: None,
@@ -116,7 +139,35 @@ mod tests {
             role: None,
         };
 
-        let template_name = persona.get_template_name(&context).unwrap();
-        assert_eq!(template_name, "chat");
+        let result = persona.get_template_name(&context);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_specialist_unknown_role_error() {
+        let persona = SpecialistPersona::new();
+        let context = PersonaContext {
+            task: None,
+            issue_type: None,
+            bead_id: Some("bp6-123".to_string()),
+            role: Some("unknown".to_string()),
+        };
+
+        let result = persona.get_template_name(&context);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_specialist_unknown_task_error() {
+        let persona = SpecialistPersona::new();
+        let context = PersonaContext {
+            task: Some("unknown_task".to_string()),
+            issue_type: None,
+            bead_id: Some("bp6-123".to_string()),
+            role: Some("web".to_string()),
+        };
+
+        let result = persona.get_template_name(&context);
+        assert!(result.is_err());
     }
 }

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SpaceX Electric Palette</title>
+<style>
+  :root {
+    --swatch-size: 120px;
+    --gap: 12px;
+    --radius: 10px;
+    --font: "Inter", system-ui, -apple-system, sans-serif;
+  }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: #0b0f1a;
+    font-family: var(--font);
+    color: #e9f1ff;
+  }
+  h1 { margin: 0 0 16px; letter-spacing: 0.08em; text-transform: uppercase; font-size: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+  .card { background: #0e1624; border: 1px solid #1f2a3a; border-radius: 14px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); }
+  .title { font-weight: 800; margin-bottom: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--gap); }
+  .swatch { border-radius: var(--radius); padding: 10px; background: #0b0f1a; border: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 6px; }
+  .chip { height: var(--swatch-size); border-radius: 8px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 10px 24px rgba(0,0,0,0.3); }
+  .label { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: #b6c4d9; }
+  .code { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 12px; color: #7d8aa3; }
+</style>
+</head>
+<body>
+  <h1>SpaceX Electric Palette — Dark & Light</h1>
+  <div class="grid">
+    <!-- Dark -->
+    <div class="card">
+      <div class="title">Dark</div>
+      <div class="row">
+        <div class="swatch"><div class="chip" style="background:#05070D"></div><div class="label">BG Primary</div><div class="code">#05070D</div></div>
+        <div class="swatch"><div class="chip" style="background:#0E1624"></div><div class="label">BG Panel</div><div class="code">#0E1624</div></div>
+        <div class="swatch"><div class="chip" style="background:#141E2D"></div><div class="label">BG Raised</div><div class="code">#141E2D</div></div>
+
+        <div class="swatch"><div class="chip" style="background:#E9F1FF"></div><div class="label">Text Primary</div><div class="code">#E9F1FF</div></div>
+        <div class="swatch"><div class="chip" style="background:#B6C4D9"></div><div class="label">Text Secondary</div><div class="code">#B6C4D9</div></div>
+        <div class="swatch"><div class="chip" style="background:#7D8AA3"></div><div class="label">Text Muted</div><div class="code">#7D8AA3</div></div>
+
+        <div class="swatch"><div class="chip" style="background:#1F2A3A"></div><div class="label">Border</div><div class="code">#1F2A3A</div></div>
+        <div class="swatch"><div class="chip" style="background:#3BA3FF; box-shadow:0 0 0 6px rgba(59,163,255,0.20)"></div><div class="label">Accent Primary</div><div class="code">#3BA3FF</div></div>
+        <div class="swatch"><div class="chip" style="background:#5CF1FF; box-shadow:0 0 0 6px rgba(92,241,255,0.20)"></div><div class="label">Accent Cyan</div><div class="code">#5CF1FF</div></div>
+
+        <div class="swatch"><div class="chip" style="background:#3CE0A8"></div><div class="label">Status Open</div><div class="code">#3CE0A8</div></div>
+        <div class="swatch"><div class="chip" style="background:#3BA3FF"></div><div class="label">Status Active</div><div class="code">#3BA3FF</div></div>
+        <div class="swatch"><div class="chip" style="background:#FF6B6B"></div><div class="label">Status Blocked</div><div class="code">#FF6B6B</div></div>
+        <div class="swatch"><div class="chip" style="background:#6B768C"></div><div class="label">Status Done</div><div class="code">#6B768C</div></div>
+
+        <div class="swatch"><div class="chip" style="background:#6B7A90"></div><div class="label">Gantt Connector</div><div class="code">#6B7A90</div></div>
+        <div class="swatch"><div class="chip" style="background:#FF6B6B"></div><div class="label">Gantt Critical</div><div class="code">#FF6B6B</div></div>
+        <div class="swatch"><div class="chip" style="background:linear-gradient(90deg,rgba(255,255,255,0.06),rgba(255,255,255,0.06))"></div><div class="label">Gantt Gridline</div><div class="code">rgba(255,255,255,0.06)</div></div>
+        <div class="swatch"><div class="chip" style="background:#94A9C5"></div><div class="label">Gantt Summary</div><div class="code">#94A9C5</div></div>
+        <div class="swatch"><div class="chip" style="background:#141E2D; box-shadow:inset 0 0 0 3px #5CF1FF"></div><div class="label">Gantt Milestone</div><div class="code">stroke #5CF1FF</div></div>
+
+        <div class="swatch"><div class="chip" style="background:rgba(92,241,255,0.35)"></div><div class="label">Focus</div><div class="code">rgba(92,241,255,0.35)</div></div>
+        <div class="swatch"><div class="chip" style="background:rgba(59,163,255,0.20)"></div><div class="label">Glow</div><div class="code">rgba(59,163,255,0.20)</div></div>
+      </div>
+    </div>
+
+    <!-- Light -->
+    <div class="card" style="background:#EDF2FA; border-color:#C8D3E5; color:#0C1A2A; box-shadow: 0 10px 24px rgba(0,0,0,0.1);">
+      <div class="title">Light</div>
+      <div class="row">
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#F6F9FF"></div><div class="label" style="color:#55657D">BG Primary</div><div class="code" style="color:#55657D">#F6F9FF</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#EDF2FA"></div><div class="label" style="color:#55657D">BG Panel</div><div class="code" style="color:#55657D">#EDF2FA</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#E5EBF5"></div><div class="label" style="color:#55657D">BG Raised</div><div class="code" style="color:#55657D">#E5EBF5</div></div>
+
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#0C1A2A"></div><div class="label" style="color:#55657D">Text Primary</div><div class="code" style="color:#55657D">#0C1A2A</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#24344D"></div><div class="label" style="color:#55657D">Text Secondary</div><div class="code" style="color:#55657D">#24344D</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#55657D"></div><div class="label" style="color:#55657D">Text Muted</div><div class="code" style="color:#55657D">#55657D</div></div>
+
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#C8D3E5"></div><div class="label" style="color:#55657D">Border</div><div class="code" style="color:#55657D">#C8D3E5</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#0F8BFF; box-shadow:0 0 0 6px rgba(15,139,255,0.18)"></div><div class="label" style="color:#55657D">Accent Primary</div><div class="code" style="color:#55657D">#0F8BFF</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#3BC8FF; box-shadow:0 0 0 6px rgba(59,163,255,0.18)"></div><div class="label" style="color:#55657D">Accent Cyan</div><div class="code" style="color:#55657D">#3BC8FF</div></div>
+
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#3CE0A8"></div><div class="label" style="color:#55657D">Status Open</div><div class="code" style="color:#55657D">#3CE0A8</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#0F8BFF"></div><div class="label" style="color:#55657D">Status Active</div><div class="code" style="color:#55657D">#0F8BFF</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#FF6B6B"></div><div class="label" style="color:#55657D">Status Blocked</div><div class="code" style="color:#55657D">#FF6B6B</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#6B768C"></div><div class="label" style="color:#55657D">Status Done</div><div class="code" style="color:#55657D">#6B768C</div></div>
+
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#6B7A90"></div><div class="label" style="color:#55657D">Gantt Connector</div><div class="code" style="color:#55657D">#6B7A90</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#FF6B6B"></div><div class="label" style="color:#55657D">Gantt Critical</div><div class="code" style="color:#55657D">#FF6B6B</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:linear-gradient(90deg,rgba(0,23,46,0.08),rgba(0,23,46,0.08))"></div><div class="label" style="color:#55657D">Gantt Gridline</div><div class="code" style="color:#55657D">rgba(0,23,46,0.08)</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#4C6B8C"></div><div class="label" style="color:#55657D">Gantt Summary</div><div class="code" style="color:#55657D">#4C6B8C</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:#E5EBF5; box-shadow:inset 0 0 0 3px #0F8BFF"></div><div class="label" style="color:#55657D">Gantt Milestone</div><div class="code" style="color:#55657D">stroke #0F8BFF</div></div>
+
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:rgba(15,139,255,0.25)"></div><div class="label" style="color:#55657D">Focus</div><div class="code" style="color:#55657D">rgba(15,139,255,0.25)</div></div>
+        <div class="swatch" style="background:#F6F9FF; border-color:rgba(0,0,0,0.05)"><div class="chip" style="background:rgba(59,163,255,0.18)"></div><div class="label" style="color:#55657D">Glow</div><div class="code" style="color:#55657D">rgba(59,163,255,0.18)</div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+
+

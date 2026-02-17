@@ -61,11 +61,6 @@ export const Header = ({
   return (
     <header className="h-16 border-b-2 border-[var(--border-primary)] flex items-center px-6 justify-between bg-[var(--background-primary)]/90 backdrop-blur-xl z-30">
       <div className="flex items-center gap-6">
-        <div className="flex items-center gap-3">
-           <div className="w-8 h-8 bg-indigo-700 rounded-lg flex items-center justify-center font-black text-xs shadow-[var(--shadow-lg)] text-white">B</div>
-           <h1 className="text-base font-black tracking-tighter uppercase text-[var(--text-primary)]">BERT <span className="text-indigo-700 dark:text-indigo-400 font-mono">BP6</span></h1>
-        </div>
-        <div className="h-6 w-px bg-[var(--border-primary)]" />
         <div className="flex items-center gap-4">
            <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-emerald-600 shadow-[0_0_10px_rgba(5,150,105,0.5)] animate-pulse" />

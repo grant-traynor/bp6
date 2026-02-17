@@ -3,12 +3,12 @@ import { cn } from "../../utils";
 export const getChipStyles = (label: string | undefined) => {
   if (!label) return "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]";
   const l = label.toLowerCase();
-  if (l === 'epic') return "bg-purple-500/20 text-purple-800 dark:text-purple-300 border-purple-500/40";
-  if (l === 'bug') return "bg-rose-500/20 text-rose-800 dark:text-rose-300 border-rose-500/40";
-  if (l === 'feature') return "bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-500/40";
-  if (l === 'task') return "bg-indigo-500/20 text-indigo-800 dark:text-indigo-300 border-indigo-500/40";
-  if (l.includes('infra')) return "bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-500/40";
-  if (l.includes('doc')) return "bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border-cyan-500/40";
+  if (l === 'epic') return "bg-[rgba(156,92,255,0.14)] text-[#9C5CFF] border-[rgba(156,92,255,0.35)]";
+  if (l === 'bug') return "bg-[rgba(240,109,118,0.18)] text-[#F06D76] border-[rgba(240,109,118,0.35)]";
+  if (l === 'feature') return "bg-[rgba(59,200,255,0.16)] text-[#3BC8FF] border-[rgba(59,200,255,0.35)]";
+  if (l === 'task') return "bg-[rgba(15,139,255,0.12)] text-[#0F8BFF] border-[rgba(15,139,255,0.35)]";
+  if (l.includes('infra')) return "bg-[rgba(242,169,59,0.16)] text-[#F2A93B] border-[rgba(242,169,59,0.35)]";
+  if (l.includes('doc')) return "bg-[rgba(92,241,255,0.16)] text-[#5CF1FF] border-[rgba(92,241,255,0.35)]";
   return "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]";
 };
 

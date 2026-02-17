@@ -14,22 +14,35 @@ pub struct TemplateLoader {
 impl TemplateLoader {
     /// Create a new template loader with the default template directory
     ///
-    /// Looks for templates relative to the binary location in `../../templates/personas/`
+    /// Searches for `templates/personas/` by walking up from the binary location.
     pub fn new() -> Result<Self, String> {
         // Get the directory containing the binary
         let exe_path =
             std::env::current_exe().map_err(|e| format!("Failed to get executable path: {}", e))?;
 
-        // Templates are located at: binary/../../../templates/personas/
-        // (binary is in target/debug/ or target/release/)
-        let template_root = exe_path
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .map(|p| p.join("bert-viz/templates/personas"))
-            .ok_or_else(|| "Failed to determine template root path".to_string())?;
+        // Walk up from the executable to find the templates directory
+        let mut current_dir = exe_path.parent();
+        while let Some(dir) = current_dir {
+            // Check for templates/personas directly in this directory
+            let template_path = dir.join("templates/personas");
+            if template_path.is_dir() {
+                return Ok(TemplateLoader {
+                    template_root: template_path,
+                });
+            }
 
-        Ok(TemplateLoader { template_root })
+            // Also check for bert-viz/templates/personas (for the case where we're one level above bert-viz)
+            let nested_path = dir.join("bert-viz/templates/personas");
+            if nested_path.is_dir() {
+                return Ok(TemplateLoader {
+                    template_root: nested_path,
+                });
+            }
+
+            current_dir = dir.parent();
+        }
+
+        Err("Failed to determine template root path: Could not find 'templates/personas' or 'bert-viz/templates/personas' in any parent directory of the executable".to_string())
     }
 
     /// Create a template loader with a custom template directory

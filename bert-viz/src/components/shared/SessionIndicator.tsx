@@ -36,7 +36,7 @@ export const SessionIndicator = ({ sessions, className }: SessionIndicatorProps)
 
       {/* Count Badge (if > 1) */}
       {count > 1 && (
-        <div className="absolute -bottom-1 -left-1 text-[8px] font-black bg-indigo-600 text-white rounded-full w-3.5 h-3.5 flex items-center justify-center border border-white dark:border-gray-900 shadow-sm">
+        <div className="absolute -bottom-1 -left-1 text-[8px] font-black bg-[var(--accent-primary)] text-white rounded-full w-3.5 h-3.5 flex items-center justify-center border border-white dark:border-gray-900 shadow-sm">
           {count}
         </div>
       )}
