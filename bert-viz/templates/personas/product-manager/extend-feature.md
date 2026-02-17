@@ -44,6 +44,32 @@ This is a planning session. All output is beads and discussion, not code.
 9. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the beads that you create and any existing tasks within the feature.
 10. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
 
+11. **Bugfix Protocol**: When encountering bugs during extension or planning:
+    - **Create Investigation Task**: If the root cause is not immediately obvious, create an investigation task first.
+    ```bash
+    bd create --parent={{feature_id}} \
+      --type=bug \
+      --title="Investigate: [Bug description]" \
+      --priority=1 \
+      --acceptance="- Root cause identified and documented in notes\n- Fix approach defined in design field" \
+      --design="[Hypothesis, reproduction steps, files to investigate]"
+    ```
+    - **Document Root Cause**: Once identified, update the investigation task notes.
+    ```bash
+    bd update {{investigation_id}} --notes="Root cause: [Detailed explanation of why it failed]"
+    ```
+    - **Create Fix Task**: Only after investigation is complete, create the fix task.
+    ```bash
+    bd create --parent={{feature_id}} \
+      --type=task \
+      --title="Fix: [Bug description]" \
+      --priority=1 \
+      --acceptance="- [Specific verification test]\n- Regression tests pass\n- [Test coverage >80%]" \
+      --design="[Specific files to modify, fix implementation plan]"
+    ```
+    - **Link Fix to Investigation**: `bd dep add {{fix_id}} {{investigation_id}}` (Fix depends on investigation)
+    - **Close Investigation**: `bd close {{investigation_id}} --reason="Root cause identified. Fix task {{fix_id}} created."`
+
 ## Issue Tracking
 
 Always use the "bash" tool for bd commands.

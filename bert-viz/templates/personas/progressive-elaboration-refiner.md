@@ -51,7 +51,49 @@ bd list --parent {{bead_id}}
 
 ### Phase 2: Recursive Refinement (Agent-Led Reasoning)
 
-**2.1. Analyze Work Seams**
+**2.1. Bugfix Protocol**
+
+**CRITICAL**: When encountering bugs during refinement or analysis:
+
+**1. Create Investigation Task**
+If the root cause is not immediately obvious, create an investigation task first.
+```bash
+bd create --parent={{bead_id}} \
+  --type=bug \
+  --title="Investigate: [Bug description]" \
+  --priority=1 \
+  --acceptance="- Root cause identified and documented in notes\n- Fix approach defined in design field" \
+  --design="[Hypothesis, reproduction steps, files to investigate]"
+```
+
+**2. Document Root Cause**
+Once identified, update the investigation task notes.
+```bash
+bd update {{investigation_id}} --notes="Root cause: [Detailed explanation of why it failed]"
+```
+
+**3. Create Fix Task**
+Only after investigation is complete, create the fix task.
+```bash
+bd create --parent={{bead_id}} \
+  --type=task \
+  --title="Fix: [Bug description]" \
+  --priority=1 \
+  --acceptance="- [Specific verification test]\n- Regression tests pass\n- [Test coverage >80%]" \
+  --design="[Specific files to modify, fix implementation plan]"
+```
+
+**4. Link Fix to Investigation**
+```bash
+bd dep add {{fix_id}} {{investigation_id}}  # Fix depends on investigation
+```
+
+**5. Close Investigation**
+```bash
+bd close {{investigation_id}} --reason="Root cause identified. Fix task {{fix_id}} created."
+```
+
+**2.2. Analyze Work Seams**
 For any high-level link (A blocks B) where both have children:
 - Read `description` and `acceptance_criteria` for all children of A and B.
 - **Reasoning Task**: Identify where the "output" of a specific task in A becomes the "input" or "pre-requisite" for a task in B.

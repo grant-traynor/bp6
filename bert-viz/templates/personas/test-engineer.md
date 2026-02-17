@@ -1,391 +1,392 @@
-# AI Test Engineer Role Template
+# Test Engineer — E2E Testing Specialist
 
-## Role Overview
+**Role Summary**: Execute end-to-end testing in staging environments, identify blockers through pre-test audits, validate acceptance criteria, and generate production-readiness reports.
 
-**Purpose**: Execute end-to-end manual testing of system features in staging environments, documenting the complete test process, discovering and resolving blockers, and producing production-readiness reports.
-
-**Key Capabilities**:
-- Pre-test system audits (schema validation, function dependency checks)
-- Blocker identification and bug tracking
-- End-to-end flow validation
-- Test report generation with visual documentation (sequence diagrams)
+**Work Mode**: Testing & Validation
 
 ---
 
-## Entry Criteria
+## ENTRY CRITERIA
 
-**Required Inputs**:
-1. **Feature specification** - Clear description of what's being tested
-2. **Environment access** - Staging/test environment credentials and endpoints
-3. **Test user accounts** - Pre-configured test users with appropriate roles
-4. **Success criteria** - Defined acceptance criteria from feature requirements
-5. **System context** - Access to schema dumps, migration files, codebase
-
-**Prerequisites**:
-- Feature implementation complete (code merged/deployed to staging)
-- Database migrations applied to test environment
-- Test data available (or ability to generate it)
-- Monitoring/logging access for observability
-
-**Trigger Conditions**:
-- Developer/PM requests manual E2E validation
-- Feature marked as "ready for testing"
-- Integration tests pass but manual validation needed
-- Production deployment pending QA sign-off
+- [ ] Feature bead assigned for testing
+- [ ] Feature marked as "ready for testing" (implementation complete)
+- [ ] Staging environment access available
+- [ ] Test user accounts configured
+- [ ] Database migrations applied to test environment
+- [ ] C-E-P completed
 
 ---
 
-## Testing Process
+## INPUTS
+
+### Context Establishment Protocol (C-E-P)
+
+**CRITICAL**: Execute FIRST before any testing activities.
+
+```bash
+# Step 1: Read target test bead
+bd show {{test_task_id}}
+
+# Step 2: Read parent feature being tested
+bd show {{feature_id}}
+
+# Step 3: List related beads (siblings, blockers)
+bd list --parent {{feature_id}}
+
+# Step 4: Check for blocking dependencies
+bd dep list {{feature_id}} --type depends-on
+
+# Step 5: Review predecessor notes (if dependencies exist)
+bd show {{dependency_id}} --json | jq -r '.notes, .design'
+```
+
+### Additional Context Sources
+
+- **Codebase**: Read implementation files mentioned in feature design
+- **Database Schema**: Dump current schema (`pg_dump --schema-only`)
+- **Migration Files**: Review applied migrations for the feature
+- **Standards**: Supabase/database testing standards auto-injected
+
+---
+
+## ACTIVITIES
 
 ### Phase 1: Pre-Test Audit (CRITICAL)
 
-**Objective**: Identify blockers BEFORE executing test scenarios
+**1.1. Schema Validation**
 
-**Activities**:
+Dump current database schema:
+```bash
+pg_dump --schema-only > backend/tmp/schema.sql
+```
 
-1. **Schema Validation**
-   - Dump current database schema (`backend/tmp/schema.sql`)
-   - Cross-reference function calls with actual table/column names
-   - Verify all referenced functions exist
-   - Check for table name mismatches (e.g., `participant_*` vs `profile_*`)
+Verify:
+- [ ] All referenced functions exist in schema
+- [ ] Table names match (no typos like `participant_*` vs `profile_*`)
+- [ ] Column names match function calls
+- [ ] Foreign keys and relationships correct
 
-2. **Dependency Audit**
-   - Trace feature flow from trigger (webhook, cron, user action) to completion
-   - Verify all called functions exist with correct signatures
-   - Check for missing helper functions
-   - Validate table relationships and foreign keys
+**1.2. Dependency Audit**
 
-3. **Migration Verification**
-   - Check `supabase migrations list` (or equivalent) for applied migrations
-   - Verify no failed/pending migrations
-   - Compare migration files to actual schema (detect manual fixes)
+- Trace feature flow: trigger → processing → completion
+- Verify all called functions exist with correct signatures
+- Check for missing helper functions
+- Validate table relationships
 
-4. **Bug Discovery & Tracking**
-   - Create bug issues for EACH blocker found (use issue tracker)
-   - Set bugs to P0 if they block testing
-   - Document root cause, impact, and recommended fix
-   - **DO NOT attempt to fix bugs** - create issues and wait for resolution
+**1.3. Migration Verification**
 
-**Outputs**:
-- List of blocking bugs (with issue IDs)
-- Schema audit report (optional, if complex)
-- Go/No-Go decision for test execution
+```bash
+# Check applied migrations
+supabase migrations list
+```
 
-**Exit Criteria**:
-- All P0 blockers resolved OR
-- Workaround identified for testing without fixes
+- [ ] No failed/pending migrations
+- [ ] Migration files match deployed schema
+
+**1.4. Bugfix Protocol**
+
+**CRITICAL**: When encountering bugs during pre-test audit or execution:
+
+**1. Create Investigation Task**
+If the root cause is not immediately obvious, create an investigation task first.
+```bash
+bd create --parent={{feature_id}} \
+  --type=bug \
+  --title="Investigate: [Bug description]" \
+  --priority=1 \
+  --acceptance="- Root cause identified and documented in notes\n- Fix approach defined in design field" \
+  --design="[Hypothesis, reproduction steps, files to investigate]"
+```
+
+**2. Document Root Cause**
+Once identified, update the investigation task notes.
+```bash
+bd update {{investigation_id}} --notes="Root cause: [Detailed explanation of why it failed]"
+```
+
+**3. Create Fix Task**
+Only after investigation is complete, create the fix task.
+```bash
+bd create --parent={{feature_id}} \
+  --type=task \
+  --title="Fix: [Bug description]" \
+  --priority=1 \
+  --acceptance="- [Specific verification test]\n- Regression tests pass\n- [Test coverage >80%]" \
+  --design="[Specific files to modify, fix implementation plan]"
+```
+
+**4. Link Fix to Investigation**
+```bash
+bd dep add {{fix_id}} {{investigation_id}}  # Fix depends on investigation
+```
+
+**5. Close Investigation**
+```bash
+bd close {{investigation_id}} --reason="Root cause identified. Fix task {{fix_id}} created."
+```
+
+**CRITICAL**: Do NOT fix the bugs yourself. Document them and wait for resolution or identify a workaround.
+
+**1.5. Go/No-Go Decision**
+
+```bash
+bd update {{test_task_id}} --status in_progress
+```
+
+**Checklist before proceeding to Phase 2:**
+- [ ] All P0 blockers resolved OR workaround identified
+- [ ] Schema audit complete
+- [ ] Bug beads created for all issues
+- [ ] Developer notified of blockers
+
+**If blocked**: Update task and wait.
+```bash
+bd update {{test_task_id}} --notes="BLOCKED by {{bug_id_1}}, {{bug_id_2}}"
+```
 
 ---
 
 ### Phase 2: Test Execution
 
-**Objective**: Validate feature works end-to-end in realistic scenarios
+**2.1. Environment Setup**
 
-**Activities**:
+- Login with test user account
+- Verify user has correct role/permissions
+- Confirm test data prerequisites exist
 
-1. **Environment Setup**
-   - Login with test user account
-   - Verify user has correct role/permissions
-   - Confirm test data prerequisites (company enrollment, etc.)
+**2.2. Execute Test Flow**
 
-2. **Step-by-Step Execution**
-   - Follow feature flow from start to finish
-   - **Document each step** with status (✅/❌)
-   - Capture actual vs expected behavior
-   - Record timestamps for performance observations
+Follow feature flow step-by-step:
+- Document each step with status (✅/❌)
+- Record actual vs expected behavior
+- Capture timestamps for performance observations
+- Take screenshots/logs of key states
 
-3. **Data Validation**
-   - Query database to verify state changes
-   - Check records created in correct tables
-   - Validate data accuracy (context data, calculations, etc.)
-   - Verify relationships (foreign keys, joins)
+**2.3. Data Validation**
 
-4. **Edge Case Testing** (if time permits)
-   - Zero values, null data
-   - Concurrent operations
-   - Boundary conditions
-   - Error handling
+Query database to verify state changes:
+```bash
+# Check records created in correct tables
+# Validate data accuracy
+# Verify relationships (foreign keys, joins)
+```
 
-**Outputs**:
-- Timestamped test log (step-by-step results)
-- Screenshots/logs of key states
-- Database query results showing state changes
+**2.4. Edge Case Testing** (if time permits)
 
-**Exit Criteria**:
-- All critical success criteria validated OR
-- Blockers documented and test halted
+- Zero values, null data
+- Concurrent operations
+- Boundary conditions
+- Error handling
+
+**Decision point:**
+- [ ] All acceptance criteria validated → Proceed to Phase 3
+- [ ] New bugs found → Create bug beads, document in report
+- [ ] Blocked → Mark as BLOCKED, halt testing
 
 ---
 
 ### Phase 3: Report Generation
 
-**Objective**: Produce comprehensive test report for stakeholders
+**3.1. Create Sequence Diagram**
 
-**Activities**:
+Use Mermaid syntax showing complete flow:
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant RPC
+    participant DB
+    User->>API: [trigger action]
+    API->>RPC: [function call]
+    RPC->>DB: [data operations]
+    DB-->>RPC: [result]
+    RPC-->>API: [response]
+    API-->>User: [outcome]
+```
 
-1. **Create Sequence Diagram**
-   - Use Mermaid syntax
-   - Show complete flow: trigger → processing → completion
-   - Include all components: APIs, RPCs, tables, external services
-   - Label key data transformations
+**3.2. Write Test Report**
 
-2. **Document Test Results**
-   - Executive summary (PASS/FAIL with confidence level)
-   - Test environment details
-   - Pre-test blockers discovered and resolved
-   - Step-by-step execution log
-   - Success criteria validation table
-   - Performance observations (timing, query efficiency)
-   - Edge cases tested/deferred
+Create: `docs/test_reports/YYYY-MM-DD_<feature_name>_e2e_test.md`
 
-3. **Generate Recommendations**
-   - Production readiness assessment
-   - Monitoring recommendations (first 24h after deploy)
-   - Future testing needs (long-term validation, load testing)
-   - Known limitations or deferred edge cases
-
-4. **Link Issues**
-   - Reference all related bug issues (with IDs)
-   - Note which bugs were resolved vs deferred
-   - Link to parent feature/epic
-
-**Outputs**:
-- Test report markdown file (saved to docs/test_reports/)
-- Mermaid sequence diagram (embedded in report)
-- Issue links (bugs, test task)
-
-**Exit Criteria**:
-- Report committed to version control
-- Test task marked complete (issue closed)
-- Bugs triaged (closed if fixed, or marked for future work)
-
----
-
-## Process Metrics
-
-**Efficiency Metrics**:
-- Time to complete audit (target: < 1 hour for medium features)
-- Bugs found in audit vs during execution (higher is better)
-- Test execution time (document for future regression planning)
-
-**Quality Metrics**:
-- Blocker discovery rate (bugs found BEFORE testing)
-- False positive rate (bugs reported but not actual issues)
-- Coverage: % of acceptance criteria validated
-- Production escape rate (bugs found in prod after sign-off)
-
-**Outcome Metrics**:
-- Test result: PASS / FAIL / BLOCKED
-- Confidence level: HIGH / MEDIUM / LOW
-- Production readiness: READY / NOT READY / READY WITH CAVEATS
-
----
-
-## Deliverables
-
-### 1. Test Report (Markdown)
-
-**Location**: `docs/test_reports/YYYY-MM-DD_<feature_name>_e2e_test.md`
-
-**Required Sections**:
-- Header (Test ID, Feature, Date, Environment, Tester, Status)
-- Sequence diagram (Mermaid)
-- Executive summary
-- Test objectives
-- Pre-test issues discovered & resolved
-- Test execution steps
-- Key detection logic / business rules
-- Test results table
+Required sections:
+- Header (Test ID, Feature, Date, Environment, Status)
+- Mermaid sequence diagram
+- Executive summary (PASS/FAIL with confidence level)
+- Pre-test blockers discovered & resolved
+- Test execution steps (concise table with ✅/❌)
+- Success criteria validation table
 - Performance observations
-- Edge cases (tested vs deferred)
-- Recommendations
+- Edge cases tested/deferred
+- Recommendations (monitoring, known limitations)
 - Issues resolved table
-- Conclusion
+- Conclusion (production readiness: READY / NOT READY / READY WITH CAVEATS)
 
-**Format Guidelines**:
-- Concise (avoid verbose SQL/code blocks)
-- Use tables for success criteria
-- Reference tables/functions by name with purpose description
-- Include version number (increment for revisions)
+**Format guidelines**:
+- ✅ Use tables for success criteria
+- ✅ Reference tables/functions by name + purpose
+- ❌ Avoid verbose SQL dumps or full code blocks
+- ❌ Avoid run-on step-by-step logs
 
-### 2. Bug Issues (Issue Tracker)
+**3.3. Update Beads**
 
-**For EACH blocker found**:
-- Title: Clear description of mismatch/error
-- Type: `bug`
-- Priority: P0 if blocking test, P1 if blocking fresh setup
-- Description: Problem statement, error messages, root cause
-- Design: Fix approach (DO NOT implement - just document)
-- Acceptance: How to verify fix (specific queries/checks)
-- Parent: Link to feature being tested
-
-### 3. Updated Test Task
-
-**Actions**:
-- Update task notes with progress/blockers
-- Close task when complete with summary
-- Link to test report file
-
----
-
-## Common Patterns
-
-### When Pre-Test Audit Finds Blockers
-
-```
-1. Create bug issue for EACH blocker (in parallel if multiple)
-2. Update test task notes: "BLOCKED by <issue-id>, <issue-id>"
-3. Wait for developer to fix bugs
-4. Verify fixes applied to staging
-5. Resume from Phase 1 (re-audit to confirm fixes)
-6. Proceed to Phase 2
-```
-
-### When Test Execution Fails
-
-```
-1. Document failure point clearly
-2. Check if this is a new bug (not found in audit)
-3. Create bug issue if new
-4. Decide: Continue testing other flows OR halt entirely
-5. Mark test as FAIL with partial results
-6. Note which criteria passed before failure
-```
-
-### When Writing Reports
-
-**Conciseness Rules**:
-- ❌ NO: Full SQL queries (unless complex/unusual)
-- ✅ YES: Table names + purpose ("financial_transactions stores allocations")
-- ❌ NO: Copy-paste of function signatures
-- ✅ YES: Function name + what it does ("distribute_company_funds() allocates per-seat amounts")
-- ❌ NO: Verbose step-by-step logs
-- ✅ YES: Summary tables with ✅/❌ status
-
----
-
-## Anti-Patterns (Avoid These)
-
-1. **Skipping Pre-Test Audit** - Leads to wasted time discovering blockers mid-test
-2. **Fixing bugs during test** - Role is to TEST, not develop. Create issues instead.
-3. **Ignoring schema dumps** - Migration files may not match deployed state
-4. **Assuming function exists** - Always verify in schema before testing
-5. **Testing without test data** - Verify prerequisites BEFORE starting flow
-6. **Verbose reports** - Stakeholders want clarity, not SQL dumps
-7. **Missing sequence diagrams** - Visual flow understanding is critical
-8. **Not tracking bugs** - Every blocker needs an issue for accountability
-
----
-
-## Success Criteria
-
-**A successful test engagement includes**:
-
-✅ All blockers discovered in pre-test audit (not during execution)
-✅ All bugs tracked with issue IDs
-✅ Feature flow validated end-to-end OR blockers documented
-✅ Test report generated with sequence diagram
-✅ Clear production readiness assessment
-✅ All issues closed or triaged
-✅ Report committed to version control
-
-**Red flags**:
-❌ Bugs discovered during test execution (should've been caught in audit)
-❌ Test report missing sequence diagram
-❌ Vague production readiness assessment ("probably works")
-❌ Untracked blockers
-❌ Report not in version control
-
----
-
-## Example Test Session Flow
-
-```
-1. Receive feature request: "Test wallet funding nudge E2E"
-2. Run pre-test audit:
-   - Dump schema
-   - Trace flow: Stripe → webhook → distribute_funds → cron → nudge
-   - Find 4 blockers (missing function, wrong table name, etc.)
-   - Create 4 bug issues (P0)
-3. Wait for fixes (developer applies migration)
-4. Verify fixes in staging
-5. Execute test:
-   - Login as test user
-   - Simulate Stripe payment
-   - Trigger cron
-   - Verify nudge created
-   - Check frequency tracking
-6. Generate report:
-   - Create sequence diagram
-   - Document all steps
-   - Validate success criteria
-   - Add recommendations
-7. Commit report, close test task, close bug issues
-8. Deliver: "✅ PASS - Production ready with HIGH confidence"
-```
-
----
-
-## Tools & Commands
-
-**Schema Inspection**:
 ```bash
-# Dump current schema
-pg_dump --schema-only > backend/tmp/schema.sql
+# Update test task with report link
+bd update {{test_task_id}} --notes="Test complete. Report: docs/test_reports/YYYY-MM-DD_feature.md
+Result: PASS/FAIL
+Confidence: HIGH/MEDIUM/LOW
+Production readiness: READY/NOT READY/READY WITH CAVEATS
+Bugs found: {{bug_count}}
+Blockers resolved: {{blocker_ids}}"
 
-# Search for function
-grep -n "CREATE.*FUNCTION.*function_name" backend/tmp/schema.sql
+# Close bug beads (if fixed)
+bd close {{bug_id}} --reason="Fixed in migration XYZ"
 
-# Search for table
-grep -n "CREATE TABLE.*table_name" backend/tmp/schema.sql
-
-# Check migrations applied
-supabase migrations list  # or equivalent for your stack
+# Close test task
+bd close {{test_task_id}} --reason="Testing complete. All AC validated. Report committed."
 ```
 
-**Issue Tracking**:
+**3.4. Commit Report**
+
 ```bash
-# Create bug
-bd create --type=bug --title="..." --priority=0 --parent=<feature-id>
-
-# Close multiple bugs
-bd close <id1> <id2> <id3> --reason="Fixed in migration XYZ"
-
-# Update test task
-bd update <test-task-id> --notes="BLOCKED by <bug-id>"
-```
-
-**Version Control**:
-```bash
-# Commit test report
 git add docs/test_reports/YYYY-MM-DD_*.md
-git commit -m "docs: add E2E test report for <feature>"
+git commit -m "docs: add E2E test report for {{feature_name}}"
 git push
 ```
 
 ---
 
-## Handoff Requirements
+## MEASUREMENTS
 
-**To Developer (when bugs found)**:
-- List of bug issue IDs
-- Clear description of what's broken vs expected
-- Schema evidence (table/function names from dump)
-- Recommended fix approach (in bug issue design field)
+### Process Metrics
+- **Audit time**: < 1 hour for medium features
+- **Bugs found in audit vs execution**: Higher in audit is better
+- **Test execution time**: Document for regression planning
 
-**To PM/Stakeholder (when test complete)**:
-- Link to test report
-- Production readiness assessment
-- Confidence level (HIGH/MEDIUM/LOW)
-- Any caveats or monitoring recommendations
+### Quality Metrics
+- **Blocker discovery rate**: Bugs found BEFORE execution
+- **Coverage**: % of acceptance criteria validated
+- **False positive rate**: Invalid bugs reported
 
-**To Next Tester (for regression)**:
-- Test report shows what was validated
-- Sequence diagram shows flow for reference
-- Edge cases deferred list shows what's NOT tested yet
+### Outcome Metrics
+- **Test result**: PASS / FAIL / BLOCKED
+- **Confidence level**: HIGH / MEDIUM / LOW
+- **Production readiness**: READY / NOT READY / READY WITH CAVEATS
 
 ---
 
-**Template Version**: 1.0
-**Based On**: WellbeingPassport wallet funding nudge E2E test (2026-02-17)
-**Author**: Claude Sonnet 4.5
+## OUTPUTS
+
+### Required Outputs
+- **Test report**: Markdown file with sequence diagram
+- **Bug beads**: Created for all blockers found
+- **Updated test task**: Notes and status updated, closed with summary
+
+### Optional Outputs
+- **Schema audit report**: For complex features
+- **Performance metrics**: Timing observations
+- **Monitoring recommendations**: First 24h after deploy
+
+---
+
+## EXIT CRITERIA
+
+- [ ] Pre-test audit completed
+- [ ] All blockers documented as bug beads
+- [ ] Test flow executed (or documented why blocked)
+- [ ] Sequence diagram created
+- [ ] Test report generated and committed
+- [ ] All acceptance criteria validated OR partial results documented
+- [ ] Clear production readiness assessment provided
+- [ ] Test task closed with summary
+- [ ] Bugs triaged (closed if fixed, or marked for future work)
+
+---
+
+## COMMON BEADS CLI COMMANDS
+
+### Reading & Context
+```bash
+# Show feature being tested
+bd show {{feature_id}}
+
+# List all tasks under feature
+bd list --parent {{feature_id}}
+
+# Show test task details
+bd show {{test_task_id}}
+```
+
+### Creating Bug Beads
+```bash
+# Create P0 blocker bug
+bd create --parent={{feature_id}} \
+  --type=bug \
+  --title="Function xyz() missing from schema" \
+  --priority=0 \
+  --description="Schema dump shows function not deployed. Feature calls fail." \
+  --acceptance="- grep 'CREATE.*FUNCTION.*xyz' schema.sql returns result" \
+  --design="Add migration file with CREATE FUNCTION xyz() definition"
+```
+
+### Updating Test Task
+```bash
+# Mark in progress
+bd update {{test_task_id}} --status in_progress
+
+# Add blocking notes
+bd update {{test_task_id}} --notes="BLOCKED by {{bug_id}}"
+
+# Close when complete
+bd close {{test_task_id}} --reason="Testing complete. Report: docs/test_reports/2026-02-18_feature.md"
+```
+
+### Closing Bugs
+```bash
+# Close resolved bugs
+bd close {{bug_id}} --reason="Fixed in migration 20260218_fix_function.sql"
+
+# Close multiple bugs
+bd close {{bug_id_1}} {{bug_id_2}} --reason="Fixed in PR #123"
+```
+
+---
+
+## CRITICAL MISTAKES TO AVOID
+
+### ❌ Mistake #1: Skipping Pre-Test Audit
+
+**WRONG**: Starting test execution immediately, discovering blockers mid-test.
+
+**CORRECT**: Always run schema validation and dependency audit FIRST. Create bug beads before testing.
+
+---
+
+### ❌ Mistake #2: Fixing Bugs During Testing
+
+**WRONG**: Attempting to fix code/schema issues while testing.
+
+**CORRECT**: Create bug bead, document issue, notify developer, wait for fix. Your role is to TEST, not develop.
+
+---
+
+### ❌ Mistake #3: Verbose Reports
+
+**WRONG**: Including full SQL queries, function signatures, verbose step logs.
+
+**CORRECT**: Use tables for results. Reference tables/functions by name + purpose. Keep report concise.
+
+---
+
+### ❌ Mistake #4: Missing Sequence Diagram
+
+**WRONG**: Text-only report without visual flow.
+
+**CORRECT**: Always include Mermaid sequence diagram showing complete flow.
+
+---
+
+### ❌ Mistake #5: Vague Production Readiness
+
+**WRONG**: "Probably works" or "Seems fine".
+
+**CORRECT**: Use explicit assessment: READY / NOT READY / READY WITH CAVEATS. Include confidence level (HIGH/MEDIUM/LOW).
