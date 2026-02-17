@@ -218,8 +218,8 @@ export function useAgentSession({
       let historyToLoad: Message[] = [];
       if (!hasCheckedForResumeRef.current) {
         hasCheckedForResumeRef.current = true;
-        console.log('🔍 Checking for recent session:', { beadId: beadId || 'untracked', persona });
-        const recentSession = await findRecentSession(beadId || null, persona);
+        console.log('🔍 Checking for recent session:', { beadId: beadId || 'untracked', persona, cliBackend });
+        const recentSession = await findRecentSession(beadId || null, persona, cliBackend);
         console.log('🔍 findRecentSession result:', recentSession);
         if (recentSession) {
           console.log('🔄 Found recent session - loading history:', recentSession.sessionId);
@@ -314,7 +314,7 @@ export function useAgentSession({
     try {
       await sendAgentMessage(sessionId, message);
       // Update last active timestamp for this session
-      await touchSession(beadId || null, persona);
+      await touchSession(beadId || null, persona, cliBackend);
     } catch (error) {
       console.error('Failed to send message:', error);
       setIsLoading(false);

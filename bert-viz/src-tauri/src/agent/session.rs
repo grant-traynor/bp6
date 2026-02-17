@@ -1573,9 +1573,10 @@ pub fn start_agent_session_headless(
 pub fn find_recent_session(
     beadId: Option<String>,
     persona: String,
+    backendId: String,
 ) -> Result<Option<super::session_index::SessionMetadata>, String> {
     let index = super::session_index::SessionIndex::load()?;
-    Ok(index.get_session(beadId.as_deref(), &persona).cloned())
+    Ok(index.get_session(beadId.as_deref(), &persona, &backendId).cloned())
 }
 
 /// Record a session in the resume index
@@ -1618,9 +1619,10 @@ pub fn record_session_for_resume(
 pub fn touch_session(
     beadId: Option<String>,
     persona: String,
+    backendId: String,
 ) -> Result<(), String> {
     let mut index = super::session_index::SessionIndex::load()?;
-    index.touch_session(beadId.as_deref(), &persona);
+    index.touch_session(beadId.as_deref(), &persona, &backendId);
     index.save()?;
     Ok(())
 }
@@ -1700,14 +1702,15 @@ pub fn handover_to_interactive(
 
 /// Write data to a PTY session
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn write_to_pty(
-    session_id: String,
+    sessionId: String,
     data: String,
     state: State<AgentState>,
 ) -> Result<(), String> {
     use std::time::Instant;
     let start = Instant::now();
-    eprintln!("🔵 write_to_pty START: session={}, data_len={}", session_id, data.len());
+    eprintln!("🔵 write_to_pty START: session={}, data_len={}", sessionId, data.len());
 
     // Extract PTY session ID while holding lock, then release immediately
     let pty_session_id = {
@@ -1716,14 +1719,14 @@ pub fn write_to_pty(
         eprintln!("🔓 AgentState.sessions lock acquired in {:?}", lock_start.elapsed());
 
         let session = sessions
-            .get(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
+            .get(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
 
         // Clone the PTY session ID to use after lock is released
         let pty_id = session
             .pty_session_id
             .as_ref()
-            .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?
+            .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
             .clone();
 
         eprintln!("🔓 AgentState.sessions lock releasing after {:?}", lock_start.elapsed());
@@ -1744,8 +1747,9 @@ pub fn write_to_pty(
 
 /// Resize a PTY session
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn resize_pty(
-    session_id: String,
+    sessionId: String,
     cols: u16,
     rows: u16,
     state: State<AgentState>,
@@ -1755,14 +1759,14 @@ pub fn resize_pty(
         let sessions = state.sessions.lock().unwrap();
 
         let session = sessions
-            .get(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
+            .get(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
 
         // Clone the PTY session ID to use after lock is released
         session
             .pty_session_id
             .as_ref()
-            .ok_or_else(|| format!("Session {} not in terminal mode", session_id))?
+            .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
             .clone()
     }; // Lock released here
 
@@ -1775,16 +1779,17 @@ pub fn resize_pty(
 /// Spawn a PTY for an existing session (for terminal mode)
 /// This spawns the agent CLI with --resume in PTY mode (raw output, not JSON)
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn spawn_pty_for_session(
-    session_id: String,
+    sessionId: String,
     state: State<AgentState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     let mut sessions = state.sessions.lock().unwrap();
 
     let session = sessions
-        .get_mut(&session_id)
-        .ok_or_else(|| format!("Session {} not found", session_id))?;
+        .get_mut(&sessionId)
+        .ok_or_else(|| format!("Session {} not found", sessionId))?;
 
     // Check if already in terminal mode
     if session.pty_session_id.is_some() {
@@ -1809,21 +1814,12 @@ pub fn spawn_pty_for_session(
         .ok_or_else(|| "Could not locate project root (.beads directory)".to_string())?;
 
     // Generate PTY session ID
-    let pty_session_id = format!("pty-{}", session_id);
+    let pty_session_id = format!("pty-{}", sessionId);
 
     // Build args for PTY mode (resume without JSON output)
     // Note: For PTY, we DON'T want --output-format stream-json
     // We want raw terminal output
-    let mut args = Vec::new();
-
-    // Add resume args
-    args.push("--resume".to_string());
-    args.push(cli_session_id.clone());
-
-    // For Gemini, add --yolo flag if needed
-    if backend_id == crate::agent::plugin::BackendId::Gemini {
-        args.push("--yolo".to_string());
-    }
+    let args = backend.build_pty_args(&cli_session_id);
 
     // Spawn agent CLI in PTY
     state.pty_manager.spawn(
@@ -1842,7 +1838,7 @@ pub fn spawn_pty_for_session(
     // Spawn a thread to stream PTY output
     let pty_manager = state.pty_manager.clone();
     let app_handle_clone = app_handle.clone();
-    let session_id_clone = session_id.clone();
+    let session_id_clone = sessionId.clone();
     
     std::thread::spawn(move || {
         loop {
@@ -1884,8 +1880,9 @@ pub fn spawn_pty_for_session(
 /// Detach PTY from a session (switch back to chat mode)
 /// This kills the PTY process but keeps the main session running
 #[tauri::command]
+#[allow(non_snake_case)]
 pub fn detach_pty_from_session(
-    session_id: String,
+    sessionId: String,
     state: State<AgentState>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
@@ -1893,14 +1890,14 @@ pub fn detach_pty_from_session(
         let mut sessions = state.sessions.lock().unwrap();
         
         let session = sessions
-            .get_mut(&session_id)
-            .ok_or_else(|| format!("Session {} not found", session_id))?;
+            .get_mut(&sessionId)
+            .ok_or_else(|| format!("Session {} not found", sessionId))?;
         
         // Get PTY session ID
         let pty_id = session
             .pty_session_id
             .take() // Remove from session
-            .ok_or_else(|| format!("Session {} has no PTY attached", session_id))?;
+            .ok_or_else(|| format!("Session {} has no PTY attached", sessionId))?;
         
         // Switch back to chat mode
         session.view_mode = ViewMode::Chat;
@@ -1916,7 +1913,7 @@ pub fn detach_pty_from_session(
     let _ = app_handle.emit(
         "view-mode-changed",
         serde_json::json!({
-            "sessionId": session_id,
+            "sessionId": sessionId,
             "viewMode": "chat",
         }),
     );

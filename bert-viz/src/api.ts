@@ -812,12 +812,14 @@ export interface SessionMetadata {
  */
 export async function findRecentSession(
   beadId: string | null,
-  persona: string
+  persona: string,
+  backendId: string
 ): Promise<SessionMetadata | null> {
   try {
     return await invoke<SessionMetadata | null>('find_recent_session', {
       beadId,
-      persona
+      persona,
+      backendId
     });
   } catch (error) {
     console.error('Failed to find recent session:', error);
@@ -860,15 +862,18 @@ export async function recordSessionForResume(
  *
  * @param beadId - The bead ID (null for untracked)
  * @param persona - The persona
+ * @param backendId - The backend being used (gemini, claude-code)
  */
 export async function touchSession(
   beadId: string | null,
-  persona: string
+  persona: string,
+  backendId: string
 ): Promise<void> {
   try {
     await invoke('touch_session', {
       beadId,
-      persona
+      persona,
+      backendId
     });
   } catch (error) {
     console.error('Failed to touch session:', error);
