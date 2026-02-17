@@ -46,7 +46,7 @@ Apply the 6-section framework:
 **ACTIVITIES** (3 phases):
 - **Phase 1: Planning** (generic - analyze, create work plan, mark in_progress)
 - **Phase 2: Execution** ← THIS IS THE UNIQUE PART PER PERSONA
-  - Role-specific workflow (e.g., Decomposer creates child tasks, Specialist writes code)
+  - Role-specific workflow (e.g., Product Manager decomposes features, Specialist writes code)
   - Include copy-paste beads commands with {{placeholder}} syntax
   - Use checklists for decision points
 - **Phase 3: Documentation** (generic - update notes/design, close bead)
@@ -72,7 +72,7 @@ Transform verbose prose into **directive, executable formats**:
 
 **❌ BEFORE (verbose)**:
 ```markdown
-The Decomposer is responsible for analyzing high-level beads and breaking
+The Product Manager is responsible for analyzing high-level beads and breaking
 them down into smaller, manageable tasks. You should carefully review the
 feature description and identify logical work boundaries. It's important
 to ensure each task is small enough to complete in a reasonable timeframe...
@@ -197,9 +197,9 @@ Before finalizing the refactored template, verify:
 
 ### Example Transformation
 
-**BEFORE** (`decomposer/decompose.md` - old format, 150 lines):
+**BEFORE** (`product-manager/decompose-feature.md` - old format, 150 lines):
 ```markdown
-# Decomposer — Feature Decomposition Specialist
+# Product Manager — Feature Decomposition
 
 You are an expert in breaking down complex software features into
 small, manageable, and testable tasks.
@@ -214,9 +214,9 @@ a set of child beads.
 [... 120 more lines of prose ...]
 ```
 
-**AFTER** (`decomposer/decompose.md` - E-I-A-M-O-E format, 180 lines):
+**AFTER** (`product-manager/decompose-feature.md` - E-I-A-M-O-E format, 180 lines):
 ```markdown
-# Decomposer — Feature Decomposition Specialist
+# Product Manager — Feature Decomposition
 
 **Role Summary**: Breaks down Epics/Features into small, testable tasks
 
@@ -347,7 +347,7 @@ These conditions must be TRUE before this persona can begin work:
   - Get explicit approval before proceeding
   - Iterate based on feedback
 
-  **Example personas/tasks**: Decomposer, Architect, Product Manager, Orchestrator
+  **Example personas/tasks**: Product Manager, Architect, Orchestrator, Customer
 
   ---
 
@@ -391,9 +391,8 @@ These conditions must be TRUE before this persona can begin work:
 
   | Persona | Task | Default Mode | Rationale |
   |---------|------|--------------|-----------|
-  | **Decomposer** | decompose | Interactive | Breakdown requires user validation |
+  | **Product Manager** | decompose-epic, decompose-feature, extend-* | Interactive | Requirements validation, breakdown needs approval |
   | **Architect** | establish-epic, chat | Interactive | Design decisions need approval |
-  | **Product Manager** | decompose-epic, decompose-feature, extend-* | Interactive | Requirements validation |
   | **Orchestrator** | coordinate | Interactive | Multi-agent coordination needs oversight |
   | **Customer** | bootstrap, refinement, chat | Interactive | User-facing, exploratory |
   | **Specialist** | implement | Autonomous | Clear task, validated by tests |
@@ -402,7 +401,7 @@ These conditions must be TRUE before this persona can begin work:
   | **QA Engineer** | guide-test, fix-dependencies | Autonomous | Test execution, dependency analysis |
 
   **Override Examples**:
-  - User: "Autonomously decompose bp6-auth" → Use Mode 2 even though Decomposer defaults to Mode 1
+  - User: "Autonomously decompose bp6-auth" → Use Mode 2 even though Product Manager defaults to Mode 1
   - User: "Let's work together on bp6-task-123" → Use Mode 1 even if Specialist:implement defaults to Mode 2
 
 - [ ] **Access Verified**: Agent has access to codebase, tools, and necessary credentials
@@ -410,7 +409,7 @@ These conditions must be TRUE before this persona can begin work:
 - [ ] **[Role-Specific Prerequisite]**: [Add any persona-specific prerequisites here]
   - Example (Flutter Specialist): Flutter SDK installed, project compiles
   - Example (QA Engineer): Test environment accessible, test data available
-  - Example (Decomposer): Parent Epic/Feature has clear description and acceptance criteria
+  - Example (Product Manager): Parent Epic/Feature has clear description and acceptance criteria
 
 - [ ] **Context Establishment Protocol (C-E-P) Completed**: All required context has been gathered (see INPUTS section)
 
@@ -568,7 +567,7 @@ bd update {{bead_id}} --status in_progress
 
 **2.1. [Persona-Specific Activity]**
 [Describe the core work this persona performs. Examples:
-- For Decomposer: "Break down the Epic/Feature into child beads"
+- For Product Manager: "Break down the Epic/Feature into child beads"
 - For Specialist: "Implement the feature according to the design"
 - For QA Engineer: "Execute tests and validate acceptance criteria"
 - For Architect: "Define system architecture and design patterns"]
@@ -729,7 +728,7 @@ These metrics help track progress and quality during execution.
 
 ### Quality Metrics
 - **[Persona-Specific Metric]**: [Examples:
-  - Decomposer: "Number of child beads created", "Average task size (S/M/L/XL)"
+  - Product Manager: "Number of child beads created", "Average task size (S/M/L/XL)"
   - Specialist: "Test coverage %", "Linter warnings/errors", "Build success rate"
   - QA Engineer: "Number of bugs found", "Test pass rate", "Regression count"
   - Architect: "Design document completeness", "Stakeholder approval"]
@@ -750,7 +749,7 @@ These are the tangible artifacts produced by this persona.
 ### Required Outputs
 - **Updated Bead**: The target bead must be updated with `--notes` and `--design` (if applicable)
 - **[Persona-Specific Output]**: [Examples:
-  - Decomposer: "Child beads created with clear AC and dependencies mapped"
+  - Product Manager: "Child beads created with clear AC and dependencies mapped"
   - Specialist: "Code changes committed, tests passing, linter clean"
   - QA Engineer: "Test report generated, bugs filed as child beads"
   - Architect: "Design document created, architectural decisions recorded"]
