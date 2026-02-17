@@ -41,6 +41,7 @@ const PERSONAS: PersonaOption[] = [
     tasks: [
       { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
       { id: "fix_dependencies", label: "Fix Dependencies", icon: <Wrench size={14} /> },
+      { id: "process-improvement", label: "Process Improvement", icon: <Wrench size={14} /> },
     ],
   },
   {

@@ -166,9 +166,10 @@ pub trait PersonaPlugin: Send + Sync {
         // Add the template content
         prompt.push_str(&template_content);
 
-        // Substitute {{feature_id}} with actual bead_id
+        // Substitute {{feature_id}} and {{bead_id}} with actual bead_id
         if let Some(bead_id) = &context.bead_id {
             prompt = prompt.replace("{{feature_id}}", bead_id);
+            prompt = prompt.replace("{{bead_id}}", bead_id);
         }
 
         // Append bead JSON context if provided
