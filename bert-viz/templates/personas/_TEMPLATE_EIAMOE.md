@@ -327,12 +327,107 @@ bd close {{feature_id}} --reason="Decomposition complete"
 These conditions must be TRUE before this persona can begin work:
 
 - [ ] **Bead Assignment**: A specific bead ID has been provided to work on
+
 - [ ] **Bead Status**: The target bead is in an appropriate status (e.g., `open` for new work, `in_progress` for continuation)
+
+- [ ] **Execution Mode Determined**: Select the appropriate working mode for this task:
+
+  ### Mode 1: Interactive/Planning/Collaborative
+  **Pattern**: Propose → Approve → Execute
+
+  **Use when**:
+  - Requirements are ambiguous or open to interpretation
+  - Multiple valid approaches exist (architectural decisions)
+  - User input affects design/priority/scope
+  - Decomposition or planning work (propose breakdown, get feedback)
+
+  **Behavior**:
+  - Present options or plans to the user
+  - Ask clarifying questions
+  - Get explicit approval before proceeding
+  - Iterate based on feedback
+
+  **Example personas/tasks**: Decomposer, Architect, Product Manager, Orchestrator
+
+  ---
+
+  ### Mode 2: Autonomous Execution
+  **Pattern**: Execute → Report
+
+  **Use when**:
+  - Requirements are clear and well-defined
+  - Implementation approach is obvious or specified in design notes
+  - Task is routine or follows established patterns
+  - Work can be validated programmatically (tests, linter, build)
+
+  **Behavior**:
+  - Execute independently without user interaction
+  - Spawn parallel agents for complex multi-task work (if needed)
+  - Surface results, blockers, or errors when complete
+  - Update bead with notes and close when done
+
+  **Example personas/tasks**: Specialist (implement/review), QA Engineer (test), automated workflows
+
+  ---
+
+  ### Mode 3: Ask the User
+  **Pattern**: Clarify → Proceed
+
+  **Use when**:
+  - Mode is unclear for this specific task
+  - Persona/task combination is ambiguous
+  - User preference is unknown
+
+  **Behavior**:
+  - Explicitly ask the user which mode to use:
+    > "Would you like me to (1) **propose a plan** for your approval first, or (2) **proceed autonomously** and report when complete?"
+  - Proceed based on user's response
+
+  ---
+
+  ### Default Modes by Persona/Task
+
+  These are DEFAULTS - user can override by specifying mode explicitly.
+
+  | Persona | Task | Default Mode | Rationale |
+  |---------|------|--------------|-----------|
+  | **Decomposer** | decompose | Interactive | Breakdown requires user validation |
+  | **Architect** | establish-epic, chat | Interactive | Design decisions need approval |
+  | **Product Manager** | decompose-epic, decompose-feature, extend-* | Interactive | Requirements validation |
+  | **Orchestrator** | coordinate | Interactive | Multi-agent coordination needs oversight |
+  | **Customer** | bootstrap, refinement, chat | Interactive | User-facing, exploratory |
+  | **Specialist** | implement | Autonomous | Clear task, validated by tests |
+  | **Specialist** | review | Autonomous | Code analysis, objective criteria |
+  | **Specialist** | chat | Interactive | Conversational, exploratory |
+  | **QA Engineer** | guide-test, fix-dependencies | Autonomous | Test execution, dependency analysis |
+
+  **Override Examples**:
+  - User: "Autonomously decompose bp6-auth" → Use Mode 2 even though Decomposer defaults to Mode 1
+  - User: "Let's work together on bp6-task-123" → Use Mode 1 even if Specialist:implement defaults to Mode 2
+
 - [ ] **Access Verified**: Agent has access to codebase, tools, and necessary credentials
+
 - [ ] **[Role-Specific Prerequisite]**: [Add any persona-specific prerequisites here]
+  - Example (Flutter Specialist): Flutter SDK installed, project compiles
+  - Example (QA Engineer): Test environment accessible, test data available
+  - Example (Decomposer): Parent Epic/Feature has clear description and acceptance criteria
+
 - [ ] **Context Establishment Protocol (C-E-P) Completed**: All required context has been gathered (see INPUTS section)
 
-**Validation Check**: Before proceeding, confirm all entry criteria are met. If any criterion fails, halt and request resolution.
+---
+
+**Validation Check**: Before proceeding to INPUTS, confirm ALL entry criteria are met. If any criterion fails, halt and request resolution from the user.
+
+**Mode Selection Decision Tree**:
+```
+START
+  ↓
+Is execution mode specified by user?
+  ├─ YES → Use specified mode
+  └─ NO → Check persona/task default table
+       ├─ Default found → Use default (confirm with user if high-risk)
+       └─ No default → Use Mode 3 (Ask the User)
+```
 
 ---
 
