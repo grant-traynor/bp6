@@ -114,8 +114,12 @@ bd show {{dependency_id}} --json | jq -r '.notes, .design'
 - Review test files to understand expected behavior
 - Check for existing patterns or conventions to follow
 
-**Standards & Documentation**:
-- [List any persona-specific standards documents to review, e.g., `.agent/standards/flutter.md`]
+**Standards & Conventions**:
+- Standards are injected into your context automatically based on the technology stack
+- Review the PAIRTI_STANDARDS_START/END block in your system context before coding
+- Do NOT list standards here - they are provided by the system
+
+**Additional Documentation** (if applicable):
 - [List any codebase-specific documentation to review]
 
 **Environment Context**:
@@ -206,35 +210,41 @@ bd dep add bp6-child-task bp6-parent-feature  # WRONG - this is a blocker, not a
 ```
 
 **2.4. Add Sequential Dependencies (if applicable)**
-Use `bd dep add` ONLY for ordering **peer tasks at the SAME level**, NOT for parent/child relationships.
+Use `bd dep add` ONLY for ordering tasks/features, NOT for parent/child relationships.
 
 **When to use `bd dep add`**:
-- Task A must complete before Task B can start (both are children of the same parent)
-- Feature X must complete before Feature Y can start (both are children of the same Epic)
+- Task A must complete before Task B can start (sequential ordering)
+- Feature X must complete before Feature Y can start (cross-feature dependency)
+- Task in Feature A depends on Task in Feature B (cross-feature task dependency)
 
 **When NOT to use `bd dep add`**:
 - ❌ Creating Epic → Feature hierarchy (use `--parent` instead)
 - ❌ Creating Feature → Task hierarchy (use `--parent` instead)
 
 ```bash
-# This bead depends on (is blocked by) another bead AT THE SAME LEVEL
+# This bead depends on (is blocked by) another bead (can be cross-feature)
 bd dep add {{bead_id}} {{blocker_id}}
 
-# This bead blocks another bead AT THE SAME LEVEL
+# This bead blocks another bead (can be cross-feature)
 bd dep add {{dependent_id}} {{bead_id}}
 
 # This bead is related to another bead (peer relationship)
 bd dep relate {{bead_id}} {{peer_id}}
 ```
 
-**✅ CORRECT Example - Ordering sibling tasks**:
+**✅ CORRECT Examples - Sequential dependencies**:
 ```bash
-# Both bp6-xyz and bp6-abc are tasks under the same feature
+# Example 1: Tasks under the same feature
 # Task bp6-xyz depends on bp6-abc being completed first
 bd dep add bp6-xyz bp6-abc
 
-# Task bp6-def cannot start until bp6-xyz is done (sequential ordering)
-bd dep add bp6-def bp6-xyz
+# Example 2: Cross-feature dependency
+# Feature JWT depends on Feature OAuth being complete
+bd dep add bp6-auth-jwt bp6-auth-oauth
+
+# Example 3: Cross-feature task dependency
+# Task in Feature B depends on Task in Feature A
+bd dep add bp6-featureB-task1 bp6-featureA-task2
 ```
 
 **❌ WRONG Example - Modeling hierarchy with dependencies**:
@@ -473,11 +483,14 @@ bd create --parent=bp6-epic --type=feature --title="Feature under epic"
 bd create --parent=bp6-feature --type=task --title="Task under feature"
 ```
 
-**Sequential Ordering** (Task A → Task B at same level):
+**Sequential Ordering** (Task A → Task B, can be cross-feature):
 ```bash
-# ✅ CORRECT: Use bd dep add for peer tasks that must run in order
+# ✅ CORRECT: Use bd dep add for tasks/features that must run in order
 bd dep add {{bead_id}} {{blocker_id}}  # bead_id depends on blocker_id
 bd dep add {{dependent_id}} {{bead_id}}  # dependent_id depends on bead_id
+
+# Dependencies can span features - this is normal and expected
+bd dep add bp6-featureB-task bp6-featureA-task  # Cross-feature dependency OK
 
 # ❌ WRONG: Do NOT use bd dep add to model parent/child hierarchy
 bd dep add bp6-task bp6-feature  # WRONG - this is not a hierarchy
@@ -485,10 +498,10 @@ bd dep add bp6-task bp6-feature  # WRONG - this is not a hierarchy
 
 **Full Dependency Commands**:
 ```bash
-# Add a blocking dependency (bead_id depends on blocker_id - PEER LEVEL ONLY)
+# Add a blocking dependency (bead_id depends on blocker_id)
 bd dep add {{bead_id}} {{blocker_id}}
 
-# Add a blocking relationship (dependent_id depends on bead_id - PEER LEVEL ONLY)
+# Add a blocking relationship (dependent_id depends on bead_id)
 bd dep add {{dependent_id}} {{bead_id}}
 
 # Create a peer relationship (related but not blocking)
