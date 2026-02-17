@@ -12,6 +12,13 @@
 - [ ] Epic context established (existing features understood)
 - [ ] User has identified new scope to add
 - [ ] C-E-P completed
+- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
+  - **Pattern**: Propose → Approve → Execute
+  - **Override if**: User says "autonomously" or "just do it"
+  - **Danger signs** → Ask user which mode:
+    - ⚠️ Unclear requirements or high blast radius
+    - ⚠️ User's preference unknown
+  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
 
 ---
 

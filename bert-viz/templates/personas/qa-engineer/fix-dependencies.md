@@ -13,6 +13,13 @@
 - [ ] **WBS integrity check requested** (user suspects structural violations)
 - [ ] **Access to beads CLI** for auditing and remediation
 - [ ] **No implementation required** (this is structural cleanup only)
+- [ ] **Execution Mode Determined**: **Mode 2: Autonomous** (default for this persona/task)
+  - **Pattern**: Execute → Report (no approval needed mid-work)
+  - **Override if**: User says "let's work together" or "propose a plan first"
+  - **Danger signs** → Ask user which mode:
+    - ⚠️ Vague acceptance criteria or missing design notes
+    - ⚠️ High blast radius (breaking changes, architecture shifts)
+  - **Document**: State mode before proceeding ("I'll work in Autonomous Mode...")
 
 ---
 

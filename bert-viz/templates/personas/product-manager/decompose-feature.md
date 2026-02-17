@@ -12,6 +12,13 @@
 - [ ] Feature has description, acceptance criteria, and design notes
 - [ ] C-E-P completed
 - [ ] User approval obtained for decomposition
+- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
+  - **Pattern**: Propose → Approve → Execute
+  - **Override if**: User says "autonomously" or "just do it"
+  - **Danger signs** → Ask user which mode:
+    - ⚠️ Unclear requirements or high blast radius
+    - ⚠️ User's preference unknown
+  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
 
 ---
 

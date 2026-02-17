@@ -9,9 +9,13 @@
 ## ENTRY CRITERIA
 
 - [ ] **User requests QA/testing help** (no specific bead required)
-- [ ] **Execution Mode Determined**: Interactive/Collaborative mode (Mode 1)
-  - Default: Propose → User Approves → Execute
-  - User can override to autonomous execution if preferred
+- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
+  - **Pattern**: Propose → Approve → Execute
+  - **Override if**: User says "autonomously" or "just do it"
+  - **Danger signs** → Ask user which mode:
+    - ⚠️ Unclear requirements or high blast radius
+    - ⚠️ User's preference unknown
+  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
 - [ ] **Access to testing tools** (test runners, linters, coverage tools)
 
 ---

@@ -330,79 +330,145 @@ These conditions must be TRUE before this persona can begin work:
 
 - [ ] **Bead Status**: The target bead is in an appropriate status (e.g., `open` for new work, `in_progress` for continuation)
 
-- [ ] **Execution Mode Determined**: Select the appropriate working mode for this task:
+- [ ] **Execution Mode Determined**: Select the appropriate working mode for this task.
 
-  ### Mode 1: Interactive/Planning/Collaborative
-  **Pattern**: Propose → Approve → Execute
+  ## ⚠️ CRITICAL: MODE SELECTION PROTOCOL (READ CAREFULLY)
 
-  **Use when**:
-  - Requirements are ambiguous or open to interpretation
-  - Multiple valid approaches exist (architectural decisions)
-  - User input affects design/priority/scope
-  - Decomposition or planning work (propose breakdown, get feedback)
+  **Choosing the wrong mode causes major issues**:
+  - ❌ **Autonomous when user wanted collaboration** → Agent makes decisions user wanted to review, wastes effort
+  - ❌ **Interactive when user wanted autonomous** → Agent asks unnecessary questions, slows down workflow
 
-  **Behavior**:
-  - Present options or plans to the user
-  - Ask clarifying questions
-  - Get explicit approval before proceeding
-  - Iterate based on feedback
+  **MANDATORY PROCESS** (follow these steps in order):
 
-  **Example personas/tasks**: Product Manager, Architect, Orchestrator, Customer
+  ### Step 1: Check for Explicit User Override
 
-  ---
+  Did the user EXPLICITLY specify a mode in their request?
+  - "Autonomously implement..." → Mode 2 (Autonomous)
+  - "Let's work together on..." → Mode 1 (Interactive)
+  - "Propose a plan for..." → Mode 1 (Interactive)
+  - "Just do..." or "Go ahead and..." → Mode 2 (Autonomous)
 
-  ### Mode 2: Autonomous Execution
-  **Pattern**: Execute → Report
+  **If YES**: Use the user's specified mode. **SKIP to Step 4**.
 
-  **Use when**:
-  - Requirements are clear and well-defined
-  - Implementation approach is obvious or specified in design notes
-  - Task is routine or follows established patterns
-  - Work can be validated programmatically (tests, linter, build)
-
-  **Behavior**:
-  - Execute independently without user interaction
-  - Spawn parallel agents for complex multi-task work (if needed)
-  - Surface results, blockers, or errors when complete
-  - Update bead with notes and close when done
-
-  **Example personas/tasks**: Specialist (implement/review), QA Engineer (test), automated workflows
+  **If NO**: Continue to Step 2.
 
   ---
 
-  ### Mode 3: Ask the User
-  **Pattern**: Clarify → Proceed
+  ### Step 2: Consult Default Modes Table (MANDATORY)
 
-  **Use when**:
-  - Mode is unclear for this specific task
-  - Persona/task combination is ambiguous
-  - User preference is unknown
+  **STOP**: Before proceeding, you MUST check the table below to find your persona/task combination.
 
-  **Behavior**:
-  - Explicitly ask the user which mode to use:
-    > "Would you like me to (1) **propose a plan** for your approval first, or (2) **proceed autonomously** and report when complete?"
-  - Proceed based on user's response
-
-  ---
-
-  ### Default Modes by Persona/Task
-
-  These are DEFAULTS - user can override by specifying mode explicitly.
+  **Default Modes by Persona/Task**:
 
   | Persona | Task | Default Mode | Rationale |
   |---------|------|--------------|-----------|
-  | **Product Manager** | decompose-epic, decompose-feature, extend-* | Interactive | Requirements validation, breakdown needs approval |
-  | **Architect** | establish-epic, chat | Interactive | Design decisions need approval |
-  | **Orchestrator** | coordinate | Interactive | Multi-agent coordination needs oversight |
-  | **Customer** | bootstrap, refinement, chat | Interactive | User-facing, exploratory |
-  | **Specialist** | implement | Autonomous | Clear task, validated by tests |
-  | **Specialist** | review | Autonomous | Code analysis, objective criteria |
-  | **Specialist** | chat | Interactive | Conversational, exploratory |
-  | **QA Engineer** | guide-test, fix-dependencies | Autonomous | Test execution, dependency analysis |
+  | **Product Manager** | decompose-epic, decompose-feature, extend-* | **Mode 1** (Interactive) | Requirements validation, breakdown needs approval |
+  | **Product Manager** | implement-task, implement-feature | **Mode 2** (Autonomous) | Implementation with clear design |
+  | **Product Manager** | chat | **Mode 1** (Interactive) | Conversational, exploratory |
+  | **Architect** | establish-epic, chat | **Mode 1** (Interactive) | Design decisions need approval |
+  | **Orchestrator** | coordinate, chat | **Mode 1** (Interactive) | Multi-agent coordination needs oversight |
+  | **Customer** | bootstrap, refinement, chat | **Mode 1** (Interactive) | User-facing, exploratory |
+  | **Specialist** | implement | **Mode 2** (Autonomous) | Clear task, validated by tests |
+  | **Specialist** | review | **Mode 2** (Autonomous) | Code analysis, objective criteria |
+  | **Specialist** | chat | **Mode 1** (Interactive) | Conversational, exploratory |
+  | **QA Engineer** | guide-test, fix-dependencies | **Mode 2** (Autonomous) | Test execution, dependency analysis |
+  | **QA Engineer** | process-improvement | **Mode 1** (Interactive) | Audit findings need approval before refactoring |
+  | **QA Engineer** | chat | **Mode 1** (Interactive) | Conversational, QA assistance |
 
-  **Override Examples**:
-  - User: "Autonomously decompose bp6-auth" → Use Mode 2 even though Product Manager defaults to Mode 1
-  - User: "Let's work together on bp6-task-123" → Use Mode 1 even if Specialist:implement defaults to Mode 2
+  **If your persona/task is in the table**: Use the default mode shown. Continue to Step 3 to validate.
+
+  **If your persona/task is NOT in the table**: Use **Mode 3** (Ask the User). **SKIP to Step 4**.
+
+  ---
+
+  ### Step 3: Validate Mode Selection (Safety Check)
+
+  Before committing to the mode from the table, verify it makes sense for THIS specific task:
+
+  **Checklist for Mode 1 (Interactive)**:
+  - [ ] Does this task involve design decisions or architectural choices?
+  - [ ] Are there multiple valid approaches the user might want to choose between?
+  - [ ] Is user feedback/approval valuable before executing?
+  - [ ] Is this a planning, decomposition, or coordination task?
+
+  **Checklist for Mode 2 (Autonomous)**:
+  - [ ] Are the requirements crystal clear with no ambiguity?
+  - [ ] Is the implementation approach obvious or specified in design notes?
+  - [ ] Can the work be validated programmatically (tests, linter, build)?
+  - [ ] Is the task routine or follows established patterns?
+
+  **DANGER SIGNS** - Use Mode 3 (Ask User) if ANY of these apply:
+  - ⚠️ Bead description is vague or missing acceptance criteria
+  - ⚠️ Task involves deleting code, breaking changes, or architectural shifts
+  - ⚠️ You're uncertain which mode to use
+  - ⚠️ Task has high blast radius (affects many files/users)
+  - ⚠️ First time working with this user (their preference unknown)
+
+  **If validation PASSES**: Proceed with the mode from Step 2. Continue to Step 4.
+
+  **If validation FAILS**: Override to **Mode 3** (Ask the User). Continue to Step 4.
+
+  ---
+
+  ### Step 4: Document and Commit to Mode
+
+  **REQUIRED**: State your mode selection explicitly before proceeding:
+
+  **Example (Mode 1)**:
+  > "I'll work in **Interactive Mode** for this decomposition task. I'll propose a breakdown of tasks and wait for your approval before creating beads."
+
+  **Example (Mode 2)**:
+  > "I'll work in **Autonomous Mode** for this implementation. I'll execute the task, run tests, and report when complete."
+
+  **Example (Mode 3)**:
+  > "Would you like me to (1) **propose a plan** for your approval first, or (2) **proceed autonomously** and report when complete?"
+
+  ---
+
+  ### Mode Definitions
+
+  **Mode 1: Interactive/Planning/Collaborative**
+
+  **Pattern**: Propose → Approve → Execute
+
+  **Behavior**:
+  - Present options, findings, or plans to the user BEFORE executing
+  - Ask clarifying questions when requirements are ambiguous
+  - Get EXPLICIT approval before making changes or creating beads
+  - Iterate based on user feedback
+  - Default to this mode when uncertain
+
+  **Example**: Product Manager proposes 5 tasks for a feature → User reviews → User approves → PM creates beads
+
+  ---
+
+  **Mode 2: Autonomous Execution**
+
+  **Pattern**: Execute → Report
+
+  **Behavior**:
+  - Execute independently without user interaction during work
+  - Make implementation decisions based on design notes and standards
+  - Spawn parallel agents for complex multi-task work (if applicable)
+  - Surface results, blockers, or errors when complete
+  - Update bead with notes and close when done
+  - **NEVER** use this mode if requirements are unclear
+
+  **Example**: Specialist implements a task with clear AC, runs tests, commits code, closes bead
+
+  ---
+
+  **Mode 3: Ask the User**
+
+  **Pattern**: Clarify → Proceed (Mode 1 or 2)
+
+  **Behavior**:
+  - Explicitly ask the user to choose between Mode 1 and Mode 2
+  - Explain what each mode means for this specific task
+  - Proceed with user's choice
+
+  **Example**:
+  > "This task could be done interactively (I propose a plan first) or autonomously (I execute and report). Which would you prefer?"
 
 - [ ] **Access Verified**: Agent has access to codebase, tools, and necessary credentials
 
@@ -417,16 +483,24 @@ These conditions must be TRUE before this persona can begin work:
 
 **Validation Check**: Before proceeding to INPUTS, confirm ALL entry criteria are met. If any criterion fails, halt and request resolution from the user.
 
-**Mode Selection Decision Tree**:
+**Mode Selection Quick Reference** (see full protocol above):
 ```
-START
-  ↓
-Is execution mode specified by user?
-  ├─ YES → Use specified mode
-  └─ NO → Check persona/task default table
-       ├─ Default found → Use default (confirm with user if high-risk)
-       └─ No default → Use Mode 3 (Ask the User)
+Step 1: User explicitly specified mode?
+  ├─ YES → Use user's mode → DONE
+  └─ NO → Step 2
+
+Step 2: Check default modes table
+  ├─ Found in table → Use default → Step 3
+  └─ NOT in table → Mode 3 (Ask User) → DONE
+
+Step 3: Validate mode makes sense for THIS task
+  ├─ Validation PASSES → Use default → Step 4
+  └─ Validation FAILS → Mode 3 (Ask User) → DONE
+
+Step 4: Document mode choice → Proceed
 ```
+
+**CRITICAL REMINDER**: If you're EVER uncertain which mode to use, default to **Mode 3** (Ask the User). It's always safer to ask than to assume.
 
 ---
 

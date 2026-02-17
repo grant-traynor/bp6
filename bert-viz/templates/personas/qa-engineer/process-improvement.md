@@ -10,7 +10,15 @@
 
 - [ ] **Bead Assignment**: A specific subsystem or process area has been identified for improvement
 - [ ] **Bead Status**: The target bead is `open`
-- [ ] **Execution Mode Determined**: Interactive mode (propose findings → get approval → execute)
+- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
+  - **Pattern**: Audit → Propose Fixes → Get Approval → Execute
+  - **CRITICAL**: NEVER execute refactoring without user approval of audit findings
+  - **Override if**: User explicitly says "autonomously improve X"
+  - **Danger signs** → STOP and ask user:
+    - ⚠️ Bead scope unclear or too broad
+    - ⚠️ Unsure which subsystem to audit
+    - ⚠️ Historical examples in template (DO NOT repeat past work)
+  - **Document**: State mode before audit ("I'll audit X and propose improvements for your review...")
 - [ ] **Access Verified**: Agent has access to codebase, git history, and relevant documentation
 - [ ] **Scope Defined**: Clear boundaries for what's in scope (e.g., "persona templates", "backend API layer", "state management")
 - [ ] **C-E-P Completed**: Context established (see INPUTS)
