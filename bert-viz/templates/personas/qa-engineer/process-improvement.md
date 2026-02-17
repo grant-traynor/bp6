@@ -53,17 +53,25 @@ bd dep list {{bead_id}} --type blocks
 
 ### Additional Context Sources
 
+**Governing Standards** (CRITICAL - Review First):
+- `bert-viz/templates/personas/_TEMPLATE_EIAMOE.md` - The E-I-A-M-O-E reference template
+- This is the BUILD-TIME quality control instrument that defines what "good" looks like
+- Review it FIRST to ensure your audit aligns with current standards
+- Consider whether the standard itself needs updating based on your findings
+
 **Codebase Audit Targets**:
 - Architecture documentation (README, design docs)
 - Implementation files (count duplicated code, anti-patterns)
 - Configuration files (check for inconsistencies)
 - Test coverage (identify gaps)
+- Persona templates (compliance with E-I-A-M-O-E standard)
 
 **Quality Indicators**:
 - Lines of duplicated code (use Grep to find repeated patterns)
 - Inconsistent naming conventions (manual vs. automated naming)
 - Anti-patterns (hardcoded values, tight coupling, missing abstraction)
 - Technical debt markers (TODO, FIXME, HACK comments)
+- **E-I-A-M-O-E Compliance**: Do persona templates follow the 6-section pattern?
 
 ---
 
@@ -76,7 +84,27 @@ bd dep list {{bead_id}} --type blocks
 bd update {{bead_id}} --status in_progress
 ```
 
-**1.2. Conduct Subsystem Audit**
+**1.2. Review Governing Standards**
+
+Before auditing the subsystem, review the standards that define quality:
+
+```bash
+# Read the E-I-A-M-O-E template (the quality standard)
+cat bert-viz/templates/personas/_TEMPLATE_EIAMOE.md | head -300
+```
+
+**Ask yourself**:
+- Are the standards in `_TEMPLATE_EIAMOE.md` still relevant?
+- Have new patterns emerged that should be codified?
+- Are there gaps in the standard that allowed current issues to develop?
+- Should the standard itself be updated based on this audit?
+
+**Document**:
+- Whether the standard is complete and current
+- Any proposed updates to the standard itself
+- Reasons for keeping or changing the standard
+
+**1.3. Conduct Subsystem Audit**
 
 Run systematic checks to identify quality issues:
 
@@ -99,7 +127,7 @@ grep -r "^import.*Riverpod" {{subsystem_path}} | sort | uniq -c | sort -rn
 - DRY violations: Where is logic/data duplicated?
 - Abstraction leaks: Does implementation detail leak across boundaries?
 
-**1.3. Quantify Issues**
+**1.4. Quantify Issues**
 
 Create metrics:
 - **Duplication %**: Lines of duplicated code / total lines
@@ -107,7 +135,7 @@ Create metrics:
 - **Technical debt score**: Sum of TODO/FIXME/HACK markers
 - **Test coverage %**: Tested code / total code
 
-**1.4. Document Findings**
+**1.5. Document Findings**
 
 Create an audit report with:
 - **Symptoms**: What's broken or suboptimal?
@@ -143,7 +171,37 @@ Create an audit report with:
 
 ### Phase 2: Design Standardization Solution
 
-**2.1. Propose Refactoring Plan**
+**2.1. Propose Updates to Governing Standard (if needed)**
+
+If your audit revealed gaps or outdated guidance in `_TEMPLATE_EIAMOE.md`, propose updates:
+
+**Example Standard Update Proposal**:
+```markdown
+## Proposed Update to _TEMPLATE_EIAMOE.md
+
+### Issue Found During Audit
+The current E-I-A-M-O-E template doesn't address execution mode determination.
+Personas don't know whether to work interactively or autonomously.
+
+### Proposed Addition
+Add "Execution Mode Determined" to ENTRY CRITERIA section with three modes:
+1. Interactive (propose → approve → execute)
+2. Autonomous (execute → report)
+3. Ask the User (clarify → proceed)
+
+### Rationale
+Without this, agents make assumptions about autonomy level, leading to:
+- Over-automation (executing without approval when user wanted to review)
+- Under-automation (asking for approval on routine tasks)
+
+### Impact
+All future persona templates will include mode determination, preventing
+these issues from recurring.
+```
+
+**Get approval** before updating the standard itself.
+
+**2.2. Propose Subsystem Refactoring Plan**
 
 Present findings to user with proposed solution:
 
@@ -182,7 +240,7 @@ Benefits:
 - Migration effort (~4 hours) → Justified by long-term maintainability gains
 ```
 
-**2.2. Get User Approval**
+**2.3. Get User Approval**
 
 Use `AskUserQuestion` or present proposal and wait for explicit approval before proceeding.
 
@@ -192,14 +250,30 @@ Use `AskUserQuestion` or present proposal and wait for explicit approval before 
 
 ### Phase 3: Execute Refactoring (Autonomous with Team)
 
-**3.1. Create Execution Plan**
+**3.1. Update Governing Standard First (if approved)**
+
+If the standard itself needs updating, do this BEFORE refactoring the subsystem:
+
+```bash
+# Update _TEMPLATE_EIAMOE.md with approved changes
+# Example: Add execution mode determination to ENTRY CRITERIA
+```
+
+**Why first?**: The standard guides the refactoring. Update it before applying it.
+
+**Commit separately**:
+```bash
+git commit -m "feat(personas): add execution mode to E-I-A-M-O-E standard"
+```
+
+**3.2. Create Execution Plan for Subsystem**
 
 Break work into parallel tasks:
 - Backend changes (independent)
 - Template creation (can parallelize by specialist)
 - Template slimming (depends on persona.md creation)
 
-**3.2. Spawn Agent Team (if applicable)**
+**3.3. Spawn Agent Team (if applicable)**
 
 For complex refactoring with independent work streams:
 
@@ -213,7 +287,7 @@ Task: "Slim down task files after persona.md created"
 
 Use Claude Code's Task tool with `subagent_type="general-purpose"` for each parallel workstream.
 
-**3.3. Execute Changes**
+**3.4. Execute Subsystem Changes**
 
 Whether solo or with team:
 1. **Implement** the refactoring plan
@@ -221,7 +295,7 @@ Whether solo or with team:
 3. **Validate** against acceptance criteria (duplication reduced? standards applied?)
 4. **Document** what changed and why (for commit messages and handoff)
 
-**3.4. Validation Checklist**
+**3.5. Validation Checklist**
 
 Before marking complete:
 - [ ] All tests passing (automated validation)
@@ -230,6 +304,7 @@ Before marking complete:
 - [ ] Inconsistencies resolved (manual review)
 - [ ] No regressions (existing functionality preserved)
 - [ ] Documentation updated (README, design docs reflect new architecture)
+- [ ] **Standard updated** (if gaps found, `_TEMPLATE_EIAMOE.md` updated and committed separately)
 
 ---
 
@@ -330,12 +405,14 @@ bd close {{bead_id}} --reason="Completed process improvement for {{subsystem}}. 
 
 ### Required Outputs
 - **Audit Report**: Documented findings with quantified issues and examples
+- **Standard Review**: Assessment of `_TEMPLATE_EIAMOE.md` completeness and relevance
+- **Standard Updates** (if applicable): Proposed or implemented updates to the governing standard
 - **Refactoring Proposal**: Proposed solution with migration plan and risk analysis
 - **Quality Report**: Before/after metrics showing improvement
 - **Updated Code**: Refactored subsystem following proposed architecture
 - **Tests**: All existing tests passing + new tests if applicable
 - **Documentation**: Updated README/design docs reflecting new architecture
-- **Clean Git History**: Atomic commits with detailed messages
+- **Clean Git History**: Atomic commits (standard updates separate from subsystem refactoring)
 
 ### Optional Outputs
 - **Process Template**: If this refactoring pattern is reusable, create a template for future similar work
@@ -452,9 +529,63 @@ pub fn load_persona_prompt() {
 
 ---
 
-## RECURSIVE APPLICATION
+## RECURSIVE APPLICATION & STANDARD EVOLUTION
 
 **Meta Note**: This template itself is an output of the process it describes.
+
+### The Complete Outer Loop
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ _TEMPLATE_EIAMOE.md (The Standard)                      │
+│   ↓                                                      │
+│ Applied to create/validate personas                     │
+│   ↓                                                      │
+│ Process improvement audit (THIS template)               │
+│   ↓                                                      │
+│ Find gaps in standard OR subsystem implementation       │
+│   ↓                                                      │
+│ Update standard FIRST (if needed)                       │
+│   ↓                                                      │
+│ Refactor subsystem using updated standard               │
+│   ↓                                                      │
+│ _TEMPLATE_EIAMOE.md (Evolved Standard) ──────────┘      │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Standard Evolution Examples
+
+**Example 1: Execution Mode Addition (This Session)**
+- **Audit found**: Personas didn't know whether to work interactively or autonomously
+- **Standard gap**: `_TEMPLATE_EIAMOE.md` ENTRY CRITERIA missing mode determination
+- **Standard update**: Added execution mode with three patterns (Interactive/Autonomous/Ask)
+- **Subsystem update**: All future personas now include mode in ENTRY CRITERIA
+- **Commits**: 2 separate (standard update, then subsystem refactoring)
+
+**Example 2: Decomposer Removal (This Session)**
+- **Audit found**: "Decomposer" listed as persona but no PersonaType exists
+- **Standard gap**: `_TEMPLATE_EIAMOE.md` referenced non-existent persona
+- **Standard update**: Removed Decomposer, clarified Product Manager does decomposition
+- **Subsystem update**: Product Manager templates updated accordingly
+
+**Example 3: Two-File Architecture (This Session)**
+- **Audit found**: 63% duplication across specialist templates
+- **Standard gap**: `_TEMPLATE_EIAMOE.md` didn't specify persona.md + task.md pattern
+- **Standard consideration**: Should we add this pattern to the standard? (Future work)
+- **Subsystem update**: Implemented two-file architecture for specialists
+
+### When to Update the Standard
+
+Update `_TEMPLATE_EIAMOE.md` when:
+- ✅ A pattern emerges across multiple personas (not one-off solution)
+- ✅ The gap caused recurring issues (preventable with better guidance)
+- ✅ The standard is incomplete or outdated (evolution over time)
+- ✅ New best practices discovered (from real-world application)
+
+Do NOT update for:
+- ❌ Persona-specific needs (those go in persona.md, not the standard)
+- ❌ Temporary workarounds (fix root cause instead)
+- ❌ Untested ideas (validate first, then standardize)
 
 To apply this process improvement workflow to OTHER subsystems:
 1. Identify a subsystem with quality issues (duplication, inconsistency, tech debt)
