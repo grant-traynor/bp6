@@ -221,6 +221,18 @@ Use `bd dep add` ONLY for ordering tasks/features, NOT for parent/child relation
 - ❌ Creating Epic → Feature hierarchy (use `--parent` instead)
 - ❌ Creating Feature → Task hierarchy (use `--parent` instead)
 
+**WBS Structural Integrity Rules**:
+- **Same-Type Rule**: Dependencies must be between beads of the same type
+  - ✅ Feature blocks Feature
+  - ✅ Task blocks Task
+  - ✅ Bug blocks Task (granular-level types can intermix)
+  - ❌ Feature blocks Task (cross-level illegal)
+- **Progressive Elaboration**: When decomposing, move dependencies to child level
+  - If Feature A blocks Feature B, and both now have tasks
+  - Map specific task-to-task dependencies (which task in A blocks which in B?)
+  - Remove parent-level dependency once child-level links are established
+- **Granular-Level Types**: Task, Bug, Chore are same level (can block each other)
+
 ```bash
 # This bead depends on (is blocked by) another bead (can be cross-feature)
 bd dep add {{bead_id}} {{blocker_id}}
@@ -504,14 +516,8 @@ bd dep add {{bead_id}} {{blocker_id}}
 # Add a blocking relationship (dependent_id depends on bead_id)
 bd dep add {{dependent_id}} {{bead_id}}
 
-# Create a peer relationship (related but not blocking)
-bd dep relate {{bead_id}} {{peer_id}}
-
 # Remove a dependency
 bd dep remove {{bead_id}} {{blocker_id}}
-
-# Remove a peer relationship
-bd dep unrelate {{bead_id}} {{peer_id}}
 
 # List dependencies
 bd dep list {{bead_id}} --type depends-on  # What blocks this bead?
@@ -609,7 +615,34 @@ bd dep add bp6-task-b bp6-task-a  # CORRECT - B depends on A (A blocks B)
 
 ---
 
-### ❌ Mistake #3: Skipping Context Establishment Protocol (C-E-P)
+### ❌ Mistake #3: Cross-Level Dependencies (Violating Same-Type Rule)
+
+**WRONG**:
+```bash
+# Feature blocks a Task (cross-level illegal)
+bd dep add bp6-task-in-featureB bp6-featureA  # WRONG - different types
+```
+
+**CORRECT**:
+```bash
+# Option 1: Elevate to feature level
+bd dep add bp6-featureB bp6-featureA  # Feature blocks Feature
+
+# Option 2: Make it granular (if both have tasks)
+bd dep add bp6-featureB-task1 bp6-featureA-task3  # Task blocks Task
+```
+
+**Why it matters**: Dependencies must be between beads of the same type. Cross-level links create "dependency rot" and break the WBS structure.
+
+**Same-Type Rule**:
+- Epic blocks Epic ✅
+- Feature blocks Feature ✅
+- Task/Bug/Chore block each other ✅ (granular-level types)
+- Feature blocks Task ❌ (cross-level illegal)
+
+---
+
+### ❌ Mistake #4: Skipping Context Establishment Protocol (C-E-P)
 
 **WRONG**:
 ```bash
