@@ -77,14 +77,52 @@ bd dep list {{bead_id}} --type blocks
 
 ## ACTIVITIES
 
+### ⚠️ CRITICAL SCOPE CONSTRAINTS (READ FIRST)
+
+**ONLY work on the specific bead assigned to you by the user.**
+
+**DO NOT**:
+- ❌ Search for or work on historical examples mentioned later in this template
+- ❌ Search for "decomposer" persona (it NO LONGER EXISTS - removed in previous session)
+- ❌ Repeat past improvements (execution mode, two-file architecture, etc.) - those are COMPLETED
+- ❌ Audit unrelated subsystems without user request
+- ❌ Create new beads or expand scope beyond {{bead_id}}
+
+**SCOPE VERIFICATION**:
+1. Read `{{bead_id}}` to understand what subsystem needs improvement
+2. If the bead says "persona templates", work ONLY on persona templates
+3. If the bead says "backend API", work ONLY on backend API
+4. If unclear, ASK the user to clarify scope before proceeding
+
+**Examples in this template are HISTORICAL** (from previous sessions). They show how the process works, but are NOT instructions to repeat that work.
+
+---
+
 ### Phase 1: Audit & Analysis
 
-**1.1. Mark Bead In Progress**
+**1.1. Verify Scope from Bead**
+
+**CRITICAL**: Read the assigned bead FIRST to understand what you're auditing:
+```bash
+bd show {{bead_id}}
+```
+
+**Extract**:
+- What subsystem needs improvement? (e.g., "persona templates", "backend API", "state management")
+- What are the specific symptoms or issues?
+- What is the success criteria?
+
+**STOP** if:
+- The bead is unclear → Ask user to clarify scope
+- The bead references historical work (decomposer, execution mode, etc.) → Confirm with user if they want to repeat that work or do something new
+- No bead is assigned → Ask user what subsystem to audit
+
+**1.2. Mark Bead In Progress**
 ```bash
 bd update {{bead_id}} --status in_progress
 ```
 
-**1.2. Review Governing Standards**
+**1.3. Review Governing Standards**
 
 Before auditing the subsystem, review the standards that define quality:
 
@@ -104,9 +142,9 @@ cat bert-viz/templates/personas/_TEMPLATE_EIAMOE.md | head -300
 - Any proposed updates to the standard itself
 - Reasons for keeping or changing the standard
 
-**1.3. Conduct Subsystem Audit**
+**1.4. Conduct Subsystem Audit**
 
-Run systematic checks to identify quality issues:
+Run systematic checks to identify quality issues **ONLY in the subsystem specified by {{bead_id}}**:
 
 **Duplication Analysis**:
 ```bash
@@ -127,15 +165,15 @@ grep -r "^import.*Riverpod" {{subsystem_path}} | sort | uniq -c | sort -rn
 - DRY violations: Where is logic/data duplicated?
 - Abstraction leaks: Does implementation detail leak across boundaries?
 
-**1.4. Quantify Issues**
+**1.5. Quantify Issues**
 
-Create metrics:
+Create metrics **ONLY for the assigned subsystem**:
 - **Duplication %**: Lines of duplicated code / total lines
 - **Inconsistency count**: Number of files violating conventions
 - **Technical debt score**: Sum of TODO/FIXME/HACK markers
 - **Test coverage %**: Tested code / total code
 
-**1.5. Document Findings**
+**1.6. Document Findings**
 
 Create an audit report with:
 - **Symptoms**: What's broken or suboptimal?
@@ -553,22 +591,25 @@ pub fn load_persona_prompt() {
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Standard Evolution Examples
+### Standard Evolution Examples (HISTORICAL - DO NOT REPEAT)
 
-**Example 1: Execution Mode Addition (This Session)**
+**These are COMPLETED examples from previous sessions. They illustrate how the recursive process works but are NOT instructions to repeat this work.**
+
+**Example 1: Execution Mode Addition (Previous Session - COMPLETED)**
 - **Audit found**: Personas didn't know whether to work interactively or autonomously
 - **Standard gap**: `_TEMPLATE_EIAMOE.md` ENTRY CRITERIA missing mode determination
 - **Standard update**: Added execution mode with three patterns (Interactive/Autonomous/Ask)
 - **Subsystem update**: All future personas now include mode in ENTRY CRITERIA
 - **Commits**: 2 separate (standard update, then subsystem refactoring)
 
-**Example 2: Decomposer Removal (This Session)**
+**Example 2: Decomposer Removal (Previous Session - COMPLETED)**
 - **Audit found**: "Decomposer" listed as persona but no PersonaType exists
 - **Standard gap**: `_TEMPLATE_EIAMOE.md` referenced non-existent persona
 - **Standard update**: Removed Decomposer, clarified Product Manager does decomposition
 - **Subsystem update**: Product Manager templates updated accordingly
+- **NOTE**: Decomposer persona NO LONGER EXISTS - do not search for it
 
-**Example 3: Two-File Architecture (This Session)**
+**Example 3: Two-File Architecture (Previous Session - COMPLETED)**
 - **Audit found**: 63% duplication across specialist templates
 - **Standard gap**: `_TEMPLATE_EIAMOE.md` didn't specify persona.md + task.md pattern
 - **Standard consideration**: Should we add this pattern to the standard? (Future work)
