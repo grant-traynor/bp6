@@ -54,7 +54,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
 
     fn build_pty_args(&self, session_id: &str) -> Vec<String> {
         vec![
-            "--session-id".to_string(),
+            "--resume".to_string(),
             session_id.to_string(),
             "--dangerously-skip-permissions".to_string(),
         ]

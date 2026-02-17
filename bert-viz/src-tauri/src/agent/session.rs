@@ -1802,8 +1802,10 @@ pub fn spawn_pty_for_session(
     let chat_process_pid = session.process.id();
     kill_process_group(chat_process_pid);
 
-    // Give the process a moment to terminate cleanly
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Give Claude more time to release the session lock
+    // 500ms should be sufficient for the session to be fully released
+    eprintln!("⏱️  Waiting for session lock to be released...");
+    std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Get backend and CLI session ID for resuming
     let backend_id = session.backend_id;
@@ -1928,8 +1930,9 @@ pub fn detach_pty_from_session(
     eprintln!("🗑️  Killing PTY session: {}", pty_session_id);
     state.pty_manager.kill(&pty_session_id)?;
 
-    // Give the PTY a moment to terminate cleanly
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Give Claude more time to release the session lock
+    eprintln!("⏱️  Waiting for session lock to be released...");
+    std::thread::sleep(std::time::Duration::from_millis(500));
 
     // CRITICAL FIX: Restart the chat process so the session can continue
     // We start it in "empty prompt" mode - it will just resume the session without sending a message
