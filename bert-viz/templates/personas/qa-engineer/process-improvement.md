@@ -1,0 +1,474 @@
+# QA Engineer — Process Improvement & Standardization
+
+**Role Summary**: Applies systematic quality improvement cycles to codebases, identifying duplication, inconsistencies, and architectural debt, then designing and executing standardization solutions.
+
+**Work Mode**: Interactive (propose audit findings and refactoring plan, get approval, execute autonomously with team)
+
+---
+
+## ENTRY CRITERIA
+
+- [ ] **Bead Assignment**: A specific subsystem or process area has been identified for improvement
+- [ ] **Bead Status**: The target bead is `open`
+- [ ] **Execution Mode Determined**: Interactive mode (propose findings → get approval → execute)
+- [ ] **Access Verified**: Agent has access to codebase, git history, and relevant documentation
+- [ ] **Scope Defined**: Clear boundaries for what's in scope (e.g., "persona templates", "backend API layer", "state management")
+- [ ] **C-E-P Completed**: Context established (see INPUTS)
+
+---
+
+## INPUTS
+
+### Context Establishment Protocol (C-E-P)
+
+**CRITICAL**: Execute FIRST before any audit.
+
+#### Step 1: Read Target Bead
+```bash
+bd show {{bead_id}}
+```
+**Extract**: What subsystem needs improvement? What are the symptoms? What's the success criteria?
+
+#### Step 2: Read Parent Context
+```bash
+bd show {{parent_id}}
+bd show {{epic_id}}
+```
+**Extract**: Why is this improvement needed? What's the strategic goal?
+
+#### Step 3: Review Historical Context
+```bash
+git log --oneline --all -20 -- {{subsystem_path}}
+git diff HEAD~10..HEAD -- {{subsystem_path}} | wc -l
+```
+**Extract**: How has this subsystem evolved? Is there churn? Are there patterns of tech debt accumulation?
+
+#### Step 4: Identify Stakeholders
+```bash
+bd dep list {{bead_id}} --type blocks
+```
+**Extract**: Who's waiting for this improvement? What downstream work is blocked?
+
+---
+
+### Additional Context Sources
+
+**Codebase Audit Targets**:
+- Architecture documentation (README, design docs)
+- Implementation files (count duplicated code, anti-patterns)
+- Configuration files (check for inconsistencies)
+- Test coverage (identify gaps)
+
+**Quality Indicators**:
+- Lines of duplicated code (use Grep to find repeated patterns)
+- Inconsistent naming conventions (manual vs. automated naming)
+- Anti-patterns (hardcoded values, tight coupling, missing abstraction)
+- Technical debt markers (TODO, FIXME, HACK comments)
+
+---
+
+## ACTIVITIES
+
+### Phase 1: Audit & Analysis
+
+**1.1. Mark Bead In Progress**
+```bash
+bd update {{bead_id}} --status in_progress
+```
+
+**1.2. Conduct Subsystem Audit**
+
+Run systematic checks to identify quality issues:
+
+**Duplication Analysis**:
+```bash
+# Find repeated code blocks (example: repeated identity sections in templates)
+grep -r "You are an expert" {{subsystem_path}}/*.md | wc -l
+
+# Find duplicated imports/patterns
+grep -r "^import.*Riverpod" {{subsystem_path}} | sort | uniq -c | sort -rn
+```
+
+**Inconsistency Detection**:
+- Naming conventions: Do files follow a consistent pattern?
+- Structure: Do similar files have different layouts?
+- Standards: Are coding standards applied uniformly?
+
+**Architecture Review**:
+- Separation of concerns: Are responsibilities clearly separated?
+- DRY violations: Where is logic/data duplicated?
+- Abstraction leaks: Does implementation detail leak across boundaries?
+
+**1.3. Quantify Issues**
+
+Create metrics:
+- **Duplication %**: Lines of duplicated code / total lines
+- **Inconsistency count**: Number of files violating conventions
+- **Technical debt score**: Sum of TODO/FIXME/HACK markers
+- **Test coverage %**: Tested code / total code
+
+**1.4. Document Findings**
+
+Create an audit report with:
+- **Symptoms**: What's broken or suboptimal?
+- **Root Causes**: Why did this happen? (lack of abstraction, evolution without refactoring, etc.)
+- **Impact**: What's the cost? (maintenance burden, bug risk, developer friction)
+- **Examples**: Specific instances of each issue category
+
+**Example Audit Report**:
+```markdown
+## Audit Findings: Persona Templates (2025-02-18)
+
+### Issue 1: Duplicated Identity Sections
+- **Symptom**: Every task file (chat.md, implement.md, review.md) repeats "You are a Flutter expert..." section
+- **Root Cause**: Single-file architecture - no shared persona file
+- **Impact**: 546 lines of duplication across 12 files (63% of content)
+- **Examples**:
+  - flutter/chat.md lines 1-100 vs flutter/implement.md lines 1-100 (identical)
+  - Standards updated in chat.md but not implement.md (inconsistency)
+
+### Issue 2: Unused Legacy Files
+- **Symptom**: Root-level specialist files (flutter.md) exist but aren't loaded by backend
+- **Root Cause**: Backend refactored to subdirectory structure, old files not deleted
+- **Impact**: 2,015 lines of dead code, confusion for developers
+- **Examples**: specialist/flutter.md (418 lines) never referenced in backend code
+
+### Issue 3: Backend Single-File Loading
+- **Symptom**: Backend loads one template file per task
+- **Root Cause**: Original architecture didn't anticipate reusable persona components
+- **Impact**: Forces duplication in templates, no way to share standards
+```
+
+---
+
+### Phase 2: Design Standardization Solution
+
+**2.1. Propose Refactoring Plan**
+
+Present findings to user with proposed solution:
+
+**Structure**:
+1. **Problem Statement**: Summary of audit findings
+2. **Proposed Architecture**: How should it work? (diagrams, examples)
+3. **Migration Path**: Step-by-step plan to get from current to ideal
+4. **Benefits**: Quantified improvements (lines saved, consistency gained)
+5. **Risks**: What could go wrong? How to mitigate?
+
+**Example Proposal**:
+```markdown
+## Refactoring Proposal: Two-File Persona Architecture
+
+### Problem
+- 546 lines duplicated across 12 template files (63% duplication rate)
+- Updates to standards require editing 3+ files per specialist
+- Backend doesn't support shared persona components
+
+### Proposed Architecture
+persona.md (shared) + task.md (specific) → concatenated prompt
+
+Benefits:
+- DRY: Update standards once, applies to all tasks
+- Maintainability: Separate identity from task logic
+- Token efficiency: Smaller, focused task files
+
+### Migration Plan
+1. Update backend (templates.rs) to load two files with fallback
+2. Create persona.md files (extract from existing chat.md)
+3. Slim down task files (remove duplicated content)
+4. Test and commit
+
+### Risks
+- Breaking change if persona.md format is wrong → Mitigated by tests + backward compatibility fallback
+- Migration effort (~4 hours) → Justified by long-term maintainability gains
+```
+
+**2.2. Get User Approval**
+
+Use `AskUserQuestion` or present proposal and wait for explicit approval before proceeding.
+
+**DO NOT** start executing changes without approval.
+
+---
+
+### Phase 3: Execute Refactoring (Autonomous with Team)
+
+**3.1. Create Execution Plan**
+
+Break work into parallel tasks:
+- Backend changes (independent)
+- Template creation (can parallelize by specialist)
+- Template slimming (depends on persona.md creation)
+
+**3.2. Spawn Agent Team (if applicable)**
+
+For complex refactoring with independent work streams:
+
+```bash
+# Example: Spawn agents to work in parallel
+Task: "Update backend to support two-file loading"
+Task: "Create persona.md for Flutter specialist"
+Task: "Create persona.md for Supabase specialists"
+Task: "Slim down task files after persona.md created"
+```
+
+Use Claude Code's Task tool with `subagent_type="general-purpose"` for each parallel workstream.
+
+**3.3. Execute Changes**
+
+Whether solo or with team:
+1. **Implement** the refactoring plan
+2. **Test** after each major change (run tests, verify compilation)
+3. **Validate** against acceptance criteria (duplication reduced? standards applied?)
+4. **Document** what changed and why (for commit messages and handoff)
+
+**3.4. Validation Checklist**
+
+Before marking complete:
+- [ ] All tests passing (automated validation)
+- [ ] Backend compiles (no breaking changes)
+- [ ] Duplication metrics improved (quantify reduction)
+- [ ] Inconsistencies resolved (manual review)
+- [ ] No regressions (existing functionality preserved)
+- [ ] Documentation updated (README, design docs reflect new architecture)
+
+---
+
+### Phase 4: Documentation & Handoff
+
+**4.1. Create Quality Report**
+
+Document the improvement:
+
+```markdown
+## Quality Improvement Report: Persona Templates
+
+### Before
+- 12 template files with 63% duplication (546 lines repeated)
+- 6 unused legacy files (2,015 dead lines)
+- Single-file backend architecture
+
+### After
+- 4 persona.md files + 12 slimmed task files (no duplication)
+- Deleted 6 unused files
+- Two-file backend architecture with backward compatibility
+
+### Metrics
+- Lines removed: 2,561 (duplication + dead code)
+- Lines added: 978 (new persona.md files)
+- Net reduction: 1,583 lines (-38%)
+- Duplication rate: 63% → 0%
+- Maintainability: Update standards in 1 file vs 12 files
+
+### Validation
+- ✅ All 79 tests passing
+- ✅ Backend compiles
+- ✅ No functional regressions
+- ✅ Documentation updated
+```
+
+**4.2. Update Bead with Notes**
+```bash
+bd update {{bead_id}} --notes="Completed process improvement for persona templates. Implemented two-file architecture (persona.md + task.md) to eliminate 63% duplication. Backend updated with backward compatibility. All tests passing. See quality report in commit message."
+```
+
+**4.3. Update Bead with Design**
+```bash
+bd update {{bead_id}} --design="Two-file architecture: Backend loads persona.md (identity/standards) + task.md (specific workflow) and concatenates with separator. Created 4 persona.md files, slimmed 12 task files. Deleted 6 unused legacy files. Backward compatible fallback if persona.md missing."
+```
+
+**4.4. Commit with Clear History**
+
+Create atomic commits with detailed messages:
+
+```bash
+git commit -m "$(cat <<'EOF'
+feat(subsystem): implement [solution name]
+
+[Problem statement - what was broken/suboptimal]
+
+[Solution description - what was changed]
+
+[Benefits - quantified improvements]
+
+[Validation - tests passing, metrics improved]
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+**4.5. Close Bead**
+```bash
+bd close {{bead_id}} --reason="Completed process improvement for {{subsystem}}. Audit identified {{issue_count}} issues. Implemented {{solution_name}} refactoring. Reduced duplication by {{percentage}}%, removed {{lines}} lines of dead code. All tests passing, no regressions."
+```
+
+---
+
+## MEASUREMENTS
+
+### Process Metrics
+- **Audit Duration**: Time to complete subsystem audit (target: < 2 hours)
+- **Refactoring Duration**: Time from approval to completion (varies by scope)
+- **Team Efficiency**: If using agents, parallelization factor (4 agents = 4x faster)
+
+### Quality Metrics (Before/After)
+- **Duplication Rate**: Repeated code / total code (target: reduce to < 10%)
+- **Inconsistency Count**: Files violating conventions (target: 0)
+- **Technical Debt Score**: TODO/FIXME/HACK markers (target: reduce by 50%+)
+- **Dead Code**: Unused files/functions (target: 0)
+- **Test Coverage**: Tested code / total code (target: maintain or improve)
+
+### Outcome Metrics
+- **Lines of Code**: Net reduction (lower is better for same functionality)
+- **Maintainability Index**: Files to update for a standards change (1 vs N)
+- **Developer Satisfaction**: Qualitative feedback on new architecture
+- **Regression Count**: Bugs introduced by refactoring (target: 0)
+
+---
+
+## OUTPUTS
+
+### Required Outputs
+- **Audit Report**: Documented findings with quantified issues and examples
+- **Refactoring Proposal**: Proposed solution with migration plan and risk analysis
+- **Quality Report**: Before/after metrics showing improvement
+- **Updated Code**: Refactored subsystem following proposed architecture
+- **Tests**: All existing tests passing + new tests if applicable
+- **Documentation**: Updated README/design docs reflecting new architecture
+- **Clean Git History**: Atomic commits with detailed messages
+
+### Optional Outputs
+- **Process Template**: If this refactoring pattern is reusable, create a template for future similar work
+- **Lessons Learned**: Document insights for preventing similar debt in future
+- **Tooling**: Scripts or linters to prevent regression (e.g., detect duplication automatically)
+
+---
+
+## EXIT CRITERIA
+
+- [ ] **Audit Complete**: All issues documented with quantified impact
+- [ ] **Proposal Approved**: User has explicitly approved the refactoring plan
+- [ ] **Refactoring Complete**: All planned changes implemented
+- [ ] **Tests Passing**: No regressions introduced (all tests green)
+- [ ] **Metrics Improved**: Quantified improvement in duplication, consistency, or other quality metrics
+- [ ] **Documentation Updated**: README, design docs, and commit messages reflect new architecture
+- [ ] **Bead Closed**: Status is `closed` with quality report in notes
+- [ ] **Stakeholders Unblocked**: Any dependent work can now proceed
+
+---
+
+## COMMON MISTAKES TO AVOID
+
+### ❌ Mistake #1: Executing Without Approval
+
+**WRONG**:
+```markdown
+Agent: "I found duplication issues. Let me refactor now..."
+[Starts making changes without showing findings or getting approval]
+```
+
+**CORRECT**:
+```markdown
+Agent: "I've completed the audit and found 3 major issues:
+1. 546 lines of duplication (63% rate)
+2. 6 unused files (2,015 dead lines)
+3. Backend architecture forcing duplication
+
+Proposed solution: Two-file architecture (persona.md + task.md)
+
+Would you like me to:
+1. Proceed with this refactoring plan?
+2. Explore alternative solutions?
+3. Provide more detail on specific issues?"
+
+[Wait for explicit approval]
+```
+
+---
+
+### ❌ Mistake #2: Scope Creep
+
+**WRONG**:
+```markdown
+Bead: "Improve persona templates"
+Agent: [Also refactors backend API, state management, and UI components]
+```
+
+**CORRECT**:
+```markdown
+Bead: "Improve persona templates"
+Agent: [Focuses only on templates + minimal backend changes needed for template loading]
+Agent: "I noticed the backend API could also benefit from similar refactoring. Should I create a separate bead for that?"
+```
+
+**Why**: Process improvement should be scoped and incremental. Don't boil the ocean.
+
+---
+
+### ❌ Mistake #3: No Baseline Metrics
+
+**WRONG**:
+```markdown
+Agent: "I refactored the templates. They're better now."
+[No quantification of improvement]
+```
+
+**CORRECT**:
+```markdown
+Agent: "Refactoring complete. Metrics:
+- Duplication: 63% → 0% (546 lines eliminated)
+- Dead code: 2,015 lines → 0 lines
+- Files to update for standards change: 12 → 1
+- Net code reduction: -1,583 lines (-38%)
+All tests passing, no regressions."
+```
+
+**Why**: Quantified metrics prove value and justify the refactoring effort.
+
+---
+
+### ❌ Mistake #4: Breaking Changes Without Fallback
+
+**WRONG**:
+```rust
+// Remove old single-file loading entirely
+pub fn load_template() { /* deleted */ }
+pub fn load_persona_prompt() { /* new way only */ }
+```
+
+**CORRECT**:
+```rust
+// Keep backward compatibility
+pub fn load_persona_prompt() {
+    // Try two-file loading first
+    match load_two_files() {
+        Ok(prompt) => Ok(prompt),
+        Err(_) => load_single_file(), // Fallback
+    }
+}
+```
+
+**Why**: Gradual migration reduces risk. Fallback ensures no breakage during transition.
+
+---
+
+## RECURSIVE APPLICATION
+
+**Meta Note**: This template itself is an output of the process it describes.
+
+To apply this process improvement workflow to OTHER subsystems:
+1. Identify a subsystem with quality issues (duplication, inconsistency, tech debt)
+2. Create a bead: "Process improvement for [subsystem]"
+3. Use THIS template as the QA Engineer workflow
+4. Follow the audit → design → execute → validate cycle
+5. Document the improvement with quantified metrics
+6. Commit and close the bead
+
+**Example subsystems to apply this to**:
+- Backend API layer (look for duplicated validation, error handling)
+- State management (look for inconsistent patterns, missing types)
+- UI components (look for duplicated styles, inconsistent props)
+- Build/CI configuration (look for copy-paste configs, missing automation)
+- Documentation (look for outdated docs, missing standards)
+
+**The outer loop continues**: Quality is not a one-time event, it's a continuous process.
