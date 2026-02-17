@@ -111,7 +111,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   });
 
-  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null }>>(() => {
+  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; backendId?: CliBackend }>>(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
       return JSON.parse(localStorage.getItem('chatSessionMeta') || '{}');
@@ -183,6 +183,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     const sessionMeta = sessions.find(s => s.sessionId === sessionId);
     const sessionPersona = sessionMeta?.persona || sessionMetaIndex[sessionId]?.persona || 'product-manager';
     const sessionBeadId = sessionMeta?.beadId || sessionMetaIndex[sessionId]?.beadId || null;
+    const sessionBackendId = (sessionMeta?.backendId as CliBackend) || sessionMetaIndex[sessionId]?.backendId || 'gemini';
     const sessionTask = sessionMetaIndex[sessionId]?.task || 'chat';
     const sessionBeadTitle = sessionMetaIndex[sessionId]?.beadTitle || null;
 
@@ -199,17 +200,18 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 task: sessionTask,
                 beadId: sessionBeadId,
                 beadTitle: title,
+                backendId: sessionBackendId,
               }
             }));
           }
         })
         .catch(err => console.error('Failed to fetch beads for title:', err));
-    }, [sessionBeadId, sessionBeadTitle, sessionId, sessionPersona, sessionTask]);
+    }, [sessionBeadId, sessionBeadTitle, sessionId, sessionPersona, sessionTask, sessionBackendId]);
 
     useEffect(() => {
-      const title = `${sessionBeadId || 'Untracked'} · ${sessionBeadTitle || 'Chat'} · ${sessionPersona}${sessionTask ? ` · ${sessionTask}` : ''}`;
+      const title = `${sessionBeadId || 'Untracked'} · ${sessionBeadTitle || 'Chat'} · ${sessionPersona}${sessionTask ? ` · ${sessionTask}` : ''} [${sessionBackendId}]`;
       getCurrentWindow().setTitle(title).catch(err => console.error('Failed to set window title:', err));
-    }, [sessionBeadId, sessionBeadTitle, sessionPersona, sessionTask]);
+    }, [sessionBeadId, sessionBeadTitle, sessionPersona, sessionTask, sessionBackendId]);
 
     // Window state persistence hook (bp6-643.005.5)
     useEffect(() => {
@@ -278,7 +280,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           task={sessionTask || `Session window for session ${sessionId}`}
           beadId={sessionBeadId}
           beadTitle={sessionBeadTitle}
-          cliBackend={currentCli}
+          cliBackend={sessionBackendId}
         />
       </div>
     );
@@ -762,7 +764,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   }, [viewModel]);
 
   const handleOpenChat = useCallback(async (persona: string, task?: string, beadId?: string, role?: string) => {
-    const key = `${persona}::${task || 'chat'}::${beadId || 'untracked'}::${role || 'default'}`;
+    const key = `${persona}::${task || 'chat'}::${beadId || 'untracked'}::${role || 'default'}::${currentCli}`;
     const beadTitle = beadId ? beads.find(b => b.id === beadId)?.title || null : null;
 
     try {
@@ -789,6 +791,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             task: task ?? null,
             beadId: beadId ?? null,
             beadTitle,
+            backendId: currentCli,
           }
         };
 
