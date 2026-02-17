@@ -58,6 +58,19 @@ const PERSONAS: PersonaOption[] = [
     ],
   },
   {
+    id: "orchestrator",
+    label: "Orchestrator",
+    icon: "🎯",
+    color: "text-indigo-600 dark:text-indigo-400",
+    borderColor: "border-indigo-500/30",
+    hoverBgColor: "hover:bg-indigo-500/10",
+    bgColor: "bg-indigo-500/10 text-indigo-600",
+    tasks: [
+      { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
+      { id: "coordinate", label: "Coordinate", icon: <Layers size={14} /> },
+    ],
+  },
+  {
     id: "customer",
     label: "Customer Voice",
     icon: "👤",
