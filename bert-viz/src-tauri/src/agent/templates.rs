@@ -87,6 +87,62 @@ impl TemplateLoader {
         })
     }
 
+    /// Load a persona prompt using the two-file architecture
+    ///
+    /// This method loads a persona identity file (`persona.md`) and a task-specific file,
+    /// then concatenates them. For backward compatibility, if `persona.md` doesn't exist,
+    /// it falls back to loading only the task-specific file.
+    ///
+    /// # Arguments
+    ///
+    /// * `persona` - The persona type (e.g., "product-manager", "specialist")
+    /// * `template_name` - The template file name without extension (e.g., "flutter/chat")
+    ///
+    /// # Returns
+    ///
+    /// The combined prompt content as a String
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let loader = TemplateLoader::new()?;
+    /// // Loads specialist/flutter/persona.md + specialist/flutter/chat.md
+    /// let prompt = loader.load_persona_prompt("specialist", "flutter/chat")?;
+    /// ```
+    pub fn load_persona_prompt(&self, persona: &str, template_name: &str) -> Result<String, String> {
+        // Extract the directory from template_name (e.g., "flutter" from "flutter/chat")
+        let persona_dir = if let Some(slash_pos) = template_name.find('/') {
+            &template_name[..slash_pos]
+        } else {
+            // No slash means it's a simple template name, use persona root
+            ""
+        };
+
+        // Construct path to persona.md
+        let persona_md_path = if !persona_dir.is_empty() {
+            self.template_root
+                .join(persona)
+                .join(persona_dir)
+                .join("persona.md")
+        } else {
+            self.template_root.join(persona).join("persona.md")
+        };
+
+        // Try to load persona.md
+        let persona_content = fs::read_to_string(&persona_md_path).ok();
+
+        // Load the task-specific template
+        let task_template = self.load_template(persona, template_name)?;
+
+        // Combine if persona.md exists, otherwise return just the task template
+        if let Some(persona_md) = persona_content {
+            Ok(format!("{}\n\n---\n\n{}", persona_md, task_template))
+        } else {
+            // Fallback to single file for backward compatibility
+            Ok(task_template)
+        }
+    }
+
     /// Load a template and substitute variables
     #[allow(dead_code)]
     ///
@@ -232,5 +288,95 @@ mod tests {
         let templates = loader.list_templates("product-manager").unwrap();
         assert_eq!(templates.len(), 1);
         assert_eq!(templates[0], "test-template");
+    }
+
+    #[test]
+    fn test_load_persona_prompt_with_persona_md() {
+        let temp_dir = TempDir::new().unwrap();
+        let personas_dir = temp_dir.path().join("personas");
+
+        // Create specialist/flutter directory with persona.md and chat.md
+        let flutter_dir = personas_dir.join("specialist").join("flutter");
+        fs::create_dir_all(&flutter_dir).unwrap();
+        fs::write(
+            flutter_dir.join("persona.md"),
+            "# Flutter Specialist Identity\n\nYou are a Flutter expert.",
+        )
+        .unwrap();
+        fs::write(flutter_dir.join("chat.md"), "# Chat Task\n\nHelp the user.")
+            .unwrap();
+
+        let loader = TemplateLoader::with_root(personas_dir);
+
+        let result = loader
+            .load_persona_prompt("specialist", "flutter/chat")
+            .unwrap();
+
+        // Should contain both files with separator
+        assert!(result.contains("Flutter Specialist Identity"));
+        assert!(result.contains("---"));
+        assert!(result.contains("Chat Task"));
+    }
+
+    #[test]
+    fn test_load_persona_prompt_without_persona_md() {
+        let temp_dir = TempDir::new().unwrap();
+        let personas_dir = temp_dir.path().join("personas");
+
+        // Create specialist/flutter directory with only chat.md (no persona.md)
+        let flutter_dir = personas_dir.join("specialist").join("flutter");
+        fs::create_dir_all(&flutter_dir).unwrap();
+        fs::write(flutter_dir.join("chat.md"), "# Chat Task\n\nHelp the user.")
+            .unwrap();
+
+        let loader = TemplateLoader::with_root(personas_dir);
+
+        let result = loader
+            .load_persona_prompt("specialist", "flutter/chat")
+            .unwrap();
+
+        // Should only contain chat.md content (fallback behavior)
+        assert!(result.contains("Chat Task"));
+        assert!(!result.contains("---"));
+    }
+
+    #[test]
+    fn test_load_persona_prompt_simple_template() {
+        let temp_dir = TempDir::new().unwrap();
+        let personas_dir = temp_dir.path().join("personas");
+
+        // Create product-manager directory with persona.md and simple template
+        let pm_dir = personas_dir.join("product-manager");
+        fs::create_dir_all(&pm_dir).unwrap();
+        fs::write(
+            pm_dir.join("persona.md"),
+            "# Product Manager Identity\n\nYou manage products.",
+        )
+        .unwrap();
+        fs::write(
+            pm_dir.join("decompose-epic.md"),
+            "# Decompose Epic\n\nBreak down the epic.",
+        )
+        .unwrap();
+
+        let loader = TemplateLoader::with_root(personas_dir);
+
+        let result = loader
+            .load_persona_prompt("product-manager", "decompose-epic")
+            .unwrap();
+
+        // Should contain both files with separator
+        assert!(result.contains("Product Manager Identity"));
+        assert!(result.contains("---"));
+        assert!(result.contains("Decompose Epic"));
+    }
+
+    #[test]
+    fn test_load_persona_prompt_nonexistent_task() {
+        let temp_dir = create_test_templates();
+        let loader = TemplateLoader::with_root(temp_dir.path().join("personas"));
+
+        let result = loader.load_persona_prompt("product-manager", "nonexistent");
+        assert!(result.is_err());
     }
 }

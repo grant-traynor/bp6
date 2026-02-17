@@ -858,10 +858,10 @@ fn build_prompt_with_persona(
     // Get template name from persona plugin
     let template_name = persona_plugin.get_template_name(&context)?;
 
-    // Load template using TemplateLoader
+    // Load template using TemplateLoader (two-file architecture)
     let template_content = state
         .template_loader
-        .load_template(persona_type.as_str(), &template_name)
+        .load_persona_prompt(persona_type.as_str(), &template_name)
         .map_err(|e| format!("Failed to load template: {}", e))?;
 
     // Build final prompt using persona plugin
