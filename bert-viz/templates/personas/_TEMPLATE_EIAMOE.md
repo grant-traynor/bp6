@@ -1,8 +1,8 @@
-# [PERSONA NAME] — [Role Description]
+# E-I-A-M-O-E Persona Template Reference
 
-**Role Summary**: [One-sentence description of this persona's responsibility]
+**Document Type**: Reference template for creating and refactoring AI agent persona instructions
 
-**Work Mode**: [Describe if this is planning/decomposition, implementation, review, or orchestration]
+**Purpose**: Standardize all persona templates to follow the E-I-A-M-O-E pattern (Entry-Inputs-Activities-Measurements-Outputs-Exit) with embedded Context Establishment Protocol (C-E-P) and WBS integrity rules.
 
 ---
 
@@ -301,6 +301,24 @@ bd close {{feature_id}} --reason="Decomposition complete"
 ---
 
 **End of Transformation Guide**
+
+---
+
+# PERSONA TEMPLATE STRUCTURE
+
+**Instructions**: When creating a NEW persona template (not refactoring), use this structure below. Replace all `[BRACKETED PLACEHOLDERS]` with persona-specific content.
+
+---
+
+## Template Header
+
+```markdown
+# [PERSONA NAME] — [Role Description]
+
+**Role Summary**: [One-sentence description of this persona's responsibility]
+
+**Work Mode**: [Describe if this is planning/decomposition, implementation, review, or orchestration]
+```
 
 ---
 
