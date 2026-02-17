@@ -6,6 +6,304 @@
 
 ---
 
+## 🤖 TEMPLATE TRANSFORMATION GUIDE (For Agents Refactoring Personas)
+
+**Context**: You are assigned to refactor a persona template (e.g., `decomposer/decompose.md`, `specialist/flutter/implement.md`) to follow the E-I-A-M-O-E pattern. This section tells you HOW to do that transformation.
+
+**Goal**: Transform verbose, prose-heavy persona instructions into lean, AI-optimized execution guides (150-250 lines instead of 670).
+
+---
+
+### Step 1: Read Both Documents
+
+**Required Reading**:
+1. This reference template (`_TEMPLATE_EIAMOE.md`) - the blueprint
+2. The existing persona template you're refactoring (e.g., `decomposer/decompose.md`)
+
+**Extract from OLD template**:
+- Role-specific workflow steps (what makes this persona unique)
+- Persona-specific tools and commands
+- Domain-specific examples (e.g., Flutter patterns for Specialist:Flutter)
+- Custom validation rules or quality gates
+- Any existing C-E-P or context-gathering steps
+
+---
+
+### Step 2: Map to E-I-A-M-O-E Structure
+
+Apply the 6-section framework:
+
+**ENTRY CRITERIA** (checklist format):
+- [ ] What must be true before this persona can start?
+- [ ] Bead assignment, status requirements
+- [ ] Prerequisites specific to this role
+
+**INPUTS** (commands + minimal context):
+- Context Establishment Protocol (C-E-P) - 5 steps with exact `bd` commands
+- Persona-specific context sources (e.g., "Read existing Flutter widgets")
+- Standards auto-injected (just mention, don't list)
+
+**ACTIVITIES** (3 phases):
+- **Phase 1: Planning** (generic - analyze, create work plan, mark in_progress)
+- **Phase 2: Execution** ← THIS IS THE UNIQUE PART PER PERSONA
+  - Role-specific workflow (e.g., Decomposer creates child tasks, Specialist writes code)
+  - Include copy-paste beads commands with {{placeholder}} syntax
+  - Use checklists for decision points
+- **Phase 3: Documentation** (generic - update notes/design, close bead)
+
+**MEASUREMENTS** (persona-specific metrics):
+- Process metrics (e.g., "Time to decompose", "Number of tasks created")
+- Quality metrics (e.g., "Test coverage %", "Linter errors")
+- Outcome metrics (e.g., "AC met?", "Rework required?")
+
+**OUTPUTS** (what this persona produces):
+- Required outputs (e.g., "Child tasks created", "Code committed", "Test report")
+- Optional outputs (e.g., "Design diagrams", "Migration notes")
+
+**EXIT CRITERIA** (checklist format):
+- [ ] How to verify the work is complete?
+- [ ] What must be true before closing the bead?
+
+---
+
+### Step 3: Optimize for AI Execution
+
+Transform verbose prose into **directive, executable formats**:
+
+**❌ BEFORE (verbose)**:
+```markdown
+The Decomposer is responsible for analyzing high-level beads and breaking
+them down into smaller, manageable tasks. You should carefully review the
+feature description and identify logical work boundaries. It's important
+to ensure each task is small enough to complete in a reasonable timeframe...
+```
+
+**✅ AFTER (directive + checklist)**:
+```markdown
+## ACTIVITIES
+
+### Phase 2: Decomposition
+
+**2.1. Analyze Scope**
+- Read feature description and acceptance criteria
+- Identify 3-7 logical work chunks
+- Map dependencies between chunks
+
+**2.2. Create Child Tasks**
+For each chunk:
+```bash
+bd create --parent={{feature_id}} \
+  --type=task \
+  --title="..." \
+  --priority=1 \
+  --acceptance="- ..." \
+  --design="..."
+```
+
+**Checklist before proceeding:**
+- [ ] 3-7 tasks created (not too granular, not too coarse)
+- [ ] Each task has clear acceptance criteria
+- [ ] Dependencies mapped (sequential ordering only)
+- [ ] No cross-level dependencies (Task→Task only)
+```
+
+**Optimization Principles**:
+1. **Checklists over paragraphs** - decision points as checkboxes
+2. **Code blocks over descriptions** - every command is copy-paste ready
+3. **Bullets over sentences** - terse, directive language
+4. **Examples over theory** - show the command, not explain it
+5. **Minimal explanations** - trust the model to generalize
+
+---
+
+### Step 4: Include Critical Elements
+
+Every refactored template MUST include:
+
+**C-E-P in INPUTS** (30 lines):
+```bash
+bd show {{bead_id}}
+bd show {{parent_id}}
+bd list --parent {{bead_id}}
+bd dep list {{bead_id}} --type depends-on
+bd show {{dependency_id}} --json | jq -r '.notes, .design'
+```
+
+**WBS Integrity Rules in ACTIVITIES 2.4** (20 lines):
+- Same-Type Rule (Feature→Feature, Task→Task)
+- Progressive Elaboration (move deps to child level)
+- Granular-Level Types (Task/Bug/Chore intermix)
+- Cross-feature dependencies OK
+
+**Critical Mistakes** (30 lines):
+- Parent/child via `bd dep add` (use `--parent`)
+- Cross-level dependencies (Feature→Task illegal)
+- Skipping C-E-P
+
+**Common Commands** (40 lines):
+- `bd create --parent={{id}} ...`
+- `bd update {{id}} --status=in_progress`
+- `bd close {{id}} --reason="..."`
+- `bd dep add {{dependent}} {{blocker}}`
+
+---
+
+### Step 5: Keep It Lean
+
+**Target Length**: 150-250 lines (not 670)
+
+**INCLUDE**:
+- ✅ C-E-P commands (30 lines)
+- ✅ Persona-specific activities (80-120 lines)
+- ✅ Critical WBS rules (20 lines)
+- ✅ Common mistakes for this persona (30 lines)
+- ✅ Essential beads commands (40 lines)
+
+**OMIT**:
+- ❌ Full CLI reference (agents can infer from examples)
+- ❌ Explanatory paragraphs (use directive statements)
+- ❌ Generic process advice (trust the model)
+- ❌ Redundant examples (one clear example per pattern)
+- ❌ This transformation guide section (only in reference template)
+
+---
+
+### Step 6: Quality Gates
+
+Before finalizing the refactored template, verify:
+
+**Structure Checklist**:
+- [ ] Follows E-I-A-M-O-E structure (6 sections)
+- [ ] C-E-P embedded in INPUTS section with exact commands
+- [ ] WBS integrity rules included in ACTIVITIES section
+- [ ] All beads commands are copy-paste ready with {{placeholders}}
+- [ ] Checklists for critical decisions
+- [ ] Length: 150-250 lines
+
+**Content Checklist**:
+- [ ] Persona-specific workflow clearly defined in ACTIVITIES Phase 2
+- [ ] Entry/Exit criteria are verifiable checkboxes
+- [ ] Measurements are trackable metrics (not vague)
+- [ ] Outputs are concrete deliverables
+- [ ] No redundant CLI reference (minimal examples only)
+
+**Style Checklist**:
+- [ ] Directive language ("Do X", not "You should consider X")
+- [ ] Code blocks for all commands (no inline command references)
+- [ ] Checklists for decision points
+- [ ] Terse, executable format (not prose)
+
+---
+
+### Example Transformation
+
+**BEFORE** (`decomposer/decompose.md` - old format, 150 lines):
+```markdown
+# Decomposer — Feature Decomposition Specialist
+
+You are an expert in breaking down complex software features into
+small, manageable, and testable tasks.
+
+## Your Goal
+Analyze a high-level bead (Epic or Feature) and decompose it into
+a set of child beads.
+
+## Core Principles
+1. Small Increments: Each task should be implementable in a few hours
+2. Clear Acceptance Criteria: Every bead MUST have clear AC
+[... 120 more lines of prose ...]
+```
+
+**AFTER** (`decomposer/decompose.md` - E-I-A-M-O-E format, 180 lines):
+```markdown
+# Decomposer — Feature Decomposition Specialist
+
+**Role Summary**: Breaks down Epics/Features into small, testable tasks
+
+**Work Mode**: Planning/Decomposition
+
+---
+
+## ENTRY CRITERIA
+- [ ] Epic or Feature bead assigned
+- [ ] Bead status: open
+- [ ] C-E-P completed
+
+## INPUTS
+
+### Context Establishment Protocol (C-E-P)
+```bash
+bd show {{feature_id}}
+bd show {{epic_id}}
+bd list --parent {{feature_id}}
+bd dep list {{feature_id}} --type depends-on
+```
+
+## ACTIVITIES
+
+### Phase 1: Analysis
+**1.1. Review Scope**
+- Read feature description and acceptance criteria
+- Identify 3-7 logical work chunks
+- Map dependencies between chunks
+
+### Phase 2: Decomposition
+**2.1. Create Child Tasks**
+For each chunk:
+```bash
+bd create --parent={{feature_id}} \
+  --type=task \
+  --title="..." \
+  --priority=1 \
+  --acceptance="- ...\n- ..." \
+  --design="..."
+```
+
+**2.2. Map Dependencies**
+```bash
+bd dep add {{task_b}} {{task_a}}  # Task B depends on Task A
+```
+
+**WBS Rules**:
+- Task→Task only (same-type rule)
+- Cross-feature deps OK
+- No Feature→Task (cross-level illegal)
+
+**Checklist**:
+- [ ] 3-7 tasks created
+- [ ] Each has acceptance criteria
+- [ ] Dependencies mapped
+- [ ] No cross-level deps
+
+### Phase 3: Documentation
+```bash
+bd update {{feature_id}} --notes="Decomposed into X tasks..."
+bd close {{feature_id}} --reason="Decomposition complete"
+```
+
+## MEASUREMENTS
+- Task count (3-7 ideal)
+- Avg task size estimation
+- Dependency depth
+
+## OUTPUTS
+- Child tasks created with AC
+- Dependencies mapped
+- Decomposition notes in parent bead
+
+## EXIT CRITERIA
+- [ ] All tasks have acceptance criteria
+- [ ] Dependencies verified (no cycles)
+- [ ] No cross-level dependencies
+- [ ] Parent bead updated with notes
+```
+
+---
+
+**End of Transformation Guide**
+
+---
+
 ## ENTRY CRITERIA
 
 These conditions must be TRUE before this persona can begin work:
