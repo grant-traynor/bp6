@@ -22,6 +22,7 @@ impl PersonaPlugin for QcEngineerPersona {
         let template_name = match task {
             Some("collect-metrics") | Some("collect_metrics") => "collect-metrics",
             Some("generate-report") | Some("generate_report") => "generate-report",
+            Some("guide-test") | Some("guide_test") => "guide-test",
             Some(_) | None => "chat", // Default to interactive chat mode
         };
 
@@ -59,6 +60,20 @@ mod tests {
 
         let template_name = persona.get_template_name(&context).unwrap();
         assert_eq!(template_name, "generate-report");
+    }
+
+    #[test]
+    fn test_guide_test() {
+        let persona = QcEngineerPersona::new();
+        let context = PersonaContext {
+            task: Some("guide-test".to_string()),
+            issue_type: None,
+            bead_id: None,
+            role: None,
+        };
+
+        let template_name = persona.get_template_name(&context).unwrap();
+        assert_eq!(template_name, "guide-test");
     }
 
     #[test]

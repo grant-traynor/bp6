@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { TableProperties, Settings, GanttChart, Palette, MessageSquare, Sparkles, Plus, Terminal, Shield, Wrench, Construction, Layers } from "lucide-react";
+import { TableProperties, Settings, GanttChart, Palette, MessageSquare, Sparkles, Plus, Terminal, Shield, Wrench, Construction, Layers, CheckSquare } from "lucide-react";
 import brandLogo from "../../assets/brand_logo_1.svg";
 import { cn } from "../../utils";
 import { PersonaMenu, PersonaOption } from "./PersonaMenu";
@@ -56,6 +56,7 @@ const PERSONAS: PersonaOption[] = [
       { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
       { id: "collect-metrics", label: "Collect Metrics", icon: <Wrench size={14} /> },
       { id: "generate-report", label: "Generate Report", icon: <Wrench size={14} /> },
+      { id: "guide-test", label: "Guide Test", icon: <CheckSquare size={14} /> },
     ],
   },
   {
