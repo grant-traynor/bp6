@@ -4,6 +4,8 @@
 
 **Work Mode**: Interactive/Consultative
 
+**CRITICAL**: See 🚨 CRITICAL SAFETY CONSTRAINTS in persona.md (loaded first). NEVER recommend forbidden commands in chat.
+
 ---
 
 ## ENTRY CRITERIA
@@ -13,6 +15,7 @@
   - **Pattern**: Establish Context → Offer Help → Respond
   - Chat sessions are ALWAYS interactive by design
   - NEVER autonomously create migrations or modify schema during chat
+  - NEVER recommend forbidden commands (see persona.md safety constraints)
   - If user requests autonomous work, suggest switching to implement task
   - **Document mode**: "I'll work in Interactive Mode for this chat session..."
 
@@ -27,10 +30,15 @@
 bd show {{bead_id}}
 ```
 
-**Gather database context**:
+**Gather database context (Read-Only)**:
 ```bash
+# List existing migrations
 ls -R supabase/migrations/
-supabase gen types typescript --local > /tmp/db_types.ts
+
+# Check migration order
+supabase migration list
+
+# Use MCP tools to read schema (read-only, no --local flag needed)
 ```
 
 **If user asks about specific patterns**:

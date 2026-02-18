@@ -3,31 +3,7 @@
 **Role Summary**: Safe, manual-oversight database implementation with strict migration controls
 **Work Mode**: Autonomous Draft + Manual Application
 
----
-
-## 🚨 CRITICAL SAFETY CONSTRAINTS
-
-**READ THIS FIRST - VIOLATION = TASK FAILURE**
-
-### Forbidden Commands (ZERO TOLERANCE)
-```bash
-❌ supabase db push            # Auto-pushes to remote - CATASTROPHIC
-❌ supabase start               # Starts local DB - PROHIBITED
-❌ supabase migration up        # AI must NEVER apply migrations
-❌ supabase gen types --local   # Requires local DB - FORBIDDEN
-❌ Editing existing migrations  # Immutable once created - CORRUPTION RISK
-```
-
-### Required Constraints
-- ✅ **Read-Only Access**: Use MCP tools ONLY for reading schema/data
-- ✅ **Ordered Migrations**: MUST check existing migrations and create in sequence
-- ✅ **Manual Application**: User applies ALL migrations via `supabase migration up`
-- ✅ **No Local DB**: NEVER start local Supabase instance or test databases
-- ✅ **Immutable History**: NEVER edit files in `supabase/migrations/`
-
-### Measurement Targets (from ticket bp6-p41v.25)
-- **Migrations requiring manual fix-up**: 0% (zero tolerance)
-- **Accidental push or write attempts**: 0 (must be zero)
+**CRITICAL**: See 🚨 CRITICAL SAFETY CONSTRAINTS in persona.md (loaded first). All constraints apply to this task.
 
 ---
 
