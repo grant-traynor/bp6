@@ -92,6 +92,7 @@ Before running ANY `bd create` command:
 pub enum PersonaType {
     ProductManager,
     QaEngineer,
+    QcEngineer,
     Specialist,
     Architect,
     Customer,
@@ -102,6 +103,7 @@ impl PersonaType {
         match self {
             PersonaType::ProductManager => "product-manager",
             PersonaType::QaEngineer => "qa-engineer",
+            PersonaType::QcEngineer => "qc-engineer",
             PersonaType::Specialist => "specialist",
             PersonaType::Architect => "architect",
             PersonaType::Customer => "customer",
@@ -215,7 +217,7 @@ impl PersonaRegistry {
 
     /// Register all built-in persona implementations
     pub fn register_defaults(&self) {
-        use crate::agent::personas::{ArchitectPersona, CustomerPersona, ProductManagerPersona, QaEngineerPersona, SpecialistPersona};
+        use crate::agent::personas::{ArchitectPersona, CustomerPersona, ProductManagerPersona, QaEngineerPersona, QcEngineerPersona, SpecialistPersona};
 
         // SAFETY: We're using interior mutability pattern similar to BackendRegistry
         // This is safe because registration only happens during initialization
@@ -227,6 +229,7 @@ impl PersonaRegistry {
                 Arc::new(ProductManagerPersona::new()),
             );
             (*personas_ptr).insert(PersonaType::QaEngineer, Arc::new(QaEngineerPersona::new()));
+            (*personas_ptr).insert(PersonaType::QcEngineer, Arc::new(QcEngineerPersona::new()));
             (*personas_ptr).insert(PersonaType::Specialist, Arc::new(SpecialistPersona::new()));
             (*personas_ptr).insert(PersonaType::Architect, Arc::new(ArchitectPersona::new()));
             (*personas_ptr).insert(PersonaType::Customer, Arc::new(CustomerPersona::new()));

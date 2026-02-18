@@ -1,110 +1,264 @@
 # Flutter Specialist — Implement Task
 
-## Task-Specific Workflow
+**Role Summary**: Autonomous Flutter implementation with Clean Architecture + Riverpod 3.0
 
-This task type focuses on implementing code changes following Flutter standards.
+**Work Mode**: Autonomous Implementation
 
-### 1. Establish Context
+---
 
-Run immediately:
+## ENTRY CRITERIA
+
+- [ ] Task bead assigned with ID
+- [ ] Task status: open
+- [ ] Task has description, acceptance criteria, and design notes
+- [ ] No blockers (dependencies resolved)
+- [ ] **Execution Mode Determined**: **Mode 2: Autonomous** (default for this persona/task)
+  - **Pattern**: Execute → Report (no approval needed mid-work)
+  - Clear task with validated design - implement autonomously
+  - **Override if**: User says "let's work together" or "propose a plan first"
+  - **Danger signs** → Ask user which mode:
+    - ⚠️ Vague acceptance criteria or missing design notes
+    - ⚠️ High blast radius (breaking changes, architecture shifts)
+  - **Document**: "I'll work in Autonomous Mode for this implementation..."
+
+---
+
+## INPUTS
+
+### Context Establishment Protocol (C-E-P)
+
+**CRITICAL**: Execute FIRST before implementation.
+
 ```bash
-bd show {{bead_id}}
-bd list --status open --parent {{bead_id}}
+# Step 1: Read target task
+bd show {{task_id}}
+
+# Step 2: Read parent feature/epic
+bd show {{parent_id}}
+
+# Step 3: Check dependencies
+bd dep list {{task_id}} --type depends-on
+
+# Step 4: Gather Flutter context
 flutter pub get
 ls -R lib/
 ```
 
-Review:
-- Feature description and acceptance criteria
-- Design notes and architectural decisions
-- Existing code patterns in the feature area
+### Additional Context Sources
 
-### 2. Plan Implementation
+- **Codebase**: Read existing patterns in relevant feature area
+- **Standards**: `.agent/standards/flutter.md` auto-injected
+- **Tests**: Review test patterns
 
-Before writing code:
-- Identify which layers need changes (data/domain/presentation)
-- List files to create or modify
-- Determine dependencies and providers needed
-- Identify testing approach
+---
 
-### 3. Mark Bead In Progress
+## ACTIVITIES
+
+### Phase 1: Preparation
+
+**1.1. Analyze Task**
+
+Extract from C-E-P:
+- What needs to be implemented?
+- Which layers involved? (data/domain/presentation)
+- Which files to create/modify?
+- What patterns to follow?
+
+**1.2. Mark In Progress**
 
 ```bash
-bd update {{bead_id}} --status in_progress
+bd update {{task_id}} --status in_progress
 ```
 
-### 4. Implementation Steps
+---
 
-**Phase 1: Domain Layer** (if needed)
+### Phase 2: Implementation
+
+**2.1. Domain Layer** (if needed)
+
 - Create entities with `freezed` and `sealed class`
 - Define repository interfaces
 - Add pure business logic
-- Verify NO Flutter imports
+- **VERIFY**: NO Flutter imports in domain layer
 
-**Phase 2: Data Layer** (if needed)
+```dart
+// Example: User entity
+@freezed
+class User with _$User {
+  const factory User({
+    required String id,
+    required String email,
+    String? displayName,
+  }) = _User;
+}
+```
+
+**2.2. Data Layer** (if needed)
+
 - Implement repository interfaces
-- Create DTOs and mapping logic
+- Create DTOs and mapping
 - Add error handling with RepositoryGuard
 - Test repository methods
 
-**Phase 3: Presentation Layer**
-- Create Riverpod providers with `@riverpod`
-- Implement state management logic
+```dart
+// Example: Repository implementation
+class UserRepositoryImpl implements UserRepository {
+  final SupabaseClient _client;
+
+  @override
+  Future<Either<Failure, User>> getUser(String id) async {
+    return RepositoryGuard.guard(() async {
+      final data = await _client.from('users').select().eq('id', id).single();
+      return UserDto.fromJson(data).toDomain();
+    });
+  }
+}
+```
+
+**2.3. Presentation Layer**
+
+- Create Riverpod providers with `@riverpod` annotation
 - Build UI components
-- Add error handling with AsyncValue
+- Add state management with `AsyncNotifierProvider`
+- Handle loading/error states with `AsyncValue` pattern matching
 
-**Phase 4: Integration**
-- Wire up dependencies
-- Ensure theme compliance (no hardcoded colors/styles)
-- Add navigation if needed
-- Test user flows
+```dart
+// Example: Provider
+@riverpod
+class UserNotifier extends _$UserNotifier {
+  @override
+  Future<User> build(String userId) async {
+    final repo = ref.read(userRepositoryProvider);
+    final result = await repo.getUser(userId);
+    return result.fold((l) => throw l, (r) => r);
+  }
 
-### 5. Code Generation
-
-After creating or modifying code with generators:
-```bash
-dart run build_runner build --delete-conflicting-outputs
+  Future<void> updateUser(User user) async {
+    state = const AsyncValue.loading();
+    final repo = ref.read(userRepositoryProvider);
+    final result = await repo.updateUser(user);
+    if (!ref.mounted) return;
+    state = result.fold(
+      (l) => AsyncValue.error(l, StackTrace.current),
+      (r) => AsyncValue.data(r),
+    );
+  }
+}
 ```
 
-### 6. Quality Verification
+**2.4. Testing**
 
-Run checks before closing:
 ```bash
-flutter analyze
+# Run tests
 flutter test
-dart format .
+
+# Run analyzer
+flutter analyze
+
+# Check coverage (if required)
+flutter test --coverage
 ```
 
-### 7. Update Bead
+**Checklist**:
+- [ ] All acceptance criteria met
+- [ ] Tests pass
+- [ ] Linter clean (no warnings/errors)
+- [ ] No regressions
 
-Document what was done:
+---
+
+### Phase 3: Documentation & Closure
+
+**3.1. Update Task Notes**
+
 ```bash
-bd update {{bead_id}} --notes="[Implementation summary, key decisions, gotchas]"
-bd update {{bead_id}} --design="[Architectural approach, patterns used, rationale]"
+bd update {{task_id}} --notes="Implemented {{summary}}. Key decisions: {{decisions}}. Files modified: {{files}}. Tests: {{status}}."
 ```
 
-### 8. Close Bead
+**3.2. Update Design (if changed)**
 
 ```bash
-bd close {{bead_id}} --reason="[What was accomplished, how it meets acceptance criteria]"
+bd update {{task_id}} --design="{{architectural_changes_or_deviations}}"
 ```
 
-Verify closure:
+**3.3. Close Task**
+
 ```bash
-bd show {{bead_id}}
+bd close {{task_id}} --reason="{{summary_of_what_was_accomplished}}"
 ```
 
-## Implementation Checklist
+**3.4. Commit**
 
-Before marking complete:
-- [ ] Domain layer is pure Dart (no Flutter imports)
-- [ ] All entities use `freezed` with `sealed class`
-- [ ] DTOs don't leak to presentation
-- [ ] Using `@riverpod` generators (no legacy patterns)
-- [ ] `ref.mounted` checked after async operations
-- [ ] No hardcoded colors (using SemanticColors)
-- [ ] No inline text styles (using SemanticTextStyles)
-- [ ] Error states handled explicitly
-- [ ] `flutter analyze` passes
-- [ ] Tests pass and cover key functionality
-- [ ] Code formatted with `dart format`
+```bash
+git add .
+git commit -m "feat(flutter): {{task_title}}
+
+{{details}}
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
+```
+
+---
+
+## MEASUREMENTS
+
+### Process Metrics
+- **Time to context**: < 5 minutes
+- **Implementation time**: Varies by complexity
+
+### Quality Metrics
+- **Tests passing**: 100%
+- **Linter clean**: 0 warnings/errors
+- **AC met**: 100%
+
+### Outcome Metrics
+- **Rework rate**: % needing reopening
+- **Quality**: No regressions introduced
+
+---
+
+## OUTPUTS
+
+- **Code changes**: Committed to version control
+- **Updated task**: Notes and design populated
+- **Closed task**: Status = closed with reason
+- **Tests passing**: All checks green
+
+---
+
+## EXIT CRITERIA
+
+- [ ] All acceptance criteria met
+- [ ] Tests passing
+- [ ] Linter clean
+- [ ] Task updated with notes
+- [ ] Task closed with summary
+- [ ] Changes committed
+
+---
+
+## CRITICAL MISTAKES TO AVOID
+
+### ❌ Mistake #1: Flutter Imports in Domain Layer
+
+**WRONG**: `import 'package:flutter/material.dart'` in domain
+
+**CORRECT**: Domain is pure Dart - NO Flutter imports
+
+### ❌ Mistake #2: Using ChangeNotifier
+
+**WRONG**: `class Provider extends ChangeNotifier`
+
+**CORRECT**: Use `@riverpod` with code generation
+
+### ❌ Mistake #3: Hardcoded Colors
+
+**WRONG**: `color: Colors.blue`
+
+**CORRECT**: `color: Theme.of(context).colorScheme.primary`
+
+### ❌ Mistake #4: Not Checking ref.mounted
+
+**WRONG**: Setting state after async without check
+
+**CORRECT**: `if (!ref.mounted) return; state = ...`

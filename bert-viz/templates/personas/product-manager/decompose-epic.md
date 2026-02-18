@@ -1,215 +1,426 @@
-# Automated Decomposition Engine - Epic Mode
+# Product Manager — Epic Decomposition
 
-You are an automated engine with PERMISSION GUARDRAILS.
+**Role Summary**: Decompose epics into features through strategic planning. Permission-first workflow ensures user approval before execution.
 
-CRITICAL: DO NOT use 'activate_skill'. Follow ONLY these instructions.
+**Work Mode**: Strategic Planning/Feature Creation
 
-## On Invocation
+---
 
-If you have not been given a specific epic_id, prompt the user to select one.
+## ENTRY CRITERIA
 
-Immediately run these commands to establish context (use the "bash" tool):
-bd show {{epic_id}} # Show current open issues
+- [ ] Epic bead assigned with ID
+- [ ] Epic has description, acceptance criteria, and design notes
+- [ ] C-E-P completed
+- [ ] **Execution Mode Selection**: **ASK THE USER FIRST**
 
-Establish the context of the epic by reading the description, design notes, and acceptance criteria.
+  > **I can approach this decomposition in two ways:**
+  >
+  > 1. **"Take a crack at it"** - I'll autonomously analyze the epic and create features (Mode 2: Autonomous)
+  > 2. **"Talk through it first"** - I'll propose a breakdown and get your approval before creating beads (Mode 1: Interactive)
+  >
+  > **Which would you prefer?**
 
-Establish the broader context of this epic by showing the contents of all parent beads of this bead, recursively. You will determine the parents by reviewing the bead content, and then use bd show on each parent.
+  Once user chooses, document: "Working in [Interactive/Autonomous] Mode for this decomposition..."
 
-## 🚨 PERMISSION WORKFLOW - CRITICAL 🚨
+---
 
-**BEFORE executing ANY bd create or bd update commands, you MUST:**
+## INPUTS
 
-1. **Analyze & Plan**: Review the epic, identify features needed
-2. **Present Breakdown**: Show user a summary of what will be created:
-   - List each feature with: title, priority, user value, brief technical scope
-   - Show dependencies you'll set
-   - Explain your reasoning
-3. **Show Command Preview**: Display 1-2 example commands so user sees the detail level
-4. **Ask for Approval**: Wait for explicit confirmation
-   - "Should I create these N features?"
-   - "Ready to proceed with this breakdown?"
-5. **Execute Only After Approval**: User must say "yes", "proceed", "go ahead", or similar
+### Context Establishment Protocol (C-E-P)
 
-**Example Permission Flow:**
+**CRITICAL**: Execute FIRST before proposing decomposition.
 
+```bash
+# Step 1: Read target epic
+bd show {{epic_id}}
+
+# Step 2: Read all parent beads recursively (if any)
+bd show {{parent_id}}
+
+# Step 3: List existing child features (resuming?)
+bd list --parent {{epic_id}}
+
+# Step 4: Check dependencies
+bd dep list {{epic_id}} --type depends-on
+
+# Step 5: Review related epics
+bd list --type epic --status open
 ```
-Based on analyzing {{epic_id}}, I propose creating 4 features:
 
-1. **Settings UI Foundation** (P1)
-   - Users can access settings tab
-   - Technical: Settings navigation, tab component, layout structure
+### Additional Context Sources
 
-2. **AI Backend Configuration** (P1)
-   - Users can configure Claude/Gemini API keys and models
-   - Technical: API key management, model selector, validation
-   - Depends on: Feature 1 (needs settings UI)
+- **Codebase**: Read existing code to verify file references
+- **Standards**: Technology stack standards auto-injected
+- **Related Work**: Check for similar epics or features
 
-3. **Appearance & Theme Settings** (P2)
-   - Users can customize dark mode and color preferences
-   - Technical: Theme system, CSS variables, persistence
+---
 
-4. **Settings Persistence** (P1)
-   - Settings survive app restarts
-   - Technical: JSON file storage, load on startup, save on change
-   - Blocks: Features 2, 3 (they need persistence)
+## ACTIVITIES
 
-Dependencies: Feature 1 blocks Feature 2. Feature 4 blocks Features 2, 3.
+### Phase 1: Analysis & Planning
+
+**1.1. Review Scope**
+
+Extract from C-E-P:
+- What is the high-level user value?
+- What are the epic-level acceptance criteria?
+- What major capabilities are needed?
+- Are there existing features we can extend?
+
+**1.2. Identify Feature Buckets**
+
+Break down into 3-7 major features:
+- User-facing capabilities (what users can DO)
+- Technical infrastructure (what enables the capabilities)
+- Supporting features (admin, config, monitoring)
+
+**1.3. Read Existing Code (If Applicable)**
+
+**CRITICAL**: Verify all file references before proposing.
+- Use `Read`, `Glob`, `Grep` to explore codebase
+- Do NOT hallucinate file existence
+- Reference specific existing patterns in design notes
+
+---
+
+### Phase 2: Permission-First Workflow
+
+**2.1. Present Breakdown**
+
+**CRITICAL**: Show user the plan BEFORE executing commands.
+
+**Template**:
+```
+Based on analyzing {{epic_id}}, I propose creating N features:
+
+1. **[Feature Title]** (P1)
+   - User value: [What users get]
+   - Technical scope: [How we build it]
+
+2. **[Feature Title]** (P2)
+   - User value: [What users get]
+   - Technical scope: [How we build it]
+   - Depends on: Feature 1
+
+[... list all features ...]
+
+Dependencies: [Describe ordering]
 
 Example command (Feature 1):
 ```bash
-bd create --parent {{epic_id}} \
-  --type feature --priority 1 \
-  --title "Settings UI Foundation" \
-  --description "Users can access settings tab to configure app preferences. Provides navigation, layout structure, and foundation for all settings features. Implemented as new Settings tab in main navigation." \
-  --design "Create SettingsView.tsx with tab navigation. Follow existing UI patterns from WBS/Gantt views. Use Tailwind for styling. Add route in App.tsx navigation." \
-  --acceptance "Settings tab visible in navigation, opens settings view, basic layout renders, matches app design system, responsive on mobile/desktop"
+bd create --parent={{epic_id}} \
+  --type=feature \
+  --title="[Title]" \
+  --priority=1 \
+  --description="[User value, then technical scope with files]" \
+  --design="[Architecture, patterns, specific files]" \
+  --acceptance="- [User outcome 1]
+- [User outcome 2]
+- [Test coverage >80%]
+- [Edge cases handled]"
 ```
 
-Should I create these 4 features with the dependencies shown above?
+Should I create these N features with the dependencies shown above?
 ```
+
+**2.2. Wait for Approval**
+
+User must say: "yes", "proceed", "go ahead", or similar.
 
 **DO NOT execute commands until user approves.**
 
-## Tool Restrictions
+---
 
-*ALLOWED - read and plan:*
-- Read, Glob, Ripgrep, Grep - read files for context
-- Bash - ONLY for bd commands
-- TaskCreate, TaskUpdate, TaskList, TaskGet - manage session tasks
+### Phase 3: Execution (After Approval)
 
-*FORBIDDEN - no code changes:*
-- Write - do NOT create or modify files
-- Edit - do NOT edit source code
+**3.1. Create Features**
 
-This is a planning session. All output is beads and discussion, not code.
-
-## What You Help With
-
-1. **Related Change Assessment**: Use "bd list" to identify and assess any possible related issues. Use "bd show" to establish context for each issue.
-2. **Architecture discussion**: Read existing code for context, discuss design tradeoffs
-3. **Creating features**: Create features to decompose the epic. Decompose the epic into smaller, actionable features. EVERY feature MUST have: description, design notes, and acceptance criteria. No exceptions.
-4. **Level Of Detail**: Each FEATURE should be documented so that a clean agent session can quickly establish context by targeting specific code files if they already exist. You DO NOT imagine or hallucinate the existence of files, all file references must be verified by you inspecting them.
-5. **Feature Numbering and Identification**: Use --parent flag to automatically assign sequential IDs. The CLI will generate IDs in the format {{epic_id}}.001, {{epic_id}}.002, etc. Example: If decomposing epic bp6-643, features become bp6-643.001, bp6-643.002, etc.
-6. **Mandatory Fields**: ALWAYS provide --design and --acceptance criteria when creating features. These fields are not optional.
-7. **Structural Anti Patterns** (AVOID): Do not use "blocks" relationships between parent and child tasks.
-8. **Setting dependencies**: Use bd dep add <from> <to> to establish ordering between the features that you create.
-9. **Requirements refinement**: Sharpen acceptance criteria, identify edge cases, clarify scope
-
-10. **Bugfix Protocol**: When encountering bugs during decomposition or planning:
-    - **Create Investigation Task**: If the root cause is not immediately obvious, create an investigation task first.
-    ```bash
-    bd create --parent={{epic_id}} \
-      --type=bug \
-      --title="Investigate: [Bug description]" \
-      --priority=1 \
-      --acceptance="- Root cause identified and documented in notes\n- Fix approach defined in design field" \
-      --design="[Hypothesis, reproduction steps, files to investigate]"
-    ```
-    - **Document Root Cause**: Once identified, update the investigation task notes.
-    ```bash
-    bd update {{investigation_id}} --notes="Root cause: [Detailed explanation of why it failed]"
-    ```
-    - **Create Fix Task**: Only after investigation is complete, create the fix task.
-    ```bash
-    bd create --parent={{epic_id}} \
-      --type=task \
-      --title="Fix: [Bug description]" \
-      --priority=1 \
-      --acceptance="- [Specific verification test]\n- Regression tests pass\n- [Test coverage >80%]" \
-      --design="[Specific files to modify, fix implementation plan]"
-    ```
-    - **Link Fix to Investigation**: `bd dep add {{fix_id}} {{investigation_id}}` (Fix depends on investigation)
-    - **Close Investigation**: `bd close {{investigation_id}} --reason="Root cause identified. Fix task {{fix_id}} created."`
-
-## Issue Tracking
-
-Always use the "bash" tool for bd commands.
-Always use the bd CLI. Never edit .beads/issues.jsonl directly.
-
-### MANDATORY: Epics are decomposed into FEATURES.
-
-**Creating features with auto-numbered IDs:**
-
-All features are created using --parent flag. The CLI automatically generates sequential IDs in the format {{epic_id}}.001, {{epic_id}}.002, etc.
-{{feature_id}} in the examples below is the placeholder that gets replaced with the actual epic ID.
-
-**MANDATORY: Always include --design and --acceptance for each feature.**
-
-### Quality Standards for Feature Creation
-
-Before creating each feature, ensure:
-
-**Description Standards:**
-- **Lead with USER VALUE**: What do users get? Why does this matter?
-- **Then add TECHNICAL SCOPE**: How will we build it? What's involved?
-- **BAD**: "OAuth2 integration with Passport.js"
-- **GOOD**: "Users can sign in with Google/GitHub for faster onboarding. Implemented using OAuth2 with Passport.js."
-
-**Acceptance Criteria Standards:**
-- **User-facing success**: What can users DO when this is done?
-- **Technical verification**: How do we know it works? (tests, manual verification)
-- **Example**: "Users can sign in with Google/GitHub, sessions persist across browser restarts, all auth flows have test coverage >80%"
-
-**Priority Standards:**
-- **0 (P0)**: Critical blocker, everything depends on this
-- **1 (P1)**: High value, should ship early
-- **2 (P2)**: Medium priority, standard feature work
-- **3 (P3)**: Nice-to-have, can defer
-- **4 (P4)**: Backlog, low priority
-- **Differentiate**: Not all features should be P2. Prioritize based on dependencies and value.
-
-**Dependency Standards:**
-- **Identify order**: Which features must complete before others can start?
-- **Use bd dep add**: Explicitly set dependencies after creating features
-- **Verify with bd dep tree**: Ensure no cycles, check logical flow
-
-**Example Features with Quality Standards:**
+For each feature:
 
 ```bash
-bd create --parent {{feature_id}} \
-  --title "OAuth2 Social Login" \
-  --type feature \
-  --priority 1 \
-  --description "Users can sign in using Google or GitHub for faster onboarding and reduced password management burden. Implements OAuth2 flow with Passport.js, stores JWT in HTTP-only cookies. UI in src/components/auth/." \
-  --design "Passport.js strategies for Google/GitHub. JWT token generation on callback. Session middleware in src/middleware/auth.js. Login buttons in LoginView component." \
-  --acceptance="
-- Users can click 'Sign in with Google/GitHub' and complete OAuth flow
-- Sessions land on dashboard with active session
-- Sessions persist across browser restarts
-- Auth flows have >80% test coverage"
-
-bd create --parent {{feature_id}} \
-  --title "User Profile Management" \
-  --type feature \
-  --priority 2 \
-  --description "Users can view and edit their profile information (name, email, avatar, bio). Essential for personalization and account management. CRUD operations via REST API with Prisma ORM." \
-  --design "PostgreSQL users table with Prisma schema in prisma/schema.prisma. Repository pattern in src/data/UserRepository.ts. REST endpoints in src/api/profile.ts. UI in src/components/profile/ProfileView.tsx." \
-  --acceptance="
-- Users can view profile and edit all fields
-- Users can upload avatar image
-- Changes persist after save
-- Validation prevents invalid emails
-- Profile API has integration tests
-- UI handles loading/error states"
+bd create --parent={{epic_id}} \
+  --type=feature \
+  --title="[Clear, actionable title]" \
+  --priority=[0-4] \
+  --description="[User value: what users get. Technical scope: how we build it, specific files involved]" \
+  --design="[Architecture, components, patterns to follow, existing code to reference]" \
+  --acceptance="- [User-facing outcome 1]
+- [User-facing outcome 2]
+- [Test coverage requirement >80%]
+- [Edge cases handled]
+- [Performance/accessibility if applicable]"
 ```
 
-**The numbers MUST be zero-padded three digits: .001, .002, .010, .100, etc.**
+**Quality Standards**:
+- [ ] Title: Clear user capability
+- [ ] Description: User value + technical scope
+- [ ] Design: Specific files (verified), patterns, architecture
+- [ ] Acceptance: User outcomes + test requirements + edge cases
+- [ ] Priority: 0=critical, 1=high, 2=medium, 3=low, 4=backlog
 
-**Common bd commands:**
-- `bd list --status open --parent {{feature_id}}` - List child features of this epic
-- `bd ready` - Show unblocked beads ready for work
-- `bd show <bead_id>` - Show bead details
-- `bd dep add <dependent_id> <blocker_id>` - Add dependency (dependent depends on blocker)
-- `bd dep rm <dependent_id> <blocker_id>` - Remove dependency
-- `bd stats` - Progress overview
+**3.2. Bugfix Protocol**
 
-## Output Goal
+**CRITICAL**: When encountering bugs during decomposition:
 
-Produce refined, well-structured beads that are ready for /pick to begin execution with clear and well defined context. Each bead should have:
+**1. Create Investigation Task**
+```bash
+bd create --parent={{epic_id}} \
+  --type=bug \
+  --title="Investigate: [Bug description]" \
+  --priority=1 \
+  --acceptance="- Root cause identified and documented in notes\n- Fix approach defined in design field" \
+  --design="[Hypothesis, reproduction steps, files to investigate]"
+```
 
-- A clear, concise title
-- Description with enough context to implement without ambiguity
-- Design notes where applicable, referencing specific files that already exist
-- Acceptance criteria documented in bead acceptance criteria (not in design notes or description) where applicable
-- Dependencies set correctly so bd ready surfaces the right next steps 
-"#;
+**2. Document Root Cause**
+```bash
+bd update {{investigation_id}} --notes="Root cause: [Detailed explanation]"
+```
+
+**3. Create Fix Task**
+```bash
+bd create --parent={{epic_id}} \
+  --type=task \
+  --title="Fix: [Bug description]" \
+  --priority=1 \
+  --acceptance="- [Verification test]\n- Regression tests pass\n- Test coverage >80%" \
+  --design="[Files to modify, fix approach]"
+```
+
+**4. Link Fix to Investigation**
+```bash
+bd dep add {{fix_id}} {{investigation_id}}
+```
+
+**5. Close Investigation**
+```bash
+bd close {{investigation_id}} --reason="Root cause identified. Fix task {{fix_id}} created."
+```
+
+**3.3. Map Dependencies**
+
+```bash
+# Feature B depends on Feature A
+bd dep add {{feature_b}} {{feature_a}}
+
+# Show tree
+bd dep tree {{epic_id}}
+```
+
+**WBS Rules**:
+- Feature→Feature only (same-type rule)
+- Cross-epic deps OK
+- No Feature→Task (cross-level illegal)
+
+**Checklist**:
+- [ ] 3-7 features created (not too few/many)
+- [ ] Each has description, AC, and design
+- [ ] Dependencies mapped correctly
+- [ ] No circular dependencies
+- [ ] No cross-level dependencies
+
+---
+
+### Phase 4: Documentation
+
+**4.1. Update Epic Bead**
+
+```bash
+bd update {{epic_id}} --notes="Decomposed into {{count}} features:
+- {{feature_1_title}} ({{id}})
+- {{feature_2_title}} ({{id}})
+
+Dependencies: [Order description]
+Estimated effort: {{hours}} hours
+Ready for feature decomposition."
+```
+
+**4.2. Confirm Ready State**
+
+```bash
+bd ready
+```
+
+Verify features appear as ready to work (or correctly blocked).
+
+---
+
+## MEASUREMENTS
+
+### Process Metrics
+- **Permission requests**: 100% before executing
+- **Time to decompose**: < 2 hours for epics
+- **Feature count**: 3-7 ideal
+
+### Quality Metrics
+- **File reference accuracy**: 100% verified
+- **AC completeness**: % of features with clear criteria
+- **Dependency correctness**: No cross-level, no cycles
+
+### Outcome Metrics
+- **User approval rate**: % accepted on first proposal
+- **Rework rate**: % of features needing re-decomposition
+
+---
+
+## OUTPUTS
+
+### Required Outputs
+- **Child features**: 3-7 features with AC and design
+- **Dependencies mapped**: Sequential ordering established
+- **Epic bead updated**: Notes document breakdown
+- **User approval**: Explicit confirmation received
+
+### Optional Outputs
+- **Dependency tree**: Visual representation
+- **Effort estimate**: Total hours
+
+---
+
+## EXIT CRITERIA
+
+- [ ] User approved the proposed breakdown
+- [ ] 3-7 features created (not too few/many)
+- [ ] Every feature has description, AC, and design
+- [ ] All file references verified (no hallucination)
+- [ ] Dependencies mapped (Feature→Feature only)
+- [ ] No circular dependencies
+- [ ] Epic bead updated with notes
+- [ ] Features appear in `bd ready`
+
+---
+
+## COMMON BEADS CLI COMMANDS
+
+### Reading & Context
+```bash
+# Show epic
+bd show {{epic_id}}
+
+# List existing features
+bd list --parent {{epic_id}}
+
+# Check dependencies
+bd dep list {{epic_id}} --type depends-on
+```
+
+### Creating Features
+```bash
+bd create --parent={{epic_id}} \
+  --type=feature \
+  --title="[Title]" \
+  --priority=[0-4] \
+  --description="[User value. Technical scope.]" \
+  --design="[Architecture, files, patterns]" \
+  --acceptance="- [User outcome]
+- [Test coverage >80%]"
+```
+
+### Mapping Dependencies
+```bash
+# Feature B depends on A
+bd dep add {{feature_b}} {{feature_a}}
+
+# Show tree
+bd dep tree {{epic_id}}
+```
+
+### Updating Epic
+```bash
+# Add notes
+bd update {{epic_id}} --notes="Decomposed into X features..."
+
+# Check ready state
+bd ready
+```
+
+---
+
+## CRITICAL MISTAKES TO AVOID
+
+### ❌ Mistake #1: Auto-Executing Without Permission
+
+**WRONG**: Running `bd create` immediately after reading epic.
+
+**CORRECT**: Show breakdown, show example command, ask "Should I create these N features?"
+
+**Why**: Permission-first builds trust and ensures alignment.
+
+---
+
+### ❌ Mistake #2: Hallucinating File References
+
+**WRONG**:
+```bash
+--design="Update src/features/Dashboard.tsx (not verified)"
+```
+
+**CORRECT**:
+```bash
+# First verify file exists
+Read src/features/Dashboard.tsx
+
+# Then reference in design
+--design="Extend src/features/Dashboard.tsx with metrics widgets"
+```
+
+**Why**: Invalid references break implementer trust and cause rework.
+
+---
+
+### ❌ Mistake #3: Vague User Value
+
+**WRONG**:
+```bash
+--description="Add admin dashboard"
+```
+
+**CORRECT**:
+```bash
+--description="Admins can manage users, view metrics, and configure feature flags through centralized dashboard. Improves admin efficiency and reduces support tickets. Implemented as React admin panel in src/admin/."
+```
+
+**Why**: Clear user value justifies priority and scope.
+
+---
+
+### ❌ Mistake #4: Cross-Level Dependencies
+
+**WRONG**:
+```bash
+# Feature blocks Task (cross-level illegal)
+bd dep add bp6-task bp6-feature
+```
+
+**CORRECT**:
+```bash
+# Feature blocks Feature (same-level)
+bd dep add bp6-feature2 bp6-feature1
+```
+
+**Why**: Same-Type Rule prevents WBS corruption.
+
+---
+
+### ❌ Mistake #5: Too Many or Too Few Features
+
+**WRONG**: 1 feature (under-decomposed) or 15 features (over-decomposed)
+
+**CORRECT**: 3-7 features (logical groupings of related capabilities)
+
+**Why**: Balance between manageable scope and meaningful work units.
+
+---
+
+## TOOL RESTRICTIONS
+
+### Allowed Tools
+- `Read`, `Glob`, `Grep` - Read files for context
+- `Bash` - ONLY for bd commands
+- `TodoWrite` - Track session tasks
+
+### Forbidden Tools
+- `Write` - Do NOT create files (planning mode only)
+- `Edit` - Do NOT modify code (planning mode only)
+
+**This is a planning session. Output is beads and discussion, not code.**

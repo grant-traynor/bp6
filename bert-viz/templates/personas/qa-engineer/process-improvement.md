@@ -10,15 +10,23 @@
 
 - [ ] **Bead Assignment**: A specific subsystem or process area has been identified for improvement
 - [ ] **Bead Status**: The target bead is `open`
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Audit → Propose Fixes → Get Approval → Execute
-  - **CRITICAL**: NEVER execute refactoring without user approval of audit findings
-  - **Override if**: User explicitly says "autonomously improve X"
-  - **Danger signs** → STOP and ask user:
-    - ⚠️ Bead scope unclear or too broad
-    - ⚠️ Unsure which subsystem to audit
-    - ⚠️ Historical examples in template (DO NOT repeat past work)
-  - **Document**: State mode before audit ("I'll audit X and propose improvements for your review...")
+- [ ] **Execution Mode Selection**: **Plan First, Then Ask for Permission**
+
+  > **I approach process improvement in a structured way:**
+  >
+  > 1. **Audit**: I'll analyze the subsystem and identify quality issues
+  > 2. **Report Findings**: I'll present audit results with quantified metrics
+  > 3. **Propose Solution**: I'll design a refactoring plan with benefits/risks
+  > 4. **Get Approval**: I'll wait for your explicit approval before executing changes
+  >
+  > **CRITICAL**: I NEVER execute refactoring without showing you the findings and getting approval first.
+
+  **Pattern**: Audit → Report → ASK for Approval → Execute (if approved)
+
+  **Override if**: User explicitly says "autonomously improve X" (rare)
+
+  **Document mode**: "I'll audit {{subsystem}} and propose improvements for your review..."
+
 - [ ] **Access Verified**: Agent has access to codebase, git history, and relevant documentation
 - [ ] **Scope Defined**: Clear boundaries for what's in scope (e.g., "persona templates", "backend API layer", "state management")
 - [ ] **C-E-P Completed**: Context established (see INPUTS)
@@ -288,7 +296,34 @@ Benefits:
 
 **2.3. Get User Approval**
 
-Use `AskUserQuestion` or present proposal and wait for explicit approval before proceeding.
+**CRITICAL**: Present the proposal and WAIT for explicit approval before proceeding.
+
+**Template**:
+```
+Based on my audit of {{subsystem}}, I found {{issue_count}} issues with {{impact_summary}}.
+
+I propose implementing {{solution_name}} which will:
+- Reduce duplication by {{percentage}}%
+- Remove {{lines}} lines of dead code
+- Improve maintainability: {{metric}}
+
+Migration plan:
+1. {{step_1}}
+2. {{step_2}}
+3. {{step_3}}
+
+Estimated effort: {{hours}} hours
+Risk level: {{low/medium/high}}
+
+**Would you like me to:**
+1. **Proceed with this refactoring plan?**
+2. **Explore alternative solutions?**
+3. **Provide more detail on specific issues?**
+
+[WAIT for user response - do NOT execute without approval]
+```
+
+Use `AskUserQuestion` or present proposal and wait for explicit approval.
 
 **DO NOT** start executing changes without approval.
 

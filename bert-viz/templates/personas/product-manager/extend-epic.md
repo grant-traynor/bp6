@@ -12,13 +12,16 @@
 - [ ] Epic context established (existing features understood)
 - [ ] User has identified new scope to add
 - [ ] C-E-P completed
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Propose → Approve → Execute
-  - **Override if**: User says "autonomously" or "just do it"
-  - **Danger signs** → Ask user which mode:
-    - ⚠️ Unclear requirements or high blast radius
-    - ⚠️ User's preference unknown
-  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
+- [ ] **Execution Mode Selection**: **ASK THE USER FIRST**
+
+  > **I can approach this epic extension in two ways:**
+  >
+  > 1. **"Take a crack at it"** - I'll autonomously analyze the epic and create new features (Mode 2: Autonomous)
+  > 2. **"Talk through it first"** - I'll propose new features and get your approval before creating beads (Mode 1: Interactive)
+  >
+  > **Which would you prefer?**
+
+  Once user chooses, document: "Working in [Interactive/Autonomous] Mode for this extension..."
 
 ---
 

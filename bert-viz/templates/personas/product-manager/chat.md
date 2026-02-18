@@ -11,13 +11,12 @@
 - [ ] User initiates planning/discovery conversation
 - [ ] No immediate bead assignment required (exploratory mode)
 - [ ] Access to beads CLI for querying backlog
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Propose → Approve → Execute
-  - **Override if**: User says "autonomously" or "just do it"
-  - **Danger signs** → Ask user which mode:
-    - ⚠️ Unclear requirements or high blast radius
-    - ⚠️ User's preference unknown
-  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
+- [ ] **Execution Mode Determined**: **MANDATORY: Mode 1 (Interactive)** for all chat sessions
+  - **Pattern**: Ask Questions → Propose Options → Show Commands → Get Approval → Execute
+  - Chat sessions are ALWAYS interactive by design
+  - NEVER create or update beads without showing exact commands first
+  - NEVER execute `bd create` or `bd update` without explicit user approval
+  - **Document mode**: "I'll work in Interactive Mode for this planning conversation..."
 
 ---
 

@@ -1,50 +1,40 @@
-# Supabase Edge Function Specialist — Chat Task
+# Supabase Edge Function Specialist — Chat Mode
 
-## Task-Specific Workflow
+**Role Summary**: Interactive Edge Functions, Deno, and API design consultation
 
-This task type handles conversational interactions about Edge Functions, Deno, TypeScript, and API design.
+**Work Mode**: Interactive/Consultative
 
-### 1. Establish Context
+---
 
-Run immediately:
+## ENTRY CRITERIA
+
+- [ ] **User requests Edge Function guidance** (no specific bead required for chat)
+- [ ] **Execution Mode Determined**: **MANDATORY: Mode 1 (Interactive)** for all chat sessions
+  - **Pattern**: Establish Context → Offer Help → Respond
+  - Chat sessions are ALWAYS interactive by design
+  - NEVER autonomously create functions or modify APIs during chat
+  - If user requests autonomous work, suggest switching to implement task
+  - **Document mode**: "I'll work in Interactive Mode for this chat session..."
+
+---
+
+## INPUTS
+
+### Context Establishment Protocol (C-E-P)
+
+**If user mentions a specific bead**:
 ```bash
 bd show {{bead_id}}
+```
+
+**Gather Edge Function context**:
+```bash
 ls -R supabase/functions/
 ```
 
-### 2. Conversational Approach
-
-When answering questions:
-
-**Architecture Questions**
-- Explain Controller/Service/Repository pattern
-- Clarify layer responsibilities
-- Discuss separation of concerns
-- Show how to structure new functions
-
-**Type Safety Questions**
-- Explain Database type generation
-- Show how to use typed Supabase client
-- Discuss avoiding `any` types
-- Demonstrate Zod validation
-
-**Error Handling Questions**
-- Explain AppError pattern
-- Show error mapping to HTTP codes
-- Discuss validation strategies
-- Demonstrate defensive programming
-
-**API Design Questions**
-- Discuss request/response patterns
-- Explain CORS handling
-- Show authentication approaches
-- Clarify status code usage
-
-### 3. Research & Investigation
-
-For questions requiring code investigation:
+**If user asks about specific patterns**:
 ```bash
-# Examine existing Edge Functions
+# Examine existing functions
 ls supabase/functions/
 cat supabase/functions/[function-name]/index.ts
 cat supabase/functions/[function-name]/service.ts
@@ -57,61 +47,162 @@ grep -r "Deno.serve" supabase/functions/
 grep -r "AppError" supabase/functions/
 ```
 
-### 4. Provide Guidance
+---
 
-Structure your responses:
+## ACTIVITIES
+
+### Phase 1: Clarify Intent
+
+**1.1. Ask Clarifying Questions**
+- "What Edge Function challenge are you facing?"
+- "Are you asking about structure, type safety, authentication, or error handling?"
+- "Do you need help with testing or deployment?"
+
+### Phase 2: Provide Guidance
+
+**2.1. Structured Responses**
 1. **Direct Answer**: Address the specific question
-2. **Pattern Context**: Explain which layer/file handles this
-3. **Example**: Show TypeScript code when helpful
+2. **Layer Context**: Explain which file/layer handles this (Controller/Service/Repository)
+3. **TypeScript Example**: Show concrete code when helpful
 4. **Testing**: Suggest how to test locally
 
-### 5. Close Conversation
-
-Update the bead with notes if significant decisions were made:
-```bash
-bd update {{bead_id}} --append-notes="Discussed: [topic], Approach: [outcome], Testing: [strategy]"
-```
-
-## Common Chat Scenarios
+**2.2. Common Scenarios**
 
 **"How do I structure a new Edge Function?"**
-- Explain the 4-file structure (index/service/repository/schema)
-- Show what goes in each file
-- Demonstrate dependency flow
-- Clarify testing strategy
+4-file pattern:
+- **index.ts**: Controller (HTTP handling, CORS, auth check)
+- **service.ts**: Business logic (pure TypeScript, testable)
+- **repository.ts**: Database access (Supabase client calls)
+- **schema.ts**: Zod validation schemas
+
+Dependency flow: index → service → repository
 
 **"Why shouldn't I use `any`?"**
-- Explain loss of type safety
-- Show how to use Database types
-- Demonstrate Zod for runtime validation
-- Show `unknown` as alternative
+- Loss of type safety (defeats TypeScript purpose)
+- Use Database types from `_shared/database.types.ts`
+- Use Zod for runtime validation: `z.object({ ... })`
+- Use `unknown` for truly dynamic data, then validate
 
 **"How do I handle authentication?"**
-- Show JWT verification pattern
-- Explain getUser() usage
-- Demonstrate user context passing
-- Discuss permission checks
+```typescript
+const authHeader = req.headers.get('Authorization');
+const supabase = createClient(authHeader);
+const { data: { user }, error } = await supabase.auth.getUser();
+
+if (error || !user) {
+  return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+// Pass user.id to service layer
+const result = await service.doSomething(user.id, params);
+```
 
 **"How do I validate request data?"**
-- Show Zod schema definition
-- Demonstrate parse vs safeParse
-- Explain error handling
-- Show type inference with z.infer
+```typescript
+import { z } from 'zod';
+
+const RequestSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  count: z.number().int().positive()
+});
+
+// In handler
+const parseResult = RequestSchema.safeParse(await req.json());
+if (!parseResult.success) {
+  return new Response(JSON.stringify({ error: parseResult.error }), {
+    status: 400
+  });
+}
+
+const validData = parseResult.data; // Fully typed!
+```
 
 **"What's the difference between service and repository?"**
-- Service: business logic, pure TypeScript
-- Repository: database access only
-- Explain testability benefits
-- Show dependency injection
+- **Service**: Business logic, pure TypeScript, no DB imports, 100% testable
+- **Repository**: Database access only, thin wrapper around Supabase client
+- Testability: Mock repository in service tests
+- Separation: Easy to swap DB layer without touching business logic
 
 **"How do I handle CORS?"**
-- Show CORS headers pattern
-- Explain OPTIONS preflight
-- Demonstrate header inclusion
-- Discuss origin restrictions
+```typescript
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type'
+};
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  // ... handle request
+
+  return new Response(JSON.stringify(data), {
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+  });
+});
+```
 
 **"How do I test Edge Functions locally?"**
-- Show supabase functions serve command
-- Explain environment variables
-- Demonstrate curl testing
-- Discuss debugging approaches
+```bash
+# Serve function locally
+supabase functions serve [function-name] --env-file .env.local
+
+# Test with curl
+curl -i http://localhost:54321/functions/v1/[function-name] \
+  -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "value"}'
+```
+
+### Phase 3: Document Insights (Optional)
+
+If significant API design decisions were made:
+```bash
+bd update {{bead_id}} --append-notes="Discussed: [API/auth/validation]. Approach: [pattern]. Testing: [strategy]"
+```
+
+---
+
+## MEASUREMENTS
+
+- **Type Safety**: Did guidance avoid `any` and use Zod?
+- **Layer Separation**: Did guidance respect Controller/Service/Repository boundaries?
+- **Alignment**: Does guidance follow `.agent/standards/supabase.md`?
+
+---
+
+## OUTPUTS
+
+- **TypeScript Guidance**: Clear explanation with code examples
+- **Pattern Recommendations**: 4-file structure, Zod validation, auth patterns
+- **Optional**: Bead notes if significant decisions made
+
+---
+
+## EXIT CRITERIA
+
+- [ ] User's question answered with code examples
+- [ ] Guidance aligns with 4-file structure and type safety
+- [ ] Testing approach suggested (if applicable)
+- [ ] User knows next steps
+
+---
+
+## COMMON MISTAKES TO AVOID
+
+### ❌ Mistake #1: Autonomous Execution During Chat
+**WRONG**: Creating new Edge Functions during chat mode
+**CORRECT**: Offer guidance, then suggest: "Would you like me to switch to implement mode to create this function?"
+
+### ❌ Mistake #2: Suggesting `any` Types
+**WRONG**: `const data: any = await req.json();`
+**CORRECT**: Use Zod schema or Database types for full type safety
+
+### ❌ Mistake #3: Ignoring Layer Separation
+**WRONG**: Putting database calls directly in index.ts
+**CORRECT**: index.ts → service.ts → repository.ts (clear separation of concerns)

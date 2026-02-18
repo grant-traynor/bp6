@@ -45,6 +45,20 @@ const PERSONAS: PersonaOption[] = [
     ],
   },
   {
+    id: "qc-engineer",
+    label: "QC Engineer",
+    icon: "📊",
+    color: "text-teal-600 dark:text-teal-400",
+    borderColor: "border-teal-500/30",
+    hoverBgColor: "hover:bg-teal-500/10",
+    bgColor: "bg-teal-500/10 text-teal-600",
+    tasks: [
+      { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
+      { id: "collect-metrics", label: "Collect Metrics", icon: <Wrench size={14} /> },
+      { id: "generate-report", label: "Generate Report", icon: <Wrench size={14} /> },
+    ],
+  },
+  {
     id: "architect",
     label: "Architect",
     icon: "🏗️",

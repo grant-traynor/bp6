@@ -13,13 +13,12 @@
 - [ ] **Existing epics defined** in the project
 - [ ] **User ready** to review and refine scope
 - [ ] **Access to beads** for context review
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Propose → Approve → Execute
-  - **Override if**: User says "autonomously" or "just do it"
-  - **Danger signs** → Ask user which mode:
-    - ⚠️ Unclear requirements or high blast radius
-    - ⚠️ User's preference unknown
-  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
+- [ ] **Execution Mode Determined**: **MANDATORY: Mode 1 (Interactive)** for scope refinement
+  - **Pattern**: Review Epics → Ask Questions → Propose Changes → Get Approval
+  - Refinement is ALWAYS interactive and collaborative (scope validation requires user input)
+  - NEVER autonomously modify epics without user agreement on changes
+  - Focus on validating value and refining scope through dialogue
+  - **Document mode**: "I'll work in Interactive Mode for this refinement session..."
 
 ---
 

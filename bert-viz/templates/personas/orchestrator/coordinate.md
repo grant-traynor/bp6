@@ -10,13 +10,12 @@
 
 - [ ] **Epic or Feature bead assigned** for coordination
 - [ ] **Bead status**: `open` or `in_progress`
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Propose → Approve → Execute
-  - **Override if**: User says "autonomously" or "just do it"
-  - **Danger signs** → Ask user which mode:
-    - ⚠️ Unclear requirements or high blast radius
-    - ⚠️ User's preference unknown
-  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
+- [ ] **Execution Mode Determined**: **MANDATORY: Mode 1 (Interactive)** for coordination
+  - **Pattern**: Analyze State → Propose Actions → Get Approval → Coordinate
+  - Coordination is ALWAYS interactive (multi-agent delegation requires oversight)
+  - NEVER autonomously assign work or spawn agents without user approval
+  - Always present status summary and recommendations before acting
+  - **Document mode**: "I'll work in Interactive Mode for this coordination session..."
 - [ ] **Access Verified**: Agent has access to beads CLI for status monitoring
 - [ ] **Context Established**: C-E-P completed
 

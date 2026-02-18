@@ -14,13 +14,12 @@ These conditions must be TRUE before the refinement process begins:
 - [ ] **Dependency Update**: New `bd dep add` relationships have been established at a high level.
 - [ ] **Planning Completion**: The primary agent (e.g., Decomposer or Architect) has finished their current batch of work.
 - [ ] **Graph Access**: Full access to `bd dep tree` and `bd show` for all related beads.
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Propose → Approve → Execute
-  - **Override if**: User says "autonomously" or "just do it"
-  - **Danger signs** → Ask user which mode:
-    - ⚠️ Unclear requirements or high blast radius
-    - ⚠️ User's preference unknown
-  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
+- [ ] **Execution Mode Determined**: **MANDATORY: Mode 1 (Interactive)** for dependency refinement
+  - **Pattern**: Analyze Graph → Report Violations → Propose Fixes → Get Approval → Execute
+  - Dependency refinement is ALWAYS interactive (structural changes need approval)
+  - NEVER autonomously modify dependency graph without showing violations first
+  - Always present analysis before making changes
+  - **Document mode**: "I'll work in Interactive Mode for dependency refinement..."
 
 ---
 

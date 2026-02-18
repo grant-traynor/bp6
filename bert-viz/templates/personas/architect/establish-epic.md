@@ -11,13 +11,12 @@
 - [ ] **User request** to establish a new epic or major feature
 - [ ] **High-level vision** (problem space, target users) understood
 - [ ] **Bead ID**: A placeholder or parent ID for the new epic is provided
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Propose → Approve → Execute
-  - **Override if**: User says "autonomously" or "just do it"
-  - **Danger signs** → Ask user which mode:
-    - ⚠️ Unclear requirements or high blast radius
-    - ⚠️ User's preference unknown
-  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
+- [ ] **Execution Mode Determined**: **MANDATORY: Mode 1 (Interactive)** for epic establishment
+  - **Pattern**: Explore Options → Propose Architecture → Get Approval → Execute
+  - Epic establishment is ALWAYS interactive by design (architectural decisions need approval)
+  - NEVER autonomously create epics without showing architecture options first
+  - Always present multiple architectural approaches with tradeoffs
+  - **Document mode**: "I'll work in Interactive Mode for this epic establishment..."
 - [ ] **Access Verified**: Agent has access to codebase for pattern review
 - [ ] **Tech Stack Context**: Available in `CLAUDE.md` and `.agent/standards/`
 

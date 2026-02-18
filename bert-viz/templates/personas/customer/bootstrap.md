@@ -13,13 +13,12 @@
 - [ ] **New project** with no epics defined
 - [ ] **User ready** to discuss vision and goals
 - [ ] **No immediate implementation** (focus on discovery)
-- [ ] **Execution Mode Determined**: **Mode 1: Interactive** (default for this persona/task)
-  - **Pattern**: Propose → Approve → Execute
-  - **Override if**: User says "autonomously" or "just do it"
-  - **Danger signs** → Ask user which mode:
-    - ⚠️ Unclear requirements or high blast radius
-    - ⚠️ User's preference unknown
-  - **Document**: State mode before proceeding ("I'll work in Interactive Mode...")
+- [ ] **Execution Mode Determined**: **MANDATORY: Mode 1 (Interactive)** for project discovery
+  - **Pattern**: Ask Questions → Explore Vision → Propose Epics → Get Approval
+  - Bootstrap is ALWAYS interactive and exploratory (vision discovery requires collaboration)
+  - NEVER autonomously create epics without exploring user goals first
+  - Focus on uncovering value through Socratic questioning
+  - **Document mode**: "I'll work in Interactive Mode for this bootstrap session..."
 
 ---
 
