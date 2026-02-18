@@ -100,16 +100,7 @@ bd update {{task_id}} --status in_progress
 ps aux | grep supabase | grep -v grep && echo "❌ STOP: Local DB detected - shut it down first" || echo "✅ No local DB running"
 ```
 
-**1.3. Determine Next Migration Timestamp**
-```bash
-# Get current timestamp for migration file
-date -u +"%Y%m%d%H%M%S"
-
-# Example output: 20260218143022
-# This becomes: supabase/migrations/20260218143022_your_migration_name.sql
-```
-
-**1.4. Analyze Schema Change Requirements**
+**1.3. Analyze Schema Change Requirements**
 
 From task acceptance criteria, identify:
 - **Tables**: Which tables to create/modify?
@@ -122,15 +113,60 @@ From task acceptance criteria, identify:
 
 ### Phase 2: Draft Migration
 
-**2.1. Create Migration File**
+**2.1. Create Migration File (Official Supabase CLI)**
 
 ```bash
-# Create new migration with timestamp-ordered name
-# FORMAT: YYYYMMDDHHMMSS_descriptive_name.sql
-touch supabase/migrations/$(date -u +"%Y%m%d%H%M%S")_{{descriptive_name}}.sql
+# CORRECT: Use Supabase CLI to create migration with proper timestamp
+supabase migration new {{descriptive_name}}
+
+# This creates: supabase/migrations/YYYYMMDDHHMMSS_descriptive_name.sql
+# Timestamp is calculated automatically by convention
 ```
 
-**2.2. Write Defensive SQL**
+**2.2. Validate Migration Ordering**
+
+```bash
+# Use official CLI to list migrations in order
+supabase migration list
+
+# Check that new migration is LAST in the list
+# If not, proceed to workaround in 2.3
+```
+
+**2.3. Workaround for Broken Ordering (If Needed)**
+
+```bash
+# If migration is out of sequence due to timestamp issues:
+
+# Step 1: Get the last valid migration ID
+LAST_MIGRATION=$(ls -1 supabase/migrations/ | sort | tail -2 | head -1 | cut -d'_' -f1)
+
+# Step 2: Calculate next sequential ID (last + 1)
+NEXT_ID=$((LAST_MIGRATION + 1))
+
+# Step 3: Get the new migration filename
+NEW_FILE=$(ls -1 supabase/migrations/ | sort | tail -1)
+
+# Step 4: Extract the descriptive name
+DESC_NAME=$(echo $NEW_FILE | cut -d'_' -f2-)
+
+# Step 5: Rename to sequential ID
+mv "supabase/migrations/$NEW_FILE" "supabase/migrations/${NEXT_ID}_${DESC_NAME}"
+
+echo "⚠️ WORKAROUND APPLIED: Renamed to sequential ID $NEXT_ID"
+echo "Note: Eventually timestamps should be valid again, making this unnecessary"
+
+# Step 6: Verify ordering is now correct
+supabase migration list
+```
+
+**Why This Workaround?**
+- **Problem**: Agents sometimes create migrations with broken timestamps
+- **Impact**: Breaks ordering, prevents proper migration sequencing
+- **Solution**: Fall back to sequential numbering (last ID + 1) until timestamps are clean
+- **Goal**: Eventually enforce timestamp-based naming, remove workaround
+
+**2.4. Write Defensive SQL**
 
 Follow persona.md standards:
 
@@ -210,7 +246,7 @@ END;
 $$;
 ```
 
-**2.3. Migration Checklist**
+**2.5. Migration Checklist**
 
 Before finalizing, verify:
 - [ ] All new tables have RLS enabled
@@ -224,15 +260,14 @@ Before finalizing, verify:
 - [ ] JSON handling uses COALESCE for defensive programming
 - [ ] No hardcoded user IDs or workspace IDs
 
-**2.4. Validate Migration Ordering**
+**2.6. Final Ordering Verification**
 
 ```bash
-# Ensure new migration is sequentially after the last one
-LAST_MIGRATION=$(ls -1 supabase/migrations/ | sort | tail -1 | cut -d'_' -f1)
-NEW_MIGRATION=$(ls -1 supabase/migrations/ | sort | tail -1 | cut -d'_' -f1)
+# Verify migration is properly ordered
+supabase migration list | tail -5
 
-# New migration timestamp MUST be > last migration timestamp
-# If not, delete and recreate with correct timestamp
+# Confirm new migration is last in sequence
+# If using workaround (sequential ID), ensure it's last valid ID + 1
 ```
 
 ---
@@ -401,26 +436,31 @@ supabase gen types typescript --local  # Requires local DB
 
 ---
 
-### ❌ Mistake #3: Out-of-Order Migration
+### ❌ Mistake #3: Manual Timestamp Creation (Wrong Approach)
 
 **WRONG**:
 ```bash
-# Create migration without checking existing timestamps
-touch supabase/migrations/20260101000000_new_feature.sql
-# This timestamp is OLDER than existing migrations!
+# Manually calculating timestamps - DON'T DO THIS
+date -u +"%Y%m%d%H%M%S"
+touch supabase/migrations/20260218143022_new_feature.sql
 ```
 
 **CORRECT**:
 ```bash
-# Check latest migration first
-ls -1 supabase/migrations/ | sort | tail -1
+# Use official Supabase CLI
+supabase migration new new_feature
 
-# Create new migration with LATER timestamp
-date -u +"%Y%m%d%H%M%S"
-touch supabase/migrations/$(date -u +"%Y%m%d%H%M%S")_new_feature.sql
+# Then validate ordering
+supabase migration list
+
+# If out of order, apply workaround (rename to sequential ID)
 ```
 
-**Why**: Out-of-order migrations break reproducibility and migration history.
+**Why**:
+- Supabase CLI handles timestamps correctly by convention
+- Manual timestamp calculation often causes ordering issues
+- `supabase migration list` is the authoritative source for ordering
+- Workaround (sequential numbering) fixes ordering until timestamps are clean
 
 ---
 
