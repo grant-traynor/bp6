@@ -2305,6 +2305,15 @@ pub fn run() {
             window::save_window_state, window::load_window_state, window::toggle_window_always_on_top
         ])
         .setup(|app| {
+            // Create a default menu (includes standard Edit menu for macOS dictation)
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::Menu;
+                if let Ok(menu) = Menu::default(app.handle()) {
+                    let _ = app.set_menu(menu);
+                }
+            }
+
             let handle = app.handle().clone();
             let proj_handle = app.handle().clone();
 

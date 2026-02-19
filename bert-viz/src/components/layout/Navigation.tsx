@@ -4,7 +4,7 @@ import brandLogo from "../../assets/brand_logo_1.svg";
 import { cn } from "../../utils";
 import { PersonaMenu, PersonaOption } from "./PersonaMenu";
 
-export type ViewType = 'gantt' | 'list';
+export type ViewType = 'gantt' | 'list' | 'settings';
 
 interface NavigationProps {
   currentView: ViewType;
@@ -227,7 +227,16 @@ export const Navigation = ({ currentView, onViewChange, onOpenChat, onOpenPalett
         >
           <Palette size={20} strokeWidth={2.5} />
         </button>
-        <button className="p-3 text-[var(--text-primary)] hover:text-[var(--accent-primary)] transition-colors">
+        <button
+          onClick={() => onViewChange('settings')}
+          className={cn(
+            "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
+            currentView === 'settings'
+              ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
+              : "bg-[var(--background-primary)] text-[var(--text-primary)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
+          )}
+          title="Settings"
+        >
           <Settings size={22} strokeWidth={2.5} />
         </button>
       </div>

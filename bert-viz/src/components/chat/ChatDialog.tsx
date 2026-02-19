@@ -8,6 +8,7 @@ import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
 import { Terminal as TerminalComponent } from '../terminal/Terminal';
+import { RawHtml } from '../shared/Markdown';
 import { invoke } from '@tauri-apps/api/core';
 
 interface ChatDialogProps {
@@ -240,8 +241,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     <div
       className={
         isSessionWindow
-          ? "h-screen w-screen bg-white dark:bg-slate-800 flex flex-col overflow-hidden"
-          : "fixed w-[850px] h-[600px] bg-white dark:bg-slate-800 border-2 border-indigo-500/50 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden"
+          ? "h-screen w-screen bg-[var(--background-primary)] flex flex-col overflow-hidden"
+          : "fixed w-[850px] h-[700px] bg-[var(--background-primary)] border-2 border-[var(--border-primary)] rounded-3xl shadow-2xl flex flex-col z-50 overflow-hidden"
       }
       style={isSessionWindow ? undefined : {
         left: `${position.x}px`,
@@ -250,35 +251,31 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     >
       {/* Header */}
       <div
-        className={`p-4 border-b-2 border-slate-200 dark:border-slate-700 flex justify-between items-center bg-indigo-600 text-white ${
+        className={`px-5 py-3 border-b-2 border-[var(--border-primary)] flex justify-between items-center bg-[var(--background-secondary)] ${
           !isSessionWindow && isDragging ? 'cursor-grabbing' : !isSessionWindow ? 'cursor-grab' : ''
         }`}
         onMouseDown={isSessionWindow ? undefined : handleMouseDown}
       >
         <div className="flex items-center gap-3">
-          <span className="text-lg">{PERSONA_ICONS[role || persona] || '🤖'}</span>
+          <span className="text-xl">{PERSONA_ICONS[role || persona] || '🤖'}</span>
           <div className="flex flex-col">
-            <h3 className="font-black text-xs uppercase tracking-[0.2em]">
-              {role ? `${role.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')} Specialist` :
-               persona === 'product-manager' ? 'Product Manager' :
-               persona === 'qa-engineer' ? 'QA Engineer' :
-               persona === 'qc-engineer' ? 'QC Engineer' :
-               persona === 'architect' ? 'Architect' :
-               persona === 'orchestrator' ? 'Orchestrator' :
-               persona === 'customer' ? 'Customer Voice' :
-               persona === 'specialist' ? 'Specialist' : 'AI Assistant'}
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black font-mono text-[var(--text-muted)] uppercase tracking-widest">
+                {beadId || 'Session'}
+              </span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                · {role ? role.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ') :
+                   persona.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')}
+              </span>
+            </div>
+            <h3 className="text-sm font-black text-[var(--text-primary)] truncate leading-tight">
+              {task || (beadTitle ? beadTitle : 'AI Conversation')}
             </h3>
-            <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest">
-              {task || 'Active Session'}
-            </span>
-            <span className="text-[11px] font-black tracking-tight opacity-80">
-              {(beadId || 'Untracked')}{beadTitle ? ` · ${beadTitle}` : ''}
-            </span>
           </div>
         </div>
 
         {/* View Mode Toggle */}
-        <div className="flex items-center gap-1 bg-white/10 p-1 rounded-lg">
+        <div className="flex items-center gap-1 bg-[var(--background-tertiary)] p-1 rounded-xl border border-[var(--border-primary)]">
           <button
             onClick={async () => {
               if (!sessionId) return;
@@ -287,113 +284,90 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                 setViewMode('chat');
               } catch (error) {
                 console.error('Failed to switch to chat mode:', error);
-                // If PTY wasn't attached, just switch view
                 setViewMode('chat');
               }
             }}
-            className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded transition-all ${
+            className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
               viewMode === 'chat'
-                ? 'bg-white text-indigo-600 shadow-md'
-                : 'text-white/70 hover:text-white hover:bg-white/5'
+                ? 'bg-[var(--background-primary)] text-indigo-600 shadow-sm'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
             }`}
           >
-            💬 Chat
+            Chat
           </button>
           <button
             onClick={async () => {
-              if (!sessionId) {
-                console.error('No session ID available');
-                return;
-              }
-              console.log('Switching to CLI mode for session:', sessionId);
+              if (!sessionId) return;
               try {
                 await invoke('spawn_pty_for_session', { sessionId: sessionId });
-                console.log('PTY spawned successfully');
                 setViewMode('cli');
               } catch (error) {
                 console.error('Failed to switch to CLI mode:', error);
-                alert(`Failed to switch to terminal: ${error}`);
               }
             }}
-            className={`px-3 py-1 text-xs font-bold uppercase tracking-wider rounded transition-all ${
+            className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
               viewMode === 'cli'
-                ? 'bg-white text-indigo-600 shadow-md'
-                : 'text-white/70 hover:text-white hover:bg-white/5'
+                ? 'bg-[var(--background-primary)] text-indigo-600 shadow-sm'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
             }`}
           >
-            🖥️ CLI
+            CLI
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {isLoading && (
             <button
               onClick={stopAgent}
-              className="p-2 bg-rose-500 hover:bg-rose-400 text-white rounded-lg transition-all"
+              className="p-1.5 hover:bg-rose-500/10 text-rose-500 rounded-xl transition-all active:scale-90"
               title="Stop Agent"
             >
-              <Square size={18} fill="currentColor" />
-            </button>
-          )}
-          {isSessionWindow && (
-            <button
-              onClick={handleToggleAlwaysOnTop}
-              className={`p-2 rounded-lg transition-all ${
-                isAlwaysOnTop
-                  ? 'bg-blue-500 hover:bg-blue-400 text-white'
-                  : 'bg-gray-600 hover:bg-gray-500 text-gray-300'
-              }`}
-              title={isAlwaysOnTop ? 'Unpin Window' : 'Pin Window on Top'}
-            >
-              {isAlwaysOnTop ? <Pin size={18} /> : <PinOff size={18} />}
+              <Square size={16} fill="currentColor" strokeWidth={2.5} />
             </button>
           )}
           <button
             onClick={() => setShowDebug(!showDebug)}
-            className={`p-2 rounded-lg transition-all ${
-              showDebug ? 'bg-white/20 text-white' : 'hover:bg-white/10 text-white/70'
+            className={`p-1.5 rounded-xl transition-all active:scale-90 ${
+              showDebug ? 'bg-indigo-500/10 text-indigo-600' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
             }`}
             title="Toggle Debug Logs"
           >
-            <Terminal size={18} />
+            <Terminal size={16} strokeWidth={2.5} />
           </button>
           <button
             onClick={handleClearChat}
-            className="p-2 hover:bg-white/10 text-white/70 rounded-lg transition-all"
+            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl transition-all active:scale-90"
             title="Clear Chat"
           >
-            <Trash2 size={18} />
+            <Trash2 size={16} strokeWidth={2.5} />
           </button>
           {!isSessionWindow && (
-            <>
-              <div className="w-px h-4 bg-white/20 mx-1" />
-              <button
-                onClick={onClose}
-                className="hover:bg-rose-500 p-2 rounded-lg transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </>
+            <button
+              onClick={onClose}
+              className="p-1.5 text-[var(--text-muted)] hover:text-rose-500 rounded-xl transition-all active:scale-90"
+            >
+              <X size={18} strokeWidth={2.5} />
+            </button>
           )}
         </div>
       </div>
 
       {/* Main Content - Flex Layout */}
-      <div className="min-h-0 flex-1 overflow-hidden flex">
+      <div className="min-h-0 flex-1 overflow-hidden flex bg-[var(--background-primary)]">
         {viewMode === 'chat' ? (
           /* Chat Content */
-          <div className="min-h-0 flex-1 flex flex-col relative overflow-hidden bg-[var(--background-primary)]">
+          <div className="min-h-0 flex-1 flex flex-col relative overflow-hidden">
             {/* Messages View */}
             {!showDebug && (
             <div ref={chatContainerRef} className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-              <div className="flex flex-col gap-2 px-4 py-4">
+              <div className="flex flex-col px-6 py-6">
                 {messages.length === 0 && !streamingMessage && (
-                  <div className="py-12 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
-                    <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
-                      <MessageSquare size={32} className="opacity-50" />
+                  <div className="py-12 flex flex-col items-center justify-center text-[var(--text-muted)] space-y-4">
+                    <div className="w-16 h-16 rounded-3xl bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] flex items-center justify-center">
+                      <MessageSquare size={32} className="opacity-30" />
                     </div>
-                    <p className="font-bold italic text-sm text-center px-8">
-                      Ready to help with your project plan. Ask me to elaborate an epic or breakdown features.
+                    <p className="font-black uppercase tracking-widest text-[10px] text-center px-8">
+                      Session Started · Waiting for input
                     </p>
                   </div>
                 )}
@@ -407,22 +381,25 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                   />
                 ))}
                 {streamingMessage && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[85%] p-3 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600 text-sm font-bold leading-relaxed">
-                      <div dangerouslySetInnerHTML={{ __html: safeStreamingMessage }} />
-                      <span className="inline-block w-2 h-4 ml-1 bg-indigo-400 opacity-50"></span>
+                  <div className="flex justify-start mb-4">
+                    <div className="w-full">
+                      <div className="flex items-center gap-2 mb-2 opacity-50">
+                        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Assistant Thinking</span>
+                      </div>
+                      <RawHtml html={safeStreamingMessage} />
+                      <span className="inline-block w-2 h-4 ml-1 bg-indigo-400 animate-pulse"></span>
                     </div>
                   </div>
                 )}
                 {(isLoading && (isAwaitingFirstChunk || !streamingMessage)) && (
-                  <div className="flex justify-start">
-                    <div className="px-4 py-3 rounded-2xl bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 shadow-sm text-sm font-bold text-slate-600 dark:text-slate-200 flex items-center gap-3">
-                      <span>Thinking</span>
-                      <div className="flex items-center gap-1">
+                  <div className="flex justify-start mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
                         <span className="inline-flex h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }} />
                         <span className="inline-flex h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '120ms' }} />
                         <span className="inline-flex h-2 w-2 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '240ms' }} />
                       </div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Agent Processing</span>
                     </div>
                   </div>
                 )}
@@ -430,6 +407,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
               </div>
             </div>
           )}
+
 
           {/* Scroll to Bottom Button Overlay */}
           {!isAtBottom && !showDebug && (
@@ -482,21 +460,21 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 
       {/* Input Area - only show in chat mode */}
       {viewMode === 'chat' && (
-        <div className="p-4 border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
+        <div className="p-4 border-t-2 border-[var(--border-primary)] bg-[var(--background-secondary)]">
           {isHeadless ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-4 px-6 bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-300 dark:border-amber-600 rounded-xl">
-            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+          <div className="flex flex-col items-center justify-center gap-3 py-4 px-6 bg-amber-500/10 border-2 border-amber-500/30 rounded-2xl">
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
               <span className="text-2xl">🤖</span>
               <div className="flex flex-col">
-                <span className="font-bold text-sm">Running in Headless Mode</span>
-                <span className="text-xs opacity-80">Commands are executing automatically</span>
+                <span className="font-black text-[10px] uppercase tracking-widest">Headless Mode</span>
+                <span className="text-[10px] font-bold opacity-80">Commands are executing automatically</span>
               </div>
             </div>
             {currentSession?.commandsRemaining !== undefined && currentSession?.commandsRemaining !== null && currentSession?.totalCommands && (() => {
               const remaining = currentSession.commandsRemaining ?? 0;
               const total = currentSession.totalCommands;
               return (
-                <div className="text-xs text-amber-700 dark:text-amber-400 font-bold">
+                <div className="text-[10px] text-amber-600 dark:text-amber-400 font-black uppercase tracking-widest">
                   Command {(total - remaining)}/{total}
                   {remaining > 0 && ` • ${remaining} remaining`}
                 </div>
@@ -505,9 +483,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
             <button
               onClick={handleTakeOver}
               disabled={isHandingOver}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white rounded-lg font-bold text-sm transition-all active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-[var(--background-tertiary)] text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 shadow-sm"
             >
-              <Hand size={14} />
+              <Hand size={12} />
               {isHandingOver ? 'Taking Over...' : 'Take Over Session'}
             </button>
           </div>
@@ -525,7 +503,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                 }
               }}
               placeholder={showDebug ? "Debug input..." : "Type a message..."}
-              className="flex-1 p-3 bg-white dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700 rounded-xl text-sm font-bold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500 transition-all shadow-inner resize-none overflow-y-auto max-h-32"
+              className="flex-1 p-3 bg-[var(--background-primary)] border-2 border-[var(--border-primary)] rounded-2xl text-sm font-bold text-[var(--text-primary)] focus:outline-none focus:border-indigo-500 transition-all shadow-inner resize-none overflow-y-auto max-h-32 placeholder:text-[var(--text-muted)]"
               disabled={isLoading}
             />
             <button
@@ -534,12 +512,12 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
               className={`${
                 isLoading
                   ? 'bg-rose-600 hover:bg-rose-700'
-                  : 'bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400'
-              } text-white px-5 py-3 rounded-xl transition-all active:scale-95 shadow-lg font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 h-[46px]`}
+                  : 'bg-indigo-600 hover:bg-indigo-700 disabled:bg-[var(--background-tertiary)] disabled:text-[var(--text-muted)]'
+              } text-white px-6 py-3 rounded-2xl transition-all active:scale-95 shadow font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 h-[46px]`}
             >
               {isLoading ? (
                 <>
-                  <div className="w-2 h-2 bg-white rounded-sm" />
+                  <Square size={12} fill="currentColor" />
                   Stop
                 </>
               ) : 'Send'}

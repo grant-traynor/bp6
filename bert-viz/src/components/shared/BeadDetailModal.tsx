@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   X, Pencil, Eye, User, Star, Clock, Tag, Trash2, Plus, ArrowRight, Link2, CheckSquare, ChevronDown,
 } from "lucide-react";
 import type { BeadNode } from "../../api";
 import { cn } from "../../utils";
+
+import { mdComponents, Markdown } from "./Markdown";
 
 const PRIORITY_LABELS = ["P0 — Critical", "P1 — High", "P2 — Medium", "P3 — Low", "P4 — Backlog"];
 
@@ -31,36 +31,6 @@ function beadToMarkdown(bead: BeadNode): string {
   if (bead.notes?.trim()) md += `## Notes\n\n${bead.notes.trim()}\n\n`;
   return md;
 }
-
-// ─── Custom markdown renderers — reliable styling without prose plugin ─────────
-const mdComponents = {
-  h1: ({ children }: any) => (
-    <h1 className="text-lg font-black text-[var(--text-primary)] mb-3 pb-2 border-b-2 border-[var(--border-primary)]">
-      {children}
-    </h1>
-  ),
-  h2: ({ children }: any) => (
-    <h2 className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] mt-6 mb-2">
-      {children}
-    </h2>
-  ),
-  p: ({ children }: any) => (
-    <p className="text-sm text-[var(--text-secondary)] leading-relaxed mb-3">{children}</p>
-  ),
-  strong: ({ children }: any) => (
-    <strong className="font-black text-[var(--text-primary)]">{children}</strong>
-  ),
-  ul: ({ children }: any) => <ul className="list-none pl-0 mb-3 space-y-1">{children}</ul>,
-  li: ({ children }: any) => (
-    <li className="flex items-start gap-2 text-sm text-[var(--text-secondary)]">
-      {children}
-    </li>
-  ),
-  input: ({ checked }: any) => (
-    <input type="checkbox" checked={!!checked} readOnly
-      className="mt-0.5 shrink-0 accent-indigo-500 cursor-default" />
-  ),
-};
 
 // ─── Collapsible section wrapper ──────────────────────────────────────────────
 const Section = ({ label, icon, collapsed, onToggle, children }: {
@@ -122,36 +92,59 @@ export const BeadDetailModal = ({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setCollapsed(p => ({ ...p, [key]: !p[key] }));
 
-  // Drag state
+  // Drag / size state
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ width: 600, height: 500 });
   const [initialised, setInitialised] = useState(false);
   const dragging = useRef(false);
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Persist position to localStorage whenever it changes (after first init)
+  // Persist position + size to localStorage whenever they change (after first init)
   useEffect(() => {
     if (initialised) {
-      localStorage.setItem('beadDetailPos', JSON.stringify(pos));
+      localStorage.setItem('beadDetailPos', JSON.stringify({ pos, size }));
     }
-  }, [pos, initialised]);
+  }, [pos, size, initialised]);
 
-  // Set initial position once on first open — restore from localStorage if available
+  // Set initial position/size once on first open — restore from localStorage if available
   useEffect(() => {
     if (open && !initialised) {
       const saved = localStorage.getItem('beadDetailPos');
+      let restored = false;
       if (saved) {
         try {
-          setPos(JSON.parse(saved));
-        } catch {
-          setPos({ x: Math.max(0, window.innerWidth - 660), y: 120 });
-        }
-      } else {
-        setPos({ x: Math.max(0, window.innerWidth - 660), y: 120 });
+          const parsed = JSON.parse(saved);
+          if (parsed.pos) {
+            setPos(parsed.pos);
+            if (parsed.size) setSize(parsed.size);
+            restored = true;
+          }
+        } catch { /* fall through to default */ }
+      }
+      if (!restored) {
+        const gap = 12;
+        const w = Math.round(window.innerWidth * 0.4);
+        const h = Math.round(window.innerHeight * 0.9);
+        setSize({ width: w, height: h });
+        setPos({ x: window.innerWidth - w - gap, y: Math.round((window.innerHeight - h) / 2) });
       }
       setInitialised(true);
     }
   }, [open, initialised]);
+
+  // Track CSS resize via ResizeObserver so size state stays in sync
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || !initialised) return;
+    const ro = new ResizeObserver(() => {
+      if (panelRef.current) {
+        setSize({ width: panelRef.current.offsetWidth, height: panelRef.current.offsetHeight });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [initialised]);
 
   // Reset form & mode when bead changes
   useEffect(() => {
@@ -226,10 +219,10 @@ export const BeadDetailModal = ({
       style={{
         left: pos.x,
         top: pos.y,
-        width: 600,
+        width: size.width,
+        height: size.height,
         minWidth: 400,
         minHeight: 300,
-        maxHeight: "80vh",
         resize: "both",
         overflow: "hidden",
       }}
@@ -282,9 +275,7 @@ export const BeadDetailModal = ({
         {/* ── VIEW MODE ─────────────────────────────────────────────────── */}
         {mode === "view" && bead && (
           <div className="px-6 py-5">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-              {beadToMarkdown(bead)}
-            </ReactMarkdown>
+            <Markdown content={beadToMarkdown(bead)} />
           </div>
         )}
 

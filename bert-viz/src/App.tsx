@@ -43,6 +43,7 @@ import { ResizeHandle } from "./components/shared/ResizeHandle";
 import ChatDialog from "./components/chat/ChatDialog";
 import { ListView } from "./components/list/ListView";
 import { PalettePreviewDialog } from "./components/palette/PalettePreviewDialog";
+import SettingsView from "./components/settings/SettingsView";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -156,6 +157,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const scrollRefGanttHeader = useRef<HTMLDivElement>(null);
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
   const hasInitialized = useRef(false);
+  const isInitializing = useRef(true);
   const lastToggledNode = useRef<{ id: string; offsetTop: number } | null>(null);
 
   // Ensure session windows initialize the session store even though they short-circuit
@@ -469,6 +471,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         console.error("Initialization failed:", error);
         setHasProject(false);
       } finally {
+        isInitializing.current = false;
         setLoading(false);
       }
     };
@@ -533,11 +536,18 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     if (isSessionWindow) return;
 
     const saveCurrentWindowState = async () => {
+      if (isInitializing.current) return;
       try {
         const window = getCurrentWindow();
         const position = await window.outerPosition();
         const size = await window.outerSize();
         const isMaximized = await window.isMaximized();
+
+        // Reject bogus coordinates (e.g. caught during window transition)
+        if (Math.abs(position.x) > 10000 || Math.abs(position.y) > 10000) {
+          console.warn('Skipping save: suspicious window position', position);
+          return;
+        }
 
         // Build complete startup state by merging current UI state with new window state
         const state = {
@@ -595,8 +605,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       if (saveTimeout) clearTimeout(saveTimeout);
       if (unlistenResize) unlistenResize();
       if (unlistenMove) unlistenMove();
-      // Save final state on unmount (window close)
-      saveCurrentWindowState();
     };
   }, [isSessionWindow, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds, panelWidth]);
 
@@ -857,6 +865,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   useEffect(() => {
     // Skip saving during initial load
     if (!hasProject) return;
+    if (isInitializing.current) return;
 
     const saveState = async () => {
       try {
@@ -901,6 +910,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   // Save WBS panel width to startup.json with debouncing (bp6-j33p.5.3)
   useEffect(() => {
     if (!hasProject) return;
+    if (isInitializing.current) return;
 
     const saveTimeout = setTimeout(async () => {
       try {
@@ -981,7 +991,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const handleBeadClick = (bead: BeadNode) => {
     setSelectedBead(bead);
     setIsCreating(false);
-    setBeadDetailOpen(true);
   };
 
   const handleHeaderClick = (column: 'priority' | 'title' | 'type' | 'id') => {
@@ -1249,6 +1258,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
               </div>
             )}
           </div>
+        ) : view === 'settings' ? (
+          <SettingsView />
         ) : (
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 flex flex-col overflow-hidden">
