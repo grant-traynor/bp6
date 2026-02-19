@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
-import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, PanelRight } from "lucide-react";
+import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, Info } from "lucide-react";
 import { cn } from "./utils";
 import {
   fetchProjectViewModel,
@@ -1326,7 +1326,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                         style={beadDetailOpen ? { backgroundColor: 'rgba(15,139,255,0.12)' } : undefined}
                         title={beadDetailOpen ? "Close Bead Detail" : "Open Bead Detail"}
                       >
-                        <PanelRight size={18} strokeWidth={2.5} />
+                        <Info size={18} strokeWidth={2.5} />
                       </button>
                   </div>
                 </div>
