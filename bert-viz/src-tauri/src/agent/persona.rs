@@ -174,11 +174,10 @@ pub trait PersonaPlugin: Send + Sync {
             prompt = prompt.replace("{{bead_id}}", bead_id);
         }
 
-        // Append bead JSON context if provided
-        if let Some(json) = bead_json {
-            prompt.push_str("\nContext JSON:\n```json\n");
-            prompt.push_str(&json);
-            prompt.push_str("\n```\n");
+        // Append bead context as markdown if provided
+        if let Some(bead_md) = bead_json {
+            prompt.push_str("\n---\n\n## Bead Context\n\n");
+            prompt.push_str(&bead_md);
         }
 
         prompt

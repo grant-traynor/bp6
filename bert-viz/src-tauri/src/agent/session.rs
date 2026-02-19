@@ -56,6 +56,10 @@ pub struct SessionState {
     pub bead_id: Option<String>,
     /// The persona/role for this session (specialist, product-manager, qa-engineer)
     pub persona: String,
+    /// The specific task string passed at session creation time
+    pub task: Option<String>,
+    /// The specialist role (e.g., flutter, tauri) if persona is 'specialist'
+    pub role: Option<String>,
     /// The CLI backend being used (Gemini, ClaudeCode)
     pub backend_id: crate::agent::plugin::BackendId,
     /// Current status of the session
@@ -92,6 +96,10 @@ pub struct SessionInfo {
     pub bead_id: Option<String>,
     /// The persona/role for this session
     pub persona: String,
+    /// The specific task string passed at session creation time
+    pub task: Option<String>,
+    /// The specialist role (e.g., flutter, tauri) if persona is 'specialist'
+    pub role: Option<String>,
     /// The CLI backend being used
     pub backend_id: crate::agent::plugin::BackendId,
     /// Current status of the session
@@ -409,6 +417,8 @@ fn list_active_sessions_internal(sessions: &HashMap<String, SessionState>) -> Ve
             session_id: session_id.clone(),
             bead_id: state.bead_id.clone(),
             persona: state.persona.clone(),
+            task: state.task.clone(),
+            role: state.role.clone(),
             backend_id: state.backend_id,
             status: state.status.clone(),
             created_at: state
@@ -823,6 +833,8 @@ fn build_prompt_with_persona(
         "specialist" => PersonaType::Specialist,
         "product-manager" => PersonaType::ProductManager,
         "qa-engineer" => PersonaType::QaEngineer,
+        "qc-engineer" => PersonaType::QcEngineer,
+        "architect" => PersonaType::Architect,
         "customer" => PersonaType::Customer,
         _ => return Err(format!("Unknown persona: {}", persona)),
     };
@@ -836,10 +848,10 @@ fn build_prompt_with_persona(
     // Get bead and extract information
     let (bead_json, issue_type, bead_role) = if let Some(bid) = bead_id {
         let bead = crate::bd::get_bead_by_id(bid).map_err(|e| e.to_string())?;
-        let json = serde_json::to_string_pretty(&bead).ok();
+        let markdown = Some(bead.to_markdown());
         let issue_type = Some(bead.issue_type.clone());
         let role = get_role_from_bead(&bead);
-        (json, issue_type, role)
+        (markdown, issue_type, role)
     } else {
         (None, None, None)
     };
@@ -922,6 +934,8 @@ pub fn start_agent_session(
         process: child,
         bead_id: bead_id.clone(),
         persona: persona.clone(),
+        task: task.clone(),
+        role: role.clone(),
         backend_id: backend,
         status: SessionStatus::Running,
         created_at: now,
@@ -1497,6 +1511,8 @@ pub fn start_agent_session_headless(
         process: child,
         bead_id: bead_id.clone(),
         persona: persona.clone(),
+        task: None,
+        role: None,
         backend_id: backend,
         status: SessionStatus::Running,
         created_at: now,
@@ -1522,6 +1538,8 @@ pub fn start_agent_session_headless(
         session_id: session_id.clone(),
         bead_id,
         persona,
+        task: None,
+        role: None,
         backend_id: backend,
         status: SessionStatus::Running,
         created_at: now
