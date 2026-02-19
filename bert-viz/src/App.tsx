@@ -34,7 +34,7 @@ import './stores/sessionStoreDiagnostics'; // Enable diagnostics
 // Components
 import { Navigation, ViewType } from "./components/layout/Navigation";
 import { Header } from "./components/layout/Header";
-import { Sidebar } from "./components/layout/Sidebar";
+import { BeadDetailModal } from "./components/shared/BeadDetailModal";
 import { WBSTreeList } from "./components/wbs/WBSTreeItem";
 import { GanttBar } from "./components/gantt/GanttBar";
 import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
@@ -72,7 +72,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   });
   const [loading, setLoading] = useState(true);
   const [selectedBead, setSelectedBead] = useState<BeadNode | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
+
   const [isCreating, setIsCreating] = useState(false);
   const [editForm, setEditForm] = useState<Partial<BeadNode>>({});
   const [filterText, setFilterText] = useState("");
@@ -111,7 +111,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   });
 
-  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; backendId?: CliBackend }>>(() => {
+  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; backendId?: CliBackend; role?: string | null }>>(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
       return JSON.parse(localStorage.getItem('chatSessionMeta') || '{}');
@@ -326,7 +326,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const [processingData, setProcessingData] = useState(false);
   const [sortBy, setSortBy] = useState<'priority' | 'title' | 'type' | 'id' | 'none'>('none');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'none'>('none');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [beadDetailOpen, setBeadDetailOpen] = useState(false);
 
   // WBS Panel resize state (bp6-j33p.5.2)
   const [panelWidth, setPanelWidth] = useState(300);
@@ -829,7 +829,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       }
       switch (e.key) {
         case '/': e.preventDefault(); searchInputRef.current?.focus(); break;
-        case 'Escape': setSelectedBead(null); setIsCreating(false); setIsEditing(false); break;
+        case 'Escape': setSelectedBead(null); setIsCreating(false); setBeadDetailOpen(false); break;
         case '+': case '=': e.preventDefault(); expandAll(); break;
         case '-': case '_': e.preventDefault(); collapseAll(); break;
         case 'n': e.preventDefault(); handleStartCreate(); break;
@@ -976,8 +976,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
   const handleBeadClick = (bead: BeadNode) => {
     setSelectedBead(bead);
-    setIsEditing(false);
     setIsCreating(false);
+    setBeadDetailOpen(true);
   };
 
   const handleHeaderClick = (column: 'priority' | 'title' | 'type' | 'id') => {
@@ -995,14 +995,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   };
 
-  const handleStartEdit = () => {
-    if (selectedBead) {
-      const parent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'))?.id;
-      setEditForm({ ...selectedBead, parent });
-      setIsEditing(true);
-      setIsCreating(false);
-    }
-  };
 
   const handleSaveEdit = async () => {
     if (selectedBead && editForm) {
@@ -1019,7 +1011,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         const updated = beadNodeToBead(updatedNode);
         await updateBead(updated as any);
         setSelectedBead(updatedNode as BeadNode);
-        setIsEditing(false);
+        // editing state managed by modal
         await loadData();
       } catch (error) { alert(`Failed to save bead: ${error}`); }
     }
@@ -1037,7 +1029,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       createdAt: new Date().toISOString(),
       acceptanceCriteria: []
     } as Partial<BeadNode>);
-    setIsEditing(false);
+    // editing state managed by modal
     setIsCreating(true);
   }, []);
 
@@ -1325,14 +1317,14 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                       <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
                       <button onClick={() => setZoom(1)} className="px-4 py-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black uppercase tracking-[0.2em] active:scale-95">Reset</button>
                       <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
-                      <button 
-                        onClick={() => setSidebarOpen(!sidebarOpen)} 
+                      <button
+                        onClick={() => setBeadDetailOpen(!beadDetailOpen)}
                         className={cn(
                           "p-2 hover:bg-[var(--background-tertiary)] rounded-xl transition-all active:scale-90",
-                          sidebarOpen ? "text-[var(--accent-primary)]" : "text-[var(--text-primary)]"
+                          beadDetailOpen ? "text-[var(--accent-primary)]" : "text-[var(--text-primary)]"
                         )}
-                        style={sidebarOpen ? { backgroundColor: 'rgba(15,139,255,0.12)' } : undefined}
-                        title={sidebarOpen ? "Close Sidebar" : "Open Sidebar"}
+                        style={beadDetailOpen ? { backgroundColor: 'rgba(15,139,255,0.12)' } : undefined}
+                        title={beadDetailOpen ? "Close Bead Detail" : "Open Bead Detail"}
                       >
                         <PanelRight size={18} strokeWidth={2.5} />
                       </button>
@@ -1506,13 +1498,30 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 />
               )}
             </div>
-            {sidebarOpen && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} onOpenChat={handleOpenChat} />}
           </div>
         )}
       </main>
       {showPalettePreview && (
         <PalettePreviewDialog onClose={() => setShowPalettePreview(false)} />
       )}
+      <BeadDetailModal
+        bead={selectedBead}
+        open={beadDetailOpen}
+        onClose={() => setBeadDetailOpen(false)}
+        isCreating={isCreating}
+        editForm={editForm}
+        beads={beads}
+        setIsCreating={setIsCreating}
+        setSelectedBead={setSelectedBead}
+        setEditForm={setEditForm}
+        handleSaveEdit={handleSaveEdit}
+        handleSaveCreate={handleSaveCreate}
+        handleCloseBead={handleCloseBead}
+        handleReopenBead={handleReopenBead}
+        handleClaimBead={handleClaimBead}
+        toggleFavorite={toggleFavorite}
+        onOpenChat={handleOpenChat}
+      />
     </div>
   );
 }

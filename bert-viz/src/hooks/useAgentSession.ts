@@ -27,6 +27,7 @@ interface UseAgentSessionOptions {
   cliBackend: CliBackend;
   isOpen: boolean;
   sessionIdOverride?: string | null;
+  role?: string | null;
 }
 
 interface UseAgentSessionReturn {
@@ -56,7 +57,8 @@ export function useAgentSession({
   beadId,
   cliBackend,
   isOpen,
-  sessionIdOverride = null
+  sessionIdOverride = null,
+  role = null,
 }: UseAgentSessionOptions): UseAgentSessionReturn {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -240,10 +242,10 @@ export function useAgentSession({
       }
 
       try {
-        console.log('🚀 Starting new CLI session with:', { persona, task, beadId, cliBackend, isOpen });
+        console.log('🚀 Starting new CLI session with:', { persona, task, beadId, cliBackend, isOpen, role });
         setIsLoading(true);
         setIsAwaitingFirstChunk(true);
-        const newSessionId = await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend);
+        const newSessionId = await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend, role || undefined);
         console.log('✅ Session started:', newSessionId);
         setSessionId(newSessionId);
         setDebugLogs(prev => [...prev, `[System] New session ID: ${newSessionId}`]);
