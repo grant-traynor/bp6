@@ -14,11 +14,11 @@ export const SessionIndicator = ({ sessions, className }: SessionIndicatorProps)
 
   // Use the first active session's persona for the icon
   const primarySession = activeSessions[0];
-  const icon = PERSONA_ICONS[primarySession.persona] || '🤖';
+  const icon = PERSONA_ICONS[primarySession.role || primarySession.persona] || '🤖';
   const count = activeSessions.length;
 
   const tooltipText = activeSessions
-    .map(s => `${PERSONA_ICONS[s.persona] || '🤖'} ${s.persona.replace(/-/g, ' ')}`)
+    .map(s => `${PERSONA_ICONS[s.role || s.persona] || '🤖'} ${(s.role || s.persona).replace(/-/g, ' ')}`)
     .join(', ');
 
   return (

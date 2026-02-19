@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Terminal, MessageSquare, Trash2, X, Square, Pin, PinOff, Hand } from 'lucide-react';
+import { Terminal, MessageSquare, Trash2, X, Square, Pin, PinOff, Hand, ChevronDown } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { useAgentSession } from '../../hooks/useAgentSession';
 import { useDraggable } from '../../hooks/useDraggable';
-import { approveSuggestion, CliBackend, toggleWindowAlwaysOnTop, handoverToInteractive } from '../../api';
+import { approveSuggestion, CliBackend, toggleWindowAlwaysOnTop, handoverToInteractive, PERSONA_ICONS } from '../../api';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -20,6 +20,7 @@ interface ChatDialogProps {
   cliBackend: CliBackend;
   isSessionWindow?: boolean;  // True for fullscreen pop-out windows
   sessionIdOverride?: string | null; // Use existing session instead of creating a new one
+  role?: string | null;
 }
 
 /**
@@ -42,7 +43,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   beadTitle = null,
   cliBackend,
   isSessionWindow = false,
-  sessionIdOverride = null
+  sessionIdOverride = null,
+  role = null
 }) => {
   const [input, setInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
@@ -53,7 +55,10 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   // Refs for auto-scroll and input
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const debugEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const [isAtBottom, setIsAtBottom] = useState(true);
 
   // Custom hooks
   const {
@@ -65,7 +70,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     debugLogs,
     sendMessage,
     stopAgent
-  } = useAgentSession({ persona, task, beadId, cliBackend, isOpen, sessionIdOverride });
+  } = useAgentSession({ persona, task, beadId, cliBackend, isOpen, sessionIdOverride, role });
 
   // Get session info from store to check execution mode
   const sessions = useSessionStore(state => state.sessions);
@@ -77,11 +82,14 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   const { position, isDragging, handleMouseDown } = useDraggable({ x: 100, y: 100 });
 
   // Auto-scroll logic
-  const isNearBottom = (element: HTMLElement | null | undefined) => {
-    if (!element) return true;
-    const threshold = 100;
-    return element.scrollHeight - element.scrollTop - element.clientHeight < threshold;
-  };
+  const checkIsAtBottom = useCallback(() => {
+    if (!chatContainerRef.current) return;
+    const { scrollHeight, scrollTop, clientHeight } = chatContainerRef.current;
+    // Use a smaller threshold (30px) to determine if we're "at bottom"
+    const threshold = 30;
+    const nearBottom = scrollHeight - scrollTop - clientHeight < threshold;
+    setIsAtBottom(nearBottom);
+  }, []);
 
   const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     messagesEndRef.current?.scrollIntoView({ behavior });
@@ -91,15 +99,21 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     debugEndRef.current?.scrollIntoView({ behavior: 'auto' });
   };
 
-  // Auto-scroll when messages change
+  // Handle manual scroll to update isAtBottom state
   useEffect(() => {
-    if (!showDebug) {
-      const scrollContainer = messagesEndRef.current?.parentElement;
-      if (isNearBottom(scrollContainer)) {
-        scrollToBottom('auto');
-      }
+    const container = chatContainerRef.current;
+    if (container) {
+      container.addEventListener('scroll', checkIsAtBottom);
+      return () => container.removeEventListener('scroll', checkIsAtBottom);
     }
-  }, [messages, streamingMessage, showDebug]);
+  }, [checkIsAtBottom, showDebug]);
+
+  // Auto-scroll when messages change - but only if we were already at bottom
+  useEffect(() => {
+    if (!showDebug && isAtBottom) {
+      scrollToBottom('auto');
+    }
+  }, [messages, streamingMessage, showDebug, isAtBottom]);
 
   // Auto-scroll debug logs
   useEffect(() => {
@@ -242,13 +256,17 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
         onMouseDown={isSessionWindow ? undefined : handleMouseDown}
       >
         <div className="flex items-center gap-3">
-          <span className="text-lg">🤖</span>
+          <span className="text-lg">{PERSONA_ICONS[role || persona] || '🤖'}</span>
           <div className="flex flex-col">
             <h3 className="font-black text-xs uppercase tracking-[0.2em]">
-              {persona === 'product-manager' ? 'Product Manager' :
+              {role ? `${role.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ')} Specialist` :
+               persona === 'product-manager' ? 'Product Manager' :
                persona === 'qa-engineer' ? 'QA Engineer' :
-               persona === 'specialist' ? 'Specialist' :
-               persona === 'architect' ? 'Architect' : 'AI Assistant'}
+               persona === 'qc-engineer' ? 'QC Engineer' :
+               persona === 'architect' ? 'Architect' :
+               persona === 'orchestrator' ? 'Orchestrator' :
+               persona === 'customer' ? 'Customer Voice' :
+               persona === 'specialist' ? 'Specialist' : 'AI Assistant'}
             </h3>
             <span className="text-[10px] opacity-70 font-bold uppercase tracking-widest">
               {task || 'Active Session'}
@@ -364,10 +382,10 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
       <div className="min-h-0 flex-1 overflow-hidden flex">
         {viewMode === 'chat' ? (
           /* Chat Content */
-          <div className="min-h-0 flex-1 flex flex-col overflow-hidden bg-[var(--background-primary)]">
+          <div className="min-h-0 flex-1 flex flex-col relative overflow-hidden bg-[var(--background-primary)]">
             {/* Messages View */}
             {!showDebug && (
-            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
+            <div ref={chatContainerRef} className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
               <div className="flex flex-col gap-2 px-4 py-4">
                 {messages.length === 0 && !streamingMessage && (
                   <div className="py-12 flex flex-col items-center justify-center text-slate-500 dark:text-slate-400 space-y-4">
@@ -411,6 +429,28 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                 <div ref={messagesEndRef} />
               </div>
             </div>
+          )}
+
+          {/* Scroll to Bottom Button Overlay */}
+          {!isAtBottom && !showDebug && (
+            <button
+              onClick={() => {
+                setIsAtBottom(true);
+                scrollToBottom('smooth');
+              }}
+              className="absolute bottom-4 right-8 p-2 bg-indigo-600/90 text-white rounded-full shadow-lg hover:bg-indigo-700 transition-all active:scale-95 flex items-center gap-2 pr-4 z-10 animate-in fade-in slide-in-from-bottom-2 duration-300"
+            >
+              <div className="relative">
+                <ChevronDown size={20} />
+                {streamingMessage && (
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-black uppercase tracking-widest">New Messages</span>
+            </button>
           )}
 
           {/* Debug View */}

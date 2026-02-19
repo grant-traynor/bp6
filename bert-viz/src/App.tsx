@@ -182,9 +182,10 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
     const sessionMeta = sessions.find(s => s.sessionId === sessionId);
     const sessionPersona = sessionMeta?.persona || sessionMetaIndex[sessionId]?.persona || 'product-manager';
+    const sessionRole = sessionMeta?.role || sessionMetaIndex[sessionId]?.role || null;
     const sessionBeadId = sessionMeta?.beadId || sessionMetaIndex[sessionId]?.beadId || null;
     const sessionBackendId = (sessionMeta?.backendId as CliBackend) || sessionMetaIndex[sessionId]?.backendId || 'gemini';
-    const sessionTask = sessionMetaIndex[sessionId]?.task || 'chat';
+    const sessionTask = sessionMeta?.task || sessionMetaIndex[sessionId]?.task || 'chat';
     const sessionBeadTitle = sessionMetaIndex[sessionId]?.beadTitle || null;
 
     useEffect(() => {
@@ -201,6 +202,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 beadId: sessionBeadId,
                 beadTitle: title,
                 backendId: sessionBackendId,
+                role: sessionRole,
               }
             }));
           }
@@ -277,6 +279,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             console.log('Session window ChatDialog close requested (no-op)');
           }}
           persona={sessionPersona}
+          role={sessionRole}
           task={sessionTask || `Session window for session ${sessionId}`}
           beadId={sessionBeadId}
           beadTitle={sessionBeadTitle}
@@ -792,6 +795,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             beadId: beadId ?? null,
             beadTitle,
             backendId: currentCli,
+            role: role ?? null,
           }
         };
 

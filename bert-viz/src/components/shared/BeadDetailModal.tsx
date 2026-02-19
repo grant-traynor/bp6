@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  X, Pencil, Eye, User, Star, Clock, Tag, Trash2, Plus, ArrowRight, Link2, CheckSquare,
+  X, Pencil, Eye, User, Star, Clock, Tag, Trash2, Plus, ArrowRight, Link2, CheckSquare, ChevronDown,
 } from "lucide-react";
 import type { BeadNode } from "../../api";
 import { cn } from "../../utils";
@@ -62,6 +62,24 @@ const mdComponents = {
   ),
 };
 
+// ─── Collapsible section wrapper ──────────────────────────────────────────────
+const Section = ({ label, icon, collapsed, onToggle, children }: {
+  label: string; icon: React.ReactNode; collapsed: boolean;
+  onToggle: () => void; children: React.ReactNode;
+}) => (
+  <div className="flex flex-col gap-1.5">
+    <button onClick={onToggle}
+      className="flex items-center justify-between group cursor-pointer select-none">
+      <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1">
+        {icon} {label}
+      </span>
+      <ChevronDown size={12} strokeWidth={2.5}
+        className={cn("text-[var(--text-muted)] transition-transform", collapsed ? "-rotate-90" : "")} />
+    </button>
+    {!collapsed && children}
+  </div>
+);
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface BeadDetailModalProps {
   bead: BeadNode | null;
@@ -101,6 +119,8 @@ export const BeadDetailModal = ({
 }: BeadDetailModalProps) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [formData, setFormData] = useState<Partial<BeadNode>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggle = (key: string) => setCollapsed(p => ({ ...p, [key]: !p[key] }));
 
   // Drag state
   const [pos, setPos] = useState({ x: 0, y: 0 });
@@ -109,10 +129,26 @@ export const BeadDetailModal = ({
   const dragOffset = useRef({ x: 0, y: 0 });
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Set initial position once on first open
+  // Persist position to localStorage whenever it changes (after first init)
+  useEffect(() => {
+    if (initialised) {
+      localStorage.setItem('beadDetailPos', JSON.stringify(pos));
+    }
+  }, [pos, initialised]);
+
+  // Set initial position once on first open — restore from localStorage if available
   useEffect(() => {
     if (open && !initialised) {
-      setPos({ x: Math.max(0, window.innerWidth - 660), y: 80 });
+      const saved = localStorage.getItem('beadDetailPos');
+      if (saved) {
+        try {
+          setPos(JSON.parse(saved));
+        } catch {
+          setPos({ x: Math.max(0, window.innerWidth - 660), y: 120 });
+        }
+      } else {
+        setPos({ x: Math.max(0, window.innerWidth - 660), y: 120 });
+      }
       setInitialised(true);
     }
   }, [open, initialised]);
@@ -285,11 +321,10 @@ export const BeadDetailModal = ({
             </div>
 
             {/* Description */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)]">Description</span>
-              <textarea className="bg-transparent border-none p-0 text-sm font-medium min-h-[80px] w-full focus:ring-0 focus:outline-none resize-none text-[var(--text-secondary)] leading-relaxed placeholder:text-[var(--text-muted)]"
+            <Section label="Description" icon={null} collapsed={!!collapsed.description} onToggle={() => toggle("description")}>
+              <textarea className="bg-transparent border-none p-0 text-sm font-medium min-h-[120px] w-full focus:ring-0 focus:outline-none resize-y text-[var(--text-secondary)] leading-relaxed placeholder:text-[var(--text-muted)]"
                 value={formData.description ?? ""} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Description… (markdown supported)" />
-            </div>
+            </Section>
 
             {/* Priority + Owner + Estimate */}
             <div className="grid grid-cols-3 gap-3">
@@ -323,38 +358,37 @@ export const BeadDetailModal = ({
             </div>
 
             {/* Acceptance Criteria */}
-            <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1"><CheckSquare size={10} /> Acceptance Criteria</span>
-              {(formData.acceptanceCriteria ?? []).map((ac: string, i: number) => (
-                <div key={i} className="flex items-center gap-2 group">
-                  <CheckSquare size={13} className="text-emerald-500 shrink-0" strokeWidth={2.5} />
-                  <input className="flex-1 bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-lg px-2.5 py-1.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none"
-                    value={ac} onChange={e => { const n = [...(formData.acceptanceCriteria ?? [])]; n[i] = e.target.value; setFormData({ ...formData, acceptanceCriteria: n }); }} placeholder={`Criterion ${i + 1}…`} />
-                  <button onClick={() => setFormData({ ...formData, acceptanceCriteria: (formData.acceptanceCriteria ?? []).filter((_: string, idx: number) => idx !== i) })}
-                    className="text-rose-500 hover:bg-rose-500/10 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all active:scale-90">
-                    <Trash2 size={13} strokeWidth={2.5} />
-                  </button>
-                </div>
-              ))}
-              <button onClick={() => setFormData({ ...formData, acceptanceCriteria: [...(formData.acceptanceCriteria ?? []), ""] })}
-                className="self-start flex items-center gap-1.5 text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-3 py-1.5 rounded-xl border border-indigo-500/20 uppercase tracking-widest transition-all hover:bg-indigo-500/20 active:scale-95">
-                <Plus size={11} strokeWidth={3} /> Add Criterion
-              </button>
-            </div>
+            <Section label="Acceptance Criteria" icon={<CheckSquare size={10} />} collapsed={!!collapsed.ac} onToggle={() => toggle("ac")}>
+              <div className="flex flex-col gap-2">
+                {(formData.acceptanceCriteria ?? []).map((ac: string, i: number) => (
+                  <div key={i} className="flex items-center gap-2 group">
+                    <CheckSquare size={13} className="text-emerald-500 shrink-0" strokeWidth={2.5} />
+                    <input className="flex-1 bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-lg px-2.5 py-1.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none"
+                      value={ac} onChange={e => { const n = [...(formData.acceptanceCriteria ?? [])]; n[i] = e.target.value; setFormData({ ...formData, acceptanceCriteria: n }); }} placeholder={`Criterion ${i + 1}…`} />
+                    <button onClick={() => setFormData({ ...formData, acceptanceCriteria: (formData.acceptanceCriteria ?? []).filter((_: string, idx: number) => idx !== i) })}
+                      className="text-rose-500 hover:bg-rose-500/10 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all active:scale-90">
+                      <Trash2 size={13} strokeWidth={2.5} />
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => setFormData({ ...formData, acceptanceCriteria: [...(formData.acceptanceCriteria ?? []), ""] })}
+                  className="self-start flex items-center gap-1.5 text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-3 py-1.5 rounded-xl border border-indigo-500/20 uppercase tracking-widest transition-all hover:bg-indigo-500/20 active:scale-95">
+                  <Plus size={11} strokeWidth={3} /> Add Criterion
+                </button>
+              </div>
+            </Section>
 
             {/* Design Notes */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)]">Design Notes</span>
-              <textarea className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl p-2.5 text-sm font-medium text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[70px] resize-none leading-relaxed"
+            <Section label="Design Notes" icon={null} collapsed={!!collapsed.design} onToggle={() => toggle("design")}>
+              <textarea className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl p-2.5 text-sm font-medium text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[120px] resize-y w-full leading-relaxed"
                 value={formData.design ?? ""} onChange={e => setFormData({ ...formData, design: e.target.value })} placeholder="Architectural decisions… (markdown supported)" />
-            </div>
+            </Section>
 
             {/* Working Notes */}
-            <div className="flex flex-col gap-1.5">
-              <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)]">Working Notes</span>
-              <textarea className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl p-2.5 text-sm font-medium text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[70px] resize-none leading-relaxed"
+            <Section label="Working Notes" icon={null} collapsed={!!collapsed.notes} onToggle={() => toggle("notes")}>
+              <textarea className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl p-2.5 text-sm font-medium text-[var(--text-primary)] focus:border-indigo-500 outline-none min-h-[120px] resize-y w-full leading-relaxed"
                 value={formData.notes ?? ""} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Progress observations… (markdown supported)" />
-            </div>
+            </Section>
 
             {/* External Reference */}
             <div className="flex flex-col gap-1.5">
@@ -364,31 +398,32 @@ export const BeadDetailModal = ({
             </div>
 
             {/* Dependencies */}
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1"><Link2 size={10} /> Dependencies</span>
-                <button onClick={() => { const t = prompt("Enter Target Bead ID:"); if (t) setFormData({ ...formData, dependencies: [...(formData.dependencies ?? []), { issue_id: formData.id!, depends_on_id: t, type: "blocks" }] }); }}
-                  className="flex items-center gap-1 text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-xl border border-indigo-500/20 uppercase tracking-widest transition-all hover:bg-indigo-500/20 active:scale-95">
-                  <Plus size={11} strokeWidth={3} /> Add
-                </button>
-              </div>
-              {!(formData.dependencies ?? []).length
-                ? <div className="text-xs text-[var(--text-muted)] font-bold italic">None</div>
-                : (formData.dependencies ?? []).map((d, i) => (
-                  <div key={i} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--background-secondary)] border border-[var(--border-primary)]/40 group hover:border-indigo-500 transition-all">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <Link2 size={12} className="text-indigo-500 shrink-0" strokeWidth={2.5} />
-                      <span className="text-[10px] font-black font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">{d.depends_on_id}</span>
-                      <ArrowRight size={9} className="text-[var(--text-muted)] shrink-0" strokeWidth={2.5} />
-                      <span className="text-[9px] uppercase font-black text-[var(--text-primary)] tracking-[0.15em]">{d.type}</span>
+            <Section label="Dependencies" icon={<Link2 size={10} />} collapsed={!!collapsed.deps} onToggle={() => toggle("deps")}>
+              <div className="flex flex-col gap-2">
+                <div className="flex justify-end">
+                  <button onClick={() => { const t = prompt("Enter Target Bead ID:"); if (t) setFormData({ ...formData, dependencies: [...(formData.dependencies ?? []), { issue_id: formData.id!, depends_on_id: t, type: "blocks" }] }); }}
+                    className="flex items-center gap-1 text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-xl border border-indigo-500/20 uppercase tracking-widest transition-all hover:bg-indigo-500/20 active:scale-95">
+                    <Plus size={11} strokeWidth={3} /> Add
+                  </button>
+                </div>
+                {!(formData.dependencies ?? []).length
+                  ? <div className="text-xs text-[var(--text-muted)] font-bold italic">None</div>
+                  : (formData.dependencies ?? []).map((d, i) => (
+                    <div key={i} className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-[var(--background-secondary)] border border-[var(--border-primary)]/40 group hover:border-indigo-500 transition-all">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <Link2 size={12} className="text-indigo-500 shrink-0" strokeWidth={2.5} />
+                        <span className="text-[10px] font-black font-mono text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">{d.depends_on_id}</span>
+                        <ArrowRight size={9} className="text-[var(--text-muted)] shrink-0" strokeWidth={2.5} />
+                        <span className="text-[9px] uppercase font-black text-[var(--text-primary)] tracking-[0.15em]">{d.type}</span>
+                      </div>
+                      <button onClick={() => setFormData({ ...formData, dependencies: (formData.dependencies ?? []).filter((_, idx) => idx !== i) })}
+                        className="text-rose-500 hover:bg-rose-500/10 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all active:scale-90">
+                        <Trash2 size={12} strokeWidth={2.5} />
+                      </button>
                     </div>
-                    <button onClick={() => setFormData({ ...formData, dependencies: (formData.dependencies ?? []).filter((_, idx) => idx !== i) })}
-                      className="text-rose-500 hover:bg-rose-500/10 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-all active:scale-90">
-                      <Trash2 size={12} strokeWidth={2.5} />
-                    </button>
-                  </div>
-                ))}
-            </div>
+                  ))}
+              </div>
+            </Section>
           </div>
         )}
       </div>

@@ -93,8 +93,8 @@ describe('SessionIndicator', () => {
 
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
-      // Check for persona icon (should be 📋 for product_manager)
-      expect(container.textContent).toContain('📋');
+      // Check for persona icon (should be 🤖 for product_manager)
+      expect(container.textContent).toContain('🤖');
     });
 
     it('should render count badge for multiple sessions', () => {
@@ -128,7 +128,7 @@ describe('SessionIndicator', () => {
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
       // Check for count badge showing "2"
-      const countBadge = container.querySelector('.bg-indigo-600');
+      const countBadge = container.querySelector('.bg-\\[var\\(--accent-primary\\)\\]');
       expect(countBadge).toBeTruthy();
       expect(countBadge?.textContent).toBe('2');
     });
@@ -152,7 +152,7 @@ describe('SessionIndicator', () => {
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
       // Count badge should not be present
-      const countBadge = container.querySelector('.bg-indigo-600');
+      const countBadge = container.querySelector('.bg-\\[var\\(--accent-primary\\)\\]');
       expect(countBadge).toBeNull();
     });
 
@@ -202,7 +202,7 @@ describe('SessionIndicator', () => {
       ];
 
       const { container } = render(<SessionIndicator sessions={sessions} />);
-      expect(container.textContent).toContain('📋');
+      expect(container.textContent).toContain('🤖');
     });
 
     it('should display correct icon for qa_engineer', () => {
@@ -222,7 +222,7 @@ describe('SessionIndicator', () => {
       ];
 
       const { container } = render(<SessionIndicator sessions={sessions} />);
-      expect(container.textContent).toContain('🧪');
+      expect(container.textContent).toContain('🛡️');
     });
 
     it('should display correct icon for specialist', () => {
@@ -295,9 +295,30 @@ describe('SessionIndicator', () => {
 
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
-      // Should show product_manager icon (📋) as it's the first session
+      // Should show product_manager icon (🤖) as it's the first session
       const personaIcon = container.querySelector('[class*="bg-[var(--background-secondary)]"]');
-      expect(personaIcon?.textContent).toBe('📋');
+      expect(personaIcon?.textContent).toBe('🤖');
+    });
+
+    it('should display correct icon for role when provided', () => {
+      const sessions: SessionInfo[] = [
+        {
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
+          persona: 'specialist',
+          role: 'tauri',
+          backendId: 'gemini',
+          status: 'running',
+          executionMode: 'interactive',
+          createdAt: Date.now(),
+          lastActivity: Date.now() / 1000,
+          hasUnread: false,
+          messageCount: 0,
+        },
+      ];
+
+      const { container } = render(<SessionIndicator sessions={sessions} />);
+      expect(container.textContent).toContain('🦀');
     });
   });
 
@@ -327,7 +348,7 @@ describe('SessionIndicator', () => {
       const indicator = screen.getByTitle(/1 active session/);
       expect(indicator).toBeTruthy();
       expect(indicator.title).toContain('product manager');
-      expect(indicator.title).toContain('📋');
+      expect(indicator.title).toContain('🤖');
     });
 
     it('should show count and multiple personas for multiple sessions', () => {
@@ -374,8 +395,8 @@ describe('SessionIndicator', () => {
 
       const indicator = screen.getByTitle(/3 active sessions/);
       expect(indicator).toBeTruthy();
-      expect(indicator.title).toContain('📋 product manager');
-      expect(indicator.title).toContain('🧪 qa engineer');
+      expect(indicator.title).toContain('🤖 product manager');
+      expect(indicator.title).toContain('🛡️ qa engineer');
       expect(indicator.title).toContain('⚡ specialist');
     });
 
@@ -457,6 +478,29 @@ describe('SessionIndicator', () => {
       expect(indicator.title).toContain('qa engineer');
       expect(indicator.title).not.toContain('qa_engineer');
     });
+
+    it('should show role in tooltip when provided', () => {
+      const sessions: SessionInfo[] = [
+        {
+          sessionId: 'session-1',
+          beadId: 'bp6-test',
+          persona: 'specialist',
+          role: 'tauri',
+          backendId: 'gemini',
+          status: 'running',
+          executionMode: 'interactive',
+          createdAt: Date.now(),
+          lastActivity: Date.now() / 1000,
+          hasUnread: false,
+          messageCount: 0,
+        },
+      ];
+
+      render(<SessionIndicator sessions={sessions} />);
+
+      const indicator = screen.getByTitle(/1 active session/);
+      expect(indicator.title).toContain('🦀 tauri');
+    });
   });
 
   // ============================================================================
@@ -509,7 +553,7 @@ describe('SessionIndicator', () => {
       // Should show only 1 active session (the running one)
       const indicator = screen.getByTitle(/1 active session/);
       expect(indicator).toBeTruthy();
-      expect(indicator.title).toContain('📋 product manager');
+      expect(indicator.title).toContain('🤖 product manager');
       expect(indicator.title).not.toContain('qa engineer');
       expect(indicator.title).not.toContain('specialist');
     });
@@ -557,7 +601,7 @@ describe('SessionIndicator', () => {
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
       // Count badge should show 2, not 3
-      const countBadge = container.querySelector('.bg-indigo-600');
+      const countBadge = container.querySelector('.bg-\\[var\\(--accent-primary\\)\\]');
       expect(countBadge?.textContent).toBe('2');
     });
 
@@ -620,12 +664,12 @@ describe('SessionIndicator', () => {
       expect(indicator).toBeTruthy();
 
       // Count badge should show 2
-      const countBadge = container.querySelector('.bg-indigo-600');
+      const countBadge = container.querySelector('.bg-\\[var\\(--accent-primary\\)\\]');
       expect(countBadge?.textContent).toBe('2');
 
       // Tooltip should only include running sessions
-      expect(indicator.title).toContain('🧪 qa engineer');
-      expect(indicator.title).toContain('📋 product manager');
+      expect(indicator.title).toContain('🛡️ qa engineer');
+      expect(indicator.title).toContain('🤖 product manager');
     });
   });
 
@@ -665,19 +709,19 @@ describe('SessionIndicator', () => {
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
       // Should show count of 2
-      const countBadge = container.querySelector('.bg-indigo-600');
+      const countBadge = container.querySelector('.bg-\\[var\\(--accent-primary\\)\\]');
       expect(countBadge?.textContent).toBe('2');
 
       // Should show both in tooltip
       const indicator = screen.getByTitle(/2 active sessions/);
-      expect(indicator.title).toContain('📋 product manager, 📋 product manager');
+      expect(indicator.title).toContain('🤖 product manager, 🤖 product manager');
     });
 
     it('should handle large number of sessions', () => {
       const sessions: SessionInfo[] = Array.from({ length: 10 }, (_, i) => ({
         sessionId: `session-${i}`,
         beadId: 'bp6-test',
-        persona: i % 3 === 0 ? 'product_manager' : i % 3 === 1 ? 'qa_engineer' : 'specialist',
+        persona: i % 3 === 0 ? 'product-manager' : i % 3 === 1 ? 'qa-engineer' : 'specialist',
         backendId: 'gemini',
         status: 'running' as const,
         executionMode: 'interactive' as const,
@@ -690,7 +734,7 @@ describe('SessionIndicator', () => {
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
       // Should show count of 10
-      const countBadge = container.querySelector('.bg-indigo-600');
+      const countBadge = container.querySelector('.bg-\\[var\\(--accent-primary\\)\\]');
       expect(countBadge?.textContent).toBe('10');
 
       // Should show correct count in tooltip
@@ -729,7 +773,7 @@ describe('SessionIndicator', () => {
       const { container } = render(<SessionIndicator sessions={sessions} />);
 
       // Should still show count of 2 regardless of backend
-      const countBadge = container.querySelector('.bg-indigo-600');
+      const countBadge = container.querySelector('.bg-\\[var\\(--accent-primary\\)\\]');
       expect(countBadge?.textContent).toBe('2');
     });
   });
