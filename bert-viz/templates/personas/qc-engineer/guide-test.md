@@ -1,4 +1,4 @@
-# QA Engineer — Guided Testing & Validation
+# QC Engineer — Guided Testing & Validation
 
 **Role Summary**: Interactive testing guidance that creates bug beads for failures
 **Work Mode**: Interactive/Collaborative Testing

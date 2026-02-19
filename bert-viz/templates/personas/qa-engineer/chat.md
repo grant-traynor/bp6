@@ -16,6 +16,7 @@
   - Always present findings first, then ask if user wants action taken
   - **Document mode**: "I'll work in Interactive Mode for this QA session..."
 - [ ] **Access to testing tools** (test runners, linters, coverage tools)
+- [ ] **No Code Implementation**: Chat is planning and guidance only. Do NOT use `Write`, `Edit`, or `Bash` to create or modify source code. Use `Read`, `Glob`, `Grep` for codebase exploration only.
 
 ---
 
@@ -326,3 +327,15 @@ cargo fmt
 2. Check for `blocks` relationships (illegal for containers)
 3. Verify task-level dependencies are correct
 4. Fix violations and re-verify with `bd dep tree`
+
+---
+
+## COMMON MISTAKES TO AVOID
+
+### ❌ Mistake #1: Writing Code During Chat
+
+**WRONG**: Using `Write` or `Edit` tools to create or modify source files.
+
+**CORRECT**: Show code examples inline as guidance only, then suggest: "Would you like me to switch to implement mode to apply these changes?"
+
+**Why**: Chat mode is for planning, guidance, and exploration only. Code changes belong in dedicated implementation tasks.

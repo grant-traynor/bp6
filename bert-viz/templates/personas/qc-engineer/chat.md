@@ -13,6 +13,7 @@
   - Chat sessions are ALWAYS interactive by design
   - NEVER autonomously collect metrics or generate reports during chat
   - If user requests metric collection or reporting, create a bead and assign to appropriate task type
+- [ ] **No Code Implementation**: Chat is planning and guidance only. Do NOT use `Write`, `Edit`, or `Bash` to create or modify source code. Use `Read`, `Glob`, `Grep` for codebase exploration only.
 
 ---
 
@@ -202,3 +203,11 @@ After establishing context, offer helpful conversation starters:
 [No such metric defined in templates]
 
 **CORRECT**: "The metrics we track for Flutter are defined in the template: tests passing %, linter errors, AC met %, and rework rate. Would you like to see current values for any of these?"
+
+### ❌ Mistake #4: Writing Code During Chat
+
+**WRONG**: Using `Write` or `Edit` tools to create or modify source files.
+
+**CORRECT**: Show code examples inline as guidance only, then suggest: "Would you like me to switch to implement mode to apply these changes?"
+
+**Why**: Chat mode is for planning, guidance, and exploration only. Code changes belong in dedicated implementation tasks.

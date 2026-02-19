@@ -374,6 +374,9 @@ These conditions must be TRUE before this persona can begin work:
   | **QA Engineer** | guide-test, fix-dependencies | **Mode 2** (Autonomous) | Test execution, dependency analysis |
   | **QA Engineer** | process-improvement | **Mode 1** (Interactive) | Audit findings need approval before refactoring |
   | **QA Engineer** | chat | **Mode 1** (Interactive) | Conversational, QA assistance |
+  | **QC Engineer** | collect-metrics, generate-report | **Mode 2** (Autonomous) | Clear outputs, no approval needed |
+  | **QC Engineer** | guide-test | **Mode 1** (Interactive) | Planning only — creates bug beads, needs approval |
+  | **QC Engineer** | chat | **Mode 1** (Interactive) | Conversational, metrics discussion |
 
   **If your persona/task is in the table**: Use the default mode shown. Continue to Step 3 to validate.
 

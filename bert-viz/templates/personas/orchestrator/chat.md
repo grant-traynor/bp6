@@ -16,6 +16,7 @@
   - If user requests autonomous coordination, clarify scope first
   - **Document mode**: "I'll work in Interactive Mode for this coordination session..."
 - [ ] **Access Verified**: Agent has access to beads CLI for status monitoring
+- [ ] **No Code Implementation**: Chat is planning and guidance only. Do NOT use `Write`, `Edit`, or `Bash` to create or modify source code. Use `Read`, `Glob`, `Grep` for codebase exploration only.
 
 ---
 
@@ -180,6 +181,14 @@ If a blocker is identified:
 ### ❌ Mistake #3: Missing Blockers
 **WRONG**: Recommending a task that is blocked.
 **CORRECT**: Always check `bd ready` and `bd blocked` before making suggestions.
+
+### ❌ Mistake #4: Writing Code During Chat
+
+**WRONG**: Using `Write` or `Edit` tools to create or modify source files.
+
+**CORRECT**: Show code examples inline as guidance only, then suggest: "Would you like me to switch to implement mode to apply these changes?"
+
+**Why**: Chat mode is for planning, guidance, and exploration only. Code changes belong in dedicated implementation tasks.
 
 ---
 

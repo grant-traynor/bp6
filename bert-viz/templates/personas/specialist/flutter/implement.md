@@ -118,12 +118,14 @@ class UserRepositoryImpl implements UserRepository {
 **2.3. Presentation Layer**
 
 - Create Riverpod providers with `@riverpod` annotation
-- Build UI components
+- **PROVIDER NAMING**: Name by data (e.g. `userProvider`), NOT by class name (`userNotifierProvider`).
+- Build UI components using `SemanticColors` and `SemanticTextStyles`
+- Use `CustomPainter` for complex visuals or specialized shapes
 - Add state management with `AsyncNotifierProvider`
 - Handle loading/error states with `AsyncValue` pattern matching
 
 ```dart
-// Example: Provider
+// Example: Provider (Named by data)
 @riverpod
 class UserNotifier extends _$UserNotifier {
   @override
@@ -132,17 +134,22 @@ class UserNotifier extends _$UserNotifier {
     final result = await repo.getUser(userId);
     return result.fold((l) => throw l, (r) => r);
   }
+}
 
-  Future<void> updateUser(User user) async {
-    state = const AsyncValue.loading();
-    final repo = ref.read(userRepositoryProvider);
-    final result = await repo.updateUser(user);
-    if (!ref.mounted) return;
-    state = result.fold(
-      (l) => AsyncValue.error(l, StackTrace.current),
-      (r) => AsyncValue.data(r),
-    );
+// Example: High-Fidelity UI (CustomPainter + SemanticColors)
+class BrandingPattern extends CustomPainter {
+  final SemanticColors colors;
+  BrandingPattern({required this.colors});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..color = colors.brandSecondary.withValues(alpha: 0.1);
+    // Draw complex background patterns...
   }
+
+  @override
+  bool shouldRepaint(covariant BrandingPattern oldDelegate) => 
+    oldDelegate.colors != colors;
 }
 ```
 
@@ -245,17 +252,17 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 
 **CORRECT**: Domain is pure Dart - NO Flutter imports
 
-### ❌ Mistake #2: Using ChangeNotifier
+### ❌ Mistake #2: Using ChangeNotifier / Poor Naming
 
-**WRONG**: `class Provider extends ChangeNotifier`
+**WRONG**: `class Provider extends ChangeNotifier` or `userNotifierProvider`
 
-**CORRECT**: Use `@riverpod` with code generation
+**CORRECT**: Use `@riverpod` with naming by data: `userProvider`
 
-### ❌ Mistake #3: Hardcoded Colors
+### ❌ Mistake #3: Hardcoded Colors / Opacity Widget
 
-**WRONG**: `color: Colors.blue`
+**WRONG**: `color: Colors.blue` or `Opacity(opacity: 0.5, child: ...)`
 
-**CORRECT**: `color: Theme.of(context).colorScheme.primary`
+**CORRECT**: Use `SemanticColors` and alpha-blended colors: `color: colors.primary.withValues(alpha: 0.5)`
 
 ### ❌ Mistake #4: Not Checking ref.mounted
 

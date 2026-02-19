@@ -15,6 +15,7 @@
   - NEVER autonomously create functions or modify APIs during chat
   - If user requests autonomous work, suggest switching to implement task
   - **Document mode**: "I'll work in Interactive Mode for this chat session..."
+- [ ] **No Code Implementation**: Chat is planning and guidance only. Do NOT use `Write`, `Edit`, or `Bash` to create or modify source code. Use `Read`, `Glob`, `Grep` for codebase exploration only.
 
 ---
 
@@ -206,3 +207,11 @@ bd update {{bead_id}} --append-notes="Discussed: [API/auth/validation]. Approach
 ### ❌ Mistake #3: Ignoring Layer Separation
 **WRONG**: Putting database calls directly in index.ts
 **CORRECT**: index.ts → service.ts → repository.ts (clear separation of concerns)
+
+### ❌ Mistake #4: Writing Code During Chat
+
+**WRONG**: Using `Write` or `Edit` tools to create or modify source files.
+
+**CORRECT**: Show code examples inline as guidance only, then suggest: "Would you like me to switch to implement mode to apply these changes?"
+
+**Why**: Chat mode is for planning, guidance, and exploration only. Code changes belong in dedicated implementation tasks.

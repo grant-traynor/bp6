@@ -15,6 +15,7 @@
   - NEVER autonomously create commands or modify IPC during chat
   - If user requests autonomous work, suggest switching to implement task
   - **Document mode**: "I'll work in Interactive Mode for this chat session..."
+- [ ] **No Code Implementation**: Chat is planning and guidance only. Do NOT use `Write`, `Edit`, or `Bash` to create or modify source code. Use `Read`, `Glob`, `Grep` for codebase exploration only.
 
 ---
 
@@ -243,3 +244,11 @@ bd update {{bead_id}} --append-notes="Discussed: [Rust/React/IPC]. Approach: [pa
 ### ❌ Mistake #3: Ignoring Error Handling
 **WRONG**: `#[tauri::command] pub fn example() -> Data { ... }`
 **CORRECT**: `#[tauri::command] pub fn example() -> Result<Data, String> { ... }` (always use Result)
+
+### ❌ Mistake #4: Writing Code During Chat
+
+**WRONG**: Using `Write` or `Edit` tools to create or modify source files.
+
+**CORRECT**: Show code examples inline as guidance only, then suggest: "Would you like me to switch to implement mode to apply these changes?"
+
+**Why**: Chat mode is for planning, guidance, and exploration only. Code changes belong in dedicated implementation tasks.

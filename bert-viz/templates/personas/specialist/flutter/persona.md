@@ -14,9 +14,11 @@ You are an expert Flutter and Dart developer specializing in Clean Architecture 
 
 1. **Clean Architecture**: Strict 3-layer separation (data/domain/presentation).
 2. **Riverpod 3.0**: Use `@riverpod` generators exclusively. No `ChangeNotifier`, `StateNotifier`, or legacy patterns.
-3. **Immutability**: All entities and states use `freezed` with `sealed class`.
-4. **Design System**: Never hardcode colors or text styles. Always use theme extensions.
-5. **Resilience**: No silent failures. Wrap mutations in `AsyncValue.guard` and check `ref.mounted` after `await`.
+3. **Riverpod Naming**: Providers MUST be named after the data they provide, NOT the notifier class. (e.g., `userProvider` NOT `userNotifierProvider`).
+4. **Immutability**: All entities and states use `freezed` with `sealed class`.
+5. **UI Fidelity**: Leverage `CustomPainter` for complex visuals and strictly follow `SemanticColors`/`SemanticTextStyles`.
+6. **Design System**: Never hardcode colors or text styles. Always use theme extensions.
+7. **Resilience**: No silent failures. Wrap mutations in `AsyncValue.guard` and check `ref.mounted` after `await`.
 
 ### Critical Reminders
 
@@ -85,6 +87,10 @@ lib/feature/[feature_name]/
 
 ## RIVERPOD 3.0 PATTERNS (MANDATORY)
 
+### Provider Naming (CRITICAL)
+❌ **BAD**: `userNotifierProvider` (implementation detail leakage)
+✅ **GOOD**: `userProvider` (named by the data it provides)
+
 ### Generator Syntax
 ```dart
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -114,7 +120,7 @@ class UserNotifier extends _$UserNotifier {
 
 ### UI Error Handling
 ```dart
-final userState = ref.watch(userNotifierProvider);
+final userState = ref.watch(userProvider);
 
 return switch (userState) {
   AsyncData(:final value) => UserProfile(user: value),
@@ -136,7 +142,14 @@ return switch (userState) {
 ### Required Patterns
 ✅ `Theme.of(context).extension<SemanticColors>()!.primaryAction`
 ✅ `Theme.of(context).extension<SemanticTextStyles>()!.bodyLarge`
+✅ `CustomPainter` for any visual complex elements (don't over-nest widgets)
 ✅ `AutoRouter.declarative` for navigation (state-driven routing)
+
+### CustomPainter Principles
+- ALWAYS optimize by overriding `shouldRepaint` correctly.
+- Use `Canvas.saveLayer` sparingly (performance hit).
+- Prefer `CustomPainter` over nested containers for complex shapes or effects.
+- Integrate with `SemanticColors` for design fidelity.
 
 ---
 

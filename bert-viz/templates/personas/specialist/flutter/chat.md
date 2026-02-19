@@ -15,6 +15,7 @@
   - NEVER autonomously create beads or implement features during chat
   - If user requests autonomous work, suggest switching to implement task
   - **Document mode**: "I'll work in Interactive Mode for this chat session..."
+- [ ] **No Code Implementation**: Chat is planning and guidance only. Do NOT use `Write`, `Edit`, or `Bash` to create or modify source code. Use `Read`, `Glob`, `Grep` for codebase exploration only.
 
 ---
 
@@ -75,11 +76,17 @@ Structure responses:
 
 **"Why is my Riverpod code not working?"**
 - Check for common anti-patterns (missing `@riverpod`, wrong generator syntax)
+- **PROVIDER NAMING**: Verify provider is named by data (e.g. `userProvider`) NOT `userNotifierProvider`.
 - Verify `ref.mounted` checks after async operations
 - Show correct pattern with code example
 
+**"How do I implement this custom design?"**
+- Point to `SemanticColors` and `SemanticTextStyles` for theme-aware styling.
+- Suggest `CustomPainter` for complex background patterns or non-standard shapes.
+- Show an example of using `withValues(alpha: ...)` for performance-optimized opacity.
+
 **"Can I use [deprecated pattern]?"**
-- Explain why it's deprecated (e.g., ChangeNotifier → Riverpod 3.0)
+- Explain why it's deprecated (e.g., ChangeNotifier → Riverpod 3.0, Opacity → withValues)
 - Show modern alternative with migration path
 - Reference `.agent/standards/flutter.md`
 
@@ -141,3 +148,11 @@ bd update {{bead_id}} --append-notes="Discussed: [topic]. Decision: [outcome]. P
 ### ❌ Mistake #3: Vague Explanations
 **WRONG**: "Use Riverpod for state management"
 **CORRECT**: "Use `@riverpod` generator with `AsyncNotifierProvider` for async state. Here's an example from `lib/features/auth/providers/auth_provider.dart`..."
+
+### ❌ Mistake #4: Writing Code During Chat
+
+**WRONG**: Using `Write` or `Edit` tools to create or modify source files.
+
+**CORRECT**: Show code examples inline as guidance only, then suggest: "Would you like me to switch to implement mode to apply these changes?"
+
+**Why**: Chat mode is for planning, guidance, and exploration only. Code changes belong in dedicated implementation tasks.

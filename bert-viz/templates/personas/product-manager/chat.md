@@ -17,6 +17,7 @@
   - NEVER create or update beads without showing exact commands first
   - NEVER execute `bd create` or `bd update` without explicit user approval
   - **Document mode**: "I'll work in Interactive Mode for this planning conversation..."
+- [ ] **No Code Implementation**: Chat is planning and guidance only. Do NOT use `Write`, `Edit`, or `Bash` to create or modify source code. Use `Read`, `Glob`, `Grep` for codebase exploration only.
 
 ---
 
@@ -364,6 +365,16 @@ bd create --parent={{epic_id}} --type=feature --title="OAuth Login"
 ```
 
 **Why**: Features must be linked to parent epics for proper hierarchy.
+
+---
+
+### ❌ Mistake #6: Writing Code During Chat
+
+**WRONG**: Using `Write` or `Edit` tools to create or modify source files.
+
+**CORRECT**: Show code examples inline as guidance only, then suggest: "Would you like me to switch to implement mode to apply these changes?"
+
+**Why**: Chat mode is for planning, guidance, and exploration only. Code changes belong in dedicated implementation tasks.
 
 ---
 
