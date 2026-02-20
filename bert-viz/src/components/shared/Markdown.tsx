@@ -26,9 +26,8 @@ export const mdComponents = {
   ),
   ul: ({ children }: any) => <ul className="list-none pl-0 mb-3 space-y-1">{children}</ul>,
   li: ({ children }: any) => (
-    <li className="flex items-start gap-2 text-sm text-[var(--text-secondary)]">
-      <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[var(--text-muted)] opacity-50 shrink-0" />
-      <span className="flex-1">{children}</span>
+    <li className="relative pl-4 mb-1 text-sm text-[var(--text-secondary)] before:absolute before:left-0 before:top-[0.45em] before:content-[''] before:w-1.5 before:h-1.5 before:rounded-full before:bg-[var(--text-muted)] before:opacity-50">
+      {children}
     </li>
   ),
   ol: ({ children }: any) => <ol className="list-decimal pl-5 mb-3 space-y-1 text-sm text-[var(--text-secondary)]">{children}</ol>,
@@ -70,8 +69,8 @@ export const RawHtml = ({ html, className }: { html: string; className?: string 
       "[&_p]:text-sm [&_p]:text-[var(--text-secondary)] [&_p]:leading-relaxed [&_p]:mb-3 last:[&_p]:mb-0",
       "[&_strong]:font-black [&_strong]:text-[var(--text-primary)]",
       "[&_ul]:list-none [&_ul]:pl-0 [&_ul]:mb-3 [&_ul]:space-y-1",
-      "[&_li]:flex [&_li]:items-start [&_li]:gap-2 [&_li]:text-sm [&_li]:text-[var(--text-secondary)]",
-      "[&_li]:before:content-[''] [&_li]:before:mt-1.5 [&_li]:before:w-1.5 [&_li]:before:h-1.5 [&_li]:before:rounded-full [&_li]:before:bg-[var(--text-muted)] [&_li]:before:opacity-50 [&_li]:before:shrink-0",
+      "[&_li]:relative [&_li]:pl-4 [&_li]:mb-1 [&_li]:text-sm [&_li]:text-[var(--text-secondary)]",
+      "[&_li]:before:absolute [&_li]:before:left-0 [&_li]:before:top-[0.45em] [&_li]:before:content-[''] [&_li]:before:w-1.5 [&_li]:before:h-1.5 [&_li]:before:rounded-full [&_li]:before:bg-[var(--text-muted)] [&_li]:before:opacity-50",
       "[&_code]:font-mono [&_code]:text-xs [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:bg-[var(--background-tertiary)] [&_code]:rounded [&_code]:text-[var(--text-primary)]",
       "[&_pre]:p-3 [&_pre]:bg-[var(--background-secondary)] [&_pre]:border-2 [&_pre]:border-[var(--border-primary)] [&_pre]:rounded-xl [&_pre]:overflow-x-auto [&_pre]:mb-3 [&_pre]:custom-scrollbar",
       className
