@@ -112,7 +112,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   });
 
-  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; backendId?: CliBackend; role?: string | null }>>(() => {
+  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; beadDescription?: string | null; backendId?: CliBackend; role?: string | null }>>(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
       return JSON.parse(localStorage.getItem('chatSessionMeta') || '{}');
@@ -189,20 +189,22 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     const sessionBackendId = (sessionMeta?.backendId as CliBackend) || sessionMetaIndex[sessionId]?.backendId || 'gemini';
     const sessionTask = sessionMeta?.task || sessionMetaIndex[sessionId]?.task || 'chat';
     const sessionBeadTitle = sessionMetaIndex[sessionId]?.beadTitle || null;
+    const sessionBeadDescription = sessionMetaIndex[sessionId]?.beadDescription ?? null;
 
     useEffect(() => {
-      if (!sessionBeadId || sessionBeadTitle) return;
+      if (!sessionBeadId || (sessionBeadTitle && sessionBeadDescription !== undefined)) return;
       fetchBeads()
         .then(all => {
-          const title = all.find(b => b.id === sessionBeadId)?.title;
-          if (title) {
+          const bead = all.find(b => b.id === sessionBeadId);
+          if (bead?.title) {
             setSessionMetaIndex(prev => ({
               ...prev,
               [sessionId]: {
                 persona: sessionPersona,
                 task: sessionTask,
                 beadId: sessionBeadId,
-                beadTitle: title,
+                beadTitle: bead.title,
+                beadDescription: bead.description ?? null,
                 backendId: sessionBackendId,
                 role: sessionRole,
               }
@@ -210,7 +212,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           }
         })
         .catch(err => console.error('Failed to fetch beads for title:', err));
-    }, [sessionBeadId, sessionBeadTitle, sessionId, sessionPersona, sessionTask, sessionBackendId]);
+    }, [sessionBeadId, sessionBeadTitle, sessionBeadDescription, sessionId, sessionPersona, sessionTask, sessionBackendId]);
 
     useEffect(() => {
       const title = `${sessionBeadId || 'Untracked'} · ${sessionBeadTitle || 'Chat'} · ${sessionPersona}${sessionTask ? ` · ${sessionTask}` : ''} [${sessionBackendId}]`;
@@ -285,6 +287,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           task={sessionTask || `Session window for session ${sessionId}`}
           beadId={sessionBeadId}
           beadTitle={sessionBeadTitle}
+          beadDescription={sessionBeadDescription}
           cliBackend={sessionBackendId}
         />
       </div>
@@ -777,6 +780,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const handleOpenChat = useCallback(async (persona: string, task?: string, beadId?: string, role?: string) => {
     const key = `${persona}::${task || 'chat'}::${beadId || 'untracked'}::${role || 'default'}::${currentCli}`;
     const beadTitle = beadId ? beads.find(b => b.id === beadId)?.title || null : null;
+    const beadDescription = beadId ? beads.find(b => b.id === beadId)?.description || null : null;
 
     try {
       let targetSessionId = chatSessionMap[key];
@@ -802,6 +806,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             task: task ?? null,
             beadId: beadId ?? null,
             beadTitle,
+            beadDescription,
             backendId: currentCli,
             role: role ?? null,
           }

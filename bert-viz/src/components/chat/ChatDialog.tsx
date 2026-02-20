@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Terminal, MessageSquare, Trash2, X, Square, Pin, PinOff, Hand, ChevronDown } from 'lucide-react';
+import { Terminal, MessageSquare, Trash2, X, Square, Hand, ChevronDown, Pin, PinOff } from 'lucide-react';
 import { MessageBubble } from './MessageBubble';
 import { useAgentSession } from '../../hooks/useAgentSession';
 import { useDraggable } from '../../hooks/useDraggable';
-import { approveSuggestion, CliBackend, toggleWindowAlwaysOnTop, handoverToInteractive, PERSONA_ICONS } from '../../api';
+import { approveSuggestion, CliBackend, handoverToInteractive, PERSONA_ICONS, toggleWindowAlwaysOnTop } from '../../api';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -18,6 +18,7 @@ interface ChatDialogProps {
   task: string | null;
   beadId: string | null;
   beadTitle?: string | null;
+  beadDescription?: string | null;
   cliBackend: CliBackend;
   isSessionWindow?: boolean;  // True for fullscreen pop-out windows
   sessionIdOverride?: string | null; // Use existing session instead of creating a new one
@@ -42,6 +43,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   task,
   beadId,
   beadTitle = null,
+  beadDescription = null,
   cliBackend,
   isSessionWindow = false,
   sessionIdOverride = null,
@@ -49,7 +51,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const [showDebug, setShowDebug] = useState(false);
-  const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true); // Default is true per current implementation
+  const [isAlwaysOnTop, setIsAlwaysOnTop] = useState(true);
   const [isHandingOver, setIsHandingOver] = useState(false);
   const [viewMode, setViewMode] = useState<'chat' | 'cli'>('chat');
 
@@ -207,12 +209,12 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     console.log('Clear chat requested - consider adding this to useAgentSession hook');
   }, []);
 
+
   const handleToggleAlwaysOnTop = useCallback(async () => {
     try {
       const currentWindow = getCurrentWindow();
       const windowLabel = currentWindow.label;
       const newState = !isAlwaysOnTop;
-
       await toggleWindowAlwaysOnTop(windowLabel, newState);
       setIsAlwaysOnTop(newState);
     } catch (error) {
@@ -236,6 +238,10 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   }, [sessionId]);
 
   if (!isOpen) return null;
+
+  const beadDescriptionExcerpt = beadDescription
+    ? beadDescription.trim().split('\n').filter(l => l.trim()).slice(0, 2).join(' · ')
+    : null;
 
   return (
     <div
@@ -341,6 +347,17 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           >
             <Trash2 size={16} strokeWidth={2.5} />
           </button>
+          {isSessionWindow && (
+            <button
+              onClick={handleToggleAlwaysOnTop}
+              className={`p-1.5 rounded-xl transition-all active:scale-90 ${
+                isAlwaysOnTop ? 'text-indigo-500 hover:text-indigo-400' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              }`}
+              title={isAlwaysOnTop ? "Always on top (click to disable)" : "Not always on top (click to enable)"}
+            >
+              {isAlwaysOnTop ? <Pin size={16} strokeWidth={2.5} /> : <PinOff size={16} strokeWidth={2.5} />}
+            </button>
+          )}
           {!isSessionWindow && (
             <button
               onClick={onClose}
@@ -351,6 +368,15 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           )}
         </div>
       </div>
+
+      {/* Bead Description Strip */}
+      {beadId && beadDescriptionExcerpt && (
+        <div className="px-5 py-1.5 border-b border-[var(--border-primary)] bg-[var(--background-secondary)] flex items-center gap-2 min-w-0">
+          <span className="text-[10px] font-black font-mono text-[var(--text-muted)] uppercase tracking-widest shrink-0">{beadId}</span>
+          <span className="text-[var(--border-primary)] text-[10px] shrink-0">·</span>
+          <span className="text-[10px] font-medium text-[var(--text-muted)] truncate leading-tight">{beadDescriptionExcerpt}</span>
+        </div>
+      )}
 
       {/* Main Content - Flex Layout */}
       <div className="min-h-0 flex-1 overflow-hidden flex bg-[var(--background-primary)]">
@@ -505,6 +531,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
               placeholder={showDebug ? "Debug input..." : "Type a message..."}
               className="flex-1 p-3 bg-[var(--background-primary)] border-2 border-[var(--border-primary)] rounded-2xl text-sm font-bold text-[var(--text-primary)] focus:outline-none focus:border-indigo-500 transition-all shadow-inner resize-none overflow-y-auto max-h-32 placeholder:text-[var(--text-muted)]"
               disabled={isLoading}
+              spellCheck={true}
+              autoCorrect="on"
             />
             <button
               onClick={isLoading ? stopAgent : handleSend}
