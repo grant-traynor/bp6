@@ -16,6 +16,14 @@ const savedTheme = (() => {
 if (savedTheme === 'dark') document.documentElement.classList.add('dark');
 else if (savedTheme === 'light') document.documentElement.classList.remove('dark');
 
+// Request microphone access so macOS registers this app for dictation.
+// getUserMedia triggers the TCC permission prompt; we immediately stop the
+// track — we don't actually use the mic directly, the system dictation
+// service does. Without this, the app never appears in Privacy > Microphone.
+navigator.mediaDevices?.getUserMedia({ audio: true })
+  .then((stream) => stream.getTracks().forEach((t) => t.stop()))
+  .catch(() => { /* user denied or unavailable — dictation may not work */ });
+
 // Detect window type on initialization
 const currentWindow = getCurrentWindow();
 const windowLabel = currentWindow.label;

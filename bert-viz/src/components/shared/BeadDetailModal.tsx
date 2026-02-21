@@ -5,7 +5,7 @@ import {
 import type { BeadNode } from "../../api";
 import { cn } from "../../utils";
 
-import { mdComponents, Markdown } from "./Markdown";
+import { Markdown } from "./Markdown";
 
 const PRIORITY_LABELS = ["P0 — Critical", "P1 — High", "P2 — Medium", "P3 — Low", "P4 — Backlog"];
 

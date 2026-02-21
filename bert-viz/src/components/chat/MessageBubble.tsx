@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
-import { Markdown, RawHtml } from '../shared/Markdown';
+import { RawHtml } from '../shared/Markdown';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
