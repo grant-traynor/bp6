@@ -27,6 +27,7 @@ interface UseAgentSessionOptions {
   cliBackend: CliBackend;
   isOpen: boolean;
   sessionIdOverride?: string | null;
+  role?: string | null;
 }
 
 interface UseAgentSessionReturn {
@@ -56,7 +57,8 @@ export function useAgentSession({
   beadId,
   cliBackend,
   isOpen,
-  sessionIdOverride = null
+  sessionIdOverride = null,
+  role = null,
 }: UseAgentSessionOptions): UseAgentSessionReturn {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -218,8 +220,8 @@ export function useAgentSession({
       let historyToLoad: Message[] = [];
       if (!hasCheckedForResumeRef.current) {
         hasCheckedForResumeRef.current = true;
-        console.log('🔍 Checking for recent session:', { beadId: beadId || 'untracked', persona });
-        const recentSession = await findRecentSession(beadId || null, persona);
+        console.log('🔍 Checking for recent session:', { beadId: beadId || 'untracked', persona, cliBackend });
+        const recentSession = await findRecentSession(beadId || null, persona, cliBackend);
         console.log('🔍 findRecentSession result:', recentSession);
         if (recentSession) {
           console.log('🔄 Found recent session - loading history:', recentSession.sessionId);
@@ -240,10 +242,10 @@ export function useAgentSession({
       }
 
       try {
-        console.log('🚀 Starting new CLI session with:', { persona, task, beadId, cliBackend, isOpen });
+        console.log('🚀 Starting new CLI session with:', { persona, task, beadId, cliBackend, isOpen, role });
         setIsLoading(true);
         setIsAwaitingFirstChunk(true);
-        const newSessionId = await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend);
+        const newSessionId = await startAgentSession(persona, task || undefined, beadId || undefined, cliBackend, role || undefined);
         console.log('✅ Session started:', newSessionId);
         setSessionId(newSessionId);
         setDebugLogs(prev => [...prev, `[System] New session ID: ${newSessionId}`]);
@@ -314,7 +316,7 @@ export function useAgentSession({
     try {
       await sendAgentMessage(sessionId, message);
       // Update last active timestamp for this session
-      await touchSession(beadId || null, persona);
+      await touchSession(beadId || null, persona, cliBackend);
     } catch (error) {
       console.error('Failed to send message:', error);
       setIsLoading(false);

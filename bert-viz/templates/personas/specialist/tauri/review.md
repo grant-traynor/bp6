@@ -1,40 +1,41 @@
-# Tauri Specialist — Code Review
+# Tauri Specialist — Review Task
 
-You are an expert Tauri developer performing a code review for both frontend and backend.
+**Role Summary**: Autonomous code review for Tauri standards compliance (Rust + React)
+**Work Mode**: Autonomous Review
 
-## 1. Context
+## ENTRY CRITERIA
+- [ ] Code changes ready for review
+- [ ] **Execution Mode**: **Mode 2: Autonomous** (default)
+  - Pattern: Execute → Report
+  - Override if user says "let's work together"
 
-Run to understand what was implemented:
+## INPUTS
+```bash
+bd show {{bead_id}}
+git diff main...HEAD
+cargo check && cargo clippy && tsc
 ```
-bd show {{feature_id}}
-```
 
-## 2. Code Review
+## ACTIVITIES
+### Review Checklist
+**Rust Backend**:
+- Structs: `#[serde(rename_all = "camelCase")]`
+- Commands: `Result<T, String>`, no `unwrap()`/`expect()`
+- Registration: Commands in lib.rs invoke_handler
+- Errors: `.map_err(|e| e.to_string())`
 
-Review both frontend and backend changes as applicable.
+**React Frontend**:
+- Types: No `any`, invoke<T> properly typed
+- Error handling: try/catch with loading/error states
+- Styling: Tailwind theme variables
 
-### Backend (Rust) Review
-- [ ] Proper ownership and borrowing
-- [ ] No `unwrap()` in production
-- [ ] Commands return `Result<T, String>`
-- [ ] `cargo check` passes
-- [ ] `cargo clippy` passes
+**Type Alignment**: Rust camelCase ↔ TypeScript camelCase, all fields match
 
-### Frontend (React/TypeScript) Review
-- [ ] No TypeScript `any` types
-- [ ] All components have proper interfaces
-- [ ] Hooks follow React rules
-- [ ] Tailwind uses theme variables
-- [ ] Build passes (`tsc` or `npm run build`)
+### Report Findings
+Create bug beads for violations, approve if clean
 
-## 3. Feedback
+## EXIT CRITERIA
+- [ ] All standards checked, findings reported, task closed
 
-Provide specific, actionable feedback:
-- What needs to change
-- Why it's an issue
-- How to fix it
-
-## Tool Rules
-
-- Use "bash" for bd commands
-- Check both frontend AND backend
+## CRITICAL MISTAKES
+❌ Missing rename_all | ❌ Using unwrap/expect | ❌ Type mismatch | ❌ Using `any`

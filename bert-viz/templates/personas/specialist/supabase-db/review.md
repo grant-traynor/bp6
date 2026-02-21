@@ -1,49 +1,57 @@
-# Supabase Database Specialist — Code Review
+# Supabase Database Specialist — Review Task
 
-You are an expert PostgreSQL database engineer performing a code review.
+**Role Summary**: Autonomous code review for Supabase DB standards compliance
+**Work Mode**: Autonomous Review
 
-## 1. Context
+**CRITICAL**: See 🚨 CRITICAL SAFETY CONSTRAINTS in persona.md (loaded first). Must check for violations.
 
-Run to understand what was implemented:
+## ENTRY CRITERIA
+- [ ] Code changes ready for review
+- [ ] **Execution Mode**: **Mode 2: Autonomous** (default)
+  - Pattern: Execute → Report
+  - Override if user says "let's work together"
+
+## INPUTS
+```bash
+bd show {{bead_id}}
+git diff main...HEAD
+ls supabase/migrations/ && supabase migration list
+cat supabase/migrations/[timestamp]_[name].sql
 ```
-bd show {{feature_id}}
+
+## ACTIVITIES
+
+### 1. Safety Violations Check (FIRST - Zero Tolerance)
+```bash
+# Check git history for forbidden commands
+git log --all --oneline --grep="supabase db push\|supabase start\|migration up" | head -10
+
+# Check if migrations are in correct order
+supabase migration list
+
+# Check if any existing migrations were edited
+git diff main...HEAD -- supabase/migrations/*.sql | grep "^--- a/supabase/migrations"
 ```
 
-## 2. Code Review
+**Flag violations**:
+- ❌ Evidence of `supabase db push` usage
+- ❌ Evidence of `supabase start` usage
+- ❌ Existing migration files edited (not new migrations)
+- ❌ Migrations out of sequential order
 
-Examine the database changes:
+### 2. Standards Compliance Checklist
+**Security**: RLS enabled, policies complete, SECURITY DEFINER with search_path
+**Naming**: p_ prefix (params), v_ prefix (vars), table aliases
+**Types**: RETURNS TABLE(...), constraints, foreign keys
+**Defensive**: COALESCE for JSON, NULL safety, edge cases handled
+**Performance**: Indexes on FKs and queried columns
+**Migration**: Created with `supabase migration new`, properly ordered
 
-### Security
-- [ ] All tables have RLS enabled
-- [ ] RLS policies are appropriate
-- [ ] SECURITY DEFINER functions have `search_path`
-- [ ] No privilege escalation risks
+### 3. Report Findings
+Create bug beads for violations (safety violations = P0 critical), approve if clean
 
-### Code Quality
-- [ ] RPC params prefixed with `p_`
-- [ ] Local vars prefixed with `v_`
-- [ ] Explicit table aliases in queries
-- [ ] Proper use of `RETURNS TABLE(...)`
+## EXIT CRITERIA
+- [ ] All standards checked, findings reported, task closed
 
-### Performance
-- [ ] Indexes on foreign keys
-- [ ] Indexes on frequently queried columns
-- [ ] No N+1 query patterns
-
-## 3. Quality Verification
-
-- [ ] All acceptance criteria met
-- [ ] Migration can be applied cleanly
-- [ ] Rollback path exists if needed
-
-## 4. Feedback
-
-Provide specific, actionable feedback. If issues exist:
-- Explain what needs to change
-- Explain why it's an issue
-- Suggest how to fix it
-
-## Tool Rules
-
-- Use "bash" for bd commands
-- Use "read_file" to examine migrations
+## CRITICAL MISTAKES
+❌ Missing RLS | ❌ No p_ prefix | ❌ Missing SECURITY DEFINER or search_path

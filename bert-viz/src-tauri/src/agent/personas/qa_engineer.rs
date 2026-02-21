@@ -21,6 +21,7 @@ impl PersonaPlugin for QaEngineerPersona {
         // Select template based on task, default to chat for interactive mode
         let template_name = match task {
             Some("fix_dependencies") => "fix-dependencies",
+            Some("process-improvement") => "process-improvement",
             Some(_) | None => "chat", // Default to interactive chat mode
         };
 

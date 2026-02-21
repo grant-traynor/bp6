@@ -75,9 +75,9 @@ impl SessionIndex {
         Ok(())
     }
 
-    /// Make a session key from bead_id and persona
-    fn make_key(bead_id: Option<&str>, persona: &str) -> String {
-        format!("{}-{}", bead_id.unwrap_or("untracked"), persona)
+    /// Make a session key from bead_id, persona, and backend_id
+    fn make_key(bead_id: Option<&str>, persona: &str, backend_id: &str) -> String {
+        format!("{}-{}-{}", bead_id.unwrap_or("untracked"), persona, backend_id)
     }
 
     /// Record a session for a bead/persona combination
@@ -89,7 +89,7 @@ impl SessionIndex {
         cli_session_id: Option<String>,
         backend_id: String,
     ) {
-        let key = Self::make_key(bead_id, persona);
+        let key = Self::make_key(bead_id, persona, &backend_id);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -106,21 +106,26 @@ impl SessionIndex {
         );
     }
 
-    /// Get the most recent session for a bead/persona combination
-    pub fn get_session(&self, bead_id: Option<&str>, persona: &str) -> Option<&SessionMetadata> {
-        let key = Self::make_key(bead_id, persona);
+    /// Get the most recent session for a bead/persona/backend combination
+    pub fn get_session(
+        &self,
+        bead_id: Option<&str>,
+        persona: &str,
+        backend_id: &str,
+    ) -> Option<&SessionMetadata> {
+        let key = Self::make_key(bead_id, persona, backend_id);
         self.sessions.get(&key)
     }
 
     /// Remove a session from the index
-    pub fn remove_session(&mut self, bead_id: Option<&str>, persona: &str) {
-        let key = Self::make_key(bead_id, persona);
+    pub fn remove_session(&mut self, bead_id: Option<&str>, persona: &str, backend_id: &str) {
+        let key = Self::make_key(bead_id, persona, backend_id);
         self.sessions.remove(&key);
     }
 
     /// Update the last active timestamp for a session
-    pub fn touch_session(&mut self, bead_id: Option<&str>, persona: &str) {
-        let key = Self::make_key(bead_id, persona);
+    pub fn touch_session(&mut self, bead_id: Option<&str>, persona: &str, backend_id: &str) {
+        let key = Self::make_key(bead_id, persona, backend_id);
         if let Some(meta) = self.sessions.get_mut(&key) {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -151,12 +156,12 @@ mod tests {
     #[test]
     fn test_make_key() {
         assert_eq!(
-            SessionIndex::make_key(Some("bp6-123"), "product-manager"),
-            "bp6-123-product-manager"
+            SessionIndex::make_key(Some("bp6-123"), "product-manager", "gemini"),
+            "bp6-123-product-manager-gemini"
         );
         assert_eq!(
-            SessionIndex::make_key(None, "qa-engineer"),
-            "untracked-qa-engineer"
+            SessionIndex::make_key(None, "qa-engineer", "claude"),
+            "untracked-qa-engineer-claude"
         );
     }
 
@@ -172,7 +177,7 @@ mod tests {
             "gemini".to_string(),
         );
 
-        let meta = index.get_session(Some("bp6-123"), "product-manager").unwrap();
+        let meta = index.get_session(Some("bp6-123"), "product-manager", "gemini").unwrap();
         assert_eq!(meta.session_id, "session-uuid-1");
         assert_eq!(meta.cli_session_id, Some("cli-session-1".to_string()));
         assert_eq!(meta.backend_id, "gemini");
@@ -190,10 +195,10 @@ mod tests {
             "gemini".to_string(),
         );
 
-        assert!(index.get_session(Some("bp6-123"), "product-manager").is_some());
+        assert!(index.get_session(Some("bp6-123"), "product-manager", "gemini").is_some());
 
-        index.remove_session(Some("bp6-123"), "product-manager");
+        index.remove_session(Some("bp6-123"), "product-manager", "gemini");
 
-        assert!(index.get_session(Some("bp6-123"), "product-manager").is_none());
+        assert!(index.get_session(Some("bp6-123"), "product-manager", "gemini").is_none());
     }
 }

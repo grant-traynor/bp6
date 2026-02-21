@@ -209,6 +209,84 @@ pub struct Bead {
     pub extra_metadata: serde_json::Map<String, serde_json::Value>,
 }
 
+impl Bead {
+    /// Serialize this bead as markdown for injection into agent session prompts.
+    ///
+    /// Produces a compact, human-readable representation ordered by semantic
+    /// importance. Empty/None fields are omitted to avoid wasting tokens.
+    pub fn to_markdown(&self) -> String {
+        let priority_label = match self.priority {
+            0 => "P0 (Critical)",
+            1 => "P1 (High)",
+            2 => "P2 (Medium)",
+            3 => "P3 (Low)",
+            _ => "P4 (Backlog)",
+        };
+
+        let mut md = String::new();
+
+        // Header
+        md.push_str(&format!("# {} — {}\n\n", self.id, self.title));
+
+        // Meta line
+        md.push_str(&format!(
+            "**Status**: {} | **Priority**: {} | **Type**: {}",
+            self.status, priority_label, self.issue_type
+        ));
+        if let Some(ref owner) = self.owner {
+            md.push_str(&format!(" | **Owner**: {}", owner));
+        }
+        if let Some(ref parent) = self.parent {
+            md.push_str(&format!(" | **Parent**: {}", parent));
+        }
+        md.push_str("\n");
+
+        if let Some(ref labels) = self.labels {
+            if !labels.is_empty() {
+                md.push_str(&format!("**Labels**: {}\n", labels.join(", ")));
+            }
+        }
+
+        // Description
+        if let Some(ref desc) = self.description {
+            if !desc.trim().is_empty() {
+                md.push_str(&format!("\n## Description\n\n{}\n", desc.trim()));
+            }
+        }
+
+        // Acceptance Criteria
+        if let Some(ref criteria) = self.acceptance_criteria {
+            if !criteria.is_empty() {
+                md.push_str("\n## Acceptance Criteria\n\n");
+                for item in criteria {
+                    let line = item.trim();
+                    if !line.starts_with("- [ ]") && !line.starts_with("- [x]") {
+                        md.push_str(&format!("- [ ] {}\n", line));
+                    } else {
+                        md.push_str(&format!("{}\n", line));
+                    }
+                }
+            }
+        }
+
+        // Design Notes
+        if let Some(ref design) = self.design {
+            if !design.trim().is_empty() {
+                md.push_str(&format!("\n## Design\n\n{}\n", design.trim()));
+            }
+        }
+
+        // Working Notes
+        if let Some(ref notes) = self.notes {
+            if !notes.trim().is_empty() {
+                md.push_str(&format!("\n## Notes\n\n{}\n", notes.trim()));
+            }
+        }
+
+        md
+    }
+}
+
 fn deserialize_acceptance_criteria<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -2227,6 +2305,15 @@ pub fn run() {
             window::save_window_state, window::load_window_state, window::toggle_window_always_on_top
         ])
         .setup(|app| {
+            // Create a default menu (includes standard Edit menu for macOS dictation)
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::Menu;
+                if let Ok(menu) = Menu::default(app.handle()) {
+                    let _ = app.set_menu(menu);
+                }
+            }
+
             let handle = app.handle().clone();
             let proj_handle = app.handle().clone();
 
@@ -2288,6 +2375,18 @@ pub fn run() {
                 if let Some(registry) = app_handle.try_state::<window::WindowRegistry>() {
                     if let Some(session_id) = registry.unregister_by_window(window_label) {
                         eprintln!("  ✅ Unregistered window for session: {}", session_id);
+
+                        // Clean up any live PTY so the next spawn_pty_for_session succeeds
+                        if let Some(agent_state) = app_handle.try_state::<agent::AgentState>() {
+                            let pty_id = {
+                                let mut sessions = agent_state.sessions.lock().unwrap();
+                                sessions.get_mut(&session_id).and_then(|s| s.pty_session_id.take())
+                            };
+                            if let Some(pty_id) = pty_id {
+                                eprintln!("  🗑️  Cleaning up PTY on window close: {}", pty_id);
+                                let _ = agent_state.pty_manager.kill(&pty_id);
+                            }
+                        }
 
                         // Emit window-closed event for UI sync
                         let _ = app_handle.emit(

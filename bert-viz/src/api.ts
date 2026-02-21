@@ -168,6 +168,8 @@ export interface SessionInfo {
   sessionId: string;
   beadId: string | null;  // Optional bead ID
   persona: string;        // PersonaType as string
+  task?: string | null;   // Task string
+  role?: string | null;   // Specialist role
   backendId: string;      // BackendId as string
   status: 'running' | 'paused';
   createdAt: number;      // Unix timestamp in seconds (Rust u64)
@@ -181,12 +183,19 @@ export interface SessionInfo {
   messageCount: number;   // Number of messages in session
 }
 
-// Persona icon mapping (aligned with PersonaType enum - uses hyphens as per Rust backend)
+// Persona icon mapping (aligned with PersonaType enum and Navigation.tsx)
 export const PERSONA_ICONS: Record<string, string> = {
-  'product-manager': '📋',
-  'qa-engineer': '🧪',
+  'product-manager': '🤖',
+  'qa-engineer': '🛡️',
+  'qc-engineer': '📊',
+  'architect': '🏗️',
+  'orchestrator': '🎯',
+  'customer': '👤',
+  'flutter': '📱',
+  'tauri': '🦀',
+  'supabase-db': '🐘',
+  'supabase-edge': '⚡',
   'specialist': '⚡',
-  // Future: architect, security, etc.
 };
 
 /**
@@ -203,12 +212,12 @@ export function formatSessionRuntime(createdAt: number): string {
 }
 
 /**
- * Get persona icon for a given persona type.
- * @param persona PersonaType as string (with hyphens, e.g., "product-manager")
- * @returns Emoji icon for the persona, or ❓ if unknown
+ * Get persona icon for a given persona type or role.
+ * @param personaOrRole - PersonaType or Specialist role as string
+ * @returns Emoji icon for the persona, or 🤖 if unknown
  */
-export function getPersonaIcon(persona: string): string {
-  return PERSONA_ICONS[persona] || '❓';
+export function getPersonaIcon(personaOrRole: string): string {
+  return PERSONA_ICONS[personaOrRole] || '🤖';
 }
 
 export interface AgentChunk {
@@ -812,12 +821,14 @@ export interface SessionMetadata {
  */
 export async function findRecentSession(
   beadId: string | null,
-  persona: string
+  persona: string,
+  backendId: string
 ): Promise<SessionMetadata | null> {
   try {
     return await invoke<SessionMetadata | null>('find_recent_session', {
       beadId,
-      persona
+      persona,
+      backendId
     });
   } catch (error) {
     console.error('Failed to find recent session:', error);
@@ -860,15 +871,18 @@ export async function recordSessionForResume(
  *
  * @param beadId - The bead ID (null for untracked)
  * @param persona - The persona
+ * @param backendId - The backend being used (gemini, claude-code)
  */
 export async function touchSession(
   beadId: string | null,
-  persona: string
+  persona: string,
+  backendId: string
 ): Promise<void> {
   try {
     await invoke('touch_session', {
       beadId,
-      persona
+      persona,
+      backendId
     });
   } catch (error) {
     console.error('Failed to touch session:', error);

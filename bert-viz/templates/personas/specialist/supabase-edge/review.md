@@ -1,53 +1,37 @@
-# Supabase Edge Function Specialist — Code Review
+# Supabase Edge Function Specialist — Review Task
 
-You are an expert Deno and TypeScript developer performing a code review.
+**Role Summary**: Autonomous code review for Edge Function standards compliance
+**Work Mode**: Autonomous Review
 
-## 1. Context
+## ENTRY CRITERIA
+- [ ] Code changes ready for review
+- [ ] **Execution Mode**: **Mode 2: Autonomous** (default)
+  - Pattern: Execute → Report
+  - Override if user says "let's work together"
 
-Run to understand what was implemented:
+## INPUTS
+```bash
+bd show {{bead_id}}
+git diff main...HEAD
+ls -la supabase/functions/[function-name]/
+# Review all 4 files
+cat supabase/functions/[function-name]/{index,service,repository,schema}.ts
 ```
-bd show {{feature_id}}
-```
 
-## 2. Code Review
+## ACTIVITIES
+### Review Checklist
+**Architecture**: 4-file structure, business logic in service.ts, DB in repository.ts
+**Type Safety**: No `any`, createClient<Database>(), Zod schemas, z.infer
+**Validation**: Zod at controller entry, all inputs validated
+**Error Handling**: AppError usage, proper HTTP codes, user-friendly messages
+**Security**: JWT validation, Authorization header, no hardcoded credentials
+**CORS**: Headers on all responses, OPTIONS handled
 
-Examine the Edge Function code:
+### Report Findings
+Create bug beads for violations, approve if clean
 
-### Architecture
-- [ ] Business logic in service.ts (not controller)
-- [ ] Database calls in repository.ts
-- [ ] Clear separation of concerns
+## EXIT CRITERIA
+- [ ] All standards checked, findings reported, task closed
 
-### Type Safety
-- [ ] No `any` types used
-- [ ] Using `createClient<Database>()` with generated types
-- [ ] Proper TypeScript throughout
-
-### Error Handling
-- [ ] Zod validation for inputs
-- [ ] Proper error mapping to HTTP codes
-- [ ] No silent failures
-
-### Security
-- [ ] JWT verification for protected endpoints
-- [ ] Input validation at system boundary
-- [ ] No hardcoded credentials
-
-## 3. Quality Verification
-
-- [ ] All acceptance criteria met
-- [ ] Function tested locally with `supabase functions serve`
-- [ ] CORS headers present
-
-## 4. Feedback
-
-Provide specific, actionable feedback. If issues exist:
-- Explain what needs to change
-- Explain why it's an issue
-- Suggest how to fix it
-
-## Tool Rules
-
-- Use "bash" for bd commands
-- Use "read_file" to examine code
-- Test with `supabase functions serve`
+## CRITICAL MISTAKES
+❌ Using `any` | ❌ No Zod validation | ❌ Logic in index.ts

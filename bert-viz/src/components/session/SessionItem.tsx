@@ -108,8 +108,8 @@ export const SessionItem = memo<SessionItemProps>(({
     }
   }, [session.sessionId]);
 
-  const personaIcon = getPersonaIcon(session.persona);
-  const personaLabel = session.persona.replace(/-/g, ' ').toUpperCase();
+  const personaIcon = getPersonaIcon(session.role || session.persona);
+  const personaLabel = (session.role || session.persona).replace(/-/g, ' ').toUpperCase();
   const isHeadless = session.executionMode === 'headless';
   const commandsRemaining = session.commandsRemaining ?? 0;
   const commandsCompleted = session.totalCommands && session.commandsRemaining !== undefined && session.commandsRemaining !== null

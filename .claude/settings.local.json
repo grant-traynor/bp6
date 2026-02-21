@@ -67,7 +67,8 @@
       "Bash(npm uninstall:*)",
       "Bash(npm search:*)",
       "Bash(git log:*)",
-      "Bash(npm info:*)"
+      "Bash(npm info:*)",
+      "mcp__dart__analyze_files"
     ]
   }
 }

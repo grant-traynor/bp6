@@ -140,6 +140,21 @@ pub trait CliBackendPlugin: Send + Sync {
     /// The command name itself should NOT be included.
     fn build_args(&self, prompt: &str, resume: bool, session_id: Option<&str>) -> Vec<String>;
 
+    /// Builds the command-line arguments for this backend in PTY mode
+    ///
+    /// PTY mode is used for interactive terminal sessions. This differs
+    /// from standard mode in that it should NOT request JSON output,
+    /// but instead should enable terminal UI features.
+    ///
+    /// # Arguments
+    ///
+    /// * `session_id` - The CLI-provided session ID to resume (required)
+    ///
+    /// # Returns
+    ///
+    /// A vector of command-line arguments for PTY mode.
+    fn build_pty_args(&self, session_id: &str) -> Vec<String>;
+
     /// Parses a line of JSON output from the CLI's stdout
     ///
     /// Each backend has its own JSON format for streaming output. This method

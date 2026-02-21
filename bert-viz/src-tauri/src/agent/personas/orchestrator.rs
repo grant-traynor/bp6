@@ -16,8 +16,15 @@ impl PersonaPlugin for OrchestratorPersona {
         PersonaType::Orchestrator
     }
 
-    fn get_template_name(&self, _context: &PersonaContext) -> Result<String, String> {
-        // For now, default to coordinate
-        Ok("coordinate".to_string())
+    fn get_template_name(&self, context: &PersonaContext) -> Result<String, String> {
+        let task = context.task.as_deref();
+
+        // Select template based on task, default to chat for interactive mode
+        let template_name = match task {
+            Some("coordinate") => "coordinate",
+            Some(_) | None => "chat", // Default to interactive chat mode
+        };
+
+        Ok(template_name.to_string())
     }
 }

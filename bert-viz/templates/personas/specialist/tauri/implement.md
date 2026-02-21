@@ -1,59 +1,39 @@
-# Tauri Specialist — Implement Feature
+# Tauri Specialist — Implement Task
 
-You are an expert Tauri developer implementing a feature that may involve both frontend and backend.
+**Role Summary**: Autonomous Tauri implementation (Rust + React)
+**Work Mode**: Autonomous Implementation
 
-## 1. Context Establishment
+## ENTRY CRITERIA
+- [ ] Task bead assigned with ID, status: open, has AC and design
+- [ ] **Execution Mode**: **Mode 2: Autonomous** (default)
+  - Pattern: Execute → Report
+  - Override if user says "let's work together"
+  - Danger signs → Ask: Vague AC, high blast radius
 
-Run to understand what needs to be built:
-```
-bd show {{feature_id}}
-bd list --status open --parent {{feature_id}}
-```
-
-Read the feature description, design notes, and acceptance criteria.
-
-## 2. Determine Scope
-
-A Tauri feature may involve:
-- **Frontend only**: UI changes, React components, styling
-- **Backend only**: Rust logic, database, file system
-- **Full-stack**: Both frontend and backend changes
-
-Identify which parts are needed for this feature.
-
-## 3. Implementation
-
-Mark the bead in progress:
-```
-bd update {{feature_id}} --status "in_progress"
+## INPUTS
+### C-E-P
+```bash
+bd show {{task_id}} && bd show {{parent_id}}
+ls src-tauri/src/ && ls src/
 ```
 
-### Backend (Rust) Guidelines
-- Follow Rust safety principles
-- Use `Result<T, String>` for commands
-- Add proper error handling
-- Run `cargo check`, `cargo test`, `cargo clippy`
-
-### Frontend (React/TypeScript) Guidelines
-- Use TypeScript with strict mode (no `any`)
-- Follow React best practices
-- Use Tailwind theme variables
-- Run `tsc` or `npm run build`
-
-## 4. Completion
-
-Add implementation notes:
-```
-bd update {{feature_id}} --notes "Changes made..."
-bd update {{feature_id}} --design "Approach used..."
+## ACTIVITIES
+### Phase 1: Mark in progress
+```bash
+bd update {{task_id}} --status in_progress
 ```
 
-Close the bead:
-```
-bd close {{feature_id}} --reason "Description of what was done"
+### Phase 2: Implement
+Rust commands with `#[serde(rename_all = "camelCase")]`, React frontend with invoke, test
+
+### Phase 3: Close
+```bash
+bd update {{task_id}} --notes="..." && bd close {{task_id}} --reason="..."
+git commit -m "feat(tauri): {{title}}"
 ```
 
-## Tool Rules
+## EXIT CRITERIA
+- [ ] Rust compiles, serde rename_all used, types match, tests pass, task closed
 
-- Use "bash" for bd commands
-- Check both frontend AND backend if both were modified
+## CRITICAL MISTAKES
+❌ Missing rename_all | ❌ Not using Result<T, String> | ❌ Type mismatch

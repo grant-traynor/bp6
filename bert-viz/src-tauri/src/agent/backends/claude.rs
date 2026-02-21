@@ -52,6 +52,14 @@ impl CliBackendPlugin for ClaudeCodeBackend {
         args
     }
 
+    fn build_pty_args(&self, session_id: &str) -> Vec<String> {
+        vec![
+            "--resume".to_string(),
+            session_id.to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ]
+    }
+
     fn parse_stdout_line(&self, json: &Value) -> Option<AgentChunk> {
         // Handle Claude Code message format:
         // {"type": "assistant", "message": {"content": [...]}}

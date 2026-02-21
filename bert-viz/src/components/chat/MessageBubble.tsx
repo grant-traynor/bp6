@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
+import { RawHtml } from '../shared/Markdown';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
@@ -9,7 +10,7 @@ interface MessageBubbleProps {
 }
 
 /**
- * Render message content with HTML and bd command support
+ * Render message content with shared styles and bd command support
  */
 function renderContent(
   content: string,
@@ -32,17 +33,20 @@ function renderContent(
       if (bdMatch) {
         const command = bdMatch[1].trim();
         return (
-          <div key={index} className="my-2 p-3 bg-slate-200 dark:bg-slate-900 rounded border border-indigo-500/30">
-            <code className="text-indigo-600 dark:text-indigo-400 font-mono text-sm">{command}</code>
-            <div className="mt-2 flex gap-2">
+          <div key={index} className="my-3 p-4 bg-[var(--background-secondary)] rounded-2xl border-2 border-[var(--border-primary)] shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Suggested Command</span>
+            </div>
+            <code className="text-indigo-600 dark:text-indigo-400 font-mono text-sm block bg-[var(--background-tertiary)] p-2 rounded-lg mb-3">{command}</code>
+            <div className="flex gap-2">
               <button
                 onClick={() => onApprove(command)}
-                className="text-[10px] font-black uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded"
+                className="text-[10px] font-black uppercase tracking-widest bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-1.5 rounded-xl shadow-sm active:scale-95 transition-all"
               >
                 Approve
               </button>
               <button
-                className="text-[10px] font-black uppercase tracking-wider bg-slate-300 dark:bg-slate-700 hover:bg-slate-400 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 px-2 py-1 rounded"
+                className="text-[10px] font-black uppercase tracking-widest bg-[var(--background-tertiary)] hover:bg-[var(--border-primary)] text-[var(--text-primary)] px-4 py-1.5 rounded-xl border border-[var(--border-primary)] active:scale-95 transition-all"
                 onClick={() => onEdit(command)}
               >
                 Edit
@@ -52,33 +56,17 @@ function renderContent(
         );
       }
 
-      // Render other HTML parts
-      return <span key={index} dangerouslySetInnerHTML={{ __html: part }} />;
+      // Render other parts as RawHtml
+      return <RawHtml key={index} html={part} />;
     });
   }
 
-  // No bd commands - render HTML directly with contained styling
-  return (
-    <div
-      dangerouslySetInnerHTML={{ __html: safeContent }}
-      className="prose prose-sm dark:prose-invert max-w-none
-        [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1
-        [&>h1]:mt-2 [&>h1]:mb-1 [&>h2]:mt-2 [&>h2]:mb-1 [&>h3]:mt-2 [&>h3]:mb-1
-        [&_li]:my-0 [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1
-        [&_li>p]:my-0 [&_li>ul]:my-1 [&_li>ol]:my-1"
-      style={{ contain: 'layout style' }}
-    />
-  );
+  // No bd commands - render as RawHtml
+  return <RawHtml html={safeContent} />;
 }
 
 /**
  * MessageBubble - Displays a single message with role-based styling
- *
- * Features:
- * - User/assistant bubble styling
- * - HTML content rendering
- * - bd command detection and UI
- * - Command approve/edit callbacks
  */
 export const MessageBubble = memo<MessageBubbleProps>(({
   role,
@@ -87,14 +75,19 @@ export const MessageBubble = memo<MessageBubbleProps>(({
   onEdit
 }) => {
   return (
-    <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
-        className={`max-w-[85%] p-3 rounded-2xl text-sm font-bold leading-relaxed ${
+        className={`max-w-[90%] ${
           role === 'user'
-            ? 'bg-indigo-600 text-white rounded-br-none shadow-md whitespace-pre-wrap'
-            : 'bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-bl-none shadow-sm border border-slate-200 dark:border-slate-600'
+            ? 'bg-[var(--background-tertiary)] text-[var(--text-primary)] p-4 rounded-3xl rounded-tr-none border-2 border-[var(--border-primary)] shadow-sm whitespace-pre-wrap font-bold text-sm'
+            : 'text-[var(--text-secondary)] w-full'
         }`}
       >
+        {role === 'assistant' && (
+          <div className="flex items-center gap-2 mb-2 opacity-50">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">Assistant</span>
+          </div>
+        )}
         {renderContent(content, onApprove, onEdit)}
       </div>
     </div>

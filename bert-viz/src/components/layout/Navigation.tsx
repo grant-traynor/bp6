@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { TableProperties, Settings, GanttChart, Palette, MessageSquare, Sparkles, Plus, Terminal, Shield, Wrench, Construction, Layers } from "lucide-react";
+import { TableProperties, Settings, GanttChart, Palette, MessageSquare, Sparkles, Plus, Terminal, Shield, Wrench, Construction, Layers, CheckSquare } from "lucide-react";
 import brandLogo from "../../assets/brand_logo_1.svg";
 import { cn } from "../../utils";
 import { PersonaMenu, PersonaOption } from "./PersonaMenu";
 
-export type ViewType = 'gantt' | 'list';
+export type ViewType = 'gantt' | 'list' | 'settings';
 
 interface NavigationProps {
   currentView: ViewType;
@@ -41,6 +41,22 @@ const PERSONAS: PersonaOption[] = [
     tasks: [
       { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
       { id: "fix_dependencies", label: "Fix Dependencies", icon: <Wrench size={14} /> },
+      { id: "process-improvement", label: "Process Improvement", icon: <Wrench size={14} /> },
+    ],
+  },
+  {
+    id: "qc-engineer",
+    label: "QC Engineer",
+    icon: "📊",
+    color: "text-teal-600 dark:text-teal-400",
+    borderColor: "border-teal-500/30",
+    hoverBgColor: "hover:bg-teal-500/10",
+    bgColor: "bg-teal-500/10 text-teal-600",
+    tasks: [
+      { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
+      { id: "collect-metrics", label: "Collect Metrics", icon: <Wrench size={14} /> },
+      { id: "generate-report", label: "Generate Report", icon: <Wrench size={14} /> },
+      { id: "guide-test", label: "Guide Test", icon: <CheckSquare size={14} /> },
     ],
   },
   {
@@ -54,6 +70,19 @@ const PERSONAS: PersonaOption[] = [
     tasks: [
       { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
       { id: "establish", label: "Establish Epic", icon: <Construction size={14} /> },
+    ],
+  },
+  {
+    id: "orchestrator",
+    label: "Orchestrator",
+    icon: "🎯",
+    color: "text-indigo-600 dark:text-indigo-400",
+    borderColor: "border-indigo-500/30",
+    hoverBgColor: "hover:bg-indigo-500/10",
+    bgColor: "bg-indigo-500/10 text-indigo-600",
+    tasks: [
+      { id: "chat", label: "Chat", icon: <MessageSquare size={14} /> },
+      { id: "coordinate", label: "Coordinate", icon: <Layers size={14} /> },
     ],
   },
   {
@@ -198,7 +227,16 @@ export const Navigation = ({ currentView, onViewChange, onOpenChat, onOpenPalett
         >
           <Palette size={20} strokeWidth={2.5} />
         </button>
-        <button className="p-3 text-[var(--text-primary)] hover:text-[var(--accent-primary)] transition-colors">
+        <button
+          onClick={() => onViewChange('settings')}
+          className={cn(
+            "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
+            currentView === 'settings'
+              ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
+              : "bg-[var(--background-primary)] text-[var(--text-primary)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
+          )}
+          title="Settings"
+        >
           <Settings size={22} strokeWidth={2.5} />
         </button>
       </div>

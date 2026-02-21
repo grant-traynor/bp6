@@ -5,18 +5,39 @@ use tauri::State;
 use crate::agent::plugin::BackendId;
 use crate::SettingsState;
 
+/// Model complexity rules mapping complexity levels to AI model names
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComplexityRules {
+    pub low: String,
+    pub medium: String,
+    pub high: String,
+}
+
+impl Default for ComplexityRules {
+    fn default() -> Self {
+        ComplexityRules {
+            low: "gemini-1.5-flash".to_string(),
+            medium: "gemini-1.5-pro".to_string(),
+            high: "gemini-1.5-pro".to_string(),
+        }
+    }
+}
+
 /// Application settings structure
-/// Stores user preferences including CLI backend choice
+/// Stores user preferences including CLI backend choice and model complexity rules
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(rename = "cliBackend")]
     pub cli_backend: BackendId,
+    #[serde(rename = "complexityRules")]
+    pub complexity_rules: ComplexityRules,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
             cli_backend: BackendId::Gemini,
+            complexity_rules: ComplexityRules::default(),
         }
     }
 }

@@ -43,6 +43,14 @@ impl CliBackendPlugin for GeminiBackend {
         args
     }
 
+    fn build_pty_args(&self, session_id: &str) -> Vec<String> {
+        vec![
+            "--resume".to_string(),
+            session_id.to_string(),
+            "--yolo".to_string(),
+        ]
+    }
+
     fn parse_stdout_line(&self, json: &Value) -> Option<AgentChunk> {
         // Handle Gemini init message: {"type": "init", "session_id": "...", "model": "..."}
         // This captures the Gemini CLI's session ID for resume capability

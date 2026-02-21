@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
-import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, PanelRight } from "lucide-react";
+import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, Info } from "lucide-react";
 import { cn } from "./utils";
 import {
   fetchProjectViewModel,
@@ -34,7 +34,7 @@ import './stores/sessionStoreDiagnostics'; // Enable diagnostics
 // Components
 import { Navigation, ViewType } from "./components/layout/Navigation";
 import { Header } from "./components/layout/Header";
-import { Sidebar } from "./components/layout/Sidebar";
+import { BeadDetailModal } from "./components/shared/BeadDetailModal";
 import { WBSTreeList } from "./components/wbs/WBSTreeItem";
 import { GanttBar } from "./components/gantt/GanttBar";
 import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
@@ -43,6 +43,7 @@ import { ResizeHandle } from "./components/shared/ResizeHandle";
 import ChatDialog from "./components/chat/ChatDialog";
 import { ListView } from "./components/list/ListView";
 import { PalettePreviewDialog } from "./components/palette/PalettePreviewDialog";
+import SettingsView from "./components/settings/SettingsView";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -72,7 +73,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   });
   const [loading, setLoading] = useState(true);
   const [selectedBead, setSelectedBead] = useState<BeadNode | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
+
   const [isCreating, setIsCreating] = useState(false);
   const [editForm, setEditForm] = useState<Partial<BeadNode>>({});
   const [filterText, setFilterText] = useState("");
@@ -111,7 +112,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   });
 
-  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null }>>(() => {
+  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; beadDescription?: string | null; backendId?: CliBackend; role?: string | null }>>(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
       return JSON.parse(localStorage.getItem('chatSessionMeta') || '{}');
@@ -156,6 +157,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const scrollRefGanttHeader = useRef<HTMLDivElement>(null);
   const activeScrollSource = useRef<HTMLDivElement | null>(null);
   const hasInitialized = useRef(false);
+  const isInitializing = useRef(true);
   const lastToggledNode = useRef<{ id: string; offsetTop: number } | null>(null);
 
   // Ensure session windows initialize the session store even though they short-circuit
@@ -182,34 +184,40 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
     const sessionMeta = sessions.find(s => s.sessionId === sessionId);
     const sessionPersona = sessionMeta?.persona || sessionMetaIndex[sessionId]?.persona || 'product-manager';
+    const sessionRole = sessionMeta?.role || sessionMetaIndex[sessionId]?.role || null;
     const sessionBeadId = sessionMeta?.beadId || sessionMetaIndex[sessionId]?.beadId || null;
-    const sessionTask = sessionMetaIndex[sessionId]?.task || 'chat';
+    const sessionBackendId = (sessionMeta?.backendId as CliBackend) || sessionMetaIndex[sessionId]?.backendId || 'gemini';
+    const sessionTask = sessionMeta?.task || sessionMetaIndex[sessionId]?.task || 'chat';
     const sessionBeadTitle = sessionMetaIndex[sessionId]?.beadTitle || null;
+    const sessionBeadDescription = sessionMetaIndex[sessionId]?.beadDescription ?? null;
 
     useEffect(() => {
-      if (!sessionBeadId || sessionBeadTitle) return;
+      if (!sessionBeadId || (sessionBeadTitle && sessionBeadDescription !== undefined)) return;
       fetchBeads()
         .then(all => {
-          const title = all.find(b => b.id === sessionBeadId)?.title;
-          if (title) {
+          const bead = all.find(b => b.id === sessionBeadId);
+          if (bead?.title) {
             setSessionMetaIndex(prev => ({
               ...prev,
               [sessionId]: {
                 persona: sessionPersona,
                 task: sessionTask,
                 beadId: sessionBeadId,
-                beadTitle: title,
+                beadTitle: bead.title,
+                beadDescription: bead.description ?? null,
+                backendId: sessionBackendId,
+                role: sessionRole,
               }
             }));
           }
         })
         .catch(err => console.error('Failed to fetch beads for title:', err));
-    }, [sessionBeadId, sessionBeadTitle, sessionId, sessionPersona, sessionTask]);
+    }, [sessionBeadId, sessionBeadTitle, sessionBeadDescription, sessionId, sessionPersona, sessionTask, sessionBackendId]);
 
     useEffect(() => {
-      const title = `${sessionBeadId || 'Untracked'} · ${sessionBeadTitle || 'Chat'} · ${sessionPersona}${sessionTask ? ` · ${sessionTask}` : ''}`;
+      const title = `${sessionBeadId || 'Untracked'} · ${sessionBeadTitle || 'Chat'} · ${sessionPersona}${sessionTask ? ` · ${sessionTask}` : ''} [${sessionBackendId}]`;
       getCurrentWindow().setTitle(title).catch(err => console.error('Failed to set window title:', err));
-    }, [sessionBeadId, sessionBeadTitle, sessionPersona, sessionTask]);
+    }, [sessionBeadId, sessionBeadTitle, sessionPersona, sessionTask, sessionBackendId]);
 
     // Window state persistence hook (bp6-643.005.5)
     useEffect(() => {
@@ -275,10 +283,12 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             console.log('Session window ChatDialog close requested (no-op)');
           }}
           persona={sessionPersona}
+          role={sessionRole}
           task={sessionTask || `Session window for session ${sessionId}`}
           beadId={sessionBeadId}
           beadTitle={sessionBeadTitle}
-          cliBackend={currentCli}
+          beadDescription={sessionBeadDescription}
+          cliBackend={sessionBackendId}
         />
       </div>
     );
@@ -324,7 +334,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const [processingData, setProcessingData] = useState(false);
   const [sortBy, setSortBy] = useState<'priority' | 'title' | 'type' | 'id' | 'none'>('none');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'none'>('none');
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [beadDetailOpen, setBeadDetailOpen] = useState(false);
 
   // WBS Panel resize state (bp6-j33p.5.2)
   const [panelWidth, setPanelWidth] = useState(300);
@@ -464,6 +474,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         console.error("Initialization failed:", error);
         setHasProject(false);
       } finally {
+        isInitializing.current = false;
         setLoading(false);
       }
     };
@@ -528,11 +539,18 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     if (isSessionWindow) return;
 
     const saveCurrentWindowState = async () => {
+      if (isInitializing.current) return;
       try {
         const window = getCurrentWindow();
         const position = await window.outerPosition();
         const size = await window.outerSize();
         const isMaximized = await window.isMaximized();
+
+        // Reject bogus coordinates (e.g. caught during window transition)
+        if (Math.abs(position.x) > 10000 || Math.abs(position.y) > 10000) {
+          console.warn('Skipping save: suspicious window position', position);
+          return;
+        }
 
         // Build complete startup state by merging current UI state with new window state
         const state = {
@@ -590,8 +608,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       if (saveTimeout) clearTimeout(saveTimeout);
       if (unlistenResize) unlistenResize();
       if (unlistenMove) unlistenMove();
-      // Save final state on unmount (window close)
-      saveCurrentWindowState();
     };
   }, [isSessionWindow, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds, panelWidth]);
 
@@ -762,8 +778,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   }, [viewModel]);
 
   const handleOpenChat = useCallback(async (persona: string, task?: string, beadId?: string, role?: string) => {
-    const key = `${persona}::${task || 'chat'}::${beadId || 'untracked'}::${role || 'default'}`;
+    const key = `${persona}::${task || 'chat'}::${beadId || 'untracked'}::${role || 'default'}::${currentCli}`;
     const beadTitle = beadId ? beads.find(b => b.id === beadId)?.title || null : null;
+    const beadDescription = beadId ? beads.find(b => b.id === beadId)?.description || null : null;
 
     try {
       let targetSessionId = chatSessionMap[key];
@@ -789,6 +806,9 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             task: task ?? null,
             beadId: beadId ?? null,
             beadTitle,
+            beadDescription,
+            backendId: currentCli,
+            role: role ?? null,
           }
         };
 
@@ -826,7 +846,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       }
       switch (e.key) {
         case '/': e.preventDefault(); searchInputRef.current?.focus(); break;
-        case 'Escape': setSelectedBead(null); setIsCreating(false); setIsEditing(false); break;
+        case 'Escape': setSelectedBead(null); setIsCreating(false); setBeadDetailOpen(false); break;
         case '+': case '=': e.preventDefault(); expandAll(); break;
         case '-': case '_': e.preventDefault(); collapseAll(); break;
         case 'n': e.preventDefault(); handleStartCreate(); break;
@@ -850,6 +870,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   useEffect(() => {
     // Skip saving during initial load
     if (!hasProject) return;
+    if (isInitializing.current) return;
 
     const saveState = async () => {
       try {
@@ -894,6 +915,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   // Save WBS panel width to startup.json with debouncing (bp6-j33p.5.3)
   useEffect(() => {
     if (!hasProject) return;
+    if (isInitializing.current) return;
 
     const saveTimeout = setTimeout(async () => {
       try {
@@ -973,7 +995,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
   const handleBeadClick = (bead: BeadNode) => {
     setSelectedBead(bead);
-    setIsEditing(false);
     setIsCreating(false);
   };
 
@@ -992,14 +1013,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   };
 
-  const handleStartEdit = () => {
-    if (selectedBead) {
-      const parent = beads.find(b => b.dependencies?.some(d => d.issue_id === selectedBead.id && d.type === 'parent-child'))?.id;
-      setEditForm({ ...selectedBead, parent });
-      setIsEditing(true);
-      setIsCreating(false);
-    }
-  };
 
   const handleSaveEdit = async () => {
     if (selectedBead && editForm) {
@@ -1016,7 +1029,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         const updated = beadNodeToBead(updatedNode);
         await updateBead(updated as any);
         setSelectedBead(updatedNode as BeadNode);
-        setIsEditing(false);
+        // editing state managed by modal
         await loadData();
       } catch (error) { alert(`Failed to save bead: ${error}`); }
     }
@@ -1034,7 +1047,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       createdAt: new Date().toISOString(),
       acceptanceCriteria: []
     } as Partial<BeadNode>);
-    setIsEditing(false);
+    // editing state managed by modal
     setIsCreating(true);
   }, []);
 
@@ -1250,6 +1263,8 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
               </div>
             )}
           </div>
+        ) : view === 'settings' ? (
+          <SettingsView />
         ) : (
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 flex flex-col overflow-hidden">
@@ -1322,16 +1337,16 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                       <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
                       <button onClick={() => setZoom(1)} className="px-4 py-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black uppercase tracking-[0.2em] active:scale-95">Reset</button>
                       <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
-                      <button 
-                        onClick={() => setSidebarOpen(!sidebarOpen)} 
+                      <button
+                        onClick={() => setBeadDetailOpen(!beadDetailOpen)}
                         className={cn(
                           "p-2 hover:bg-[var(--background-tertiary)] rounded-xl transition-all active:scale-90",
-                          sidebarOpen ? "text-[var(--accent-primary)]" : "text-[var(--text-primary)]"
+                          beadDetailOpen ? "text-[var(--accent-primary)]" : "text-[var(--text-primary)]"
                         )}
-                        style={sidebarOpen ? { backgroundColor: 'rgba(15,139,255,0.12)' } : undefined}
-                        title={sidebarOpen ? "Close Sidebar" : "Open Sidebar"}
+                        style={beadDetailOpen ? { backgroundColor: 'rgba(15,139,255,0.12)' } : undefined}
+                        title={beadDetailOpen ? "Close Bead Detail" : "Open Bead Detail"}
                       >
-                        <PanelRight size={18} strokeWidth={2.5} />
+                        <Info size={18} strokeWidth={2.5} />
                       </button>
                   </div>
                 </div>
@@ -1503,13 +1518,30 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                 />
               )}
             </div>
-            {sidebarOpen && <Sidebar selectedBead={selectedBead} isCreating={isCreating} isEditing={isEditing} editForm={editForm} beads={beads} setIsEditing={setIsEditing} setIsCreating={setIsCreating} setSelectedBead={setSelectedBead} setEditForm={setEditForm} handleSaveEdit={handleSaveEdit} handleSaveCreate={handleSaveCreate} handleStartEdit={handleStartEdit} handleCloseBead={handleCloseBead} handleReopenBead={handleReopenBead} handleClaimBead={handleClaimBead} toggleFavorite={toggleFavorite} onOpenChat={handleOpenChat} />}
           </div>
         )}
       </main>
       {showPalettePreview && (
         <PalettePreviewDialog onClose={() => setShowPalettePreview(false)} />
       )}
+      <BeadDetailModal
+        bead={selectedBead}
+        open={beadDetailOpen}
+        onClose={() => setBeadDetailOpen(false)}
+        isCreating={isCreating}
+        editForm={editForm}
+        beads={beads}
+        setIsCreating={setIsCreating}
+        setSelectedBead={setSelectedBead}
+        setEditForm={setEditForm}
+        handleSaveEdit={handleSaveEdit}
+        handleSaveCreate={handleSaveCreate}
+        handleCloseBead={handleCloseBead}
+        handleReopenBead={handleReopenBead}
+        handleClaimBead={handleClaimBead}
+        toggleFavorite={toggleFavorite}
+        onOpenChat={handleOpenChat}
+      />
     </div>
   );
 }
