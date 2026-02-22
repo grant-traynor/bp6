@@ -1049,6 +1049,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     } as Partial<BeadNode>);
     // editing state managed by modal
     setIsCreating(true);
+    setBeadDetailOpen(true);
   }, []);
 
   const handleSaveCreate = async () => {
