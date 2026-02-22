@@ -179,44 +179,46 @@ export const Navigation = ({ currentView, onViewChange, onOpenChat, onOpenPalett
           <img src={brandLogo} alt="Pairti" className="w-full h-full object-contain" style={{ filter: 'var(--logo-filter)' }} />
         </div>
 
-        <button
-          onClick={() => onViewChange('gantt')}
-          className={cn(
-            "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
-            currentView === 'gantt'
-              ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
-              : "bg-[var(--background-primary)] text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
-          )}
-          title="Gantt View"
-        >
-          <GanttChart size={24} strokeWidth={2.5} />
-        </button>
+        <div className="flex flex-col gap-2 items-center">
+          <button
+            onClick={() => onViewChange('gantt')}
+            className={cn(
+              "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
+              currentView === 'gantt'
+                ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
+                : "bg-[var(--background-primary)] text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
+            )}
+            title="Gantt View"
+          >
+            <GanttChart size={24} strokeWidth={2.5} />
+          </button>
 
-        <button
-          onClick={() => onViewChange('list')}
-          className={cn(
-            "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
-            currentView === 'list'
-              ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
-              : "bg-[var(--background-primary)] text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
-          )}
-          title="List View"
-        >
-          <TableProperties size={24} strokeWidth={2.5} />
-        </button>
+          <button
+            onClick={() => onViewChange('list')}
+            className={cn(
+              "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
+              currentView === 'list'
+                ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
+                : "bg-[var(--background-primary)] text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
+            )}
+            title="List View"
+          >
+            <TableProperties size={24} strokeWidth={2.5} />
+          </button>
 
-        <button
-          onClick={() => onViewChange('terminal')}
-          className={cn(
-            "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
-            currentView === 'terminal'
-              ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
-              : "bg-[var(--background-primary)] text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
-          )}
-          title="Terminal View"
-        >
-          <Terminal size={24} strokeWidth={2.5} />
-        </button>
+          <button
+            onClick={() => onViewChange('terminal')}
+            className={cn(
+              "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
+              currentView === 'terminal'
+                ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
+                : "bg-[var(--background-primary)] text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
+            )}
+            title="Terminal View"
+          >
+            <Terminal size={24} strokeWidth={2.5} />
+          </button>
+        </div>
 
         <div className="h-px w-8 bg-[var(--border-primary)] mx-auto" />
 
