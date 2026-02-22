@@ -196,33 +196,15 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
     xtermRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // Notify backend of initial terminal size
-    // Subtract 2 cols to prevent overflow from scrollbar/padding
+    // Set initial PTY size so the process knows the terminal dimensions
     const initialDimensions = fitAddon.proposeDimensions();
     if (initialDimensions) {
       invoke('resize_pty', {
         sessionId,
         cols: Math.max(initialDimensions.cols - 2, 20),
         rows: initialDimensions.rows,
-      }).catch((error) => {
-        console.error('Failed to set initial PTY size:', error);
-      });
+      }).catch(() => {});
     }
-
-    // Re-fit on next frame: container flex layout may not be settled at mount time.
-    // Also forces a screen redraw for apps like tmux that repaint on resize.
-    requestAnimationFrame(() => {
-      if (!fitAddonRef.current || !xtermRef.current) return;
-      fitAddonRef.current.fit();
-      const dims = fitAddonRef.current.proposeDimensions();
-      if (dims) {
-        invoke('resize_pty', {
-          sessionId,
-          cols: Math.max(dims.cols - 2, 20),
-          rows: dims.rows,
-        }).catch(() => {});
-      }
-    });
 
     // Handle terminal input (send to backend)
     terminal.onData((data) => {
@@ -231,7 +213,10 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
       });
     });
 
-    // Listen for PTY output from backend
+    // Listen for PTY output from backend.
+    // IMPORTANT: The repaint trigger goes inside .then() so it only fires AFTER
+    // the pty-data listener is fully registered on the Rust side. Firing resize_pty
+    // before the listener is ready causes us to miss the repaint output.
     console.log('Setting up pty-data event listener for session:', sessionId);
     const unlistenPromise = listen<PtyDataEvent>('pty-data', (event) => {
       console.log('Received pty-data event:', event.payload.sessionId, event.payload.data.substring(0, 50));
@@ -240,19 +225,33 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
 
         // On initial load, debounce scrolling to bottom to avoid watching the buffer fill
         if (initialLoadRef.current) {
-          // Clear any existing timeout
           if (scrollTimeoutRef.current) {
             clearTimeout(scrollTimeoutRef.current);
           }
-
-          // Set timeout to scroll to bottom after data stops flowing
           scrollTimeoutRef.current = setTimeout(() => {
             terminal.scrollToBottom();
             initialLoadRef.current = false;
             console.log('Initial load complete, scrolled to bottom');
-          }, 200); // Wait 200ms after last data chunk
+          }, 200);
         }
       }
+    }).then((unlisten) => {
+      // Listener is now registered. Re-fit (layout may have settled) then trigger a
+      // ping-pong resize: rows+1 → rows. This guarantees the process sees a size *change*
+      // and repaints its screen, even if the container dimensions are identical to the
+      // previous Terminal session (which happens every time the view is switched).
+      if (fitAddonRef.current && xtermRef.current) {
+        fitAddonRef.current.fit();
+        const dims = fitAddonRef.current.proposeDimensions();
+        if (dims) {
+          const cols = Math.max(dims.cols - 2, 20);
+          const rows = dims.rows;
+          invoke('resize_pty', { sessionId, cols, rows: rows + 1 })
+            .then(() => invoke('resize_pty', { sessionId, cols, rows }))
+            .catch(() => {});
+        }
+      }
+      return unlisten;
     });
 
     // Handle window resize (debounced)
