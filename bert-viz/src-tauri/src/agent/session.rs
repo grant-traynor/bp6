@@ -1836,9 +1836,10 @@ pub fn spawn_pty_for_session(
         .get_mut(&sessionId)
         .ok_or_else(|| format!("Session {} not found", sessionId))?;
 
-    // Check if already in terminal mode
+    // Check if already in terminal mode — idempotent, just update view_mode and return
     if session.pty_session_id.is_some() {
-        return Err("Session already has a PTY".to_string());
+        session.view_mode = ViewMode::Terminal;
+        return Ok(());
     }
 
     // CRITICAL FIX: Kill the existing chat process before spawning PTY

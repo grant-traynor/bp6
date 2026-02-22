@@ -71,11 +71,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({ sessions: sessionList || [] });
     });
 
-    // bp6-ldgi: Listen for agent-session-ready events
+    // bp6-ldgi: Listen for agent-session-ready events — refresh sessions so messageCount is current
     listen<{ session_id: string }>('agent-session-ready', (event) => {
       const sessionId = event.payload.session_id;
       console.log('🟢 agent-session-ready received for session:', sessionId);
       get().setAgentReady(sessionId);
+      get().refreshSessions();
     });
 
     set({ isInitialized: true });

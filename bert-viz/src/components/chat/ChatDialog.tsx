@@ -79,9 +79,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   const sessions = useSessionStore(state => state.sessions);
   const currentSession = sessionId ? sessions.find(s => s.sessionId === sessionId) : null;
   const isHeadless = currentSession?.executionMode === 'headless';
-  // bp6-ldgi: Check agent readiness from session store
-  const agentReadySessions = useSessionStore(state => state.agentReadySessions);
-  const isAgentReady = sessionId ? agentReadySessions.has(sessionId) : false;
+  // bp6-ldgi: Agent is ready once the backend has processed at least one chunk (messageCount > 0).
+  // Derived from live session info so it works even when the chat window opens after the agent starts.
+  const isAgentReady = (currentSession?.messageCount ?? 0) > 0;
 
   const safeStreamingMessage = sanitizeAgentHtml(streamingMessage);
 
@@ -166,14 +166,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
             console.error('Failed to switch to CLI mode:', error);
           }
         } else {
-          try {
-            await invoke('detach_pty_from_session', { sessionId: sessionId });
-            setViewMode('chat');
-          } catch (error) {
-            console.error('Failed to switch to chat mode:', error);
-            // If PTY wasn't attached, just switch view
-            setViewMode('chat');
-          }
+          // PTY stays alive — just hide the terminal UI
+          setViewMode('chat');
         }
       }
     };
@@ -286,15 +280,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
         {/* View Mode Toggle */}
         <div className="flex items-center gap-1 bg-[var(--background-tertiary)] p-1 rounded-xl border border-[var(--border-primary)]">
           <button
-            onClick={async () => {
-              if (!sessionId) return;
-              try {
-                await invoke('detach_pty_from_session', { sessionId: sessionId });
-                setViewMode('chat');
-              } catch (error) {
-                console.error('Failed to switch to chat mode:', error);
-                setViewMode('chat');
-              }
+            onClick={() => {
+              // PTY stays alive — just hide the terminal UI
+              setViewMode('chat');
             }}
             className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
               viewMode === 'chat'
