@@ -88,6 +88,13 @@ impl PtyManager {
         let mut cmd = CommandBuilder::new(command.clone());
         cmd.args(args.clone());
 
+        // Tell the child process it's running inside an xterm-256color terminal.
+        // Without this, GUI-launched processes have no TERM set and tmux falls back
+        // to the ACS character set, rendering split-pane borders as letters (q, x, etc.)
+        // rather than proper box-drawing characters.
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+
         if let Some(dir) = working_dir {
             cmd.cwd(OsString::from(dir));
         }
