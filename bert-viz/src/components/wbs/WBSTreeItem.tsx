@@ -12,6 +12,7 @@ interface WBSTreeItemProps {
   isSelected?: boolean;
   sessions?: SessionInfo[];
   onStartSession?: (beadId: string, persona: string) => void;
+  onSessionClick?: (sessionId: string) => void;
 }
 
 export const WBSTreeItem = ({
@@ -21,7 +22,8 @@ export const WBSTreeItem = ({
   onClick,
   isSelected,
   sessions = [],
-  onStartSession
+  onStartSession,
+  onSessionClick
 }: WBSTreeItemProps) => {
   const hasChildren = node.children.length > 0;
 
@@ -105,7 +107,7 @@ export const WBSTreeItem = ({
           )}>
             {node.title}
           </span>
-          <SessionIndicator sessions={sessions} className="shrink-0" />
+          <SessionIndicator sessions={sessions} className="shrink-0" onSessionClick={onSessionClick} />
         </div>
 
         <div className="w-20 shrink-0 px-2 flex items-center justify-center h-full">
@@ -138,7 +140,8 @@ export const WBSTreeList = ({
   onClick,
   selectedId,
   sessionsByBead = {},
-  onStartSession
+  onStartSession,
+  onSessionClick
 }: {
   nodes: BeadNode[],
   depth?: number,
@@ -146,7 +149,8 @@ export const WBSTreeList = ({
   onClick: (bead: BeadNode) => void,
   selectedId?: string,
   sessionsByBead?: Record<string, SessionInfo[]>,
-  onStartSession?: (beadId: string, persona: string) => void
+  onStartSession?: (beadId: string, persona: string) => void,
+  onSessionClick?: (sessionId: string) => void,
 }) => {
   return (
     <>
@@ -160,6 +164,7 @@ export const WBSTreeList = ({
             isSelected={selectedId === node.id}
             sessions={sessionsByBead[node.id]}
             onStartSession={onStartSession}
+            onSessionClick={onSessionClick}
           />
           {node.isExpanded && node.children.length > 0 && (
             <WBSTreeList
@@ -170,6 +175,7 @@ export const WBSTreeList = ({
               selectedId={selectedId}
               sessionsByBead={sessionsByBead}
               onStartSession={onStartSession}
+              onSessionClick={onSessionClick}
             />
           )}
         </div>

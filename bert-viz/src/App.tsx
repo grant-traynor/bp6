@@ -1424,6 +1424,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                               onClick={handleBeadClick}
                               selectedId={selectedBead?.id}
                               sessionsByBead={sessionsByBead}
+                              onSessionClick={createSessionWindow}
                             />
                           </div>
                         )}
