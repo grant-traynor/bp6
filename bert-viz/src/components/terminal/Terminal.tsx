@@ -170,7 +170,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
     const terminal = new XTerm({
       cursorBlink: true,
       fontSize: 13,
-      fontFamily: 'SF Mono, Monaco, Menlo, "Courier New", monospace',
+      fontFamily: '"JetBrainsMono Nerd Font", "JetBrains Mono", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font Mono", "Cascadia Code NF", monospace',
       fontWeight: '400',
       fontWeightBold: '700',
       letterSpacing: 0,

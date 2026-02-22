@@ -1,5 +1,35 @@
 @import "tailwindcss";
 
+/* JetBrains Mono Nerd Font — bundled for full Nerd Font glyph coverage (git, folders, etc.) */
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font';
+  src: url('/fonts/JetBrainsMonoNerdFont-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font';
+  src: url('/fonts/JetBrainsMonoNerdFont-Italic.ttf') format('truetype');
+  font-weight: 400;
+  font-style: italic;
+  font-display: block;
+}
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font';
+  src: url('/fonts/JetBrainsMonoNerdFont-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font';
+  src: url('/fonts/JetBrainsMonoNerdFont-BoldItalic.ttf') format('truetype');
+  font-weight: 700;
+  font-style: italic;
+  font-display: block;
+}
+
 :root {
   --background-primary: #f6f9ff;
   --background-secondary: #edf2fa;
