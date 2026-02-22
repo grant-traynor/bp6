@@ -26,6 +26,8 @@ import {
   loadStartupState,
   saveStartupState,
   fetchBeads,
+  spawnProjectShell,
+  killProjectShell,
 } from "./api";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize, currentMonitor } from '@tauri-apps/api/window';
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
@@ -44,6 +46,7 @@ import ChatDialog from "./components/chat/ChatDialog";
 import { ListView } from "./components/list/ListView";
 import { PalettePreviewDialog } from "./components/palette/PalettePreviewDialog";
 import SettingsView from "./components/settings/SettingsView";
+import { Terminal } from "./components/terminal/Terminal";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -311,10 +314,17 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   }, []);
 
+  const PROJECT_SHELL_ID = "project-shell";
+
   const handleOpenProject = useCallback(async (path: string) => {
     try {
       setLoading(true);
       await openProject(path);
+
+      // Kill existing project shell (if any) then spawn a fresh one for the new path
+      try { await killProjectShell(PROJECT_SHELL_ID); } catch (_) { /* ignore */ }
+      spawnProjectShell(PROJECT_SHELL_ID, path).catch(e => console.error("Failed to spawn project shell:", e));
+
       setCurrentProjectPath(path);
       setHasProject(true);
 
@@ -1266,6 +1276,10 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           </div>
         ) : view === 'settings' ? (
           <SettingsView />
+        ) : view === 'terminal' ? (
+          <div className="flex-1 overflow-hidden">
+            <Terminal key={currentProjectPath} sessionId={PROJECT_SHELL_ID} />
+          </div>
         ) : (
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 flex flex-col overflow-hidden">

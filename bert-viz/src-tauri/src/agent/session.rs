@@ -1757,22 +1757,23 @@ pub fn write_to_pty(
     let start = Instant::now();
     eprintln!("🔵 write_to_pty START: session={}, data_len={}", sessionId, data.len());
 
-    // Extract PTY session ID while holding lock, then release immediately
+    // Extract PTY session ID while holding lock, then release immediately.
+    // Falls back to using sessionId directly (for project shells not tied to an agent session).
     let pty_session_id = {
         let lock_start = Instant::now();
         let sessions = state.sessions.lock().unwrap();
         eprintln!("🔓 AgentState.sessions lock acquired in {:?}", lock_start.elapsed());
 
-        let session = sessions
-            .get(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-
-        // Clone the PTY session ID to use after lock is released
-        let pty_id = session
-            .pty_session_id
-            .as_ref()
-            .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
-            .clone();
+        let pty_id = if let Some(session) = sessions.get(&sessionId) {
+            session
+                .pty_session_id
+                .as_ref()
+                .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
+                .clone()
+        } else {
+            // No agent session — use sessionId as direct PTY key (project shells)
+            sessionId.clone()
+        };
 
         eprintln!("🔓 AgentState.sessions lock releasing after {:?}", lock_start.elapsed());
         pty_id
@@ -1799,20 +1800,22 @@ pub fn resize_pty(
     rows: u16,
     state: State<AgentState>,
 ) -> Result<(), String> {
-    // Extract PTY session ID while holding lock, then release immediately
+    // Extract PTY session ID while holding lock, then release immediately.
+    // Falls back to using sessionId directly (for project shells not tied to an agent session).
     let pty_session_id = {
         let sessions = state.sessions.lock().unwrap();
 
-        let session = sessions
-            .get(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-
-        // Clone the PTY session ID to use after lock is released
-        session
-            .pty_session_id
-            .as_ref()
-            .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
-            .clone()
+        let pty_id = if let Some(session) = sessions.get(&sessionId) {
+            session
+                .pty_session_id
+                .as_ref()
+                .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
+                .clone()
+        } else {
+            // No agent session — use sessionId as direct PTY key (project shells)
+            sessionId.clone()
+        };
+        pty_id
     }; // Lock released here
 
     // Resize PTY without holding the sessions lock
@@ -2011,12 +2014,97 @@ pub fn detach_pty_from_session(
             "viewMode": "chat",
         }),
     );
-    
+
     // Re-emit session-list-changed to update UI
     {
         let sessions = state.sessions.lock().unwrap();
         emit_session_list_changed(&app_handle, &sessions);
     }
-    
+
+    Ok(())
+}
+
+/// Spawn a standalone shell PTY anchored to a project directory.
+/// Used by the persistent terminal view — not tied to any agent session.
+/// Idempotent: if a PTY already exists for `session_id`, returns Ok immediately.
+#[tauri::command]
+pub fn spawn_project_shell(
+    session_id: String,
+    project_path: String,
+    state: State<AgentState>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    // Idempotent: don't spawn a second shell if one already exists
+    if state.pty_manager.has_session(&session_id) {
+        eprintln!("⚡ spawn_project_shell: PTY {} already exists, skipping", session_id);
+        return Ok(());
+    }
+
+    // Use $SHELL env var if set, else default to zsh on macOS / bash elsewhere
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+        if cfg!(target_os = "macos") {
+            "/bin/zsh".to_string()
+        } else {
+            "/bin/bash".to_string()
+        }
+    });
+
+    eprintln!("🖥️  spawn_project_shell: spawning {} in {}", shell, project_path);
+
+    state.pty_manager.spawn(
+        session_id.clone(),
+        shell,
+        vec![],
+        Some(project_path),
+        Some(80),
+        Some(24),
+    )?;
+
+    // Start reader thread that streams PTY output as pty-data events
+    let pty_manager = state.pty_manager.clone();
+    let app_handle_clone = app_handle.clone();
+    let session_id_clone = session_id.clone();
+
+    std::thread::spawn(move || {
+        loop {
+            match pty_manager.read(&session_id_clone) {
+                Ok(data) => {
+                    if data.is_empty() {
+                        break; // EOF — shell exited
+                    }
+                    let output = String::from_utf8_lossy(&data).to_string();
+                    let _ = app_handle_clone.emit(
+                        "pty-data",
+                        serde_json::json!({
+                            "sessionId": session_id_clone,
+                            "data": output,
+                        }),
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Project shell PTY read error ({}): {}", session_id_clone, e);
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        eprintln!("Project shell PTY stream ended: {}", session_id_clone);
+    });
+
+    Ok(())
+}
+
+/// Kill the project shell PTY for a given session ID.
+/// Safe to call even if the shell has already exited.
+#[tauri::command]
+pub fn kill_project_shell(
+    session_id: String,
+    state: State<AgentState>,
+) -> Result<(), String> {
+    if !state.pty_manager.has_session(&session_id) {
+        return Ok(()); // Already gone
+    }
+    state.pty_manager.kill(&session_id)?;
+    eprintln!("🗑️  kill_project_shell: killed PTY {}", session_id);
     Ok(())
 }

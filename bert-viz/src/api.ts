@@ -84,6 +84,14 @@ export async function syncProject(projectPath: string): Promise<string> {
   return await invoke<string>("sync_project", { projectPath });
 }
 
+export async function spawnProjectShell(sessionId: string, projectPath: string): Promise<void> {
+  return await invoke<void>("spawn_project_shell", { sessionId, projectPath });
+}
+
+export async function killProjectShell(sessionId: string): Promise<void> {
+  return await invoke<void>("kill_project_shell", { sessionId });
+}
+
 export async function fetchBeads(): Promise<Bead[]> {
   try {
     return await invoke<Bead[]>("get_beads");
