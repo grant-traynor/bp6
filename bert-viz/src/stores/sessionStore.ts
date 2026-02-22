@@ -1,10 +1,13 @@
 import { create } from 'zustand';
+import { listen } from '@tauri-apps/api/event';
 import { SessionInfo, listActiveSessions, onSessionListChanged, UnlistenFn } from '../api';
 
 interface SessionStore {
   // State
   sessions: SessionInfo[];
   isInitialized: boolean;
+  // bp6-ldgi: Track which sessions have had their first agent message
+  agentReadySessions: Set<string>;
 
   // Actions
   setSessions: (sessions: SessionInfo[]) => void;
@@ -12,6 +15,9 @@ interface SessionStore {
   refreshSessions: () => Promise<void>;  // Manual refresh
   initializeStore: () => Promise<UnlistenFn | undefined>;
   cleanup: () => void;
+  // bp6-ldgi: Mark a session as agent-ready
+  setAgentReady: (sessionId: string) => void;
+  isAgentReady: (sessionId: string) => boolean;
 }
 
 // Helper function to group sessions by bead ID (use in components with useMemo)
@@ -30,6 +36,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   // Initial state
   sessions: [],
   isInitialized: false,
+  agentReadySessions: new Set<string>(),
 
   // Actions
   setSessions: (sessions) => {
@@ -64,6 +71,13 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({ sessions: sessionList || [] });
     });
 
+    // bp6-ldgi: Listen for agent-session-ready events
+    listen<{ session_id: string }>('agent-session-ready', (event) => {
+      const sessionId = event.payload.session_id;
+      console.log('🟢 agent-session-ready received for session:', sessionId);
+      get().setAgentReady(sessionId);
+    });
+
     set({ isInitialized: true });
     console.log('✅ Session store initialized with event listener');
 
@@ -71,6 +85,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   cleanup: () => {
-    set({ sessions: [], isInitialized: false });
-  }
+    set({ sessions: [], isInitialized: false, agentReadySessions: new Set<string>() });
+  },
+
+  // bp6-ldgi: Mark a session as agent-ready
+  setAgentReady: (sessionId: string) => {
+    set((state) => {
+      const next = new Set(state.agentReadySessions);
+      next.add(sessionId);
+      return { agentReadySessions: next };
+    });
+  },
+
+  // bp6-ldgi: Check if a session is agent-ready
+  isAgentReady: (sessionId: string) => {
+    return get().agentReadySessions.has(sessionId);
+  },
 }));

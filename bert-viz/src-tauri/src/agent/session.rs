@@ -575,6 +575,9 @@ fn run_cli_command_for_session(
             let _ = logger.log_event(start_event);
         }
 
+        // Track whether agent-session-ready has been emitted for this session invocation
+        let mut agent_ready_emitted = false;
+
         let reader = BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line_str) = line {
@@ -622,6 +625,16 @@ fn run_cli_command_for_session(
                                 // NOTE: Don't emit session-list-changed on every chunk - causes constant flashing
                                 // Activity indicators will update on next session-list-changed event
                                 // (triggered by session create/terminate/mark-read)
+                            }
+
+                            // bp6-ns67: Emit agent-session-ready on first chunk from the agent
+                            if !agent_ready_emitted {
+                                agent_ready_emitted = true;
+                                let _ = handle_clone.emit(
+                                    "agent-session-ready",
+                                    serde_json::json!({ "session_id": session_id_clone }),
+                                );
+                                eprintln!("🟢 Emitted agent-session-ready for session: {}", session_id_clone);
                             }
 
                             // Check if command is done and there are more commands in queue

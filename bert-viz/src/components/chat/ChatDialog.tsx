@@ -79,6 +79,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   const sessions = useSessionStore(state => state.sessions);
   const currentSession = sessionId ? sessions.find(s => s.sessionId === sessionId) : null;
   const isHeadless = currentSession?.executionMode === 'headless';
+  // bp6-ldgi: Check agent readiness from session store
+  const agentReadySessions = useSessionStore(state => state.agentReadySessions);
+  const isAgentReady = sessionId ? agentReadySessions.has(sessionId) : false;
 
   const safeStreamingMessage = sanitizeAgentHtml(streamingMessage);
 
@@ -303,7 +306,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           </button>
           <button
             onClick={async () => {
-              if (!sessionId) return;
+              if (!sessionId || !isAgentReady) return;
               try {
                 await invoke('spawn_pty_for_session', { sessionId: sessionId });
                 setViewMode('cli');
@@ -311,11 +314,13 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                 console.error('Failed to switch to CLI mode:', error);
               }
             }}
+            disabled={!isAgentReady}
+            title={!isAgentReady ? 'Waiting for agent to initialize...' : 'Switch to CLI'}
             className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
               viewMode === 'cli'
                 ? 'bg-[var(--background-primary)] text-indigo-600 shadow-sm'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-            }`}
+            } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             CLI
           </button>
@@ -383,8 +388,16 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
         {viewMode === 'chat' ? (
           /* Chat Content */
           <div className="min-h-0 flex-1 flex flex-col relative overflow-hidden">
-            {/* Messages View */}
-            {!showDebug && (
+            {/* bp6-4pa6: Loading screen while agent is injecting context */}
+            {!isAgentReady && (
+              <div className="min-h-0 flex-1 flex flex-col items-center justify-center gap-4 text-[var(--text-muted)]">
+                <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                <p className="font-black uppercase tracking-widest text-[10px]">Injecting context...</p>
+              </div>
+            )}
+
+          {/* Messages View */}
+            {isAgentReady && !showDebug && (
             <div ref={chatContainerRef} className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
               <div className="flex flex-col px-6 py-6">
                 {messages.length === 0 && !streamingMessage && (
@@ -458,7 +471,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           )}
 
           {/* Debug View */}
-          {showDebug && (
+          {isAgentReady && showDebug && (
             <div className="min-h-0 flex-1 bg-slate-900 text-emerald-400 p-4 font-mono text-[10px] overflow-y-auto custom-scrollbar">
               <div className="space-y-1">
                 {debugLogs.map((log, i) => {
