@@ -540,6 +540,7 @@ fn run_cli_command_for_session(
     let bead_id_clone = bead_id.clone();
     let persona_clone = persona.clone();
     let backend_name = backend.command_name().to_string();
+    let prompt_clone = prompt.clone();
 
     std::thread::spawn(move || {
         // Initialize session logger
@@ -573,6 +574,19 @@ fn run_cli_command_for_session(
                 })),
             };
             let _ = logger.log_event(start_event);
+
+            // Log the user's prompt as a Message event
+            let prompt_event = LogEvent {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                session_id: session_id_clone.clone(),
+                bead_id: bead_id_clone.clone(),
+                persona: persona_clone.clone(),
+                backend: backend_name.clone(),
+                event_type: LogEventType::Message,
+                content: prompt_clone.clone(),
+                metadata: None,
+            };
+            let _ = logger.log_event(prompt_event);
         }
 
         // Track whether agent-session-ready has been emitted for this session invocation
