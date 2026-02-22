@@ -209,6 +209,21 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
       });
     }
 
+    // Re-fit on next frame: container flex layout may not be settled at mount time.
+    // Also forces a screen redraw for apps like tmux that repaint on resize.
+    requestAnimationFrame(() => {
+      if (!fitAddonRef.current || !xtermRef.current) return;
+      fitAddonRef.current.fit();
+      const dims = fitAddonRef.current.proposeDimensions();
+      if (dims) {
+        invoke('resize_pty', {
+          sessionId,
+          cols: Math.max(dims.cols - 2, 20),
+          rows: dims.rows,
+        }).catch(() => {});
+      }
+    });
+
     // Handle terminal input (send to backend)
     terminal.onData((data) => {
       invoke('write_to_pty', { sessionId, data }).catch((error) => {

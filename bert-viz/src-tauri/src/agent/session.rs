@@ -2024,8 +2024,27 @@ pub fn detach_pty_from_session(
     Ok(())
 }
 
+/// Derive a safe tmux session name from a project path.
+/// Uses the last path component, sanitizes to alphanumeric + hyphens, max 20 chars.
+fn tmux_session_name(project_path: &str) -> String {
+    let dir = std::path::Path::new(project_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("project");
+
+    let name: String = dir
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+        .take(20)
+        .collect();
+
+    let trimmed = name.trim_matches('-').to_string();
+    if trimmed.is_empty() { "project".to_string() } else { trimmed }
+}
+
 /// Spawn a standalone shell PTY anchored to a project directory.
-/// Used by the persistent terminal view — not tied to any agent session.
+/// Uses tmux if available: attaches to an existing session named after the project,
+/// or creates a new one. Falls back to $SHELL if tmux is not installed.
 /// Idempotent: if a PTY already exists for `session_id`, returns Ok immediately.
 #[tauri::command]
 pub fn spawn_project_shell(
@@ -2040,21 +2059,37 @@ pub fn spawn_project_shell(
         return Ok(());
     }
 
-    // Use $SHELL env var if set, else default to zsh on macOS / bash elsewhere
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| {
-        if cfg!(target_os = "macos") {
-            "/bin/zsh".to_string()
-        } else {
-            "/bin/bash".to_string()
-        }
-    });
+    // Prefer tmux: `tmux new-session -A` attaches to existing session or creates new one
+    let tmux_available = std::process::Command::new("which")
+        .arg("tmux")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
 
-    eprintln!("🖥️  spawn_project_shell: spawning {} in {}", shell, project_path);
+    let (cmd, args) = if tmux_available {
+        let session_name = tmux_session_name(&project_path);
+        eprintln!("🖥️  spawn_project_shell: tmux session '{}' in {}", session_name, project_path);
+        (
+            "tmux".to_string(),
+            vec![
+                "new-session".to_string(),
+                "-A".to_string(),          // attach if session exists, else create
+                "-s".to_string(), session_name,
+                "-c".to_string(), project_path.clone(), // working dir (new session only)
+            ],
+        )
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| {
+            if cfg!(target_os = "macos") { "/bin/zsh".to_string() } else { "/bin/bash".to_string() }
+        });
+        eprintln!("🖥️  spawn_project_shell: tmux not found, using {} in {}", shell, project_path);
+        (shell, vec![])
+    };
 
     state.pty_manager.spawn(
         session_id.clone(),
-        shell,
-        vec![],
+        cmd,
+        args,
         Some(project_path),
         Some(80),
         Some(24),
