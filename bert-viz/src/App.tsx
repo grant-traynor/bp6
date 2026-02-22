@@ -1508,7 +1508,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                   </div>
                 </>
               ) : (
-                <ListView 
+                <ListView
                   beads={beads}
                   onBeadClick={handleBeadClick}
                   selectedBeadId={selectedBead?.id}
@@ -1516,6 +1516,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                   sortOrder={sortOrder}
                   onHeaderClick={handleHeaderClick}
                   sessionsByBead={sessionsByBead}
+                  onSessionClick={createSessionWindow}
                 />
               )}
             </div>

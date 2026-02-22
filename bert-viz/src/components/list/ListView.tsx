@@ -12,6 +12,7 @@ interface ListViewProps {
   sortOrder: 'asc' | 'desc' | 'none';
   onHeaderClick: (column: 'priority' | 'title' | 'type' | 'id') => void;
   sessionsByBead?: Record<string, SessionInfo[]>;
+  onSessionClick?: (sessionId: string) => void;
 }
 
 export const ListView = ({
@@ -21,7 +22,8 @@ export const ListView = ({
   sortBy,
   sortOrder,
   onHeaderClick,
-  sessionsByBead = {}
+  sessionsByBead = {},
+  onSessionClick
 }: ListViewProps) => {
 
   const renderSortIcon = (column: string) => {
@@ -129,7 +131,7 @@ export const ListView = ({
                   )}>
                     {bead.title}
                   </span>
-                  <SessionIndicator sessions={sessionsByBead[bead.id]} className="shrink-0" />
+                  <SessionIndicator sessions={sessionsByBead[bead.id]} className="shrink-0" onSessionClick={onSessionClick} />
                 </div>
               </td>
               <td className="px-4 py-3">
