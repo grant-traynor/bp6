@@ -261,6 +261,13 @@ impl PtyManager {
         Ok(())
     }
 
+    /// Remove a session from the map without killing the process.
+    /// Used when the child process has already exited naturally (EOF on reader).
+    pub fn try_remove(&self, session_id: &str) {
+        let mut sessions = self.sessions.lock().unwrap();
+        sessions.remove(session_id);
+    }
+
     /// Check if a PTY session exists
     pub fn has_session(&self, session_id: &str) -> bool {
         let sessions = self.sessions.lock().unwrap();

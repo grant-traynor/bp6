@@ -28,6 +28,7 @@ import {
   fetchBeads,
   spawnProjectShell,
   killProjectShell,
+  onProjectShellExited,
 } from "./api";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize, currentMonitor } from '@tauri-apps/api/window';
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
@@ -154,6 +155,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   // CLI preference state
   const [currentCli, setCurrentCli] = useState<CliBackend>("gemini");
   const [view, setView] = useState<ViewType>('gantt');
+  const [projectShellKey, setProjectShellKey] = useState(0);
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
@@ -315,6 +317,25 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   }, []);
 
   const PROJECT_SHELL_ID = "project-shell";
+
+  // Use a ref so the shell-exit listener always sees the current project path
+  // without needing to be re-registered every time the path changes.
+  const currentProjectPathRef = useRef(currentProjectPath);
+  useEffect(() => { currentProjectPathRef.current = currentProjectPath; }, [currentProjectPath]);
+
+  // Listen for the project shell exiting (e.g. user typed `exit` or Ctrl-D).
+  // Respawn immediately and remount the Terminal component via key increment.
+  useEffect(() => {
+    const unlistenPromise = onProjectShellExited((_sessionId) => {
+      const path = currentProjectPathRef.current;
+      if (!path) return;
+      console.log('🔄 Project shell exited, respawning for', path);
+      spawnProjectShell(PROJECT_SHELL_ID, path)
+        .catch(e => console.error('Failed to respawn project shell:', e));
+      setProjectShellKey(k => k + 1);
+    });
+    return () => { unlistenPromise.then(u => u()); };
+  }, []); // Stable — uses ref for path, no deps needed
 
   const handleOpenProject = useCallback(async (path: string) => {
     try {
@@ -1278,7 +1299,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           <SettingsView />
         ) : view === 'terminal' ? (
           <div className="flex-1 overflow-hidden">
-            <Terminal key={currentProjectPath} sessionId={PROJECT_SHELL_ID} />
+            <Terminal key={`${currentProjectPath}-${projectShellKey}`} sessionId={PROJECT_SHELL_ID} />
           </div>
         ) : (
           <div className="flex-1 flex overflow-hidden">

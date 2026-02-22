@@ -92,6 +92,12 @@ export async function killProjectShell(sessionId: string): Promise<void> {
   return await invoke<void>("kill_project_shell", { sessionId });
 }
 
+export function onProjectShellExited(callback: (sessionId: string) => void): Promise<UnlistenFn> {
+  return listen<{ sessionId: string }>('project-shell-exited', (event) => {
+    callback(event.payload.sessionId);
+  });
+}
+
 export async function fetchBeads(): Promise<Bead[]> {
   try {
     return await invoke<Bead[]>("get_beads");

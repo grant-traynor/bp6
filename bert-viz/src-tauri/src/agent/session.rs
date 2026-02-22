@@ -2105,7 +2105,7 @@ pub fn spawn_project_shell(
             match pty_manager.read(&session_id_clone) {
                 Ok(data) => {
                     if data.is_empty() {
-                        break; // EOF — shell exited
+                        break; // EOF — shell exited naturally
                     }
                     let output = String::from_utf8_lossy(&data).to_string();
                     let _ = app_handle_clone.emit(
@@ -2123,6 +2123,17 @@ pub fn spawn_project_shell(
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+
+        // Remove dead session from PtyManager so the next spawn_project_shell call
+        // doesn't see has_session() = true and skip the respawn.
+        pty_manager.try_remove(&session_id_clone);
+
+        // Tell the frontend the shell has exited so it can respawn.
+        let _ = app_handle_clone.emit(
+            "project-shell-exited",
+            serde_json::json!({ "sessionId": session_id_clone }),
+        );
+
         eprintln!("Project shell PTY stream ended: {}", session_id_clone);
     });
 
