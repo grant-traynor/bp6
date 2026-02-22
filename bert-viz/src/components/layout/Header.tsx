@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Sun, Moon, Plus, Package, FolderOpen, ChevronDown, Star, Trash2 } from "lucide-react";
 import { cn } from "../../utils";
-import { setCliPreference } from "../../api";
+import { setCliPreference, syncProject } from "../../api";
 import type { Project, CliBackend } from "../../api";
 
 interface HeaderProps {
@@ -40,6 +40,20 @@ export const Header = ({
   setCurrentCli,
 }: HeaderProps) => {
   const [cliMenuOpen, setCliMenuOpen] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleSync = async () => {
+    if (!currentProjectPath || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      await syncProject(currentProjectPath);
+      loadData();
+    } catch (error) {
+      console.error("Sync failed:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleCliSelect = async (cli: CliBackend) => {
     try {
@@ -135,11 +149,13 @@ export const Header = ({
         >
           <Plus size={16} strokeWidth={3} /> New Bead
         </button>
-        <button 
-          onClick={loadData} 
-          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest"
+        <button
+          onClick={handleSync}
+          disabled={isSyncing || !currentProjectPath}
+          className="h-10 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] text-[var(--text-primary)] px-5 rounded-xl text-xs font-black border-[var(--border-thick)] border-[var(--border-primary)] flex items-center gap-2 transition-all active:scale-95 shadow-[var(--shadow-sm)] uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Package size={16} className="text-indigo-700 dark:text-indigo-400" strokeWidth={2.5} /> Sync
+          <Package size={16} className={cn("text-indigo-700 dark:text-indigo-400", isSyncing && "animate-spin")} strokeWidth={2.5} />
+          {isSyncing ? "Syncing..." : "Sync"}
         </button>
 
         <div className="relative">

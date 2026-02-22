@@ -361,6 +361,26 @@ pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, Strin
     Ok(new_id)
 }
 
+#[tauri::command]
+pub fn sync_project(project_path: String) -> Result<String, String> {
+    check_bd_available()?;
+    let path = std::path::Path::new(&project_path);
+    let output = Command::new("bd")
+        .arg("sync")
+        .current_dir(path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if !output.status.success() {
+        return Err(if stderr.is_empty() { stdout } else { stderr });
+    }
+
+    Ok(stdout)
+}
+
 pub fn execute_bd(args: Vec<String>) -> Result<String, String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;

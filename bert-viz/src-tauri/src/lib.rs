@@ -2290,7 +2290,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_pty::init())
         .invoke_handler(tauri::generate_handler![
-            bd::get_beads, get_processed_data, get_project_view_model, bd::update_bead, bd::create_bead, bd::close_bead, bd::reopen_bead, bd::claim_bead,
+            bd::get_beads, bd::sync_project, get_processed_data, get_project_view_model, bd::update_bead, bd::create_bead, bd::close_bead, bd::reopen_bead, bd::claim_bead,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir,
             agent::session::start_agent_session, agent::session::start_agent_session_headless, agent::session::send_agent_message, agent::session::stop_agent_session, agent::session::interrupt_agent_session, agent::session::approve_suggestion,

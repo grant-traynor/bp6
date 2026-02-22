@@ -80,6 +80,10 @@ export async function openProject(path: string): Promise<void> {
   await invoke("open_project", { path });
 }
 
+export async function syncProject(projectPath: string): Promise<string> {
+  return await invoke<string>("sync_project", { projectPath });
+}
+
 export async function fetchBeads(): Promise<Bead[]> {
   try {
     return await invoke<Bead[]>("get_beads");
