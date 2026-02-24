@@ -26,7 +26,6 @@ import {
   loadStartupState,
   saveStartupState,
   fetchBeads,
-  spawnProjectShell,
   killProjectShell,
   onProjectShellExited,
 } from "./api";
@@ -156,6 +155,11 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   const [currentCli, setCurrentCli] = useState<CliBackend>("gemini");
   const [view, setView] = useState<ViewType>('gantt');
   const [projectShellKey, setProjectShellKey] = useState(0);
+  // Prevents fetchProjectViewModel from firing before initialization is complete.
+  // Every setState during startup (filters, sort, zoom, collapsedIds, etc.) would
+  // otherwise trigger a separate 450ms file read. isReady becomes true exactly once,
+  // after init() completes, triggering a single fetch with the correct final state.
+  const [isReady, setIsReady] = useState(false);
 
   const scrollRefWBS = useRef<HTMLDivElement>(null);
   const scrollRefBERT = useRef<HTMLDivElement>(null);
@@ -324,27 +328,24 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
   useEffect(() => { currentProjectPathRef.current = currentProjectPath; }, [currentProjectPath]);
 
   // Listen for the project shell exiting (e.g. user typed `exit` or Ctrl-D).
-  // Respawn immediately and remount the Terminal component via key increment.
+  // Remounting the Terminal component (via key increment) will trigger it to
+  // re-spawn the shell at the correct dimensions.
   useEffect(() => {
     const unlistenPromise = onProjectShellExited((_sessionId) => {
-      const path = currentProjectPathRef.current;
-      if (!path) return;
-      console.log('🔄 Project shell exited, respawning for', path);
-      spawnProjectShell(PROJECT_SHELL_ID, path)
-        .catch(e => console.error('Failed to respawn project shell:', e));
       setProjectShellKey(k => k + 1);
     });
     return () => { unlistenPromise.then(u => u()); };
-  }, []); // Stable — uses ref for path, no deps needed
+  }, []);
 
   const handleOpenProject = useCallback(async (path: string) => {
     try {
       setLoading(true);
       await openProject(path);
 
-      // Kill existing project shell (if any) then spawn a fresh one for the new path
+      // Kill any existing project shell so the Terminal component spawns a fresh one
+      // at the correct dimensions when the user next opens the terminal view.
       try { await killProjectShell(PROJECT_SHELL_ID); } catch (_) { /* ignore */ }
-      spawnProjectShell(PROJECT_SHELL_ID, path).catch(e => console.error("Failed to spawn project shell:", e));
+      setProjectShellKey(k => k + 1);
 
       setCurrentProjectPath(path);
       setHasProject(true);
@@ -378,6 +379,10 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
   // Fetch view model from Rust backend when filters change
   useEffect(() => {
+    // Skip all fetches during startup — wait until init() completes so we
+    // don't fire once per setState (filterText, hideClosed, sort, zoom, etc.)
+    if (!isReady) return;
+
     // Debounce filter text to avoid excessive backend calls while typing
     const debounceTimeout = setTimeout(() => {
       const fetchData = async () => {
@@ -417,7 +422,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }, 150); // 150ms debounce for filter text changes
 
     return () => clearTimeout(debounceTimeout);
-  }, [filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, collapsedIds, currentProjectPath, refetchTrigger, sortBy, sortOrder]);
+  }, [isReady, filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, collapsedIds, currentProjectPath, refetchTrigger, sortBy, sortOrder]);
 
   useEffect(() => {
     // Prevent double initialization (React 19 Strict Mode runs effects twice)
@@ -507,6 +512,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       } finally {
         isInitializing.current = false;
         setLoading(false);
+        setIsReady(true); // Ungate fetchProjectViewModel — fires exactly once with correct state
       }
     };
 
@@ -1299,7 +1305,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           <SettingsView />
         ) : view === 'terminal' ? (
           <div className="flex-1 overflow-hidden">
-            <Terminal key={`${currentProjectPath}-${projectShellKey}`} sessionId={PROJECT_SHELL_ID} />
+            <Terminal key={`${currentProjectPath}-${projectShellKey}`} sessionId={PROJECT_SHELL_ID} projectPath={currentProjectPath} />
           </div>
         ) : (
           <div className="flex-1 flex overflow-hidden">

@@ -7,8 +7,6 @@ mod settings;
 mod startup;
 mod window;
 
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -19,8 +17,8 @@ use tauri::{Emitter, AppHandle, Manager};
 
 use settings::AppSettings;
 
-// Global cache for beads file path (avoid expensive subprocess calls)
-// Use Mutex<Option> instead of OnceLock so we can clear it when switching projects
+// Global cache for beads file path (avoid directory walk on every request)
+// Mutex<Option> so we can clear it when switching projects
 static BEADS_FILE_PATH_CACHE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// Settings state for CLI preference and other app settings
@@ -61,73 +59,54 @@ struct BeadsWatcher {
     watcher: notify::RecommendedWatcher,
     current_path: Option<PathBuf>,
     #[allow(dead_code)] // Used in watcher closure
-    last_checksum: Arc<Mutex<u64>>,
-    #[allow(dead_code)] // Used in watcher closure
     last_emit: Arc<Mutex<Instant>>,
 }
 
 impl BeadsWatcher {
     fn new(handle: AppHandle) -> Result<Self, String> {
-        let last_checksum = Arc::new(Mutex::new(0u64));
         let last_emit = Arc::new(Mutex::new(Instant::now()));
-
-        let checksum_clone = Arc::clone(&last_checksum);
         let emit_clone = Arc::clone(&last_emit);
 
         let watcher = notify::RecommendedWatcher::new(
             move |res: std::result::Result<notify::Event, notify::Error>| {
                 match res {
                     Ok(event) => {
-                        eprintln!("📁 Event: {:?}", event.kind);
+                        // Trigger on any change to beads.db or beads.db-wal.
+                        let is_db_change = event.paths.iter().any(|p| {
+                            p.file_name()
+                                .and_then(|n| n.to_str())
+                                .map(|n| n.starts_with("beads.db"))
+                                .unwrap_or(false)
+                        });
 
-                        // Get first path from event
-                        if let Some(path) = event.paths.first() {
-                            if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
-                                // Handle file deletion (beads daemon deletes and recreates the file)
-                                if matches!(event.kind, notify::EventKind::Remove(_)) {
-                                    eprintln!("  🗑️  File removed, clearing caches");
-                                    let mut last_hash = checksum_clone.lock().unwrap();
-                                    *last_hash = 0; // Reset checksum so next create triggers update
+                        if is_db_change && matches!(event.kind,
+                            notify::EventKind::Create(_) | notify::EventKind::Modify(_))
+                        {
+                            let mut last = emit_clone.lock().unwrap();
+                            let now = Instant::now();
+                            if now.duration_since(*last) >= Duration::from_millis(250) {
+                                *last = now;
 
-                                    // Clear the beads file path cache so get_processed_data reads the new file
-                                    let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
-                                    *cache = None;
-                                    eprintln!("  🗑️  Cleared beads file path cache");
-                                    return;
+                                // Derive repo root from the event path (.beads/beads.db -> repo)
+                                // and export fresh data before notifying the frontend.
+                                if let Some(beads_dir) = event.paths.first().and_then(|p| p.parent()) {
+                                    if let Some(repo_path) = beads_dir.parent() {
+                                        let dump_path = repo_path.join(".bp6").join("issue_dump.jsonl");
+                                        if let Some(bp6_dir) = dump_path.parent() {
+                                            let _ = std::fs::create_dir_all(bp6_dir);
+                                        }
+                                        let _ = std::process::Command::new("bd")
+                                            .arg("export")
+                                            .arg("-o")
+                                            .arg(&dump_path)
+                                            .current_dir(repo_path)
+                                            .output();
+                                    }
                                 }
 
-                                // Handle file creation and modification
-                                // (beads daemon creates new file after deletion)
-                                if matches!(event.kind, notify::EventKind::Create(_) | notify::EventKind::Modify(_)) {
-                                    // Add a small delay for file creation to complete
-                                    if matches!(event.kind, notify::EventKind::Create(_)) {
-                                        std::thread::sleep(Duration::from_millis(50));
-                                    }
-
-                                    if let Ok(bytes) = std::fs::read(path) {
-                                        let mut hasher = DefaultHasher::new();
-                                        bytes.hash(&mut hasher);
-                                        let new_checksum = hasher.finish();
-
-                                        let mut last_hash = checksum_clone.lock().unwrap();
-
-                                        if *last_hash != new_checksum {
-                                            *last_hash = new_checksum;
-
-                                            let mut last = emit_clone.lock().unwrap();
-                                            let now = Instant::now();
-                                            if now.duration_since(*last) >= Duration::from_millis(250) {
-                                                *last = now;
-                                                match handle.emit("beads-updated", ()) {
-                                                    Ok(_) => eprintln!("  ✅ Emitted beads-updated ({})",
-                                                        if matches!(event.kind, notify::EventKind::Create(_)) { "create" } else { "modify" }),
-                                                    Err(e) => eprintln!("  ❌ Failed to emit beads-updated: {:?}", e),
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        eprintln!("  ⚠️  Failed to read file, might be mid-write");
-                                    }
+                                match handle.emit("beads-updated", ()) {
+                                    Ok(_) => eprintln!("  ✅ Emitted beads-updated (db change)"),
+                                    Err(e) => eprintln!("  ❌ Failed to emit beads-updated: {:?}", e),
                                 }
                             }
                         }
@@ -141,7 +120,6 @@ impl BeadsWatcher {
         Ok(BeadsWatcher {
             watcher,
             current_path: None,
-            last_checksum,
             last_emit,
         })
     }
@@ -322,13 +300,13 @@ where
 fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
     let start_time = std::time::Instant::now();
 
-    // 1. Load beads from file (use cached path to avoid expensive subprocess)
+    // 1. Load beads (cache the DB path to avoid directory walk on every call)
     let beads_path = {
         let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
         if cache.is_none() {
-            *cache = bd::find_beads_file();
+            *cache = bd::find_dump_file();
         }
-        cache.clone().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?
+        cache.clone().ok_or_else(|| "Could not locate or create .bp6/issue_dump.jsonl".to_string())?
     };
 
     eprintln!("📖 get_processed_data: Reading from {}", beads_path.display());
@@ -738,13 +716,13 @@ fn calculate_project_metadata(
 fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, String> {
     let start_time = std::time::Instant::now();
 
-    // 1. Load beads from file (reuse logic from get_processed_data)
+    // 1. Load beads (cache the DB path to avoid directory walk on every call)
     let beads_path = {
         let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
         if cache.is_none() {
-            *cache = bd::find_beads_file();
+            *cache = bd::find_dump_file();
         }
-        cache.clone().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?
+        cache.clone().ok_or_else(|| "Could not locate or create .bp6/issue_dump.jsonl".to_string())?
     };
 
     eprintln!("📖 get_project_view_model: Reading from {}", beads_path.display());
@@ -2245,18 +2223,31 @@ fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
     }
     save_projects(projects)?;
 
-    // Clear cached beads file path when switching projects
+    // Clear cached DB path when switching projects
     {
         let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
         *cache = None;
-        eprintln!("🗑️  Cleared beads file path cache for new project");
+        eprintln!("🗑️  Cleared beads DB path cache for new project");
     }
 
-    // Update watcher to monitor new project's beads file
-    if let Some(new_beads_path) = bd::find_beads_file() {
+    // Export fresh data for the new project before updating the watcher or
+    // notifying the frontend — ensures beads-updated reads the correct project.
+    if let Some(repo_path) = bd::find_repo_root() {
+        if let Some(dump_path) = bd::find_dump_file() {
+            let _ = std::process::Command::new("bd")
+                .arg("export")
+                .arg("-o")
+                .arg(&dump_path)
+                .current_dir(&repo_path)
+                .output();
+        }
+    }
+
+    // Update watcher to monitor new project's beads.db
+    if let Some(beads_db_path) = bd::find_beads_db() {
         let watcher_state = app_handle.state::<Arc<Mutex<BeadsWatcher>>>();
         let mut watcher = watcher_state.lock().unwrap();
-        watcher.watch_beads_file(new_beads_path)?;
+        watcher.watch_beads_file(beads_db_path)?;
     }
 
     let _ = app_handle.emit("projects-updated", ());
@@ -2328,11 +2319,26 @@ pub fn run() {
             let window_registry = window::WindowRegistry::new();
             app.manage(window_registry);
 
-            // Initialize file watcher (lazy - will watch when first project is opened)
-            let beads_watcher = BeadsWatcher::new(handle.clone())
+            // Initialize file watcher and immediately watch the current project's
+            // beads.db if one is available from the launch directory.
+            let mut beads_watcher = BeadsWatcher::new(handle.clone())
                 .expect("Failed to create beads watcher");
 
-            // Store watcher in managed state (but don't watch anything yet)
+            // Seed dump file and start watching on startup
+            if let Some(repo_path) = bd::find_repo_root() {
+                if let Some(dump_path) = bd::find_dump_file() {
+                    let _ = std::process::Command::new("bd")
+                        .arg("export")
+                        .arg("-o")
+                        .arg(&dump_path)
+                        .current_dir(&repo_path)
+                        .output();
+                }
+                if let Some(beads_db_path) = bd::find_beads_db() {
+                    let _ = beads_watcher.watch_beads_file(beads_db_path);
+                }
+            }
+
             app.manage(Arc::new(Mutex::new(beads_watcher)));
 
             // Watch projects file with debouncing

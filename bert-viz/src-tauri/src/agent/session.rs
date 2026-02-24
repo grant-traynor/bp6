@@ -2045,18 +2045,21 @@ fn tmux_session_name(project_path: &str) -> String {
 /// Spawn a standalone shell PTY anchored to a project directory.
 /// Uses tmux if available: attaches to an existing session named after the project,
 /// or creates a new one. Falls back to $SHELL if tmux is not installed.
-/// Idempotent: if a PTY already exists for `session_id`, returns Ok immediately.
+/// Idempotent: if a PTY already exists for `session_id`, returns Ok(false) immediately.
+/// Returns Ok(true) if a new session was created, Ok(false) if it already existed.
 #[tauri::command]
 pub fn spawn_project_shell(
     session_id: String,
     project_path: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
     state: State<AgentState>,
     app_handle: AppHandle,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     // Idempotent: don't spawn a second shell if one already exists
     if state.pty_manager.has_session(&session_id) {
         eprintln!("⚡ spawn_project_shell: PTY {} already exists, skipping", session_id);
-        return Ok(());
+        return Ok(false);
     }
 
     // Prefer tmux: `tmux new-session -A` attaches to existing session or creates new one
@@ -2091,8 +2094,8 @@ pub fn spawn_project_shell(
         cmd,
         args,
         Some(project_path),
-        Some(80),
-        Some(24),
+        Some(cols.unwrap_or(80)),
+        Some(rows.unwrap_or(24)),
     )?;
 
     // Start reader thread that streams PTY output as pty-data events
@@ -2101,20 +2104,41 @@ pub fn spawn_project_shell(
     let session_id_clone = session_id.clone();
 
     std::thread::spawn(move || {
+        // Buffer for incomplete UTF-8 sequences split across PTY reads.
+        // from_utf8_lossy would replace partial sequences with U+FFFD; instead
+        // we carry over the trailing incomplete bytes to the next read.
+        let mut utf8_buf: Vec<u8> = Vec::new();
+
         loop {
             match pty_manager.read(&session_id_clone) {
                 Ok(data) => {
                     if data.is_empty() {
                         break; // EOF — shell exited naturally
                     }
-                    let output = String::from_utf8_lossy(&data).to_string();
-                    let _ = app_handle_clone.emit(
-                        "pty-data",
-                        serde_json::json!({
-                            "sessionId": session_id_clone,
-                            "data": output,
-                        }),
-                    );
+                    utf8_buf.extend_from_slice(&data);
+
+                    // Find the longest valid UTF-8 prefix and hold back any
+                    // trailing incomplete multi-byte sequence for the next read.
+                    let valid_len = match std::str::from_utf8(&utf8_buf) {
+                        Ok(_) => utf8_buf.len(),
+                        Err(e) => e.valid_up_to(),
+                    };
+
+                    if valid_len > 0 {
+                        // Safety: valid_len is guaranteed valid UTF-8 by from_utf8
+                        let output = unsafe {
+                            std::str::from_utf8_unchecked(&utf8_buf[..valid_len])
+                        }.to_string();
+                        utf8_buf.drain(..valid_len);
+
+                        let _ = app_handle_clone.emit(
+                            "pty-data",
+                            serde_json::json!({
+                                "sessionId": session_id_clone,
+                                "data": output,
+                            }),
+                        );
+                    }
                 }
                 Err(e) => {
                     eprintln!("Project shell PTY read error ({}): {}", session_id_clone, e);
@@ -2137,7 +2161,7 @@ pub fn spawn_project_shell(
         eprintln!("Project shell PTY stream ended: {}", session_id_clone);
     });
 
-    Ok(())
+    Ok(true) // New session was created
 }
 
 /// Kill the project shell PTY for a given session ID.

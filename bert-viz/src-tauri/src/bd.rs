@@ -25,27 +25,27 @@ pub fn get_sync_branch_name(repo_path: &std::path::Path) -> Option<String> {
     None
 }
 
-pub fn find_beads_file() -> Option<PathBuf> {
+pub fn find_beads_db() -> Option<PathBuf> {
     let mut curr = std::env::current_dir().ok()?;
     loop {
-        // First check if there's a sync-branch worktree (remote/sync mode)
+        // Check local .beads/beads.db (primary store — always up to date)
+        let test_path = curr.join(".beads/beads.db");
+        if test_path.exists() {
+            return Some(test_path);
+        }
+
+        // Sync-branch worktree may have its own DB
         if let Some(sync_branch) = get_sync_branch_name(&curr) {
             let worktree_path = curr
                 .join(".git")
                 .join("beads-worktrees")
                 .join(&sync_branch)
                 .join(".beads")
-                .join("issues.jsonl");
+                .join("beads.db");
 
             if worktree_path.exists() {
                 return Some(worktree_path);
             }
-        }
-
-        // Fall back to working tree (local mode)
-        let test_path = curr.join(".beads/issues.jsonl");
-        if test_path.exists() {
-            return Some(test_path);
         }
 
         if !curr.pop() {
@@ -77,9 +77,21 @@ pub fn check_bd_available() -> Result<(), String> {
     Ok(())
 }
 
+/// Returns (creating if necessary) the path to our own issue dump:
+/// <repo_root>/.bp6/issue_dump.jsonl
+/// This file is written exclusively by `bd export -o <path>` and is
+/// never touched by the beads daemon — we own it.
+pub fn find_dump_file() -> Option<PathBuf> {
+    let repo_root = find_repo_root()?;
+    let bp6_dir = repo_root.join(".bp6");
+    std::fs::create_dir_all(&bp6_dir).ok()?;
+    Some(bp6_dir.join("issue_dump.jsonl"))
+}
+
 #[tauri::command]
 pub fn get_beads() -> Result<Vec<Bead>, String> {
-    let path = find_beads_file().ok_or_else(|| "Could not locate .beads/issues.jsonl in any parent directory".to_string())?;
+    let path = find_dump_file()
+        .ok_or_else(|| "Could not locate or create .bp6/issue_dump.jsonl".to_string())?;
 
     // Retry opening and reading the file to handle transient locks and partial writes
     let mut last_error = String::new();
@@ -158,6 +170,20 @@ pub fn get_bead_by_id(id: &str) -> Result<Bead, String> {
         .ok_or_else(|| format!("Bead with ID {} not found", id))
 }
 
+/// Force an immediate export from the beads daemon into our own dump file,
+/// bypassing the daemon's 5s flush debounce. Call this after every mutation
+/// so the frontend reads fresh data when it re-fetches on beads-updated.
+fn flush_jsonl(repo_path: &std::path::Path) {
+    if let Some(dump_path) = find_dump_file() {
+        let _ = Command::new("bd")
+            .arg("export")
+            .arg("-o")
+            .arg(&dump_path)
+            .current_dir(repo_path)
+            .output();
+    }
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn update_bead(updatedBead: Bead, app_handle: AppHandle) -> Result<(), String> {
@@ -207,12 +233,13 @@ pub fn update_bead(updatedBead: Bead, app_handle: AppHandle) -> Result<(), Strin
     let metadata_json = serde_json::to_string(&updatedBead).map_err(|e| e.to_string())?;
     cmd.arg("--metadata").arg(metadata_json);
 
-    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+    let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
+    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -230,12 +257,13 @@ pub fn close_bead(beadId: String, reason: Option<String>, app_handle: AppHandle)
         cmd.arg("--reason").arg(r);
     }
 
-    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+    let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
+    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -249,12 +277,13 @@ pub fn reopen_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> 
     let mut cmd = Command::new("bd");
     cmd.arg("reopen").arg(&beadId);
 
-    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+    let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
+    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -271,12 +300,13 @@ pub fn claim_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> {
         .arg("--status")
         .arg("in_progress");
 
-    let output = cmd.current_dir(repo_path).output().map_err(|e| e.to_string())?;
+    let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
+    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -351,12 +381,13 @@ pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, Strin
     if !update_output.status.success() {
         let stderr = String::from_utf8_lossy(&update_output.stderr);
         return Err(format!(
-            "Bead created as {} but initial update failed: {}", 
-            new_id, 
+            "Bead created as {} but initial update failed: {}",
+            new_id,
             stderr
         ));
     }
 
+    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(new_id)
 }
@@ -378,6 +409,7 @@ pub fn sync_project(project_path: String) -> Result<String, String> {
         return Err(if stderr.is_empty() { stdout } else { stderr });
     }
 
+    flush_jsonl(path);
     Ok(stdout)
 }
 

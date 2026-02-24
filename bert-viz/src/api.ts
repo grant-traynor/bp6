@@ -84,8 +84,8 @@ export async function syncProject(projectPath: string): Promise<string> {
   return await invoke<string>("sync_project", { projectPath });
 }
 
-export async function spawnProjectShell(sessionId: string, projectPath: string): Promise<void> {
-  return await invoke<void>("spawn_project_shell", { sessionId, projectPath });
+export async function spawnProjectShell(sessionId: string, projectPath: string, cols?: number, rows?: number): Promise<boolean> {
+  return await invoke<boolean>("spawn_project_shell", { sessionId, projectPath, cols, rows });
 }
 
 export async function killProjectShell(sessionId: string): Promise<void> {

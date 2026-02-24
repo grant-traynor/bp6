@@ -4,17 +4,69 @@ import { FitAddon } from '@xterm/addon-fit';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { spawnProjectShell } from '../../api';
 import '@xterm/xterm/css/xterm.css';
 import './Terminal.css';
 
 interface TerminalProps {
   sessionId: string;
+  projectPath?: string;
   onReady?: () => void;
 }
 
 interface PtyDataEvent {
   sessionId: string;
   data: string;
+}
+
+function buildTheme(isDark: boolean) {
+  return isDark
+    ? {
+        background: '#0e1624',
+        foreground: '#e9f1ff',
+        cursor: '#5cf1ff',
+        cursorAccent: '#0e1624',
+        selectionBackground: 'rgba(59, 163, 255, 0.3)',
+        black: '#05070d',
+        red: '#f06d76',
+        green: '#2fc6a0',
+        yellow: '#f2a93b',
+        blue: '#3ba3ff',
+        magenta: '#9c5cff',
+        cyan: '#5cf1ff',
+        white: '#b6c4d9',
+        brightBlack: '#1f2a3a',
+        brightRed: '#ff8087',
+        brightGreen: '#3dd7b0',
+        brightYellow: '#ffba4a',
+        brightBlue: '#5cb6ff',
+        brightMagenta: '#b87cff',
+        brightCyan: '#7cf5ff',
+        brightWhite: '#e9f1ff',
+      }
+    : {
+        background: '#f6f9ff',
+        foreground: '#0c1a2a',
+        cursor: '#0f8bff',
+        cursorAccent: '#f6f9ff',
+        selectionBackground: 'rgba(15, 139, 255, 0.25)',
+        black: '#0c1a2a',
+        red: '#f06d76',
+        green: '#2fc6a0',
+        yellow: '#d97706',
+        blue: '#0f8bff',
+        magenta: '#9c5cff',
+        cyan: '#3bc8ff',
+        white: '#55657d',
+        brightBlack: '#24344d',
+        brightRed: '#ff8087',
+        brightGreen: '#3dd7b0',
+        brightYellow: '#f2a93b',
+        brightBlue: '#3ba3ff',
+        brightMagenta: '#b87cff',
+        brightCyan: '#5cf1ff',
+        brightWhite: '#0c1a2a',
+      };
 }
 
 /**
@@ -29,7 +81,7 @@ interface PtyDataEvent {
  * - Copy/paste with keyboard shortcuts (Cmd+C/V on macOS, Ctrl+C/V on Windows/Linux)
  * - Right-click context menu for copy/paste
  */
-export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
+export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onReady }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -60,263 +112,198 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, onReady }) => {
   // Update terminal theme when dark mode changes
   useEffect(() => {
     if (!xtermRef.current) return;
-
-    const theme = isDark
-      ? {
-          background: '#0e1624',
-          foreground: '#e9f1ff',
-          cursor: '#5cf1ff',
-          cursorAccent: '#0e1624',
-          selectionBackground: 'rgba(59, 163, 255, 0.3)',
-          black: '#05070d',
-          red: '#f06d76',
-          green: '#2fc6a0',
-          yellow: '#f2a93b',
-          blue: '#3ba3ff',
-          magenta: '#9c5cff',
-          cyan: '#5cf1ff',
-          white: '#b6c4d9',
-          brightBlack: '#1f2a3a',
-          brightRed: '#ff8087',
-          brightGreen: '#3dd7b0',
-          brightYellow: '#ffba4a',
-          brightBlue: '#5cb6ff',
-          brightMagenta: '#b87cff',
-          brightCyan: '#7cf5ff',
-          brightWhite: '#e9f1ff',
-        }
-      : {
-          background: '#f6f9ff',
-          foreground: '#0c1a2a',
-          cursor: '#0f8bff',
-          cursorAccent: '#f6f9ff',
-          selectionBackground: 'rgba(15, 139, 255, 0.25)',
-          black: '#0c1a2a',
-          red: '#f06d76',
-          green: '#2fc6a0',
-          yellow: '#d97706',
-          blue: '#0f8bff',
-          magenta: '#9c5cff',
-          cyan: '#3bc8ff',
-          white: '#55657d',
-          brightBlack: '#24344d',
-          brightRed: '#ff8087',
-          brightGreen: '#3dd7b0',
-          brightYellow: '#f2a93b',
-          brightBlue: '#3ba3ff',
-          brightMagenta: '#b87cff',
-          brightCyan: '#5cf1ff',
-          brightWhite: '#0c1a2a',
-        };
-
-    xtermRef.current.options.theme = theme;
+    xtermRef.current.options.theme = buildTheme(isDark);
   }, [isDark]);
 
   useEffect(() => {
-    console.log('Terminal component mounting for session:', sessionId);
     if (!terminalRef.current) return;
 
-    // Get initial theme based on dark mode
-    const theme = isDark
-      ? {
-          background: '#0e1624',
-          foreground: '#e9f1ff',
-          cursor: '#5cf1ff',
-          cursorAccent: '#0e1624',
-          selectionBackground: 'rgba(59, 163, 255, 0.3)',
-          black: '#05070d',
-          red: '#f06d76',
-          green: '#2fc6a0',
-          yellow: '#f2a93b',
-          blue: '#3ba3ff',
-          magenta: '#9c5cff',
-          cyan: '#5cf1ff',
-          white: '#b6c4d9',
-          brightBlack: '#1f2a3a',
-          brightRed: '#ff8087',
-          brightGreen: '#3dd7b0',
-          brightYellow: '#ffba4a',
-          brightBlue: '#5cb6ff',
-          brightMagenta: '#b87cff',
-          brightCyan: '#7cf5ff',
-          brightWhite: '#e9f1ff',
-        }
-      : {
-          background: '#f6f9ff',
-          foreground: '#0c1a2a',
-          cursor: '#0f8bff',
-          cursorAccent: '#f6f9ff',
-          selectionBackground: 'rgba(15, 139, 255, 0.25)',
-          black: '#0c1a2a',
-          red: '#f06d76',
-          green: '#2fc6a0',
-          yellow: '#d97706',
-          blue: '#0f8bff',
-          magenta: '#9c5cff',
-          cyan: '#3bc8ff',
-          white: '#55657d',
-          brightBlack: '#24344d',
-          brightRed: '#ff8087',
-          brightGreen: '#3dd7b0',
-          brightYellow: '#f2a93b',
-          brightBlue: '#3ba3ff',
-          brightMagenta: '#b87cff',
-          brightCyan: '#5cf1ff',
-          brightWhite: '#0c1a2a',
-        };
+    // Track whether this effect instance is still active.
+    // Used to cancel setup if the component unmounts while fonts are loading.
+    let isActive = true;
+    // These are set inside the async callback but need to be reachable by
+    // the synchronous cleanup function.
+    let unlistenFn: (() => void) | undefined;
+    let resizeObserver: ResizeObserver | undefined;
 
-    // Initialize Xterm.js terminal
-    console.log('Initializing Xterm.js terminal');
-    const terminal = new XTerm({
-      cursorBlink: true,
-      fontSize: 13,
-      fontFamily: '"JetBrainsMono Nerd Font", "JetBrains Mono", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font Mono", "Cascadia Code NF", monospace',
-      fontWeight: '400',
-      fontWeightBold: '700',
-      letterSpacing: 0,
-      lineHeight: 1.2,
-      theme,
-      scrollback: 1000,
-      convertEol: true,
-    });
+    // Open the terminal AFTER fonts are ready.
+    //
+    // xterm.js measures character cell dimensions during terminal.open().
+    // If the call happens before the custom Nerd Font loads, xterm.js uses the
+    // fallback font's metrics. This causes fitAddon.proposeDimensions() to return
+    // the wrong col/row count, which we then send to the PTY. tmux draws its
+    // panes based on those wrong dimensions, so split-pane dividers end up at the
+    // wrong visual position and pane content bleeds across column boundaries.
+    document.fonts.ready.then(() => {
+      if (!isActive || !terminalRef.current) return;
 
-    // Initialize fit addon for auto-resize
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-
-    // Initialize clipboard addon for copy/paste support
-    const clipboardAddon = new ClipboardAddon();
-    terminal.loadAddon(clipboardAddon);
-
-    // Open terminal in DOM
-    terminal.open(terminalRef.current);
-    fitAddon.fit();
-
-    // Store refs
-    xtermRef.current = terminal;
-    fitAddonRef.current = fitAddon;
-
-    // Set initial PTY size so the process knows the terminal dimensions
-    const initialDimensions = fitAddon.proposeDimensions();
-    if (initialDimensions) {
-      invoke('resize_pty', {
-        sessionId,
-        cols: Math.max(initialDimensions.cols - 2, 20),
-        rows: initialDimensions.rows,
-      }).catch(() => {});
-    }
-
-    // Handle terminal input (send to backend)
-    terminal.onData((data) => {
-      invoke('write_to_pty', { sessionId, data }).catch((error) => {
-        console.error('Failed to write to PTY:', error);
+      const terminal = new XTerm({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: '"JetBrainsMono Nerd Font", "JetBrains Mono", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font Mono", "Cascadia Code NF", monospace',
+        fontWeight: '400',
+        fontWeightBold: '700',
+        letterSpacing: 0,
+        lineHeight: 1.2,
+        theme: buildTheme(isDark),
+        scrollback: 1000,
       });
-    });
 
-    // Listen for PTY output from backend.
-    // IMPORTANT: The repaint trigger goes inside .then() so it only fires AFTER
-    // the pty-data listener is fully registered on the Rust side. Firing resize_pty
-    // before the listener is ready causes us to miss the repaint output.
-    console.log('Setting up pty-data event listener for session:', sessionId);
-    const unlistenPromise = listen<PtyDataEvent>('pty-data', (event) => {
-      console.log('Received pty-data event:', event.payload.sessionId, event.payload.data.substring(0, 50));
-      if (event.payload.sessionId === sessionId) {
-        terminal.write(event.payload.data);
+      const fitAddon = new FitAddon();
+      terminal.loadAddon(fitAddon);
 
-        // On initial load, debounce scrolling to bottom to avoid watching the buffer fill
-        if (initialLoadRef.current) {
-          if (scrollTimeoutRef.current) {
-            clearTimeout(scrollTimeoutRef.current);
+      const clipboardAddon = new ClipboardAddon();
+      terminal.loadAddon(clipboardAddon);
+
+      terminal.open(terminalRef.current!);
+      fitAddon.fit();
+
+      xtermRef.current = terminal;
+      fitAddonRef.current = fitAddon;
+      initialLoadRef.current = true;
+
+      // Handle terminal input (send to backend)
+      terminal.onData((data) => {
+        invoke('write_to_pty', { sessionId, data }).catch((error) => {
+          console.error('Failed to write to PTY:', error);
+        });
+      });
+
+      // ORDERING IS CRITICAL:
+      //   1. Register pty-data listener FIRST
+      //   2. Spawn the shell AFTER listener is confirmed registered (.then callback)
+      //
+      // Why this order matters:
+      //   - tmux draws its initial screen immediately after spawn. If we spawn
+      //     before the listener is registered we miss that draw.
+      //   - For view-switch remounts (PTY already exists, idempotent spawn):
+      //     spawn_project_shell returns false, and we send a rows+1 → rows
+      //     ping-pong to force tmux to repaint the blank xterm.
+      //   - For new spawns, spawn_project_shell returns true: the listener
+      //     already captured the initial draw — no ping-pong needed. Sending
+      //     rapid SIGWINCHs races with tmux's first draw and causes content
+      //     (including split pane borders) to be overwritten.
+      const unlistenPromise = listen<PtyDataEvent>('pty-data', (event) => {
+        if (event.payload.sessionId === sessionId) {
+          terminal.write(event.payload.data);
+
+          // On initial load, debounce scrolling to bottom
+          if (initialLoadRef.current) {
+            if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+            scrollTimeoutRef.current = setTimeout(() => {
+              terminal.scrollToBottom();
+              initialLoadRef.current = false;
+            }, 200);
           }
-          scrollTimeoutRef.current = setTimeout(() => {
-            terminal.scrollToBottom();
-            initialLoadRef.current = false;
-            console.log('Initial load complete, scrolled to bottom');
-          }, 200);
         }
-      }
-    }).then((unlisten) => {
-      // Listener is now registered. Re-fit (layout may have settled) then trigger a
-      // ping-pong resize: rows+1 → rows. This guarantees the process sees a size *change*
-      // and repaints its screen, even if the container dimensions are identical to the
-      // previous Terminal session (which happens every time the view is switched).
-      if (fitAddonRef.current && xtermRef.current) {
-        fitAddonRef.current.fit();
-        const dims = fitAddonRef.current.proposeDimensions();
-        if (dims) {
-          const cols = Math.max(dims.cols - 2, 20);
-          const rows = dims.rows;
-          invoke('resize_pty', { sessionId, cols, rows: rows + 1 })
-            .then(() => invoke('resize_pty', { sessionId, cols, rows }))
-            .catch(() => {});
+      }).then((unlisten) => {
+        // If unmounted while listen() was in flight, immediately unlisten
+        if (!isActive) {
+          unlisten();
+          return unlisten;
         }
-      }
-      return unlisten;
-    });
+        unlistenFn = unlisten;
 
-    // Handle window resize (debounced)
-    const handleResize = () => {
-      if (!xtermRef.current) return;
+        // Re-fit now that the listener is registered (layout is fully settled)
+        if (fitAddonRef.current) {
+          fitAddonRef.current.fit();
+          const dims = fitAddonRef.current.proposeDimensions();
+          if (dims) {
+            const { cols, rows } = dims;
 
-      // Clear any existing resize timeout
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
-      }
+            // rows+1 → rows ping-pong: forces SIGWINCH with an actual size change
+            // so tmux unconditionally redraws. Only used for remounts (PTY already
+            // exists, spawn is a no-op) where tmux won't emit a fresh draw on its own.
+            // Note: cols is intentionally left unchanged — a cols ping-pong causes
+            // tmux to draw junction characters at the wrong position, leaving a
+            // stale character artifact at pane border intersections.
+            const doRepaint = () => {
+              invoke('resize_pty', { sessionId, cols, rows: rows + 1 })
+                .then(() => invoke('resize_pty', { sessionId, cols, rows }))
+                .catch(() => {});
+            };
 
-      // Debounce resize to avoid rapid reflows
-      resizeTimeoutRef.current = setTimeout(() => {
+            if (projectPath) {
+              spawnProjectShell(sessionId, projectPath, cols, rows)
+                .then((isNewSession) => {
+                  if (!isNewSession) {
+                    // Remount: PTY existed, xterm is blank — ping-pong forces tmux repaint.
+                    doRepaint();
+                  }
+                  // New session: listener captured the initial draw — no ping-pong.
+                })
+                .catch(() => {
+                  // Spawn failed: attempt repaint in case PTY partially exists.
+                  doRepaint();
+                });
+            } else {
+              doRepaint();
+            }
+          }
+        }
+        return unlisten;
+      });
+
+      // Handle window resize (debounced)
+      const handleResize = () => {
         if (!xtermRef.current) return;
 
-        // Save current scroll position
-        const wasAtBottom = xtermRef.current.buffer.active.viewportY === xtermRef.current.buffer.active.baseY;
+        if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
 
-        // Resize the terminal display
-        fitAddon.fit();
+        resizeTimeoutRef.current = setTimeout(() => {
+          if (!xtermRef.current) return;
 
-        // Restore scroll position: stay at bottom if we were at bottom
-        if (wasAtBottom) {
-          xtermRef.current.scrollToBottom();
-        }
+          const wasAtBottom =
+            xtermRef.current.buffer.active.viewportY ===
+            xtermRef.current.buffer.active.baseY;
 
-        // Notify backend of new terminal size
-        // Subtract 2 cols to prevent overflow from scrollbar/padding
-        const dimensions = fitAddon.proposeDimensions();
-        if (dimensions) {
-          invoke('resize_pty', {
-            sessionId,
-            cols: Math.max(dimensions.cols - 2, 20),
-            rows: dimensions.rows,
-          }).catch((error) => {
-            console.error('Failed to resize PTY:', error);
-          });
-        }
-      }, 150); // Wait 150ms after last resize event
-    };
+          fitAddon.fit();
 
-    // Set up resize observer
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(terminalRef.current);
+          if (wasAtBottom) xtermRef.current.scrollToBottom();
 
-    // Call onReady callback
-    if (onReady) {
-      onReady();
-    }
+          const dimensions = fitAddon.proposeDimensions();
+          if (dimensions) {
+            invoke('resize_pty', {
+              sessionId,
+              cols: dimensions.cols,
+              rows: dimensions.rows,
+            }).catch((error) => {
+              console.error('Failed to resize PTY:', error);
+            });
+          }
+        }, 150);
+      };
 
-    // Cleanup
+      const ro = new ResizeObserver(handleResize);
+      ro.observe(terminalRef.current!);
+      resizeObserver = ro;
+
+      if (onReady) onReady();
+
+      // Guard against the (rare) case where the component unmounted during the
+      // synchronous setup above (possible if React strict mode double-fires).
+      if (!isActive) {
+        unlistenPromise.then((u) => u());
+        ro.disconnect();
+        terminal.dispose();
+        xtermRef.current = null;
+        fitAddonRef.current = null;
+      }
+    });
+
     return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
+      isActive = false;
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+      if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
+      if (unlistenFn) unlistenFn();
+      if (resizeObserver) resizeObserver.disconnect();
+      if (xtermRef.current) {
+        xtermRef.current.dispose();
+        xtermRef.current = null;
       }
-      if (resizeTimeoutRef.current) {
-        clearTimeout(resizeTimeoutRef.current);
-      }
-      unlistenPromise.then((unlisten) => unlisten());
-      resizeObserver.disconnect();
-      terminal.dispose();
-      xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [sessionId, onReady, isDark]);
+  }, [sessionId, projectPath, onReady, isDark]);
 
   return (
     <div className="terminal-container">

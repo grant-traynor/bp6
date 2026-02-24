@@ -20,11 +20,18 @@
   width: 100%;
 }
 
-/* Ensure xterm viewport and screen fill container */
-.terminal .xterm-viewport,
+/* Ensure xterm screen fills container for clean right-edge appearance */
 .terminal .xterm-screen {
   width: 100% !important;
 }
+
+/* Do NOT force xterm-viewport to 100% width.
+ * xterm.js sizes the viewport to exactly cols×charWidth px. Forcing 100%
+ * makes the 6px scrollbar overlap the rightmost character column, which
+ * causes FitAddon to report cols that are 1–2 wider than xterm can render.
+ * tmux then allocates those extra columns; content written there wraps to
+ * the next row in xterm.js, producing the "prompt overwrites adjacent pane"
+ * bug seen with vertical tmux splits. */
 
 /* Scrollbar styling for terminal - using app theme variables */
 .terminal .xterm-viewport::-webkit-scrollbar {
