@@ -1903,6 +1903,11 @@ pub fn spawn_pty_for_session(
     let session_id_clone = sessionId.clone();
     
     std::thread::spawn(move || {
+        // Buffer for incomplete UTF-8 sequences split across PTY reads.
+        // from_utf8_lossy would replace partial sequences with U+FFFD; instead
+        // we carry over the trailing incomplete bytes to the next read.
+        let mut utf8_buf: Vec<u8> = Vec::new();
+
         loop {
             match pty_manager.read(&pty_session_id) {
                 Ok(data) => {
@@ -1910,18 +1915,30 @@ pub fn spawn_pty_for_session(
                         // EOF - PTY closed
                         break;
                     }
-                    
-                    // Convert to string (lossy for non-UTF8)
-                    let output = String::from_utf8_lossy(&data).to_string();
-                    
-                    // Emit pty-data event
-                    let _ = app_handle_clone.emit(
-                        "pty-data",
-                        serde_json::json!({
-                            "sessionId": session_id_clone,
-                            "data": output,
-                        }),
-                    );
+                    utf8_buf.extend_from_slice(&data);
+
+                    // Find the longest valid UTF-8 prefix and hold back any
+                    // trailing incomplete multi-byte sequence for the next read.
+                    let valid_len = match std::str::from_utf8(&utf8_buf) {
+                        Ok(_) => utf8_buf.len(),
+                        Err(e) => e.valid_up_to(),
+                    };
+
+                    if valid_len > 0 {
+                        // Safety: valid_len is guaranteed valid UTF-8 by from_utf8
+                        let output = unsafe {
+                            std::str::from_utf8_unchecked(&utf8_buf[..valid_len])
+                        }.to_string();
+                        utf8_buf.drain(..valid_len);
+
+                        let _ = app_handle_clone.emit(
+                            "pty-data",
+                            serde_json::json!({
+                                "sessionId": session_id_clone,
+                                "data": output,
+                            }),
+                        );
+                    }
                 }
                 Err(e) => {
                     eprintln!("PTY read error for {}: {}", pty_session_id, e);
@@ -1932,7 +1949,7 @@ pub fn spawn_pty_for_session(
             // Minimal yield to prevent thread from hogging CPU, but allow fast data flow
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
-        
+
         eprintln!("PTY stream ended for session: {}", session_id_clone);
     });
     
