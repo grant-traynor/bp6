@@ -38,6 +38,21 @@ impl std::fmt::Display for BackendId {
     }
 }
 
+/// Structured data for a file edit/create tool call.
+/// Populated when the agent calls Edit or Write — enables diff rendering in the UI.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolUseData {
+    /// Tool name: "Edit", "Write", etc.
+    pub name: String,
+    /// Absolute path of the file being modified
+    pub file_path: String,
+    /// Previous file content (empty string for new files)
+    pub old_string: String,
+    /// New file content / replacement string
+    pub new_string: String,
+}
+
 /// Represents a chunk of output from an agent session
 ///
 /// This type is shared across all CLI backends for streaming output.
@@ -52,6 +67,9 @@ pub struct AgentChunk {
     /// Serializes as "sessionId" in JSON
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Structured tool use data for Edit/Write calls — drives diff rendering in UI
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use: Option<ToolUseData>,
 }
 
 /// Plugin trait for CLI backend implementations

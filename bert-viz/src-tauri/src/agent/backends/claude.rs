@@ -1,5 +1,5 @@
 /// Anthropic Claude Code CLI backend implementation
-use crate::agent::plugin::{AgentChunk, CliBackendPlugin};
+use crate::agent::plugin::{AgentChunk, CliBackendPlugin, ToolUseData};
 use serde_json::Value;
 
 /// Claude Code CLI backend plugin
@@ -74,26 +74,57 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                                     content: text.to_string(),
                                     is_done: false,
                                     session_id: None,
+                                    tool_use: None,
                                 });
                             }
                         }
 
-                        // Handle tool use - emit notification so UI shows activity
+                        // Handle tool use
                         if content_block["type"] == "tool_use" {
                             if let Some(tool_name) = content_block["name"].as_str() {
-                                let description =
-                                    content_block["input"]["description"].as_str().unwrap_or("");
+                                let input = &content_block["input"];
 
+                                // For Edit/Write emit structured diff data; UI renders a DiffView
+                                if tool_name == "Edit" {
+                                    return Some(AgentChunk {
+                                        content: String::new(),
+                                        is_done: false,
+                                        session_id: None,
+                                        tool_use: Some(ToolUseData {
+                                            name: tool_name.to_string(),
+                                            file_path: input["file_path"].as_str().unwrap_or("").to_string(),
+                                            old_string: input["old_string"].as_str().unwrap_or("").to_string(),
+                                            new_string: input["new_string"].as_str().unwrap_or("").to_string(),
+                                        }),
+                                    });
+                                }
+
+                                if tool_name == "Write" {
+                                    return Some(AgentChunk {
+                                        content: String::new(),
+                                        is_done: false,
+                                        session_id: None,
+                                        tool_use: Some(ToolUseData {
+                                            name: tool_name.to_string(),
+                                            file_path: input["file_path"].as_str().unwrap_or("").to_string(),
+                                            old_string: String::new(),
+                                            new_string: input["content"].as_str().unwrap_or("").to_string(),
+                                        }),
+                                    });
+                                }
+
+                                // All other tools: plain text notification
+                                let description = input["description"].as_str().unwrap_or("");
                                 let message = if !description.is_empty() {
                                     format!("🔧 {}: {}", tool_name, description)
                                 } else {
                                     format!("🔧 Using tool: {}", tool_name)
                                 };
-
                                 return Some(AgentChunk {
                                     content: message,
                                     is_done: false,
                                     session_id: None,
+                                    tool_use: None,
                                 });
                             }
                         }
@@ -118,6 +149,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                             content: format!("❌ Error: {}", error_messages.join("; ")),
                             is_done: true,
                             session_id: None,
+                            tool_use: None,
                         });
                     }
                 }
@@ -128,6 +160,7 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                 content: String::new(),
                 is_done: true,
                 session_id: None,
+                tool_use: None,
             });
         }
 

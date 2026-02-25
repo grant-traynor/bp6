@@ -238,10 +238,18 @@ export function getPersonaIcon(personaOrRole: string): string {
   return PERSONA_ICONS[personaOrRole] || '🤖';
 }
 
+export interface ToolUseData {
+  name: string;
+  filePath: string;
+  oldString: string;
+  newString: string;
+}
+
 export interface AgentChunk {
   content: string;
   isDone: boolean;
-  sessionId?: string;  // Session ID for multi-window routing
+  sessionId?: string;
+  toolUse?: ToolUseData;
 }
 
 /**

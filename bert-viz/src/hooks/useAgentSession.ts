@@ -11,13 +11,15 @@ import {
   recordSessionForResume,
   touchSession,
   CliBackend,
-  AgentChunk
+  AgentChunk,
+  ToolUseData
 } from '../api';
 import { listen } from '@tauri-apps/api/event';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  toolUse?: ToolUseData;
 }
 
 interface UseAgentSessionOptions {
@@ -107,9 +109,9 @@ export function useAgentSession({
     const listenerId = `L-${Math.random().toString(36).substr(2, 9)}`;
 
     unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
-      const { content, isDone } = event.payload;
+      const { content, isDone, toolUse } = event.payload;
 
-      console.log(`📨 LISTENER ${listenerId}: Event received | content length:`, content?.length || 0, '| isDone:', isDone);
+      console.log(`📨 LISTENER ${listenerId}: Event received | content length:`, content?.length || 0, '| isDone:', isDone, '| toolUse:', toolUse?.name);
 
       if (content) {
         setDebugLogs(prev => [...prev, `[Stdout] ${content}`]);
@@ -117,6 +119,13 @@ export function useAgentSession({
 
       // First chunk received — clear thinking state
       setIsAwaitingFirstChunk(false);
+
+      // Tool use (Edit/Write): commit immediately as a standalone message, don't
+      // accumulate in streaming text so it renders inline as a diff view.
+      if (toolUse) {
+        setMessages(prev => [...prev, { role: 'assistant', content: '', toolUse }]);
+        return;
+      }
 
       if (isDone) {
         // Fix for message duplication: Capture the final streaming content BEFORE any state updates

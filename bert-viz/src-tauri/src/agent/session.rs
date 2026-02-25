@@ -756,6 +756,7 @@ fn run_cli_command_for_session(
                                 },
                                 is_done: chunk.is_done,
                                 session_id: chunk.session_id.clone(),
+                                tool_use: chunk.tool_use.clone(),
                             };
 
                             // Emit to session-specific channel
@@ -772,6 +773,7 @@ fn run_cli_command_for_session(
             content: "".to_string(),
             is_done: true,
             session_id: Some(session_id_clone.clone()),
+            tool_use: None,
         };
 
         // Log session end

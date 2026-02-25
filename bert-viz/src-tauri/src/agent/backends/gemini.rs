@@ -60,6 +60,7 @@ impl CliBackendPlugin for GeminiBackend {
                     content: String::new(),
                     is_done: false,
                     session_id: Some(session_id.to_string()),
+                    tool_use: None,
                 });
             }
         }
@@ -71,6 +72,7 @@ impl CliBackendPlugin for GeminiBackend {
                     content: content.to_string(),
                     is_done: false,
                     session_id: None,
+                    tool_use: None,
                 });
             }
         }
@@ -82,6 +84,7 @@ impl CliBackendPlugin for GeminiBackend {
                     content: format!("🔧 Using tool: {}", tool_name),
                     is_done: false,
                     session_id: None,
+                    tool_use: None,
                 });
             }
         }
@@ -95,6 +98,7 @@ impl CliBackendPlugin for GeminiBackend {
                         content: format!("⚠️ Tool execution {}", status),
                         is_done: false,
                         session_id: None,
+                    tool_use: None,
                     });
                 }
             }
@@ -118,6 +122,7 @@ impl CliBackendPlugin for GeminiBackend {
                             content: format!("❌ Error: {}", error_messages.join("; ")),
                             is_done: true,
                             session_id: None,
+                    tool_use: None,
                         });
                     }
                 }
@@ -128,6 +133,7 @@ impl CliBackendPlugin for GeminiBackend {
                 content: String::new(),
                 is_done: true,
                 session_id: None,
+                    tool_use: None,
             });
         }
 

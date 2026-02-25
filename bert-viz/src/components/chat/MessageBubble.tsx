@@ -1,10 +1,13 @@
 import { memo } from 'react';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { RawHtml } from '../shared/Markdown';
+import { DiffView } from './DiffView';
+import { ToolUseData } from '../../api';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant';
   content: string;
+  toolUse?: ToolUseData;
   onApprove?: (command: string) => void;
   onEdit?: (command: string) => void;
 }
@@ -71,9 +74,23 @@ function renderContent(
 export const MessageBubble = memo<MessageBubbleProps>(({
   role,
   content,
+  toolUse,
   onApprove,
   onEdit
 }) => {
+  // Tool use message: render as diff view, no bubble chrome needed
+  if (toolUse) {
+    return (
+      <div className="mb-2">
+        <DiffView
+          filePath={toolUse.filePath}
+          oldString={toolUse.oldString}
+          newString={toolUse.newString}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`flex ${role === 'user' ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
