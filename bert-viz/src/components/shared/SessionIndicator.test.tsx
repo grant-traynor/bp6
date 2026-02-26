@@ -32,6 +32,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -44,6 +45,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -64,6 +66,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -88,6 +91,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -110,6 +114,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -122,6 +127,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -146,6 +152,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -169,6 +176,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -198,6 +206,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -218,6 +227,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -238,6 +248,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -258,6 +269,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -278,6 +290,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -290,6 +303,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -314,6 +328,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -340,6 +355,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -364,6 +380,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -376,6 +393,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-3',
@@ -388,6 +406,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 2000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -413,6 +432,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -425,6 +445,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -447,6 +468,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -469,6 +491,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -493,6 +516,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -521,6 +545,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -533,6 +558,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-3',
@@ -545,6 +571,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 2000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -571,6 +598,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -583,6 +611,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-3',
@@ -595,6 +624,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 2000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -618,6 +648,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -630,6 +661,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-3',
@@ -642,6 +674,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 2000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-4',
@@ -654,6 +687,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 3000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -691,6 +725,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -703,6 +738,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 
@@ -729,6 +765,7 @@ describe('SessionIndicator', () => {
         lastActivity: (Date.now() + i * 1000) / 1000,
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       }));
 
       const { container } = render(<SessionIndicator sessions={sessions} />);
@@ -755,6 +792,7 @@ describe('SessionIndicator', () => {
           lastActivity: Date.now() / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
         {
           sessionId: 'session-2',
@@ -767,6 +805,7 @@ describe('SessionIndicator', () => {
           lastActivity: (Date.now() + 1000) / 1000,
           hasUnread: false,
           messageCount: 0,
+          projectPath: '',
         },
       ];
 

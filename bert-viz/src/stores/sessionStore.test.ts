@@ -32,6 +32,7 @@ describe('sessionStore', () => {
         lastActivity: Date.now(),
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       },
       {
         sessionId: 'session-2',
@@ -44,6 +45,7 @@ describe('sessionStore', () => {
         lastActivity: Date.now(),
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       },
     ];
 
@@ -67,6 +69,7 @@ describe('sessionStore', () => {
         lastActivity: Date.now(),
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       },
       {
         sessionId: 'session-2',
@@ -79,6 +82,7 @@ describe('sessionStore', () => {
         lastActivity: Date.now(),
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       },
       {
         sessionId: 'session-3',
@@ -91,6 +95,7 @@ describe('sessionStore', () => {
         lastActivity: Date.now(),
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       },
       {
         sessionId: 'session-4',
@@ -103,6 +108,7 @@ describe('sessionStore', () => {
         lastActivity: Date.now(),
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       },
     ];
 
@@ -142,6 +148,7 @@ describe('sessionStore', () => {
         lastActivity: Date.now(),
         hasUnread: false,
         messageCount: 0,
+        projectPath: '',
       },
     ];
 
