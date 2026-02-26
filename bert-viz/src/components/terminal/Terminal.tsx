@@ -12,6 +12,7 @@ interface TerminalProps {
   sessionId: string;
   projectPath?: string;
   onReady?: () => void;
+  initialHistory?: string;
 }
 
 interface PtyDataEvent {
@@ -81,7 +82,7 @@ function buildTheme(isDark: boolean) {
  * - Copy/paste with keyboard shortcuts (Cmd+C/V on macOS, Ctrl+C/V on Windows/Linux)
  * - Right-click context menu for copy/paste
  */
-export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onReady }) => {
+export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onReady, initialHistory }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -156,6 +157,12 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onRe
       terminal.loadAddon(clipboardAddon);
 
       terminal.open(terminalRef.current!);
+
+      if (initialHistory) {
+        terminal.write(initialHistory.replace(/\n/g, '\r\n'));
+        terminal.write('\r\n\x1b[90m--- History above | Live output below ---\x1b[0m\r\n');
+      }
+
       fitAddon.fit();
 
       xtermRef.current = terminal;
@@ -303,7 +310,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onRe
       }
       fitAddonRef.current = null;
     };
-  }, [sessionId, projectPath, onReady, isDark]);
+  }, [sessionId, projectPath, onReady, initialHistory, isDark]);
 
   return (
     <div className="terminal-container">

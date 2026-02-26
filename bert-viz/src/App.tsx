@@ -47,6 +47,7 @@ import { ListView } from "./components/list/ListView";
 import { PalettePreviewDialog } from "./components/palette/PalettePreviewDialog";
 import SettingsView from "./components/settings/SettingsView";
 import { Terminal } from "./components/terminal/Terminal";
+import { SessionsView } from "./components/sessions/SessionsView";
 
 // Time-based filter options for closed tasks
 type ClosedTimeFilter =
@@ -1308,6 +1309,12 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           <div className="flex-1 overflow-hidden">
             <Terminal key={`${currentProjectPath}-${projectShellKey}`} sessionId={PROJECT_SHELL_ID} projectPath={currentProjectPath} />
           </div>
+        ) : view === 'sessions' ? (
+          <SessionsView
+            sessions={sessions}
+            currentProjectPath={currentProjectPath}
+            onSessionClick={createSessionWindow}
+          />
         ) : (
           <div className="flex-1 flex overflow-hidden">
             <div className="flex-1 flex flex-col overflow-hidden">

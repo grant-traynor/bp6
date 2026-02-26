@@ -39,6 +39,7 @@ interface UseAgentSessionReturn {
   streamingMessage: string;
   isLoading: boolean;
   isAwaitingFirstChunk: boolean;
+  historyLoaded: boolean;
   debugLogs: string[];
   sendMessage: (message: string) => Promise<void>;
   stopAgent: () => Promise<void>;
@@ -69,6 +70,7 @@ export function useAgentSession({
   const [streamingMessage, setStreamingMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isAwaitingFirstChunk, setIsAwaitingFirstChunk] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [debugLogs, setDebugLogs] = useState<string[]>(['[System] Starting agent session...']);
 
   const unlistenChunkRef = useRef<(() => void) | undefined>(undefined);
@@ -221,6 +223,7 @@ export function useAgentSession({
           setMessages(historyMessages);
           setDebugLogs(prev => [...prev, `[System] Loaded ${historyMessages.length} messages from history`]);
         }
+        setHistoryLoaded(true);
 
         await setupEventListeners(sessionIdOverride);
         return;
@@ -421,6 +424,7 @@ export function useAgentSession({
     streamingMessage,
     isLoading,
     isAwaitingFirstChunk,
+    historyLoaded,
     debugLogs,
     sendMessage,
     stopAgent,

@@ -70,6 +70,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     streamingMessage,
     isLoading,
     isAwaitingFirstChunk,
+    historyLoaded,
     debugLogs,
     sendMessage,
     stopAgent
@@ -82,6 +83,10 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   // bp6-ldgi: Agent is ready once the backend has processed at least one chunk (messageCount > 0).
   // Derived from live session info so it works even when the chat window opens after the agent starts.
   const isAgentReady = (currentSession?.messageCount ?? 0) > 0;
+  // bp6-qvgi.2: A session is "ended" when it has been removed from the sessions store but history
+  // has finished loading. In this state we show history read-only instead of the spinner.
+  const isSessionEnded = !!sessionIdOverride && !currentSession && historyLoaded;
+  const effectiveIsAgentReady = isAgentReady || isSessionEnded;
 
   const safeStreamingMessage = sanitizeAgentHtml(streamingMessage);
 
@@ -294,7 +299,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           </button>
           <button
             onClick={async () => {
-              if (!sessionId || !isAgentReady) return;
+              if (!sessionId || !effectiveIsAgentReady) return;
               try {
                 await invoke('spawn_pty_for_session', { sessionId: sessionId });
                 setViewMode('cli');
@@ -302,8 +307,8 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                 console.error('Failed to switch to CLI mode:', error);
               }
             }}
-            disabled={!isAgentReady}
-            title={!isAgentReady ? 'Waiting for agent to initialize...' : 'Switch to CLI'}
+            disabled={!effectiveIsAgentReady}
+            title={!effectiveIsAgentReady ? 'Waiting for agent to initialize...' : 'Switch to CLI'}
             className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
               viewMode === 'cli'
                 ? 'bg-[var(--background-primary)] text-indigo-600 shadow-sm'
@@ -377,15 +382,22 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           /* Chat Content */
           <div className="min-h-0 flex-1 flex flex-col relative overflow-hidden">
             {/* bp6-4pa6: Loading screen while agent is injecting context */}
-            {!isAgentReady && (
+            {!effectiveIsAgentReady && (
               <div className="min-h-0 flex-1 flex flex-col items-center justify-center gap-4 text-[var(--text-muted)]">
                 <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
                 <p className="font-black uppercase tracking-widest text-[10px]">Injecting context...</p>
               </div>
             )}
 
+            {/* bp6-qvgi.2: Session ended banner */}
+            {isSessionEnded && (
+              <div className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] bg-[var(--background-secondary)] border-b border-[var(--border-primary)]">
+                Session Ended — History
+              </div>
+            )}
+
           {/* Messages View */}
-            {isAgentReady && !showDebug && (
+            {effectiveIsAgentReady && !showDebug && (
             <div ref={chatContainerRef} className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
               <div className="flex flex-col px-6 py-6">
                 {messages.length === 0 && !streamingMessage && (
@@ -460,7 +472,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
           )}
 
           {/* Debug View */}
-          {isAgentReady && showDebug && (
+          {effectiveIsAgentReady && showDebug && (
             <div className="min-h-0 flex-1 bg-slate-900 text-emerald-400 p-4 font-mono text-[10px] overflow-y-auto custom-scrollbar">
               <div className="space-y-1">
                 {debugLogs.map((log, i) => {
@@ -481,7 +493,31 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
         ) : (
           /* Terminal Content */
           <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
-            {sessionId && <TerminalComponent sessionId={sessionId} />}
+            {isSessionEnded ? (
+              /* bp6-qvgi.1: Show read-only text history for ended PTY sessions */
+              <div className="min-h-0 flex-1 flex flex-col overflow-hidden">
+                <div className="px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)] bg-[var(--background-secondary)] border-b border-[var(--border-primary)]">
+                  Session Ended — Terminal History
+                </div>
+                <pre className="min-h-0 flex-1 overflow-y-auto custom-scrollbar p-4 font-mono text-[11px] text-[var(--text-primary)] bg-[#0e1624] whitespace-pre-wrap break-words leading-relaxed">
+                  {messages
+                    .filter(m => m.role === 'terminal')
+                    .map(m => m.content)
+                    .join('\n\n') || 'No terminal output recorded.'}
+                </pre>
+              </div>
+            ) : (
+              sessionId && (
+                <TerminalComponent
+                  sessionId={sessionId}
+                  initialHistory={
+                    messages.filter(m => m.role === 'terminal').length > 0
+                      ? messages.filter(m => m.role === 'terminal').map(m => m.content).join('\n')
+                      : undefined
+                  }
+                />
+              )
+            )}
           </div>
         )}
       </div>

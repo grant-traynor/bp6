@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { TableProperties, Settings, GanttChart, Palette, MessageSquare, Sparkles, Plus, Terminal, Shield, Wrench, Construction, Layers, CheckSquare } from "lucide-react";
+import { TableProperties, Settings, GanttChart, Palette, MessageSquare, Sparkles, Plus, Terminal, Shield, Wrench, Construction, Layers, CheckSquare, LayoutList } from "lucide-react";
 import brandLogo from "../../assets/brand_logo_1.svg";
 import { cn } from "../../utils";
 import { PersonaMenu, PersonaOption } from "./PersonaMenu";
 
-export type ViewType = 'gantt' | 'list' | 'terminal' | 'settings';
+export type ViewType = 'gantt' | 'list' | 'sessions' | 'terminal' | 'settings';
 
 interface NavigationProps {
   currentView: ViewType;
@@ -204,6 +204,19 @@ export const Navigation = ({ currentView, onViewChange, onOpenChat, onOpenPalett
             title="List View"
           >
             <TableProperties size={24} strokeWidth={2.5} />
+          </button>
+
+          <button
+            onClick={() => onViewChange('sessions')}
+            className={cn(
+              "p-3 rounded-xl transition-all border-2 shadow-md hover:shadow-lg active:scale-95",
+              currentView === 'sessions'
+                ? "bg-[var(--accent-primary)] text-white border-[var(--accent-primary)] shadow-[0_8px_30px_rgba(15,139,255,0.25)]"
+                : "bg-[var(--background-primary)] text-[var(--text-muted)] border-[var(--border-primary)] hover:text-[var(--accent-primary)]"
+            )}
+            title="Sessions View"
+          >
+            <LayoutList size={24} strokeWidth={2.5} />
           </button>
 
           <button
