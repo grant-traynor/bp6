@@ -71,24 +71,25 @@ impl BeadsWatcher {
             move |res: std::result::Result<notify::Event, notify::Error>| {
                 match res {
                     Ok(event) => {
-                        // Trigger on any change to beads.db or beads.db-wal.
-                        let is_db_change = event.paths.iter().any(|p| {
+                        // Trigger on last-touched — updated by the daemon on every
+                        // mutation, regardless of whether beads uses SQLite or Dolt.
+                        let is_last_touched = event.paths.iter().any(|p| {
                             p.file_name()
                                 .and_then(|n| n.to_str())
-                                .map(|n| n.starts_with("beads.db"))
+                                .map(|n| n == "last-touched")
                                 .unwrap_or(false)
                         });
 
-                        if is_db_change && matches!(event.kind,
+                        if is_last_touched && matches!(event.kind,
                             notify::EventKind::Create(_) | notify::EventKind::Modify(_))
                         {
                             let mut last = emit_clone.lock().unwrap();
                             let now = Instant::now();
-                            if now.duration_since(*last) >= Duration::from_millis(250) {
+                            let elapsed = now.duration_since(*last);
+                            if elapsed >= Duration::from_millis(250) {
                                 *last = now;
 
-                                // Derive repo root from the event path (.beads/beads.db -> repo)
-                                // and export fresh data before notifying the frontend.
+                                // Derive repo root from the event path (.beads/last-touched -> repo)
                                 if let Some(beads_dir) = event.paths.first().and_then(|p| p.parent()) {
                                     if let Some(repo_path) = beads_dir.parent() {
                                         let dump_path = repo_path.join(".bp6").join("issue_dump.jsonl");
@@ -104,10 +105,7 @@ impl BeadsWatcher {
                                     }
                                 }
 
-                                match handle.emit("beads-updated", ()) {
-                                    Ok(_) => eprintln!("  ✅ Emitted beads-updated (db change)"),
-                                    Err(e) => eprintln!("  ❌ Failed to emit beads-updated: {:?}", e),
-                                }
+                                let _ = handle.emit("beads-updated", ());
                             }
                         }
                     },
@@ -2243,11 +2241,11 @@ fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
         }
     }
 
-    // Update watcher to monitor new project's beads.db
-    if let Some(beads_db_path) = bd::find_beads_db() {
+    // Update watcher to monitor new project's last-touched
+    if let Some(last_touched) = bd::find_last_touched() {
         let watcher_state = app_handle.state::<Arc<Mutex<BeadsWatcher>>>();
         let mut watcher = watcher_state.lock().unwrap();
-        watcher.watch_beads_file(beads_db_path)?;
+        watcher.watch_beads_file(last_touched)?;
     }
 
     let _ = app_handle.emit("projects-updated", ());
@@ -2334,8 +2332,8 @@ pub fn run() {
                         .current_dir(&repo_path)
                         .output();
                 }
-                if let Some(beads_db_path) = bd::find_beads_db() {
-                    let _ = beads_watcher.watch_beads_file(beads_db_path);
+                if let Some(last_touched) = bd::find_last_touched() {
+                    let _ = beads_watcher.watch_beads_file(last_touched);
                 }
             }
 

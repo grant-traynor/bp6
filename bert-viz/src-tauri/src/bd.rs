@@ -6,53 +6,12 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use crate::Bead;
 
-pub fn get_sync_branch_name(repo_path: &std::path::Path) -> Option<String> {
-    // Try to read sync.branch from bd config
-    let output = Command::new("bd")
-        .arg("config")
-        .arg("get")
-        .arg("sync.branch")
-        .current_dir(repo_path)
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !branch.is_empty() {
-            return Some(branch);
-        }
-    }
-    None
-}
-
-pub fn find_beads_db() -> Option<PathBuf> {
-    let mut curr = std::env::current_dir().ok()?;
-    loop {
-        // Check local .beads/beads.db (primary store — always up to date)
-        let test_path = curr.join(".beads/beads.db");
-        if test_path.exists() {
-            return Some(test_path);
-        }
-
-        // Sync-branch worktree may have its own DB
-        if let Some(sync_branch) = get_sync_branch_name(&curr) {
-            let worktree_path = curr
-                .join(".git")
-                .join("beads-worktrees")
-                .join(&sync_branch)
-                .join(".beads")
-                .join("beads.db");
-
-            if worktree_path.exists() {
-                return Some(worktree_path);
-            }
-        }
-
-        if !curr.pop() {
-            break;
-        }
-    }
-    None
+/// Returns the path to .beads/last-touched — updated by the daemon on every
+/// mutation, making it the most reliable trigger for external changes.
+pub fn find_last_touched() -> Option<PathBuf> {
+    let repo_root = find_repo_root()?;
+    let path = repo_root.join(".beads").join("last-touched");
+    if path.exists() { Some(path) } else { None }
 }
 
 pub fn find_repo_root() -> Option<PathBuf> {

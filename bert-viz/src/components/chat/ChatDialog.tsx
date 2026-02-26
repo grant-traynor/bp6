@@ -403,6 +403,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
                     key={i}
                     role={msg.role}
                     content={msg.content}
+                    toolUse={msg.toolUse}
                     onApprove={msg.role === 'assistant' ? handleApprove : undefined}
                     onEdit={msg.role === 'assistant' ? handleEdit : undefined}
                   />
