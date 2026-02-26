@@ -134,14 +134,9 @@ impl PtyManager {
     /// * `Ok(())` if write succeeded
     /// * `Err(String)` if session not found or write failed
     pub fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
-        use std::time::Instant;
-        eprintln!("  🔷 PtyManager.write START: pty={}, data_len={}", session_id, data.len());
-
         // Get the writer Arc while holding the outer lock, then release it
         let writer_arc = {
-            let lock_start = Instant::now();
             let sessions = self.sessions.lock().unwrap();
-            eprintln!("  🔓 PtyManager.sessions lock acquired in {:?}", lock_start.elapsed());
 
             let session_arc = sessions
                 .get(session_id)
@@ -149,26 +144,14 @@ impl PtyManager {
 
             // Lock session briefly to clone the writer Arc
             let session = session_arc.lock().unwrap();
-            let writer = session.writer.clone();
-
-            eprintln!("  🔓 PtyManager.sessions lock releasing after {:?}", lock_start.elapsed());
-            writer
+            session.writer.clone()
         }; // Outer locks released here
 
         // Acquire the writer lock and perform I/O
-        let writer_lock_start = Instant::now();
         let mut writer = writer_arc.lock().unwrap();
-        eprintln!("  🔓 Writer lock acquired in {:?}", writer_lock_start.elapsed());
-
-        let io_start = Instant::now();
-        let result = writer
+        writer
             .write_all(data)
-            .map_err(|e| format!("Failed to write to PTY: {}", e));
-
-        eprintln!("  💾 write_all I/O completed in {:?}", io_start.elapsed());
-        eprintln!("  🔷 PtyManager.write COMPLETE");
-
-        result
+            .map_err(|e| format!("Failed to write to PTY: {}", e))
     }
 
     /// Read available data from a PTY session (blocking up to buffer size)

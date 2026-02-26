@@ -1880,18 +1880,12 @@ pub fn write_to_pty(
     data: String,
     state: State<AgentState>,
 ) -> Result<(), String> {
-    use std::time::Instant;
-    let start = Instant::now();
-    eprintln!("🔵 write_to_pty START: session={}, data_len={}", sessionId, data.len());
-
     // Extract PTY session ID while holding lock, then release immediately.
     // Falls back to using sessionId directly (for project shells not tied to an agent session).
     let pty_session_id = {
-        let lock_start = Instant::now();
         let sessions = state.sessions.lock().unwrap();
-        eprintln!("🔓 AgentState.sessions lock acquired in {:?}", lock_start.elapsed());
 
-        let pty_id = if let Some(session) = sessions.get(&sessionId) {
+        if let Some(session) = sessions.get(&sessionId) {
             session
                 .pty_session_id
                 .as_ref()
@@ -1900,22 +1894,11 @@ pub fn write_to_pty(
         } else {
             // No agent session — use sessionId as direct PTY key (project shells)
             sessionId.clone()
-        };
-
-        eprintln!("🔓 AgentState.sessions lock releasing after {:?}", lock_start.elapsed());
-        pty_id
+        }
     }; // Lock released here
 
-    eprintln!("📝 Calling pty_manager.write for pty={}", pty_session_id);
-    let write_start = Instant::now();
-
     // Write to PTY without holding the sessions lock
-    state.pty_manager.write(&pty_session_id, data.as_bytes())?;
-
-    eprintln!("✅ pty_manager.write completed in {:?}", write_start.elapsed());
-    eprintln!("🟢 write_to_pty COMPLETE: total {:?}", start.elapsed());
-
-    Ok(())
+    state.pty_manager.write(&pty_session_id, data.as_bytes())
 }
 
 /// Resize a PTY session
