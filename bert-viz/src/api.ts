@@ -199,6 +199,7 @@ export interface SessionInfo {
   lastActivity: number;   // Unix timestamp of last activity (Rust u64)
   hasUnread: boolean;     // Whether session has unread messages
   messageCount: number;   // Number of messages in session
+  projectPath: string;    // Project root path at session creation time
 }
 
 // Persona icon mapping (aligned with PersonaType enum and Navigation.tsx)
@@ -266,6 +267,7 @@ export type CliBackend = 'gemini' | 'claude' | 'claude-code';
  * @param beadId - Optional bead ID for context
  * @param cliBackend - Optional CLI backend to use (defaults to 'gemini' if not provided)
  * @param role - Optional specialist role ('web', 'rust', 'flutter', etc.) - only used with 'specialist' persona
+ * @param projectPath - The active project root path at session creation time
  * @returns The session ID (UUID) of the newly created session
  */
 export async function startAgentSession(
@@ -273,10 +275,11 @@ export async function startAgentSession(
   task?: string,
   beadId?: string,
   cliBackend?: CliBackend,
-  role?: string
+  role?: string,
+  projectPath?: string
 ): Promise<string> {
   try {
-    return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend, role });
+    return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend, role, projectPath });
   } catch (error) {
     console.error("Failed to start agent session:", error);
     throw error;

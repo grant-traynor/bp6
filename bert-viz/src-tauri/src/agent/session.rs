@@ -84,6 +84,8 @@ pub struct SessionState {
     pub has_unread: bool,
     /// Number of messages in this session
     pub message_count: usize,
+    /// The project root path at the time this session was created
+    pub project_path: String,
 }
 
 /// Serializable session information for UI display (excludes process handle)
@@ -122,6 +124,8 @@ pub struct SessionInfo {
     pub has_unread: bool,
     /// Number of messages in this session
     pub message_count: usize,
+    /// The project root path at the time this session was created
+    pub project_path: String,
 }
 
 /// Type of log event
@@ -511,6 +515,7 @@ fn list_active_sessions_internal(sessions: &HashMap<String, SessionState>) -> Ve
                 .as_secs(),
             has_unread: state.has_unread,
             message_count: state.message_count,
+            project_path: state.project_path.clone(),
         })
         .collect()
 }
@@ -994,6 +999,7 @@ pub fn start_agent_session(
     bead_id: Option<String>,
     cli_backend: Option<String>,
     role: Option<String>,
+    project_path: Option<String>,
 ) -> Result<String, String> {
     // Generate unique session ID
     let session_id = Uuid::new_v4().to_string();
@@ -1032,6 +1038,7 @@ pub fn start_agent_session(
 
     // Create SessionState and store in HashMap
     let now = SystemTime::now();
+    let resolved_project_path = project_path.unwrap_or_default();
     let session_state = SessionState {
         process: child,
         bead_id: bead_id.clone(),
@@ -1050,6 +1057,7 @@ pub fn start_agent_session(
         last_activity: now,
         has_unread: false,
         message_count: 0,
+        project_path: resolved_project_path,
     };
 
     {
@@ -1604,6 +1612,7 @@ pub fn start_agent_session_headless(
     persona: String,
     backend_id: String,
     commands: Vec<String>,
+    project_path: Option<String>,
 ) -> Result<SessionInfo, String> {
     // Validate command queue
     if commands.is_empty() {
@@ -1649,6 +1658,7 @@ pub fn start_agent_session_headless(
     // Create SessionState in headless mode
     let now = SystemTime::now();
     let total_commands_count = commands.len();
+    let resolved_project_path = project_path.unwrap_or_default();
     let session_state = SessionState {
         process: child,
         bead_id: bead_id.clone(),
@@ -1667,6 +1677,7 @@ pub fn start_agent_session_headless(
         last_activity: now,
         has_unread: false,
         message_count: 0,
+        project_path: resolved_project_path.clone(),
     };
 
     // Store in sessions map
@@ -1699,6 +1710,7 @@ pub fn start_agent_session_headless(
             .as_secs(),
         has_unread: false,
         message_count: 0,
+        project_path: resolved_project_path,
     };
 
     // Emit session-created event

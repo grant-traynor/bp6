@@ -115,7 +115,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     }
   });
 
-  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; beadDescription?: string | null; backendId?: CliBackend; role?: string | null }>>(() => {
+  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; beadDescription?: string | null; backendId?: CliBackend; role?: string | null; projectPath?: string | null }>>(() => {
     if (typeof localStorage === 'undefined') return {};
     try {
       return JSON.parse(localStorage.getItem('chatSessionMeta') || '{}');
@@ -828,7 +828,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
 
       // Create new session if it doesn't exist
       if (!sessionExists) {
-        targetSessionId = await startAgentSession(persona, task ?? undefined, beadId ?? undefined, currentCli, role);
+        targetSessionId = await startAgentSession(persona, task ?? undefined, beadId ?? undefined, currentCli, role, currentProjectPath || undefined);
         await useSessionStore.getState().refreshSessions();
       }
 
@@ -846,6 +846,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             beadDescription,
             backendId: currentCli,
             role: role ?? null,
+            projectPath: currentProjectPath || null,
           }
         };
 
@@ -865,7 +866,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     } catch (error) {
       console.error('Failed to open chat window:', error);
     }
-  }, [chatSessionMap, sessionMetaIndex, sessions, currentCli, beads]);
+  }, [chatSessionMap, sessionMetaIndex, sessions, currentCli, beads, currentProjectPath]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
