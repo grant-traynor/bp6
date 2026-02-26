@@ -1,11 +1,11 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { RawHtml } from '../shared/Markdown';
 import { DiffView } from './DiffView';
 import { ToolUseData } from '../../api';
 
 interface MessageBubbleProps {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'terminal';
   content: string;
   toolUse?: ToolUseData;
   onApprove?: (command: string) => void;
@@ -69,6 +69,44 @@ function renderContent(
 }
 
 /**
+ * TerminalBlock - Collapsible block showing captured PTY/terminal output
+ */
+const TerminalBlock = memo<{ content: string }>(({ content }) => {
+  const [expanded, setExpanded] = useState(false);
+  const lineCount = content.split('\n').length;
+  const preview = content.split('\n').slice(0, 3).join('\n');
+
+  return (
+    <div className="mb-4 rounded-2xl border border-[var(--border-primary)] overflow-hidden">
+      <button
+        className="w-full flex items-center justify-between px-4 py-2 bg-[var(--background-secondary)] hover:bg-[var(--background-tertiary)] transition-colors text-left"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-black uppercase tracking-widest text-[var(--text-muted)]">Terminal Session</span>
+          <span className="text-[10px] text-[var(--text-muted)] opacity-60">{lineCount} lines</span>
+        </div>
+        <span className="text-[10px] text-[var(--text-muted)] opacity-60">{expanded ? '▲ collapse' : '▼ expand'}</span>
+      </button>
+      <pre className={`px-4 py-3 font-mono text-xs text-[var(--text-secondary)] bg-[var(--background-primary)] overflow-x-auto whitespace-pre-wrap break-words ${expanded ? '' : 'max-h-20 overflow-y-hidden'}`}>
+        {expanded ? content : preview}
+      </pre>
+      {!expanded && lineCount > 3 && (
+        <div className="px-4 py-1 bg-[var(--background-primary)] border-t border-[var(--border-primary)]">
+          <button
+            className="text-[10px] text-indigo-500 hover:text-indigo-400 font-bold uppercase tracking-widest"
+            onClick={() => setExpanded(true)}
+          >
+            Show all {lineCount} lines
+          </button>
+        </div>
+      )}
+    </div>
+  );
+});
+TerminalBlock.displayName = 'TerminalBlock';
+
+/**
  * MessageBubble - Displays a single message with role-based styling
  */
 export const MessageBubble = memo<MessageBubbleProps>(({
@@ -89,6 +127,11 @@ export const MessageBubble = memo<MessageBubbleProps>(({
         />
       </div>
     );
+  }
+
+  // Terminal block: collapsible monospace view of captured PTY output
+  if (role === 'terminal') {
+    return <TerminalBlock content={content} />;
   }
 
   return (

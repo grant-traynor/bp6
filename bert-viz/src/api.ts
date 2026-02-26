@@ -572,7 +572,7 @@ export interface LogEvent {
  * Simplified from LogEvent for UI display.
  */
 export interface ConversationMessage {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'terminal';
   content: string;
   timestamp: string;
 }

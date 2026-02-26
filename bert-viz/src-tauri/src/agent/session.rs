@@ -132,6 +132,9 @@ pub enum LogEventType {
     Message,
     Chunk,
     SessionEnd,
+    /// Raw PTY/terminal output captured while the session was in terminal mode.
+    /// ANSI escape codes are stripped before storage.
+    PtyOutput,
 }
 
 /// Log event for conversation logging
@@ -292,10 +295,80 @@ impl SessionLogger {
         self.log_event(event)
     }
 
+    /// Log a PTY/terminal output block (ANSI codes should already be stripped)
+    pub fn log_pty_output(
+        &mut self,
+        session_id: &str,
+        bead_id: Option<&str>,
+        persona: &str,
+        backend: &str,
+        content: &str,
+    ) -> std::io::Result<()> {
+        let event = LogEvent {
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            session_id: session_id.to_string(),
+            bead_id: bead_id.map(String::from),
+            persona: persona.to_string(),
+            backend: backend.to_string(),
+            event_type: LogEventType::PtyOutput,
+            content: content.to_string(),
+            metadata: None,
+        };
+        self.log_event(event)
+    }
+
     /// Get the log file path
     pub fn file_path(&self) -> &PathBuf {
         &self.file_path
     }
+}
+
+/// Strip ANSI escape codes from a string, leaving plain text.
+///
+/// Handles CSI sequences (`ESC[...m`), OSC sequences (`ESC]...BEL/ST`),
+/// and bare ESC + single char sequences common in terminal output.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '\x1b' {
+            out.push(ch);
+            continue;
+        }
+        match chars.peek() {
+            Some(&'[') => {
+                // CSI sequence: ESC [ ... <final byte 0x40–0x7E>
+                chars.next(); // consume '['
+                for c in chars.by_ref() {
+                    if c >= '\x40' && c <= '\x7e' {
+                        break;
+                    }
+                }
+            }
+            Some(&']') => {
+                // OSC sequence: ESC ] ... BEL or ESC \
+                chars.next(); // consume ']'
+                for c in chars.by_ref() {
+                    if c == '\x07' {
+                        break; // BEL terminator
+                    }
+                    if c == '\x1b' {
+                        // ESC \ (ST) terminator — consume the '\'
+                        if chars.peek() == Some(&'\\') {
+                            chars.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            Some(_) => {
+                // Bare ESC + one char (e.g. ESC M, ESC 7, ESC 8)
+                chars.next();
+            }
+            None => {}
+        }
+    }
+    out
 }
 
 // Old template constants and CliBackend enum removed - now using PersonaPlugin system
@@ -1373,6 +1446,9 @@ pub fn get_session_history(
     let mut messages = Vec::new();
     let mut current_assistant_message: Option<String> = None;
     let mut current_timestamp: Option<String> = None;
+    // Consecutive PtyOutput events are merged into one terminal block
+    let mut current_pty_output: Option<String> = None;
+    let mut current_pty_timestamp: Option<String> = None;
 
     for line in reader.lines() {
         let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
@@ -1382,27 +1458,8 @@ pub fn get_session_history(
             serde_json::from_str(&line).map_err(|e| format!("Failed to parse log event: {}", e))?;
 
         match event.event_type {
-            LogEventType::Message => {
-                // User message - convert markdown to HTML
-                messages.push(ConversationMessage {
-                    role: "user".to_string(),
-                    content: markdown_to_html(&event.content),
-                    timestamp: event.timestamp,
-                });
-            }
-            LogEventType::Chunk => {
-                // Assistant chunk - accumulate until done
-                if current_assistant_message.is_none() {
-                    current_assistant_message = Some(String::new());
-                    current_timestamp = Some(event.timestamp);
-                }
-
-                if let Some(ref mut msg) = current_assistant_message {
-                    msg.push_str(&event.content);
-                }
-            }
-            LogEventType::SessionEnd => {
-                // Flush accumulated assistant message - convert markdown to HTML
+            LogEventType::PtyOutput => {
+                // Flush any in-progress assistant message before the terminal block
                 if let Some(content) = current_assistant_message.take() {
                     messages.push(ConversationMessage {
                         role: "assistant".to_string(),
@@ -1412,12 +1469,68 @@ pub fn get_session_history(
                             .unwrap_or_else(|| event.timestamp.clone()),
                     });
                 }
+                // Accumulate consecutive PTY chunks into a single terminal block
+                let buf = current_pty_output.get_or_insert_with(String::new);
+                if current_pty_timestamp.is_none() {
+                    current_pty_timestamp = Some(event.timestamp.clone());
+                }
+                buf.push_str(&event.content);
             }
-            LogEventType::SessionStart => {
-                // Metadata event - skip
-                continue;
+            other => {
+                // Any non-PTY event flushes any accumulated terminal block first
+                if let Some(content) = current_pty_output.take() {
+                    messages.push(ConversationMessage {
+                        role: "terminal".to_string(),
+                        content,
+                        timestamp: current_pty_timestamp.take().unwrap_or_default(),
+                    });
+                }
+                match other {
+                    LogEventType::Message => {
+                        // User message - convert markdown to HTML
+                        messages.push(ConversationMessage {
+                            role: "user".to_string(),
+                            content: markdown_to_html(&event.content),
+                            timestamp: event.timestamp,
+                        });
+                    }
+                    LogEventType::Chunk => {
+                        // Assistant chunk - accumulate until done
+                        if current_assistant_message.is_none() {
+                            current_assistant_message = Some(String::new());
+                            current_timestamp = Some(event.timestamp);
+                        }
+                        if let Some(ref mut msg) = current_assistant_message {
+                            msg.push_str(&event.content);
+                        }
+                    }
+                    LogEventType::SessionEnd => {
+                        // Flush accumulated assistant message - convert markdown to HTML
+                        if let Some(content) = current_assistant_message.take() {
+                            messages.push(ConversationMessage {
+                                role: "assistant".to_string(),
+                                content: markdown_to_html(&content),
+                                timestamp: current_timestamp
+                                    .take()
+                                    .unwrap_or_else(|| event.timestamp.clone()),
+                            });
+                        }
+                    }
+                    LogEventType::SessionStart | LogEventType::PtyOutput => {
+                        // SessionStart: metadata only; PtyOutput: handled above
+                    }
+                }
             }
         }
+    }
+
+    // Flush any trailing PTY block (session ended while in terminal mode)
+    if let Some(content) = current_pty_output.take() {
+        messages.push(ConversationMessage {
+            role: "terminal".to_string(),
+            content,
+            timestamp: current_pty_timestamp.take().unwrap_or_default(),
+        });
     }
 
     // DO NOT flush remaining assistant message - it means the session is still streaming
@@ -1897,16 +2010,28 @@ pub fn spawn_pty_for_session(
     session.pty_session_id = Some(pty_session_id.clone());
     session.view_mode = ViewMode::Terminal;
     
-    // Spawn a thread to stream PTY output
+    // Capture session metadata needed by the logger thread
+    let bead_id_for_log = session.bead_id.clone();
+    let persona_for_log = session.persona.clone();
+    let backend_name_for_log = format!("{:?}", session.backend_id).to_lowercase();
+
+    // Spawn a thread to stream PTY output and log it for process review
     let pty_manager = state.pty_manager.clone();
     let app_handle_clone = app_handle.clone();
     let session_id_clone = sessionId.clone();
-    
+
     std::thread::spawn(move || {
         // Buffer for incomplete UTF-8 sequences split across PTY reads.
         // from_utf8_lossy would replace partial sequences with U+FFFD; instead
         // we carry over the trailing incomplete bytes to the next read.
         let mut utf8_buf: Vec<u8> = Vec::new();
+
+        // Accumulate PTY text between log flushes (every 500ms).
+        let mut log_text_buf = String::new();
+        let mut last_log_flush = std::time::Instant::now();
+        const LOG_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+        let mut logger = SessionLogger::new(bead_id_for_log.as_deref(), &session_id_clone).ok();
 
         loop {
             match pty_manager.read(&pty_session_id) {
@@ -1931,6 +2056,9 @@ pub fn spawn_pty_for_session(
                         }.to_string();
                         utf8_buf.drain(..valid_len);
 
+                        // Accumulate for logging (strip ANSI for readability)
+                        log_text_buf.push_str(&strip_ansi(&output));
+
                         let _ = app_handle_clone.emit(
                             "pty-data",
                             serde_json::json!({
@@ -1938,6 +2066,21 @@ pub fn spawn_pty_for_session(
                                 "data": output,
                             }),
                         );
+                    }
+
+                    // Flush log buffer every 500ms
+                    if last_log_flush.elapsed() >= LOG_FLUSH_INTERVAL && !log_text_buf.is_empty() {
+                        if let Some(ref mut log) = logger {
+                            let _ = log.log_pty_output(
+                                &session_id_clone,
+                                bead_id_for_log.as_deref(),
+                                &persona_for_log,
+                                &backend_name_for_log,
+                                &log_text_buf,
+                            );
+                        }
+                        log_text_buf.clear();
+                        last_log_flush = std::time::Instant::now();
                     }
                 }
                 Err(e) => {
@@ -1948,6 +2091,19 @@ pub fn spawn_pty_for_session(
 
             // Minimal yield to prevent thread from hogging CPU, but allow fast data flow
             std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+
+        // Final flush of any remaining buffered text on PTY close
+        if !log_text_buf.is_empty() {
+            if let Some(ref mut log) = logger {
+                let _ = log.log_pty_output(
+                    &session_id_clone,
+                    bead_id_for_log.as_deref(),
+                    &persona_for_log,
+                    &backend_name_for_log,
+                    &log_text_buf,
+                );
+            }
         }
 
         eprintln!("PTY stream ended for session: {}", session_id_clone);

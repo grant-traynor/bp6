@@ -17,7 +17,7 @@ import {
 import { listen } from '@tauri-apps/api/event';
 
 interface Message {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'terminal';
   content: string;
   toolUse?: ToolUseData;
 }
@@ -213,7 +213,7 @@ export function useAgentSession({
         if (targetBeadId !== undefined) {
           const history = await loadSessionHistory(sessionIdOverride, targetBeadId || null);
           const historyMessages: Message[] = history.map(m => ({
-            role: m.role as 'user' | 'assistant',
+            role: m.role as 'user' | 'assistant' | 'terminal',
             content: m.content
           }));
           setMessages(historyMessages);
@@ -240,7 +240,7 @@ export function useAgentSession({
           const history = await loadSessionHistory(recentSession.sessionId, beadId || null);
           console.log('📜 Loaded history:', history.length, 'messages');
           historyToLoad = history.map(m => ({
-            role: m.role as 'user' | 'assistant',
+            role: m.role as 'user' | 'assistant' | 'terminal',
             content: m.content
           }));
           setMessages(historyToLoad);
@@ -273,7 +273,7 @@ export function useAgentSession({
         if (historyToLoad.length === 0 && beadId) {
           const history = await loadSessionHistory(newSessionId, beadId);
           const historyMessages: Message[] = history.map(m => ({
-            role: m.role as 'user' | 'assistant',
+            role: m.role as 'user' | 'assistant' | 'terminal',
             content: m.content
           }));
           setMessages(historyMessages);
@@ -384,7 +384,7 @@ export function useAgentSession({
       if (targetBeadId) {
         const history = await loadSessionHistory(targetSessionId, targetBeadId);
         const historyMessages: Message[] = history.map(m => ({
-          role: m.role as 'user' | 'assistant',
+          role: m.role as 'user' | 'assistant' | 'terminal',
           content: m.content
         }));
         setMessages(historyMessages);
