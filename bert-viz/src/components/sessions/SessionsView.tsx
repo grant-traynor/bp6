@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ChevronDown, ChevronRight, FolderOpen, MessageSquare, Activity } from "lucide-react";
+import { ChevronDown, ChevronRight, FolderOpen, MessageSquare, Activity, Square } from "lucide-react";
 import { SessionInfo, PERSONA_ICONS } from "../../api";
 import { cn } from "../../utils";
 
@@ -7,6 +7,7 @@ interface SessionsViewProps {
   sessions: SessionInfo[];
   currentProjectPath: string;
   onSessionClick: (sessionId: string) => void;
+  onTerminate: (sessionId: string) => void;
 }
 
 interface ProjectGroup {
@@ -58,62 +59,77 @@ function StatusBadge({ status }: { status: string }) {
 function SessionRow({
   session,
   onClick,
+  onTerminate,
 }: {
   session: SessionInfo;
   onClick: () => void;
+  onTerminate: () => void;
 }) {
   const icon = getPersonaIcon(session.persona, session.role);
   const abbrevId = abbreviateSessionId(session.sessionId);
 
   return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--background-tertiary)] transition-colors border-b border-[var(--border-primary)]/40 last:border-b-0 group"
-    >
-      {/* Persona icon */}
-      <span className="text-lg leading-none flex-shrink-0 w-6 text-center" aria-label={session.persona}>
-        {icon}
-      </span>
-
-      {/* Session info */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-mono text-xs font-bold text-[var(--text-primary)] group-hover:text-[var(--accent-primary)] transition-colors">
-            {abbrevId}
-          </span>
-          {session.beadId && (
-            <span className="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--background-tertiary)] px-1.5 py-0.5 rounded-md border border-[var(--border-primary)]/60">
-              {session.beadId}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--text-muted)]">
-          <span className="capitalize">{session.role ?? session.persona}</span>
-          {session.task && (
-            <span className="text-[var(--text-muted)]/60">· {session.task}</span>
-          )}
-        </div>
-      </div>
-
-      {/* Right side: status + message count */}
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <StatusBadge status={session.status} />
-        <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
-          <MessageSquare size={10} strokeWidth={2.5} />
-          {session.messageCount}
+    <div className="flex items-center border-b border-[var(--border-primary)]/40 last:border-b-0 group">
+      <button
+        onClick={onClick}
+        className="flex-1 flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--background-tertiary)] transition-colors"
+      >
+        {/* Persona icon */}
+        <span className="text-lg leading-none flex-shrink-0 w-6 text-center" aria-label={session.persona}>
+          {icon}
         </span>
-      </div>
-    </button>
+
+        {/* Session info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-mono text-xs font-bold text-[var(--text-primary)] group-hover:text-[var(--accent-primary)] transition-colors">
+              {abbrevId}
+            </span>
+            {session.beadId && (
+              <span className="font-mono text-[10px] text-[var(--text-muted)] bg-[var(--background-tertiary)] px-1.5 py-0.5 rounded-md border border-[var(--border-primary)]/60">
+                {session.beadId}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--text-muted)]">
+            <span className="capitalize">{session.role ?? session.persona}</span>
+            {session.task && (
+              <span className="text-[var(--text-muted)]/60">· {session.task}</span>
+            )}
+          </div>
+        </div>
+
+        {/* Status + message count */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <StatusBadge status={session.status} />
+          <span className="flex items-center gap-1 text-[10px] text-[var(--text-muted)]">
+            <MessageSquare size={10} strokeWidth={2.5} />
+            {session.messageCount}
+          </span>
+        </div>
+      </button>
+
+      {/* Terminate button — visible on hover */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onTerminate(); }}
+        className="flex-shrink-0 p-2 mr-2 text-[var(--text-muted)] hover:text-rose-500 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+        title="Terminate session"
+      >
+        <Square size={13} strokeWidth={2.5} fill="currentColor" />
+      </button>
+    </div>
   );
 }
 
 function ProjectGroupSection({
   group,
   onSessionClick,
+  onTerminate,
   defaultOpen,
 }: {
   group: ProjectGroup;
   onSessionClick: (sessionId: string) => void;
+  onTerminate: (sessionId: string) => void;
   defaultOpen: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -169,6 +185,7 @@ function ProjectGroupSection({
               key={session.sessionId}
               session={session}
               onClick={() => onSessionClick(session.sessionId)}
+              onTerminate={() => onTerminate(session.sessionId)}
             />
           ))}
         </div>
@@ -181,12 +198,13 @@ export function SessionsView({
   sessions,
   currentProjectPath,
   onSessionClick,
+  onTerminate,
 }: SessionsViewProps) {
   const groups = useMemo<ProjectGroup[]>(() => {
     const map = new Map<string, SessionInfo[]>();
 
     for (const session of sessions) {
-      const key = session.projectPath || "";
+      const key = (session as SessionInfo & { projectPath?: string }).projectPath || "";
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(session);
     }
@@ -269,6 +287,7 @@ export function SessionsView({
               key={group.projectPath || "__unknown__"}
               group={group}
               onSessionClick={onSessionClick}
+              onTerminate={onTerminate}
               defaultOpen={idx === 0 || group.isCurrent}
             />
           ))

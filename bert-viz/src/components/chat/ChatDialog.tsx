@@ -3,7 +3,7 @@ import { Terminal, MessageSquare, Trash2, X, Square, Hand, ChevronDown, Pin, Pin
 import { MessageBubble } from './MessageBubble';
 import { useAgentSession } from '../../hooks/useAgentSession';
 import { useDraggable } from '../../hooks/useDraggable';
-import { approveSuggestion, CliBackend, handoverToInteractive, PERSONA_ICONS, toggleWindowAlwaysOnTop } from '../../api';
+import { approveSuggestion, CliBackend, handoverToInteractive, PERSONA_ICONS, toggleWindowAlwaysOnTop, terminateSession } from '../../api';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
@@ -204,12 +204,16 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
     setInput(command);
   }, []);
 
-  const handleClearChat = useCallback(() => {
-    // Note: This only clears the UI, not the actual session history
-    // The original implementation had setDebugLogs([]) and setMessages([])
-    // but those are managed by the hook now
-    console.log('Clear chat requested - consider adding this to useAgentSession hook');
-  }, []);
+  const handleTerminate = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await terminateSession(sessionId);
+      // terminate_session closes the window on the Rust side; call onClose for non-window dialogs
+      onClose();
+    } catch (error) {
+      console.error('Failed to terminate session:', error);
+    }
+  }, [sessionId, onClose]);
 
 
   const handleToggleAlwaysOnTop = useCallback(async () => {
@@ -339,9 +343,9 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
             <Terminal size={16} strokeWidth={2.5} />
           </button>
           <button
-            onClick={handleClearChat}
-            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-xl transition-all active:scale-90"
-            title="Clear Chat"
+            onClick={handleTerminate}
+            className="p-1.5 text-[var(--text-muted)] hover:text-rose-500 rounded-xl transition-all active:scale-90"
+            title="Terminate Session"
           >
             <Trash2 size={16} strokeWidth={2.5} />
           </button>

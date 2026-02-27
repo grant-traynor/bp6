@@ -2379,19 +2379,8 @@ pub fn run() {
                 let app_handle = window.app_handle();
                 if let Some(registry) = app_handle.try_state::<window::WindowRegistry>() {
                     if let Some(session_id) = registry.unregister_by_window(window_label) {
-                        eprintln!("  ✅ Unregistered window for session: {}", session_id);
-
-                        // Clean up any live PTY so the next spawn_pty_for_session succeeds
-                        if let Some(agent_state) = app_handle.try_state::<agent::AgentState>() {
-                            let pty_id = {
-                                let mut sessions = agent_state.sessions.lock().unwrap();
-                                sessions.get_mut(&session_id).and_then(|s| s.pty_session_id.take())
-                            };
-                            if let Some(pty_id) = pty_id {
-                                eprintln!("  🗑️  Cleaning up PTY on window close: {}", pty_id);
-                                let _ = agent_state.pty_manager.kill(&pty_id);
-                            }
-                        }
+                        // PTY and chat processes keep running in the background.
+                        // Use terminate_session (trash icon / Sessions view) to stop them explicitly.
 
                         // Emit window-closed event for UI sync
                         let _ = app_handle.emit(

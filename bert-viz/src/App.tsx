@@ -28,6 +28,7 @@ import {
   fetchBeads,
   killProjectShell,
   onProjectShellExited,
+  terminateSession,
 } from "./api";
 import { getCurrentWindow, PhysicalPosition, PhysicalSize, currentMonitor } from '@tauri-apps/api/window';
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
@@ -1314,6 +1315,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
             sessions={sessions}
             currentProjectPath={currentProjectPath}
             onSessionClick={createSessionWindow}
+            onTerminate={(id) => terminateSession(id).catch(console.error)}
           />
         ) : (
           <div className="flex-1 flex overflow-hidden">
