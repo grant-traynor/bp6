@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "../../utils";
 import type { BeadNode, SessionInfo } from "../../api";
@@ -15,7 +16,7 @@ interface WBSTreeItemProps {
   onSessionClick?: (sessionId: string) => void;
 }
 
-export const WBSTreeItem = ({
+export const WBSTreeItem = memo(function WBSTreeItem({
   node,
   depth = 0,
   onToggle,
@@ -24,7 +25,7 @@ export const WBSTreeItem = ({
   sessions = [],
   onStartSession,
   onSessionClick
-}: WBSTreeItemProps) => {
+}: WBSTreeItemProps) {
   const hasChildren = node.children.length > 0;
 
   const handleContextMenu = (e: React.MouseEvent) => {
@@ -131,9 +132,9 @@ export const WBSTreeItem = ({
       </div>
     </div>
   );
-};
+});
 
-export const WBSTreeList = ({
+export const WBSTreeList = memo(function WBSTreeList({
   nodes,
   depth = 0,
   onToggle,
@@ -151,7 +152,7 @@ export const WBSTreeList = ({
   sessionsByBead?: Record<string, SessionInfo[]>,
   onStartSession?: (beadId: string, persona: string) => void,
   onSessionClick?: (sessionId: string) => void,
-}) => {
+}) {
   return (
     <>
       {nodes.map(node => (
@@ -182,4 +183,4 @@ export const WBSTreeList = ({
       ))}
     </>
   );
-};
+});

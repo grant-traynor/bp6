@@ -680,6 +680,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       row: number;
       depth: number;
       isCritical: boolean;
+      isBlocked: boolean;
     }> = [];
     const rowDepths: number[] = [];
     const idToItem = new Map<string, { x: number; width: number; row: number }>();
@@ -694,11 +695,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
         const x = node.cellOffset * cellSize;
         const width = node.cellCount * cellSize;
 
-        // Debug: log first few items to see values
-        if (rowIndex < 3) {
-          console.log(`Bead ${node.id}: cellOffset=${node.cellOffset}, cellCount=${node.cellCount}, x=${x}px, width=${width}px`);
-        }
-
         const item = {
           bead: node,
           x,
@@ -706,6 +702,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
           row: rowIndex,
           depth,
           isCritical: node.isCritical,
+          isBlocked: node.isBlocked,
         };
         items.push(item);
         idToItem.set(node.id, { x, width, row: rowIndex });
@@ -738,11 +735,6 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
       // So we draw: B → item (from blocker to blocked)
       const blocksDeps = item.bead.dependencies?.filter((d: any) => d.type === 'blocks') || [];
 
-      // Debug: log dependencies for first few items
-      if (item.row < 3 && item.bead.dependencies && item.bead.dependencies.length > 0) {
-        console.log(`Dependencies for ${item.bead.id}:`, item.bead.dependencies);
-      }
-
       blocksDeps.forEach((dep: any) => {
         const blocker = idToItem.get(dep.depends_on_id);
         if (blocker) {
@@ -760,26 +752,21 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
               isCritical: items.find(i => i.bead.id === dep.depends_on_id)?.isCritical && item.isCritical || false
             };
           connectors.push(connector);
-
-          // Enhanced debug logging
-          if (connectors.length <= 3) {
-            console.log(`Connector ${connectors.length}:`, {
-              from: dep.depends_on_id,
-              to: item.bead.id,
-              blockerCell: items.find(i => i.bead.id === dep.depends_on_id)?.bead.cellOffset,
-              blockerPixels: blocker.x,
-              blockedCell: item.bead.cellOffset,
-              blockedPixels: item.x,
-              connector
-            });
-          }
         }
       });
     });
 
-    console.log(`Total connectors: ${connectors.length}`);
     return { items, rowCount: rowIndex, rowDepths, connectors };
   }, [viewModel, zoom]);
+
+  const ganttGridColumns = useMemo(() =>
+    Array.from({ length: 50 }).map((_, i) => (
+      <div
+        key={i}
+        className="h-full border-r-2"
+        style={{ width: 100 * zoom, borderColor: 'var(--gantt-gridline)' }}
+      />
+    )), [zoom]);
 
   const toggleNode = useCallback((id: string) => {
     // Find the DOM element for this node to track its position
@@ -1500,13 +1487,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                             />
                           ))}
                           <div className="absolute inset-0 flex">
-                            {Array.from({ length: 50 }).map((_, i) => (
-                              <div
-                                key={i}
-                                className="h-full border-r-2"
-                                style={{ width: 100 * zoom, borderColor: 'var(--gantt-gridline)' }}
-                              />
-                            ))}
+                            {ganttGridColumns}
                           </div>
                         </div>
                         {/* Dependency connectors */}
@@ -1541,15 +1522,7 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
                         {ganttLayout.items.map((item) => (
                           <div key={item.bead.id} style={{ position: 'absolute', top: item.row * ROW_HEIGHT, height: ROW_HEIGHT, left: 0, right: 0 }}>
                             <GanttBar
-                              item={{
-                                bead: item.bead,
-                                x: item.x,
-                                width: item.width,
-                                row: item.row,
-                                depth: item.depth,
-                                isCritical: item.isCritical,
-                                isBlocked: item.bead.isBlocked,
-                              }}
+                              item={item}
                               onClick={handleBeadClick}
                               isSelected={selectedBead?.id === item.bead.id}
                             />

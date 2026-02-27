@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Flame } from "lucide-react";
 import { cn } from "../../utils";
 import type { BeadNode, GanttItem } from "../../api";
@@ -8,7 +9,7 @@ interface GanttBarProps {
   isSelected?: boolean;
 }
 
-export const GanttBar = ({ item, onClick, isSelected }: GanttBarProps) => {
+export const GanttBar = memo(function GanttBar({ item, onClick, isSelected }: GanttBarProps) {
   const { bead, isCritical, isBlocked, x, width } = item;
   const isSummary = bead.issueType === 'epic' || bead.issueType === 'feature';
   const isMilestone = bead.estimate === 0 && !isSummary;
@@ -79,4 +80,4 @@ export const GanttBar = ({ item, onClick, isSelected }: GanttBarProps) => {
       </div>
     </div>
   );
-};
+});
