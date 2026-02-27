@@ -9,6 +9,18 @@ import { Markdown } from "./Markdown";
 
 const PRIORITY_LABELS = ["P0 — Critical", "P1 — High", "P2 — Medium", "P3 — Low", "P4 — Backlog"];
 
+const HEADER_H = 56;   // min px of header that must stay on-screen vertically
+const MIN_VISIBLE = 80; // min px that must stay on-screen horizontally
+
+function clampPos(x: number, y: number, w: number): { x: number; y: number } {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  return {
+    x: Math.max(MIN_VISIBLE - w, Math.min(x, vw - MIN_VISIBLE)),
+    y: Math.max(0, Math.min(y, vh - HEADER_H)),
+  };
+}
+
 // ─── bead → markdown (mirrors Rust Bead::to_markdown) ─────────────────────────
 function beadToMarkdown(bead: BeadNode): string {
   const priorityLabel = PRIORITY_LABELS[bead.priority] ?? "Unknown";
@@ -116,8 +128,9 @@ export const BeadDetailModal = ({
         try {
           const parsed = JSON.parse(saved);
           if (parsed.pos) {
-            setPos(parsed.pos);
+            const w = parsed.size?.width ?? Math.round(window.innerWidth * 0.4);
             if (parsed.size) setSize(parsed.size);
+            setPos(clampPos(parsed.pos.x, parsed.pos.y, w));
             restored = true;
           }
         } catch { /* fall through to default */ }
@@ -199,13 +212,15 @@ export const BeadDetailModal = ({
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!dragging.current) return;
-      setPos({ x: e.clientX - dragOffset.current.x, y: e.clientY - dragOffset.current.y });
+      const rawX = e.clientX - dragOffset.current.x;
+      const rawY = e.clientY - dragOffset.current.y;
+      setPos(clampPos(rawX, rawY, size.width));
     };
     const onUp = () => { dragging.current = false; };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
-  }, []);
+  }, [size.width]);
 
   if (!open) return null;
   if (!bead && !isCreating) return null;
