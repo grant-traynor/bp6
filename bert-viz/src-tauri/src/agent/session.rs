@@ -1973,15 +1973,24 @@ pub fn spawn_pty_for_session(
         .clone()
         .ok_or_else(|| "Session has no CLI session ID for resume".to_string())?;
 
+    // Use the session's stored project_path so that switching projects doesn't cause
+    // the PTY to launch in the wrong directory. find_repo_root() walks from the process
+    // cwd which changes when the user opens a different project.
+    let session_project_path = session.project_path.clone();
+
     // Get backend plugin
     let backend = state
         .backend_registry
         .get(backend_id)
         .ok_or_else(|| format!("Backend {:?} not registered", backend_id))?;
 
-    // Get repo root for working directory
-    let repo_root = crate::bd::find_repo_root()
-        .ok_or_else(|| "Could not locate project root (.beads directory)".to_string())?;
+    // Use session's own project path; fall back to find_repo_root only if unset.
+    let repo_root: std::path::PathBuf = if !session_project_path.is_empty() {
+        std::path::PathBuf::from(&session_project_path)
+    } else {
+        crate::bd::find_repo_root()
+            .ok_or_else(|| "Could not locate project root (.beads directory)".to_string())?
+    };
 
     // Generate PTY session ID
     let pty_session_id = format!("pty-{}", sessionId);
