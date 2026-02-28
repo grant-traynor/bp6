@@ -40,11 +40,11 @@ git diff main...HEAD -- supabase/migrations/*.sql | grep "^--- a/supabase/migrat
 - ❌ Migrations out of sequential order
 
 ### 2. Standards Compliance Checklist
-**Security**: RLS enabled, policies complete, SECURITY DEFINER with search_path
+**Security**: RLS enabled, policies complete, ALL public functions have `SET search_path = public`, extensions use `WITH SCHEMA extensions`
 **Naming**: p_ prefix (params), v_ prefix (vars), table aliases
 **Types**: RETURNS TABLE(...), constraints, foreign keys
 **Defensive**: COALESCE for JSON, NULL safety, edge cases handled
-**Performance**: Indexes on FKs and queried columns
+**Performance**: Indexes on FKs and queried columns, RLS policies use `(SELECT auth.uid())` not direct `auth.uid()`
 **Migration**: Created with `supabase migration new`, properly ordered
 
 ### 3. Report Findings
@@ -54,4 +54,4 @@ Create bug beads for violations (safety violations = P0 critical), approve if cl
 - [ ] All standards checked, findings reported, task closed
 
 ## CRITICAL MISTAKES
-❌ Missing RLS | ❌ No p_ prefix | ❌ Missing SECURITY DEFINER or search_path
+❌ Missing RLS | ❌ No p_ prefix | ❌ Missing `SET search_path = public` on any public function | ❌ Extension in public schema | ❌ Direct `auth.uid()` in RLS policy (not wrapped in SELECT)

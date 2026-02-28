@@ -101,21 +101,34 @@ grep -r "CREATE OR REPLACE FUNCTION" supabase/migrations/
 - Show correct pattern with example
 
 **"How do I write a secure RPC function?"**
+
+`SET search_path = public` is required on ALL public schema functions — not just SECURITY DEFINER. Supabase flags any function without it.
+
 ```sql
-CREATE OR REPLACE FUNCTION rpc_example(p_user_id UUID)
+-- SECURITY DEFINER function
+CREATE OR REPLACE FUNCTION public.rpc_example(p_user_id UUID)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  -- Validate inputs
   IF p_user_id IS NULL THEN
     RAISE EXCEPTION 'p_user_id cannot be NULL';
   END IF;
-
-  -- Return safely
   RETURN COALESCE((SELECT jsonb_build_object(...)), '{}'::jsonb);
+END;
+$$;
+
+-- Plain trigger/utility function — still needs SET search_path
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
 END;
 $$;
 ```
@@ -124,7 +137,25 @@ $$;
 - Analyze data access patterns (who can see/edit what?)
 - Design policies for each operation (SELECT/INSERT/UPDATE/DELETE)
 - Consider role-based access (authenticated, service_role)
-- Balance security and performance
+- **Always wrap auth calls in a subquery** — `(SELECT auth.uid())` not `auth.uid()` directly (prevents per-row re-evaluation)
+
+```sql
+-- ✅ CORRECT: evaluated once as a plan constant
+USING ((SELECT auth.uid()) = user_id)
+
+-- ❌ WRONG: re-evaluated per row — severe performance hit at scale
+USING (auth.uid() = user_id)
+```
+
+**"How do I install an extension?"**
+- Always specify `WITH SCHEMA extensions` to keep `public` clean
+```sql
+-- ✅ CORRECT
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+
+-- ❌ WRONG: defaults to public, exposes functions to all users
+CREATE EXTENSION IF NOT EXISTS pg_net;
+```
 
 **"How do I handle JSON in PostgreSQL?"**
 - Use `COALESCE` for safe key access: `COALESCE(data->>'key', 'default')`

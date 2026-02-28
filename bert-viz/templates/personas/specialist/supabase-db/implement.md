@@ -168,7 +168,7 @@ ALTER TABLE workspace_members ENABLE ROW LEVEL SECURITY;
 -- Create RLS policies
 CREATE POLICY "Users can view their own workspace memberships"
   ON workspace_members FOR SELECT
-  USING (auth.uid() = user_id);
+  USING ((SELECT auth.uid()) = user_id);
 
 CREATE POLICY "Workspace owners can manage members"
   ON workspace_members FOR ALL
@@ -176,7 +176,7 @@ CREATE POLICY "Workspace owners can manage members"
     EXISTS (
       SELECT 1 FROM workspace_members wm
       WHERE wm.workspace_id = workspace_members.workspace_id
-        AND wm.user_id = auth.uid()
+        AND wm.user_id = (SELECT auth.uid())
         AND wm.role = 'owner'
     )
   );
@@ -227,9 +227,11 @@ $$;
 Before finalizing, verify:
 - [ ] All new tables have RLS enabled
 - [ ] All RLS policies are appropriate and complete
+- [ ] All RLS policies use `(SELECT auth.uid())` form, not direct `auth.uid()` call
 - [ ] All RPC parameters use `p_` prefix
 - [ ] All local variables use `v_` prefix
-- [ ] All SECURITY DEFINER functions have `SET search_path`
+- [ ] ALL public schema functions have `SET search_path = public` (not just SECURITY DEFINER)
+- [ ] Extensions installed `WITH SCHEMA extensions` (not `public`)
 - [ ] All foreign keys have indexes
 - [ ] All frequently queried columns have indexes
 - [ ] All functions use `RETURNS TABLE(...)` not `SETOF record`
@@ -457,6 +459,76 @@ touch supabase/migrations/$(date -u +"%Y%m%d%H%M%S")_add_user_columns.sql
 ```
 
 **Why**: Migrations are immutable once created. Changes require new migrations, not edits to existing ones.
+
+---
+
+### ❌ Mistake #6: Missing search_path on Non-SECURITY DEFINER Functions
+
+**WRONG**:
+```sql
+-- Trigger function without SET search_path — Supabase will flag this
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+```
+
+**CORRECT**:
+```sql
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+```
+
+**Why**: ALL public schema functions require `SET search_path = public`, not just SECURITY DEFINER. Supabase flags any function with a mutable search_path regardless of security mode.
+
+---
+
+### ❌ Mistake #7: Installing Extension in public Schema
+
+**WRONG**:
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_net;  -- defaults to public schema
+```
+
+**CORRECT**:
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_net WITH SCHEMA extensions;
+```
+
+**Why**: Extensions in `public` expose their functions to all authenticated users. Use the dedicated `extensions` schema.
+
+---
+
+### ❌ Mistake #8: Direct auth.uid() Call in RLS Policy
+
+**WRONG**:
+```sql
+CREATE POLICY "Users can view own data"
+  ON my_table FOR SELECT
+  USING (auth.uid() = user_id);  -- re-evaluated per row
+```
+
+**CORRECT**:
+```sql
+CREATE POLICY "Users can view own data"
+  ON my_table FOR SELECT
+  USING ((SELECT auth.uid()) = user_id);  -- evaluated once as initplan
+```
+
+**Why**: `auth.uid()` is a volatile function. Without the subquery wrapper, PostgreSQL re-evaluates it for every row scanned, causing severe performance degradation at scale.
 
 ---
 
