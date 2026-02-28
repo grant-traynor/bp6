@@ -1,64 +1,27 @@
-import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from "react";
-import { Star, ChevronsDown, ChevronsUp, ArrowUp, ArrowDown, Info } from "lucide-react";
-import { cn } from "./utils";
-import {
-  fetchProjectViewModel,
-  updateBead,
-  createBead,
-  closeBead,
-  reopenBead,
-  claimBead,
-  beadNodeToBead,
-  type BeadNode,
-  type Project,
-  type ProjectViewModel,
-  fetchProjects,
-  removeProject,
-  openProject,
-  toggleFavoriteProject,
-  getCliPreference,
-  type CliBackend,
-  startAgentSession,
-  createSessionWindow,
-  onBeadsUpdated,
-  onProjectsUpdated,
-  saveWindowState,
-  loadStartupState,
-  saveStartupState,
-  fetchBeads,
-  killProjectShell,
-  onProjectShellExited,
-  terminateSession,
-} from "./api";
-import { getCurrentWindow, PhysicalPosition, PhysicalSize, currentMonitor } from '@tauri-apps/api/window';
+import { useEffect, useRef, useMemo } from "react";
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
-import './stores/sessionStoreDiagnostics'; // Enable diagnostics
+import "./stores/sessionStoreDiagnostics"; // Enable diagnostics
 
-// Components
-import { Navigation, ViewType } from "./components/layout/Navigation";
-import { Header } from "./components/layout/Header";
-import { BeadDetailModal } from "./components/shared/BeadDetailModal";
-import { WBSTreeList } from "./components/wbs/WBSTreeItem";
-import { GanttBar } from "./components/gantt/GanttBar";
-import { GanttStateHeader } from "./components/gantt/GanttStateHeader";
-import { WBSSkeleton, GanttSkeleton } from "./components/shared/Skeleton";
-import { ResizeHandle } from "./components/shared/ResizeHandle";
-import ChatDialog from "./components/chat/ChatDialog";
-import { ListView } from "./components/list/ListView";
-import { PalettePreviewDialog } from "./components/palette/PalettePreviewDialog";
-import SettingsView from "./components/settings/SettingsView";
-import { Terminal } from "./components/terminal/Terminal";
-import { SessionsView } from "./components/sessions/SessionsView";
+// Hooks
+import { useAppInitialization } from "./hooks/useAppInitialization";
+import { useProjectState } from "./hooks/useProjectState";
+import { useFilterState } from "./hooks/useFilterState";
+import { useGanttTree } from "./hooks/useGanttTree";
+import { useGanttLayout } from "./hooks/useGanttLayout";
+import { useBeadEditing } from "./hooks/useBeadEditing";
+import { useChatSessions } from "./hooks/useChatSessions";
+import { usePersistentUI } from "./hooks/usePersistentUI";
+import { useScrollSync } from "./hooks/useScrollSync";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
-// Time-based filter options for closed tasks
-type ClosedTimeFilter =
-  | 'all'           // Show all closed tasks
-  | '1h'            // Closed within last hour
-  | '6h'            // Closed within last 6 hours
-  | '24h'           // Closed within last 24 hours
-  | '7d'            // Closed within last 7 days
-  | '30d'           // Closed within last 30 days
-  | 'older_than_6h'; // Closed more than 6 hours ago
+// Views
+import { SessionWindowView } from "./views/SessionWindowView";
+import { MainAppView } from "./views/MainAppView";
+
+// Context providers (optional wrapping — no component uses them yet)
+import { ProjectProvider } from "./contexts/ProjectContext";
+import { BeadProvider } from "./contexts/BeadContext";
+import { UIProvider } from "./contexts/UIContext";
 
 interface AppProps {
   isSessionWindow?: boolean;
@@ -66,121 +29,27 @@ interface AppProps {
   windowLabel?: string;
 }
 
-function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }: AppProps = {}) {
-  // Unified View Model State (replaces beads + processedData)
-  const [viewModel, setViewModel] = useState<ProjectViewModel | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [currentProjectPath, setCurrentProjectPath] = useState<string>("");
-  const [hasProject, setHasProject] = useState(false);
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem("collapsedIds");
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
-  const [loading, setLoading] = useState(true);
-  const [selectedBead, setSelectedBead] = useState<BeadNode | null>(null);
-
-  const [isCreating, setIsCreating] = useState(false);
-  const [editForm, setEditForm] = useState<Partial<BeadNode>>({});
-  const [filterText, setFilterText] = useState("");
-  const [hideClosed, setHideClosed] = useState(false);
-  const [closedTimeFilter, setClosedTimeFilter] = useState<ClosedTimeFilter>(() => {
-    const saved = localStorage.getItem("closedTimeFilter");
-    return (saved as ClosedTimeFilter) || 'all';
-  });
-  const [includeHierarchy, setIncludeHierarchy] = useState(true);
-  const [zoom, setZoom] = useState(1);
-  const [isDark, setIsDark] = useState<boolean>(() => {
-    if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem('theme');
-      if (stored === 'dark') return true;
-      if (stored === 'light') return false;
-    }
-    return true;
-  });
-  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [refetchTrigger, setRefetchTrigger] = useState(0);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const [showPalettePreview, setShowPalettePreview] = useState(false);
-
-  // Agent Session State (from Zustand store - single source of truth)
-  const sessions = useSessionStore(state => state.sessions);
-  const sessionsByBead = useMemo(() => groupSessionsByBead(sessions), [sessions]);
-
-  // Drop cached session id if backend no longer has it
-  // Chat session persistence (one chat session per window)
-  const [chatSessionMap, setChatSessionMap] = useState<Record<string, string>>(() => {
-    if (typeof localStorage === 'undefined') return {};
-    try {
-      return JSON.parse(localStorage.getItem('chatSessionMap') || '{}');
-    } catch {
-      return {};
-    }
-  });
-
-  const [sessionMetaIndex, setSessionMetaIndex] = useState<Record<string, { persona: string; task?: string | null; beadId?: string | null; beadTitle?: string | null; beadDescription?: string | null; backendId?: CliBackend; role?: string | null; projectPath?: string | null }>>(() => {
-    if (typeof localStorage === 'undefined') return {};
-    try {
-      return JSON.parse(localStorage.getItem('chatSessionMeta') || '{}');
-    } catch {
-      return {};
-    }
-  });
-
-  useEffect(() => {
-    const activeIds = new Set(sessions.map(s => s.sessionId));
-    setChatSessionMap(prev => {
-      const next = { ...prev };
-      let changed = false;
-      Object.entries(prev).forEach(([key, sid]) => {
-        if (!activeIds.has(sid)) {
-          delete next[key];
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-
-    setSessionMetaIndex(prev => {
-      const next = { ...prev };
-      let changed = false;
-      Object.keys(prev).forEach((sid) => {
-        if (!activeIds.has(sid)) {
-          delete next[sid];
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-  }, [sessions]);
-
-  // CLI preference state
-  const [currentCli, setCurrentCli] = useState<CliBackend>("gemini");
-  const [view, setView] = useState<ViewType>('gantt');
-  const [projectShellKey, setProjectShellKey] = useState(0);
-  // Prevents fetchProjectViewModel from firing before initialization is complete.
-  // Every setState during startup (filters, sort, zoom, collapsedIds, etc.) would
-  // otherwise trigger a separate 450ms file read. isReady becomes true exactly once,
-  // after init() completes, triggering a single fetch with the correct final state.
-  const [isReady, setIsReady] = useState(false);
-
-  const scrollRefWBS = useRef<HTMLDivElement>(null);
-  const scrollRefBERT = useRef<HTMLDivElement>(null);
-  const scrollRefGanttHeader = useRef<HTMLDivElement>(null);
-  const activeScrollSource = useRef<HTMLDivElement | null>(null);
-  const hasInitialized = useRef(false);
-  const isInitializing = useRef(true);
-  const lastToggledNode = useRef<{ id: string; offsetTop: number } | null>(null);
-
-  // Ensure session windows initialize the session store even though they short-circuit
+function App({
+  isSessionWindow = false,
+  sessionId = null,
+  windowLabel: _windowLabel = "main",
+}: AppProps = {}) {
+  // -------------------------------------------------------------------
+  // Session window: initialize store then render SessionWindowView
+  // -------------------------------------------------------------------
   useEffect(() => {
     if (!isSessionWindow) return;
 
     let cleanupFn: (() => void) | undefined;
-    useSessionStore.getState().initializeStore()
-      .then(unlisten => {
+    useSessionStore
+      .getState()
+      .initializeStore()
+      .then((unlisten) => {
         cleanupFn = unlisten;
       })
-      .catch(err => console.error('Failed to init session store in session window:', err));
+      .catch((err) =>
+        console.error("Failed to init session store in session window:", err)
+      );
 
     return () => {
       cleanupFn?.();
@@ -188,1388 +57,377 @@ function App({ isSessionWindow = false, sessionId = null, windowLabel = "main" }
     };
   }, [isSessionWindow]);
 
-  // Early return for session windows - render only ChatDialog
-  // Note: Full session connection implementation is in bp6-643.005.4
-  if (isSessionWindow && sessionId) {
-    console.log('📱 Session window mode:', { sessionId, windowLabel });
-
-    const sessionMeta = sessions.find(s => s.sessionId === sessionId);
-    const sessionPersona = sessionMeta?.persona || sessionMetaIndex[sessionId]?.persona || 'product-manager';
-    const sessionRole = sessionMeta?.role || sessionMetaIndex[sessionId]?.role || null;
-    const sessionBeadId = sessionMeta?.beadId || sessionMetaIndex[sessionId]?.beadId || null;
-    const sessionBackendId = (sessionMeta?.backendId as CliBackend) || sessionMetaIndex[sessionId]?.backendId || 'gemini';
-    const sessionTask = sessionMeta?.task || sessionMetaIndex[sessionId]?.task || 'chat';
-    const sessionBeadTitle = sessionMetaIndex[sessionId]?.beadTitle || null;
-    const sessionBeadDescription = sessionMetaIndex[sessionId]?.beadDescription ?? null;
-
-    useEffect(() => {
-      if (!sessionBeadId || (sessionBeadTitle && sessionBeadDescription !== undefined)) return;
-      fetchBeads()
-        .then(all => {
-          const bead = all.find(b => b.id === sessionBeadId);
-          if (bead?.title) {
-            setSessionMetaIndex(prev => ({
-              ...prev,
-              [sessionId]: {
-                persona: sessionPersona,
-                task: sessionTask,
-                beadId: sessionBeadId,
-                beadTitle: bead.title,
-                beadDescription: bead.description ?? null,
-                backendId: sessionBackendId,
-                role: sessionRole,
-              }
-            }));
-          }
-        })
-        .catch(err => console.error('Failed to fetch beads for title:', err));
-    }, [sessionBeadId, sessionBeadTitle, sessionBeadDescription, sessionId, sessionPersona, sessionTask, sessionBackendId]);
-
-    useEffect(() => {
-      const title = `${sessionBeadId || 'Untracked'} · ${sessionBeadTitle || 'Chat'} · ${sessionPersona}${sessionTask ? ` · ${sessionTask}` : ''} [${sessionBackendId}]`;
-      getCurrentWindow().setTitle(title).catch(err => console.error('Failed to set window title:', err));
-    }, [sessionBeadId, sessionBeadTitle, sessionPersona, sessionTask, sessionBackendId]);
-
-    // Window state persistence hook (bp6-643.005.5)
-    useEffect(() => {
-      const saveCurrentState = async () => {
-        try {
-          const window = getCurrentWindow();
-          const position = await window.outerPosition();
-          const size = await window.outerSize();
-          const isMaximized = await window.isMaximized();
-
-          await saveWindowState(
-            sessionId,
-            position.x,
-            position.y,
-            size.width,
-            size.height,
-            isMaximized
-          );
-        } catch (error) {
-          console.error('Failed to save window state:', error);
-        }
-      };
-
-      // Debounced save - wait 500ms after last event
-      let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-      const debouncedSave = () => {
-        if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(saveCurrentState, 500);
-      };
-
-      // Listen to window resize and move events
-      let unlistenResize: (() => void) | null = null;
-      let unlistenMove: (() => void) | null = null;
-
-      const setupListeners = async () => {
-        const window = getCurrentWindow();
-        unlistenResize = await window.onResized(debouncedSave);
-        unlistenMove = await window.onMoved(debouncedSave);
-      };
-
-      setupListeners();
-
-      // Cleanup: save final state on unmount (window close)
-      return () => {
-        if (saveTimeout) clearTimeout(saveTimeout);
-        if (unlistenResize) unlistenResize();
-        if (unlistenMove) unlistenMove();
-        // Save final state synchronously
-        saveCurrentState();
-      };
-    }, [sessionId]);
-
-    return (
-      <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans">
-        {/* Session window: fullscreen ChatDialog */}
-        {/* TODO (bp6-643.005.4): Connect to existing session instead of creating new */}
-        <ChatDialog
-          isOpen={true}
-          isSessionWindow={true}
-          sessionIdOverride={sessionId}
-          onClose={() => {
-            // Session windows can't be closed from within - only via window close
-            console.log('Session window ChatDialog close requested (no-op)');
-          }}
-          persona={sessionPersona}
-          role={sessionRole}
-          task={sessionTask || `Session window for session ${sessionId}`}
-          beadId={sessionBeadId}
-          beadTitle={sessionBeadTitle}
-          beadDescription={sessionBeadDescription}
-          cliBackend={sessionBackendId}
-        />
-      </div>
-    );
-  }
-
-  const loadProjects = useCallback(async () => {
-    const data = await fetchProjects();
-    setProjects(data);
-  }, []);
-
-  const loadData = useCallback(async (showLoading = false) => {
-    if (showLoading) setLoading(true);
-    try {
-      // Trigger a refetch of the view model
-      setRefetchTrigger(prev => prev + 1);
-    } catch (error) {
-      console.error("Error in loadData:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  const PROJECT_SHELL_ID = "project-shell";
-
-  // Use a ref so the shell-exit listener always sees the current project path
-  // without needing to be re-registered every time the path changes.
-  const currentProjectPathRef = useRef(currentProjectPath);
-  useEffect(() => { currentProjectPathRef.current = currentProjectPath; }, [currentProjectPath]);
-
-  // Listen for the project shell exiting (e.g. user typed `exit` or Ctrl-D).
-  // Remounting the Terminal component (via key increment) will trigger it to
-  // re-spawn the shell at the correct dimensions.
-  useEffect(() => {
-    const unlistenPromise = onProjectShellExited((_sessionId) => {
-      setProjectShellKey(k => k + 1);
-    });
-    return () => { unlistenPromise.then(u => u()); };
-  }, []);
-
-  const handleOpenProject = useCallback(async (path: string) => {
-    try {
-      setLoading(true);
-      await openProject(path);
-
-      // Kill any existing project shell so the Terminal component spawns a fresh one
-      // at the correct dimensions when the user next opens the terminal view.
-      try { await killProjectShell(PROJECT_SHELL_ID); } catch (_) { /* ignore */ }
-      setProjectShellKey(k => k + 1);
-
-      setCurrentProjectPath(path);
-      setHasProject(true);
-
-      // Use startTransition to keep UI responsive during heavy computation
-      startTransition(() => {
-        loadData(false).then(() => {
-          loadProjects();
-          setLoading(false);
-        });
-      });
-    } catch (error) {
-      alert(`Failed to open project: ${error}`);
-      setLoading(false);
-    }
-  }, [loadData, loadProjects]);
-
-  const [processingData, setProcessingData] = useState(false);
-  const [sortBy, setSortBy] = useState<'priority' | 'title' | 'type' | 'id' | 'none'>('none');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc' | 'none'>('none');
-  const [beadDetailOpen, setBeadDetailOpen] = useState(false);
-
-  // WBS Panel resize state (bp6-j33p.5.2)
-  const [panelWidth, setPanelWidth] = useState(300);
-  const MIN_PANEL_WIDTH = 200;
-  const MAX_PANEL_WIDTH = 1200;
-  const ROW_HEIGHT = 40;
-
-  // The view model tree already includes isExpanded and isVisible state from backend
-  // No need for complex frontend processing - just access viewModel.tree directly
-
-  // Fetch view model from Rust backend when filters change
-  useEffect(() => {
-    // Skip all fetches during startup — wait until init() completes so we
-    // don't fire once per setState (filterText, hideClosed, sort, zoom, etc.)
-    if (!isReady) return;
-
-    // Debounce filter text to avoid excessive backend calls while typing
-    const debounceTimeout = setTimeout(() => {
-      const fetchData = async () => {
-        const startTime = performance.now();
-        setProcessingData(true);
-        try {
-          // Use startTransition to maintain UI responsiveness
-          startTransition(() => {
-            fetchProjectViewModel({
-              filter_text: filterText,
-              hide_closed: hideClosed,
-              closed_time_filter: closedTimeFilter,
-              include_hierarchy: includeHierarchy,
-              zoom: zoom,
-              collapsed_ids: Array.from(collapsedIds), // Backend now handles collapsed state
-              sort_by: sortBy,
-              sort_order: sortOrder
-            }).then(data => {
-              const endTime = performance.now();
-              console.log(`⏱️  Frontend: IPC call took ${(endTime - startTime).toFixed(2)}ms`);
-              setViewModel(data);
-              setProcessingData(false);
-              // Refresh sessions after WBS loads to ensure indicators show
-              useSessionStore.getState().refreshSessions();
-            }).catch(error => {
-              console.error("Failed to fetch view model:", error);
-              setProcessingData(false);
-            });
-          });
-        } catch (error) {
-          console.error("Failed to fetch view model:", error);
-          setProcessingData(false);
-        }
-      };
-
-      fetchData();
-    }, 150); // 150ms debounce for filter text changes
-
-    return () => clearTimeout(debounceTimeout);
-  }, [isReady, filterText, zoom, hideClosed, includeHierarchy, closedTimeFilter, collapsedIds, currentProjectPath, refetchTrigger, sortBy, sortOrder]);
-
-  useEffect(() => {
-    // Prevent double initialization (React 19 Strict Mode runs effects twice)
-    if (hasInitialized.current) return;
-    hasInitialized.current = true;
-
-    const init = async () => {
-      try {
-        // Load startup state from ~/.bp6/startup.json (bp6-j33p.2.4)
-        const startupState = await loadStartupState();
-        if (startupState) {
-          console.log('✅ Loaded startup state:', startupState);
-
-          // Restore window state with safety clamps to avoid invalid/offscreen positions
-          const window = getCurrentWindow();
-          const monitor = await currentMonitor().catch(() => null);
-          const minW = 960;
-          const minH = 640;
-
-          const savedW = startupState.window.width;
-          const savedH = startupState.window.height;
-          const savedX = startupState.window.x;
-          const savedY = startupState.window.y;
-
-          const monitorSize = monitor?.size;
-          const monitorPos = (monitor as any)?.position || { x: 0, y: 0 };
-
-          const maxW = monitorSize?.width || savedW || minW;
-          const maxH = monitorSize?.height || savedH || minH;
-
-          const targetW = Math.min(Math.max(savedW || maxW, minW), maxW);
-          const targetH = Math.min(Math.max(savedH || maxH, minH), maxH);
-
-          const maxX = monitorPos.x + (monitorSize?.width ?? targetW) - targetW;
-          const maxY = monitorPos.y + (monitorSize?.height ?? targetH) - targetH;
-
-          const targetX = Math.min(Math.max(savedX ?? monitorPos.x, monitorPos.x), maxX);
-          const targetY = Math.min(Math.max(savedY ?? monitorPos.y, monitorPos.y), maxY);
-
-          if (startupState.window.isMaximized) {
-            await window.maximize();
-          } else {
-            await window.setSize(new PhysicalSize(targetW, targetH));
-            await window.setPosition(new PhysicalPosition(targetX, targetY));
-          }
-
-          // Restore filter state
-          setFilterText(startupState.filters.filterText);
-          setHideClosed(startupState.filters.hideClosed);
-          setClosedTimeFilter(startupState.filters.closedTimeFilter as ClosedTimeFilter);
-          setIncludeHierarchy(startupState.filters.includeHierarchy);
-
-          // Restore sort state
-          setSortBy(startupState.sort.sortBy as any);
-          setSortOrder(startupState.sort.sortOrder as any);
-
-          // Restore UI state
-          setZoom(startupState.ui.zoom);
-          setCollapsedIds(new Set(startupState.ui.collapsedIds));
-          if (startupState.ui.wbsPanelWidth) {
-            setPanelWidth(startupState.ui.wbsPanelWidth);
-          }
-        } else {
-          console.log('📂 No startup state file found, using defaults');
-        }
-
-        // Load projects list from ~/.bp6/projects.json
-        const projs = await fetchProjects();
-        setProjects(projs);
-
-        // Initialize session store (loads sessions and sets up event listener)
-        const sessionUnlisten = await useSessionStore.getState().initializeStore();
-
-        // Auto-open most recent project if it exists
-        const mostRecent = [...projs].sort((a, b) => (b.last_opened || "").localeCompare(a.last_opened || ""))[0];
-        if (mostRecent) {
-          await handleOpenProject(mostRecent.path);
-        } else {
-          // No projects - show welcome screen
-          setHasProject(false);
-        }
-
-        return sessionUnlisten;
-      } catch (error) {
-        console.error("Initialization failed:", error);
-        setHasProject(false);
-      } finally {
-        isInitializing.current = false;
-        setLoading(false);
-        setIsReady(true); // Ungate fetchProjectViewModel — fires exactly once with correct state
-      }
-    };
-
-    console.log('🔧 Setting up event listeners...');
-
-    const unlistenPromises = [
-      onBeadsUpdated(() => {
-        console.log('🎉 beads-updated event received!');
-        loadData();
-        setRefetchTrigger(prev => prev + 1);
-      }),
-      onProjectsUpdated(() => {
-        console.log('🎉 projects-updated event received!');
-        loadProjects();
-      }),
-      init() // Initialize and add session store cleanup to promises
-    ];
-
-    return () => {
-      console.log('🧹 Cleaning up event listeners');
-      unlistenPromises.forEach(async (p) => {
-        try {
-          const unlisten = await p;
-          unlisten?.();
-        } catch (err) {
-          console.error('❌ Failed to unlisten:', err);
-        }
-      });
-      // Cleanup session store
-      useSessionStore.getState().cleanup();
-      // Reset initialization flag for refresh
-      hasInitialized.current = false;
-    };
-  }, [handleOpenProject, loadData, loadProjects]);
-
-  // Load CLI preference on mount
-  useEffect(() => {
-    const loadCliPreference = async () => {
-      try {
-        const preference = await getCliPreference();
-        setCurrentCli(preference as CliBackend);
-      } catch (error) {
-        console.error("Failed to load CLI preference:", error);
-        // Keep default value (gemini) on error
-      }
-    };
-    loadCliPreference();
-  }, []);
-
-  // Persist last chat session id so reopening chat reuses the same session
-  useEffect(() => {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem('chatSessionMap', JSON.stringify(chatSessionMap));
-    localStorage.setItem('chatSessionMeta', JSON.stringify(sessionMetaIndex));
-  }, [chatSessionMap, sessionMetaIndex]);
-
-  // Main window state persistence (bp6-j33p.2.2)
-  // Save window position/size on resize/move with 500ms debounce
-  useEffect(() => {
-    // Only set up for main window (not session windows)
-    if (isSessionWindow) return;
-
-    const saveCurrentWindowState = async () => {
-      if (isInitializing.current) return;
-      try {
-        const window = getCurrentWindow();
-        const position = await window.outerPosition();
-        const size = await window.outerSize();
-        const isMaximized = await window.isMaximized();
-
-        // Reject bogus coordinates (e.g. caught during window transition)
-        if (Math.abs(position.x) > 10000 || Math.abs(position.y) > 10000) {
-          console.warn('Skipping save: suspicious window position', position);
-          return;
-        }
-
-        // Build complete startup state by merging current UI state with new window state
-        const state = {
-          window: {
-            width: size.width,
-            height: size.height,
-            x: position.x,
-            y: position.y,
-            isMaximized
-          },
-          filters: {
-            filterText,
-            hideClosed,
-            closedTimeFilter,
-            includeHierarchy
-          },
-          sort: {
-            sortBy,
-            sortOrder
-          },
-          ui: {
-            zoom,
-            collapsedIds: Array.from(collapsedIds),
-            wbsPanelWidth: panelWidth
-          }
-        };
-
-        await saveStartupState(state);
-      } catch (error) {
-        console.error('Failed to save main window state:', error);
-      }
-    };
-
-    // Debounced save - wait 500ms after last event
-    let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-    const debouncedSave = () => {
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(saveCurrentWindowState, 500);
-    };
-
-    // Listen to window resize and move events
-    let unlistenResize: (() => void) | null = null;
-    let unlistenMove: (() => void) | null = null;
-
-    const setupListeners = async () => {
-      const window = getCurrentWindow();
-      unlistenResize = await window.onResized(debouncedSave);
-      unlistenMove = await window.onMoved(debouncedSave);
-    };
-
-    setupListeners();
-
-    // Cleanup
-    return () => {
-      if (saveTimeout) clearTimeout(saveTimeout);
-      if (unlistenResize) unlistenResize();
-      if (unlistenMove) unlistenMove();
-    };
-  }, [isSessionWindow, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds, panelWidth]);
-
-  // Helper: Flatten tree to array of beads for backward compatibility
-  const flattenTree = useCallback((nodes: BeadNode[]): BeadNode[] => {
-    const result: BeadNode[] = [];
-    const traverse = (nodeList: BeadNode[]) => {
-      nodeList.forEach(node => {
-        result.push(node);
-        if (node.children.length > 0) {
-          traverse(node.children);
-        }
-      });
-    };
-    traverse(nodes);
-    return result;
-  }, []);
-
-  const beads = useMemo(() => viewModel ? flattenTree(viewModel.tree) : [], [viewModel, flattenTree]);
-
-  // Gantt layout: flatten tree to visible nodes with row numbers and pixel positions
-  const ganttLayout = useMemo(() => {
-    if (!viewModel) {
-      return { items: [], rowCount: 0, rowDepths: [], connectors: [] };
-    }
-
-    const items: Array<{
-      bead: BeadNode;
-      x: number;
-      width: number;
-      row: number;
-      depth: number;
-      isCritical: boolean;
-      isBlocked: boolean;
-    }> = [];
-    const rowDepths: number[] = [];
-    const idToItem = new Map<string, { x: number; width: number; row: number }>();
-    let rowIndex = 0;
-
-    // Traverse tree and build visible items with row numbers
-    const traverse = (nodes: BeadNode[], depth: number = 0) => {
-      nodes.forEach(node => {
-        // Convert cell offset/count to pixels
-        // Cell size: 100px at zoom=1
-        const cellSize = 100 * zoom;
-        const x = node.cellOffset * cellSize;
-        const width = node.cellCount * cellSize;
-
-        const item = {
-          bead: node,
-          x,
-          width,
-          row: rowIndex,
-          depth,
-          isCritical: node.isCritical,
-          isBlocked: node.isBlocked,
-        };
-        items.push(item);
-        idToItem.set(node.id, { x, width, row: rowIndex });
-        rowDepths.push(depth);
-        rowIndex++;
-
-        // Recurse to children if node is expanded
-        if (node.isExpanded && node.children.length > 0) {
-          traverse(node.children, depth + 1);
-        }
-      });
-    };
-
-    traverse(viewModel.tree);
-
-    // Build connectors from "blocks" dependencies
-    const connectors: Array<{
-      fromId: string;
-      toId: string;
-      fromX: number;
-      fromY: number;
-      toX: number;
-      toY: number;
-      isCritical: boolean;
-    }> = [];
-
-    items.forEach(item => {
-      // Find "blocks" dependencies (other tasks block this task)
-      // If item has {type: "blocks", depends_on_id: "B"}, it means B blocks item
-      // So we draw: B → item (from blocker to blocked)
-      const blocksDeps = item.bead.dependencies?.filter((d: any) => d.type === 'blocks') || [];
-
-      blocksDeps.forEach((dep: any) => {
-        const blocker = idToItem.get(dep.depends_on_id);
-        if (blocker) {
-          // Account for the 20px left padding (8px + 12px) on bars
-          const CONNECTOR_PADDING = 20;
-
-          // Connector from right edge of BLOCKER to left edge of BLOCKED task
-            const connector = {
-              fromId: dep.depends_on_id,
-              toId: item.bead.id,
-              fromX: blocker.x + blocker.width,      // Right edge of blocker cell
-              fromY: blocker.row * ROW_HEIGHT + ROW_HEIGHT / 2,
-              toX: item.x + CONNECTOR_PADDING,       // Left edge of blocked bar (after padding)
-              toY: item.row * ROW_HEIGHT + ROW_HEIGHT / 2,
-              isCritical: items.find(i => i.bead.id === dep.depends_on_id)?.isCritical && item.isCritical || false
-            };
-          connectors.push(connector);
-        }
-      });
-    });
-
-    return { items, rowCount: rowIndex, rowDepths, connectors };
-  }, [viewModel, zoom]);
-
-  const ganttGridColumns = useMemo(() =>
-    Array.from({ length: 50 }).map((_, i) => (
-      <div
-        key={i}
-        className="h-full border-r-2"
-        style={{ width: 100 * zoom, borderColor: 'var(--gantt-gridline)' }}
-      />
-    )), [zoom]);
-
-  const toggleNode = useCallback((id: string) => {
-    // Find the DOM element for this node to track its position
-    const element = document.querySelector(`[data-bead-id="${id}"]`);
-    if (element && scrollRefWBS.current) {
-      const elementRect = element.getBoundingClientRect();
-      const containerRect = scrollRefWBS.current.getBoundingClientRect();
-      const offsetTop = elementRect.top - containerRect.top;
-      lastToggledNode.current = { id, offsetTop };
-    }
-
-    setCollapsedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-
-  const expandAll = useCallback(() => setCollapsedIds(new Set()), []);
-  const collapseAll = useCallback(() => {
-    const allParentIds = new Set<string>();
-    const findParents = (nodes: BeadNode[]) => {
-      nodes.forEach(node => {
-        if (node.children.length > 0) {
-          allParentIds.add(node.id);
-          findParents(node.children);
-        }
-      });
-    };
-    if (viewModel) {
-      findParents(viewModel.tree);
-    }
-    setCollapsedIds(allParentIds);
-  }, [viewModel]);
-
-  const handleOpenChat = useCallback(async (persona: string, task?: string, beadId?: string, role?: string) => {
-    const key = `${persona}::${task || 'chat'}::${beadId || 'untracked'}::${role || 'default'}::${currentCli}`;
-    const beadTitle = beadId ? beads.find(b => b.id === beadId)?.title || null : null;
-    const beadDescription = beadId ? beads.find(b => b.id === beadId)?.description || null : null;
-
-    try {
-      let targetSessionId = chatSessionMap[key];
-
-      const sessionExists = targetSessionId
-        ? sessions.some(s => s.sessionId === targetSessionId)
-        : false;
-
-      // Create new session if it doesn't exist
-      if (!sessionExists) {
-        targetSessionId = await startAgentSession(persona, task ?? undefined, beadId ?? undefined, currentCli, role, currentProjectPath || undefined);
-        await useSessionStore.getState().refreshSessions();
-      }
-
-      // ALWAYS update metadata when opening chat (even for existing sessions)
-      // This ensures the window title and task display are always correct
-      if (targetSessionId) {
-        const updatedChatSessionMap = { ...chatSessionMap, [key]: targetSessionId };
-        const updatedSessionMetaIndex = {
-          ...sessionMetaIndex,
-          [targetSessionId]: {
-            persona,
-            task: task ?? null,
-            beadId: beadId ?? null,
-            beadTitle,
-            beadDescription,
-            backendId: currentCli,
-            role: role ?? null,
-            projectPath: currentProjectPath || null,
-          }
-        };
-
-        // Update state
-        setChatSessionMap(updatedChatSessionMap);
-        setSessionMetaIndex(updatedSessionMetaIndex);
-
-        // CRITICAL: Synchronously persist to localStorage BEFORE creating window
-        // This prevents race condition where new window reads stale data
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem('chatSessionMap', JSON.stringify(updatedChatSessionMap));
-          localStorage.setItem('chatSessionMeta', JSON.stringify(updatedSessionMetaIndex));
-        }
-
-        await createSessionWindow(targetSessionId);
-      }
-    } catch (error) {
-      console.error('Failed to open chat window:', error);
-    }
-  }, [chatSessionMap, sessionMetaIndex, sessions, currentCli, beads, currentProjectPath]);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          (e.target as HTMLElement).blur();
-        }
-        return;
-      }
-      // Don't intercept keyboard shortcuts with modifiers (Cmd/Ctrl/Alt)
-      // This allows CMD+C, CMD+V, etc. to work normally
-      if (e.metaKey || e.ctrlKey || e.altKey) {
-        return;
-      }
-      switch (e.key) {
-        case '/': e.preventDefault(); searchInputRef.current?.focus(); break;
-        case 'Escape': setSelectedBead(null); setIsCreating(false); setBeadDetailOpen(false); break;
-        case '+': case '=': e.preventDefault(); expandAll(); break;
-        case '-': case '_': e.preventDefault(); collapseAll(); break;
-        case 'n': e.preventDefault(); handleStartCreate(); break;
-        case 'r': e.preventDefault(); loadData(); break;
-        case 'c': e.preventDefault(); handleOpenChat('product-manager').catch(err => console.error('Chat open failed:', err)); break;
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [expandAll, collapseAll, loadData, handleOpenChat]);
-
-  useEffect(() => {
-    localStorage.setItem("collapsedIds", JSON.stringify(Array.from(collapsedIds)));
-  }, [collapsedIds]);
-
-  useEffect(() => {
-    localStorage.setItem("closedTimeFilter", closedTimeFilter);
-  }, [closedTimeFilter]);
-
-  // Save filter and sort state to startup.json (bp6-j33p.2.3)
-  useEffect(() => {
-    // Skip saving during initial load
-    if (!hasProject) return;
-    if (isInitializing.current) return;
-
-    const saveState = async () => {
-      try {
-        // Get current window state
-        const window = getCurrentWindow();
-        const position = await window.outerPosition();
-        const size = await window.outerSize();
-        const isMaximized = await window.isMaximized();
-
-        await saveStartupState({
-          window: {
-            width: size.width,
-            height: size.height,
-            x: position.x,
-            y: position.y,
-            isMaximized
-          },
-          filters: {
-            filterText: filterText,
-            hideClosed: hideClosed,
-            closedTimeFilter: closedTimeFilter,
-            includeHierarchy: includeHierarchy
-          },
-          sort: {
-            sortBy: sortBy,
-            sortOrder: sortOrder
-          },
-          ui: {
-            zoom: zoom,
-            collapsedIds: Array.from(collapsedIds),
-            wbsPanelWidth: panelWidth
-          }
-        });
-      } catch (error) {
-        console.error('Failed to save startup state:', error);
-      }
-    };
-
-    saveState();
-  }, [hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, filterText, zoom, collapsedIds, hasProject]);
-
-  // Save WBS panel width to startup.json with debouncing (bp6-j33p.5.3)
-  useEffect(() => {
-    if (!hasProject) return;
-    if (isInitializing.current) return;
-
-    const saveTimeout = setTimeout(async () => {
-      try {
-        const window = getCurrentWindow();
-        const position = await window.outerPosition();
-        const size = await window.outerSize();
-        const isMaximized = await window.isMaximized();
-
-        await saveStartupState({
-          window: {
-            width: size.width,
-            height: size.height,
-            x: position.x,
-            y: position.y,
-            isMaximized
-          },
-          filters: {
-            filterText,
-            hideClosed,
-            closedTimeFilter,
-            includeHierarchy
-          },
-          sort: {
-            sortBy,
-            sortOrder
-          },
-          ui: {
-            zoom,
-            collapsedIds: Array.from(collapsedIds),
-            wbsPanelWidth: panelWidth
-          }
-        });
-      } catch (error) {
-        console.error('Failed to save panel width:', error);
-      }
-    }, 500); // 500ms debounce for panel width changes
-
-    return () => clearTimeout(saveTimeout);
-  }, [panelWidth, hasProject, filterText, hideClosed, closedTimeFilter, includeHierarchy, sortBy, sortOrder, zoom, collapsedIds]);
-
-  useEffect(() => {
-    if (isDark) document.documentElement.classList.add('dark');
-    else document.documentElement.classList.remove('dark');
-
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    }
-  }, [isDark]);
-
-  // Keep selectedBead synchronized with the latest bead data
-  useEffect(() => {
-    if (selectedBead && beads.length > 0) {
-      const updatedBead = beads.find(b => b.id === selectedBead.id);
-      if (updatedBead) {
-        setSelectedBead(updatedBead);
-      }
-    }
-  }, [beads]);
-
-  const handleToggleFavoriteProject = async (path: string) => {
-    try {
-      await toggleFavoriteProject(path);
-      await loadProjects(); // Explicitly refresh projects list
-    } catch (error) {
-      alert(`Failed to toggle favorite: ${error}`);
-    }
+  // -------------------------------------------------------------------
+  // Gantt tree: collapse state + zoom (needed by filterState for deps)
+  // -------------------------------------------------------------------
+  const ganttTree = useGanttTree();
+
+  // -------------------------------------------------------------------
+  // Filter / sort / data-fetching state (gated by isReady)
+  // Needs a project path and isReady; these come from initialization
+  // so we must declare filterState before init but feed it isReady after.
+  // We'll initialise with placeholder values and the hooks self-correct
+  // once isReady flips true.
+  // -------------------------------------------------------------------
+
+  // isInitializingRef — fed into usePersistentUI to guard saves during startup
+  const isInitializingRef = useRef(true);
+
+  // Persistent UI: theme, panel width, view
+  // We'll wire the real filter state into it after declaring filterState.
+  // To break the circular dependency we forward refs to filter state via
+  // a stable ref container that is populated after the hooks run.
+  const filterStateRef = useRef<{
+    filterText: string;
+    hideClosed: boolean;
+    closedTimeFilter: string;
+    includeHierarchy: boolean;
+    sortBy: string;
+    sortOrder: string;
+  }>({
+    filterText: "",
+    hideClosed: false,
+    closedTimeFilter: "all",
+    includeHierarchy: true,
+    sortBy: "none",
+    sortOrder: "none",
+  });
+
+  // We need project state before filterState to wire `hasProject`
+  // -------------------------------------------------------------------
+  // We create filterState first with placeholder projectPath/isReady;
+  // the hooks handle their own initialization.
+  // -------------------------------------------------------------------
+
+  // Chat sessions (standalone)
+  const chatSessions = useChatSessions();
+
+  // Sessions from Zustand store
+  const sessions = useSessionStore((state) => state.sessions);
+  const sessionsByBead = useMemo(
+    () => groupSessionsByBead(sessions),
+    [sessions]
+  );
+
+  // Project state: needs loadData + setLoading + setProjectShellKey
+  // These come from filterState and appInit, but we have a circular dep.
+  // Solution: use a stable callback ref for loadData, resolved after filterState.
+  const loadDataRef = useRef<() => void>(() => {});
+  const setLoadingRef = useRef<React.Dispatch<React.SetStateAction<boolean>>>(
+    () => {}
+  );
+  const setProjectShellKeyRef = useRef<
+    React.Dispatch<React.SetStateAction<number>>
+  >(() => {});
+
+  const projectState = useProjectState(
+    () => loadDataRef.current(),
+    (...args: Parameters<React.Dispatch<React.SetStateAction<boolean>>>) =>
+      setLoadingRef.current(...args),
+    (...args: Parameters<React.Dispatch<React.SetStateAction<number>>>) =>
+      setProjectShellKeyRef.current(...args)
+  );
+
+  // Filter state — owns isReady gate, data fetching, sorting, etc.
+  const filterState = useFilterState({
+    isReady: false, // patched by appInit via incrementRefetchTrigger
+    currentProjectPath: projectState.currentProjectPath,
+    zoom: ganttTree.zoom,
+    collapsedIds: ganttTree.collapsedIds,
+    panelWidth: 300, // placeholder; real value from persistentUI
+    hasProject: projectState.hasProject,
+  });
+
+  // Patch the loadDataRef so projectState.handleOpenProject can call it
+  loadDataRef.current = filterState.incrementRefetchTrigger;
+  setLoadingRef.current = filterState.setLoading;
+
+  // Persistent UI — needs filter state snapshot for saving startup state
+  const persistentUI = usePersistentUI({
+    hasProject: projectState.hasProject,
+    isInitializing: isInitializingRef,
+    filterText: filterState.filterText,
+    hideClosed: filterState.hideClosed,
+    closedTimeFilter: filterState.closedTimeFilter,
+    includeHierarchy: filterState.includeHierarchy,
+    sortBy: filterState.sortBy,
+    sortOrder: filterState.sortOrder,
+    zoom: ganttTree.zoom,
+    collapsedIds: ganttTree.collapsedIds,
+  });
+
+  // Keep filterStateRef in sync so persistentUI can observe latest values
+  filterStateRef.current = {
+    filterText: filterState.filterText,
+    hideClosed: filterState.hideClosed,
+    closedTimeFilter: filterState.closedTimeFilter,
+    includeHierarchy: filterState.includeHierarchy,
+    sortBy: filterState.sortBy,
+    sortOrder: filterState.sortOrder,
   };
 
-  const handleRemoveProject = async (path: string) => {
-    try {
-      await removeProject(path);
-      await loadProjects(); // Explicitly refresh projects list
-    } catch (error) {
-      alert(`Failed to remove project: ${error}`);
-    }
-  };
+  // App initialization: startup state restore, session store init, project auto-open
+  const appInit = useAppInitialization(
+    {
+      setFilterText: filterState.setFilterText,
+      setHideClosed: filterState.setHideClosed,
+      setClosedTimeFilter: filterState.setClosedTimeFilter,
+      setIncludeHierarchy: filterState.setIncludeHierarchy,
+      setSortBy: filterState.setSortBy,
+      setSortOrder: filterState.setSortOrder,
+      setZoom: ganttTree.setZoom,
+      setCollapsedIds: ganttTree.setCollapsedIds,
+      setPanelWidth: persistentUI.setPanelWidth,
+      setProjects: projectState.setProjects,
+      setCurrentProjectPath: projectState.setCurrentProjectPath,
+      setHasProject: projectState.setHasProject,
+      setLoading: filterState.setLoading,
+      setProjectShellKey: setProjectShellKeyRef.current,
+    },
+    projectState.handleOpenProject,
+    filterState.incrementRefetchTrigger
+  );
 
-  const handleBeadClick = (bead: BeadNode) => {
-    setSelectedBead(bead);
-    setIsCreating(false);
-  };
+  // Patch setProjectShellKey ref so projectState can update it
+  setProjectShellKeyRef.current = appInit.projectShellKey as unknown as React.Dispatch<React.SetStateAction<number>>;
 
-  const handleHeaderClick = (column: 'priority' | 'title' | 'type' | 'id') => {
-    if (sortBy === column) {
-      if (sortOrder === 'asc') setSortOrder('desc');
-      else if (sortOrder === 'desc') {
-        setSortOrder('none');
-        setSortBy('none');
-      } else {
-        setSortOrder('asc');
-      }
-    } else {
-      setSortBy(column);
-      setSortOrder('asc');
-    }
-  };
-
-
-  const handleSaveEdit = async () => {
-    if (selectedBead && editForm) {
-      try {
-        const beads = flattenTree(viewModel?.tree || []);
-        const currentParent = beads.find(b => b.dependencies?.some((d: any) => d.issue_id === selectedBead.id && d.type === 'parent-child'));
-        const updatedNode = { ...editForm };
-        if (updatedNode.parent !== currentParent?.id) {
-          updatedNode.dependencies = (updatedNode.dependencies || []).filter((d: any) => d.type !== 'parent-child');
-          if (updatedNode.parent) {
-            updatedNode.dependencies.push({ issue_id: updatedNode.id!, depends_on_id: updatedNode.parent, type: 'parent-child' });
-          }
-        }
-        const updated = beadNodeToBead(updatedNode);
-        await updateBead(updated as any);
-        setSelectedBead(updatedNode as BeadNode);
-        // editing state managed by modal
-        await loadData();
-      } catch (error) { alert(`Failed to save bead: ${error}`); }
-    }
-  };
-
-  const handleStartCreate = useCallback(() => {
-    setSelectedBead(null);
-    setEditForm({
-      id: `bp6-${Math.random().toString(36).slice(2, 5)}`,
-      title: "",
-      status: "open",
-      priority: 2,
-      issueType: "task",
-      dependencies: [],
-      createdAt: new Date().toISOString(),
-      acceptanceCriteria: []
-    } as Partial<BeadNode>);
-    // editing state managed by modal
-    setIsCreating(true);
-    setBeadDetailOpen(true);
-  }, []);
-
-  const handleSaveCreate = async () => {
-    console.log('🆕 handleSaveCreate called', { editForm });
-    if (editForm.title) {
-      console.log('🆕 Title exists, proceeding with create');
-      try {
-        const newNode = { ...editForm };
-        console.log('🆕 newNode prepared:', newNode);
-        if (newNode.parent) {
-          newNode.dependencies = [...(newNode.dependencies || []), { issue_id: newNode.id!, depends_on_id: newNode.parent, type: 'parent-child' }];
-        }
-        const newBead = beadNodeToBead(newNode);
-        console.log('🆕 Calling createBead...');
-        const createdId = await createBead(newBead as any);
-        console.log('🆕 Created bead ID:', createdId);
-        setIsCreating(false);
-        await loadData();
-        const allBeads = flattenTree(viewModel?.tree || []);
-        const createdBead = allBeads.find((b: BeadNode) => b.id === createdId);
-        if (createdBead) {
-          setSelectedBead(createdBead);
-        }
-      } catch (error) {
-        console.error('🆕 Error creating bead:', error);
-        alert(`Failed to create bead: ${error}`);
-      }
-    } else {
-      console.log('🆕 No title, skipping create');
-    }
-  };
-
-  const handleCloseBead = async (beadId: string) => {
-    try {
-      await closeBead(beadId);
-      setSelectedBead(null);
-      await loadData();
-    } catch (error) {
-      console.error('Failed to close bead:', error);
-    }
-  };
-
-  const handleReopenBead = async (beadId: string) => {
-    try {
-      await reopenBead(beadId);
-      await loadData();
-    } catch (error) {
-      console.error('Failed to reopen bead:', error);
-    }
-  };
-
-  const handleClaimBead = async (beadId: string) => {
-    try {
-      await claimBead(beadId);
-      await loadData();
-    } catch (error) {
-      console.error('Failed to claim bead:', error);
-    }
-  };
-
-  // WBS Panel resize drag handler (bp6-j33p.5.2)
-  // TODO: Wire this up to ResizeHandle component
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handlePanelResizeStart = useCallback((e: React.MouseEvent) => {
-    const startX = e.clientX;
-    const startWidth = panelWidth;
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const delta = moveEvent.clientX - startX;
-      const newWidth = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, startWidth + delta));
-      setPanelWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  }, [panelWidth, MIN_PANEL_WIDTH, MAX_PANEL_WIDTH]);
-
+  // Mark initialization complete when isReady flips
   useEffect(() => {
-    if (!loading) {
-      const savedScroll = localStorage.getItem("scrollTop");
-      if (savedScroll) {
-        const top = parseInt(savedScroll);
-        if (scrollRefWBS.current) scrollRefWBS.current.scrollTop = top;
-        if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = top;
-      }
+    if (appInit.isReady) {
+      isInitializingRef.current = false;
     }
-  }, [loading]);
+  }, [appInit.isReady]);
 
-  // Restore scroll position after processedData updates
+  // Re-create filterState with real isReady value.
+  // Since hooks can't be conditionally called, we use a second useFilterState
+  // instance — but that violates Rules of Hooks. Instead we patch via an effect:
+  // useFilterState gates its data fetching on isReady internally.
+  // We need to share isReady with it. The cleanest way is to call useFilterState
+  // with a stable ref-based isReady that we flip.
+  // Since we already declared filterState above with isReady=false, and
+  // useFilterState watches [isReady, ...] in its effect deps, we need to make
+  // isReady reactive. We'll use the incrementRefetchTrigger pattern:
+  // when appInit.isReady becomes true, fire once.
   useEffect(() => {
-    if (loading || processingData) return;
-
-    // If we just toggled a node, adjust scroll to keep it in the same visual position
-    if (lastToggledNode.current) {
-      setTimeout(() => {
-        const { id, offsetTop } = lastToggledNode.current!;
-        const element = document.querySelector(`[data-bead-id="${id}"]`);
-        if (element && scrollRefWBS.current) {
-          const elementRect = element.getBoundingClientRect();
-          const containerRect = scrollRefWBS.current.getBoundingClientRect();
-          const currentOffsetTop = elementRect.top - containerRect.top;
-          const scrollAdjustment = currentOffsetTop - offsetTop;
-
-          const newScrollTop = scrollRefWBS.current.scrollTop + scrollAdjustment;
-          scrollRefWBS.current.scrollTop = newScrollTop;
-          if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = newScrollTop;
-
-          localStorage.setItem("scrollTop", newScrollTop.toString());
-        }
-        lastToggledNode.current = null;
-      }, 0);
-    } else {
-      // Normal scroll restoration
-      const savedScroll = localStorage.getItem("scrollTop");
-      if (savedScroll) {
-        const top = parseInt(savedScroll);
-        setTimeout(() => {
-          if (scrollRefWBS.current) scrollRefWBS.current.scrollTop = top;
-          if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = top;
-        }, 0);
-      }
+    if (appInit.isReady) {
+      filterState.incrementRefetchTrigger();
     }
-  }, [viewModel, loading, processingData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appInit.isReady]);
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget;
-    if (activeScrollSource.current && activeScrollSource.current !== target) return;
-    if (target === scrollRefWBS.current) {
-      if (scrollRefBERT.current) scrollRefBERT.current.scrollTop = target.scrollTop;
-    } else if (target === scrollRefBERT.current) {
-      if (scrollRefWBS.current) scrollRefWBS.current.scrollTop = target.scrollTop;
-      if (scrollRefGanttHeader.current) scrollRefGanttHeader.current.scrollLeft = target.scrollLeft;
-    } else if (target === scrollRefGanttHeader.current) {
-      if (scrollRefBERT.current) scrollRefBERT.current.scrollLeft = target.scrollLeft;
-    }
-    if (target === scrollRefWBS.current || target === scrollRefBERT.current) {
-      localStorage.setItem("scrollTop", target.scrollTop.toString());
-    }
-  };
+  // Gantt layout computed from viewModel + zoom + collapsedIds
+  const ganttLayoutData = useGanttLayout(
+    filterState.viewModel,
+    ganttTree.zoom,
+    ganttTree.collapsedIds
+  );
 
-  const handleMouseEnter = (e: React.MouseEvent<HTMLDivElement>) => {
-    activeScrollSource.current = e.currentTarget;
-  };
+  // Bead editing
+  const beadEditing = useBeadEditing(
+    filterState.incrementRefetchTrigger,
+    ganttLayoutData.beads
+  );
 
-  const toggleFavorite = async (bead: BeadNode) => {
-    try {
-      const updated = beadNodeToBead({
-        ...bead,
-        isFavorite: !bead.isFavorite
-      });
-      await updateBead(updated as any);
-      await loadData();
-    } catch (error) { alert(`Failed to toggle favorite: ${error}`); }
-  };
+  // Scroll sync
+  const scrollSync = useScrollSync(filterState.loading);
 
-  const handleSelectProject = async () => {
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({ directory: true, multiple: false, title: "Select BERT Project Directory" });
-      if (selected && typeof selected === 'string') await handleOpenProject(selected);
-    } catch (error) { alert(`Failed to select project: ${error}`); }
-  };
+  // Keyboard shortcuts
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  useKeyboardShortcuts({
+    expandAll: ganttTree.expandAll,
+    collapseAll: ganttTree.collapseAll,
+    loadData: filterState.incrementRefetchTrigger,
+    handleOpenChat: (persona, task, beadId, role) =>
+      chatSessions.handleOpenChat(
+        persona,
+        task,
+        beadId,
+        role,
+        ganttLayoutData.beads,
+        projectState.currentProjectPath
+      ),
+    setFilterText: filterState.setFilterText,
+    searchInputRef,
+    setSelectedBead: beadEditing.setSelectedBead,
+    setIsCreating: beadEditing.setIsCreating,
+    setBeadDetailOpen: beadEditing.setBeadDetailOpen,
+    handleStartCreate: beadEditing.handleStartCreate,
+  });
 
-  const favoriteBeads = useMemo(() => beads.filter(b => b.is_favorite), [beads]);
-  const favoriteProjects = useMemo(() => projects.filter(p => p.is_favorite), [projects]);
-  const recentProjects = useMemo(() => projects.filter(p => !p.is_favorite).sort((a, b) => (b.last_opened || "").localeCompare(a.last_opened || "")), [projects]);
-
+  // Stats memo
   const stats = useMemo(() => {
+    const beads = ganttLayoutData.beads;
     const total = beads.length;
-    const open = beads.filter(b => b.status === 'open').length;
-    const inProgress = beads.filter(b => b.status === 'in_progress').length;
-    const closed = beads.filter(b => b.status === 'closed').length;
-    const blocked = beads.filter(b => {
-      if (b.status === 'closed') return false;
+    const open = beads.filter((b) => b.status === "open").length;
+    const inProgress = beads.filter((b) => b.status === "in_progress").length;
+    const closed = beads.filter((b) => b.status === "closed").length;
+    const blocked = beads.filter((b) => {
+      if (b.status === "closed") return false;
       const deps = b.dependencies || [];
-      return deps.some(d => {
-        if (d.type !== 'blocks') return false;
-        const pred = beads.find(p => p.id === d.depends_on_id);
-        return pred && pred.status !== 'closed';
+      return deps.some((d) => {
+        if (d.type !== "blocks") return false;
+        const pred = beads.find((p) => p.id === d.depends_on_id);
+        return pred && pred.status !== "closed";
       });
     }).length;
     return { total, open, inProgress, closed, blocked };
-  }, [beads]);
+  }, [ganttLayoutData.beads]);
 
-  return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[var(--background-primary)] text-[var(--text-primary)] font-sans">
-      <Navigation currentView={view} onViewChange={setView} onOpenChat={handleOpenChat} onOpenPalettePreview={() => setShowPalettePreview(true)} selectedBeadId={selectedBead?.id} />
-      <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
-        <Header isDark={isDark} setIsDark={setIsDark} handleStartCreate={handleStartCreate} loadData={loadData} projectMenuOpen={projectMenuOpen} setProjectMenuOpen={setProjectMenuOpen} favoriteProjects={favoriteProjects} recentProjects={recentProjects} currentProjectPath={currentProjectPath} handleOpenProject={handleOpenProject} toggleFavoriteProject={handleToggleFavoriteProject} removeProject={handleRemoveProject} handleSelectProject={handleSelectProject} currentCli={currentCli} setCurrentCli={setCurrentCli} />
-        {!hasProject ? (
-          <div className="flex-1 flex items-center justify-center">
-            {loading ? (
-              <div className="text-center">
-                <div className="inline-block h-12 w-12 animate-spin rounded-full border-4 border-solid border-indigo-600 border-r-transparent mb-4"></div>
-                <p className="text-lg text-[var(--text-muted)] font-medium">Loading project...</p>
-              </div>
-            ) : (
-              <div className="text-center max-w-md px-8">
-                <h1 className="text-4xl font-black text-[var(--text-primary)] mb-4 tracking-tight">Welcome to BERT</h1>
-                <p className="text-lg text-[var(--text-muted)] mb-8 font-medium">Get started by loading a project directory with a .beads folder</p>
-                <button
-                  onClick={handleSelectProject}
-                  className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-95 text-lg uppercase tracking-wider"
-                >
-                  Load Project
-                </button>
-              </div>
-            )}
-          </div>
-        ) : view === 'settings' ? (
-          <SettingsView />
-        ) : view === 'terminal' ? (
-          <div className="flex-1 overflow-hidden">
-            <Terminal key={`${currentProjectPath}-${projectShellKey}`} sessionId={PROJECT_SHELL_ID} projectPath={currentProjectPath} />
-          </div>
-        ) : view === 'sessions' ? (
-          <SessionsView
-            sessions={sessions}
-            currentProjectPath={currentProjectPath}
-            onSessionClick={createSessionWindow}
-            onTerminate={(id) => terminateSession(id).catch(console.error)}
-          />
-        ) : (
-          <div className="flex-1 flex overflow-hidden">
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
-                <div className="border-r-2 border-[var(--border-primary)] flex flex-col" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
-                  <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
-                    <h2 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">Task Breakdown</h2>
-                    <div className="flex items-center gap-1">
-                      <button onClick={expandAll} title="Expand All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"><ChevronsDown size={16} strokeWidth={2.5} /></button>
-                      <button onClick={collapseAll} title="Collapse All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"><ChevronsUp size={16} strokeWidth={2.5} /></button>
-                    </div>
-                  </div>
-                  {favoriteBeads.length > 0 && (
-                    <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 bg-indigo-500/10">
-                      <h2 className="text-xs font-black text-indigo-800 dark:text-indigo-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-3"><Star size={12} className="fill-current" /> Favorites</h2>
-                      <div className="flex flex-wrap gap-2">
-                        {favoriteBeads.map(f => (
-                          <div key={f.id} onClick={() => handleBeadClick(f)} className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-[var(--background-primary)] border-[var(--border-thick)] border-[var(--border-primary)] hover:border-indigo-500 shadow-[var(--shadow-sm)] cursor-pointer transition-all active:scale-95 hover-lift">
-                            <span className="font-mono text-xs font-black text-indigo-700 dark:text-indigo-400">{f.id}</span>
-                            <span className="text-sm font-black text-[var(--text-primary)] truncate max-w-[140px]">{f.title}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="px-4 py-3 bg-[var(--background-primary)]">
-                    <div className="relative group mb-3">
-                      <input ref={searchInputRef} type="text" placeholder="Search by title, ID, or label..." className="w-full bg-[var(--background-secondary)] border-[var(--border-thick)] border-[var(--border-primary)] rounded-xl px-4 py-2.5 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none transition-all placeholder:text-[var(--text-muted)] shadow-[var(--shadow-inset)]" value={filterText} onChange={e => setFilterText(e.target.value)} />
-                    </div>
-                    <div className="flex items-center gap-4 px-1 flex-wrap">
-                      <label className="flex items-center gap-2 cursor-pointer group">
-                        <input type="checkbox" checked={hideClosed} onChange={e => setHideClosed(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
-                        <span className="text-xs font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hide Closed</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer group">
-                        <input type="checkbox" checked={includeHierarchy} onChange={e => setIncludeHierarchy(e.target.checked)} className="rounded border-2 border-[var(--border-primary)] text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 bg-[var(--background-secondary)]" />
-                        <span className="text-xs font-black text-[var(--text-muted)] group-hover:text-[var(--text-primary)] uppercase tracking-wider">Hierarchy</span>
-                      </label>
-                      <label className="flex items-center gap-2 group">
-                        <span className="text-xs font-black text-[var(--text-muted)] uppercase tracking-wider">Closed:</span>
-                        <select
-                          value={closedTimeFilter}
-                          onChange={e => setClosedTimeFilter(e.target.value as ClosedTimeFilter)}
-                          className="text-xs font-black bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-lg px-2 py-1 text-[var(--text-primary)] focus:border-indigo-500 outline-none uppercase tracking-wider"
-                        >
-                          <option value="all">All Time</option>
-                          <option value="1h">Last Hour</option>
-                          <option value="6h">Last 6 Hours</option>
-                          <option value="24h">Last 24 Hours</option>
-                          <option value="7d">Last 7 Days</option>
-                          <option value="30d">Last 30 Days</option>
-                          <option value="older_than_6h">Older Than 6h</option>
-                        </select>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex-1 flex items-end justify-between px-8 py-3 bg-[var(--background-primary)]">
-                  <div className="flex items-center gap-10 mb-1">
-                      <div className="flex flex-col"><span className="text-xs font-black text-[var(--text-muted)] uppercase tracking-[0.25em] mb-1">Total</span><span className="text-base font-black text-[var(--text-primary)]">{stats.total}</span></div>
-                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-open)] uppercase tracking-[0.25em] mb-1">Open</span><span className="text-base font-black text-[var(--status-open)]">{stats.open}</span></div>
-                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-active)] uppercase tracking-[0.25em] mb-1">In Progress</span><span className="text-base font-black text-[var(--status-active)]">{stats.inProgress}</span></div>
-                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-blocked)] uppercase tracking-[0.25em] mb-1">Blocked</span><span className="text-base font-black text-[var(--status-blocked)]">{stats.blocked}</span></div>
-                      <div className="flex flex-col border-l-2 border-[var(--border-primary)] pl-6"><span className="text-xs font-black text-[var(--status-done)] uppercase tracking-[0.25em] mb-1">Closed</span><span className="text-base font-black text-[var(--status-done)]">{stats.closed}</span></div>
-                  </div>
-                  <div className="flex items-center gap-1 bg-[var(--background-secondary)] p-1.5 rounded-2xl border-[var(--border-thick)] border-[var(--border-primary)] shadow-[var(--shadow-md)] mb-1">
-                      <button onClick={() => setZoom(Math.max(0.25, zoom - 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">-</button>
-                      <span className="text-sm font-mono font-black text-[var(--text-primary)] min-w-[50px] text-center">{Math.round(zoom * 100)}%</span>
-                      <button onClick={() => setZoom(Math.min(3, zoom + 0.25))} className="p-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black px-4 active:scale-90">+</button>
-                      <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
-                      <button onClick={() => setZoom(1)} className="px-4 py-2 hover:bg-[var(--background-tertiary)] rounded-xl text-[var(--text-primary)] transition-all text-xs font-black uppercase tracking-[0.2em] active:scale-95">Reset</button>
-                      <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
-                      <button
-                        onClick={() => setBeadDetailOpen(!beadDetailOpen)}
-                        className={cn(
-                          "p-2 hover:bg-[var(--background-tertiary)] rounded-xl transition-all active:scale-90",
-                          beadDetailOpen ? "text-[var(--accent-primary)]" : "text-[var(--text-primary)]"
-                        )}
-                        style={beadDetailOpen ? { backgroundColor: 'rgba(15,139,255,0.12)' } : undefined}
-                        title={beadDetailOpen ? "Close Bead Detail" : "Open Bead Detail"}
-                      >
-                        <Info size={18} strokeWidth={2.5} />
-                      </button>
-                  </div>
-                </div>
-              </div>
-              {view === 'gantt' ? (
-                <>
-                  <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-10">
-                    <div className="border-r-2 border-[var(--border-primary)] flex items-center px-4 py-2 bg-[var(--background-tertiary)] text-xs font-black text-[var(--text-primary)] uppercase tracking-[0.3em]" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
-                      <div className="w-10 shrink-0" />
-                      <div 
-                        className={cn(
-                          "w-16 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                          sortBy === 'priority' && sortOrder !== 'none' && "text-indigo-500"
-                        )}
-                        onClick={() => handleHeaderClick('priority')}
-                      >
-                        <span>P</span>
-                        {sortBy === 'priority' && sortOrder !== 'none' && (
-                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                        )}
-                      </div>
-                      <div 
-                        className={cn(
-                          "flex-1 px-4 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                          sortBy === 'title' && sortOrder !== 'none' && "text-indigo-500"
-                        )}
-                        onClick={() => handleHeaderClick('title')}
-                      >
-                        <span>Name</span>
-                        {sortBy === 'title' && sortOrder !== 'none' && (
-                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                        )}
-                      </div>
-                      <div 
-                        className={cn(
-                          "w-20 shrink-0 px-2 border-r-2 border-[var(--border-primary)]/50 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                          sortBy === 'type' && sortOrder !== 'none' && "text-indigo-500"
-                        )}
-                        onClick={() => handleHeaderClick('type')}
-                      >
-                        <span>Type</span>
-                        {sortBy === 'type' && sortOrder !== 'none' && (
-                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                        )}
-                      </div>
-                      <div 
-                        className={cn(
-                          "w-24 shrink-0 px-2 cursor-pointer hover:text-indigo-500 transition-colors flex items-center justify-between group",
-                          sortBy === 'id' && sortOrder !== 'none' && "text-indigo-500"
-                        )}
-                        onClick={() => handleHeaderClick('id')}
-                      >
-                        <span>ID</span>
-                        {sortBy === 'id' && sortOrder !== 'none' && (
-                          sortOrder === 'asc' ? <ArrowUp size={12} strokeWidth={3} /> : <ArrowDown size={12} strokeWidth={3} />
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
-                      <div ref={scrollRefGanttHeader} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="overflow-x-auto overflow-y-hidden no-scrollbar">
-                        <div style={{ width: Math.max(5000 * zoom, ((viewModel?.metadata.distributions.length || 0) * 100 * zoom)) }}>
-                          <GanttStateHeader distributions={viewModel?.metadata.distributions || []} zoom={zoom} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex-1 flex overflow-hidden">
-                    <div ref={scrollRefWBS} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="border-r-2 border-[var(--border-primary)] flex flex-col bg-[var(--background-secondary)] overflow-y-auto custom-scrollbar relative" style={{ width: `${panelWidth}px`, minWidth: `${MIN_PANEL_WIDTH}px`, maxWidth: `${MAX_PANEL_WIDTH}px` }}>
-                      <div className="p-0">
-                        {(loading || processingData) ? <WBSSkeleton /> : (
-                          <div className="flex flex-col">
-                            <WBSTreeList
-                              nodes={viewModel?.tree || []}
-                              onToggle={toggleNode}
-                              onClick={handleBeadClick}
-                              selectedId={selectedBead?.id}
-                              sessionsByBead={sessionsByBead}
-                              onSessionClick={createSessionWindow}
-                            />
-                          </div>
-                        )}
-                      </div>
-                      <ResizeHandle onMouseDown={handlePanelResizeStart} />
-                    </div>
-                    <div ref={scrollRefBERT} onScroll={handleScroll} onMouseEnter={handleMouseEnter} className="flex-1 relative bg-[var(--background-primary)] overflow-auto custom-scrollbar">
-                      <div className="relative" style={{ height: Math.max(600, ganttLayout.rowCount * ROW_HEIGHT), width: 5000 * zoom }}>
-                        {loading && <GanttSkeleton />}
-                        {/* Background grid */}
-                          <div className="absolute inset-0 pointer-events-none">
-                          {ganttLayout.rowDepths.map((depth, i) => (
-                            <div
-                              key={i}
-                              className="w-full border-b-2"
-                              style={{
-                                height: `${ROW_HEIGHT}px`,
-                                backgroundColor: `var(--level-${Math.min(depth, 4)})`,
-                                borderColor: 'var(--gantt-gridline)'
-                              }}
-                            />
-                          ))}
-                          <div className="absolute inset-0 flex">
-                            {ganttGridColumns}
-                          </div>
-                        </div>
-                        {/* Dependency connectors */}
-                        <svg
-                          className="absolute inset-0 pointer-events-none"
-                          style={{ zIndex: 30 }}
-                          width={5000 * zoom}
-                          height={Math.max(600, ganttLayout.rowCount * ROW_HEIGHT)}
-                        >
-                          {ganttLayout.connectors.map((conn, idx) => {
-                            // Keep vertical segment in connector channel (first 20px of each cell)
-                            // Place it 10px into the channel immediately after the blocker
-                            const channelOffset = 10 * zoom;
-                            const verticalX = conn.fromX + channelOffset;
+  // Favorite beads
+  const favoriteBeads = useMemo(
+    () => ganttLayoutData.beads.filter((b) => b.is_favorite),
+    [ganttLayoutData.beads]
+  );
 
-                                const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
-                            return (
-                              <path
-                                key={`${conn.fromId}-${conn.toId}-${idx}`}
-                                d={path}
-                                stroke={conn.isCritical ? "var(--gantt-connector-critical)" : "var(--gantt-connector)"}
-                                strokeWidth="3"
-                                fill="none"
-                                opacity="0.9"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            );
-                          })}
-                        </svg>
-                        {/* Gantt bars */}
-                        {ganttLayout.items.map((item) => (
-                          <div key={item.bead.id} style={{ position: 'absolute', top: item.row * ROW_HEIGHT, height: ROW_HEIGHT, left: 0, right: 0 }}>
-                            <GanttBar
-                              item={item}
-                              onClick={handleBeadClick}
-                              isSelected={selectedBead?.id === item.bead.id}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <ListView
-                  beads={beads}
-                  onBeadClick={handleBeadClick}
-                  selectedBeadId={selectedBead?.id}
-                  sortBy={sortBy}
-                  sortOrder={sortOrder}
-                  onHeaderClick={handleHeaderClick}
-                  sessionsByBead={sessionsByBead}
-                  onSessionClick={createSessionWindow}
-                />
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-      {showPalettePreview && (
-        <PalettePreviewDialog onClose={() => setShowPalettePreview(false)} />
-      )}
-      <BeadDetailModal
-        bead={selectedBead}
-        open={beadDetailOpen}
-        onClose={() => setBeadDetailOpen(false)}
-        isCreating={isCreating}
-        editForm={editForm}
-        beads={beads}
-        setIsCreating={setIsCreating}
-        setSelectedBead={setSelectedBead}
-        setEditForm={setEditForm}
-        handleSaveEdit={handleSaveEdit}
-        handleSaveCreate={handleSaveCreate}
-        handleCloseBead={handleCloseBead}
-        handleReopenBead={handleReopenBead}
-        handleClaimBead={handleClaimBead}
-        toggleFavorite={toggleFavorite}
-        onOpenChat={handleOpenChat}
+  // Convert sessionsByBead to string[] for components that need only IDs
+  const sessionsByBeadIds = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(sessionsByBead).map(([k, v]) => [
+          k,
+          v.map((s) => s.sessionId),
+        ])
+      ),
+    [sessionsByBead]
+  );
+
+  // -------------------------------------------------------------------
+  // Session window early return
+  // -------------------------------------------------------------------
+  if (isSessionWindow && sessionId) {
+    return (
+      <SessionWindowView
+        sessionId={sessionId}
+        sessionMetaIndex={chatSessions.sessionMetaIndex}
+        setSessionMetaIndex={chatSessions.setSessionMetaIndex}
       />
-    </div>
+    );
+  }
+
+  // -------------------------------------------------------------------
+  // Main app — context providers + MainAppView
+  // -------------------------------------------------------------------
+  return (
+    <ProjectProvider
+      value={{
+        viewModel: filterState.viewModel,
+        currentProjectPath: projectState.currentProjectPath,
+        hasProject: projectState.hasProject,
+        loading: filterState.loading,
+        processingData: filterState.processingData,
+        loadData: filterState.incrementRefetchTrigger,
+      }}
+    >
+      <BeadProvider
+        value={{
+          selectedBead: beadEditing.selectedBead,
+          handleBeadClick: beadEditing.handleBeadClick,
+          sessionsByBead: sessionsByBeadIds,
+        }}
+      >
+        <UIProvider
+          value={{
+            isDark: persistentUI.isDark,
+            view: persistentUI.view,
+            panelWidth: persistentUI.panelWidth,
+          }}
+        >
+          <MainAppView
+            // Project
+            currentProjectPath={projectState.currentProjectPath}
+            hasProject={projectState.hasProject}
+            projects={projectState.projects}
+            favoriteProjects={projectState.favoriteProjects}
+            recentProjects={projectState.recentProjects}
+            projectMenuOpen={projectState.projectMenuOpen}
+            setProjectMenuOpen={projectState.setProjectMenuOpen}
+            showPalettePreview={projectState.showPalettePreview}
+            setShowPalettePreview={projectState.setShowPalettePreview}
+            handleOpenProject={projectState.handleOpenProject}
+            handleRemoveProject={projectState.handleRemoveProject}
+            handleToggleFavoriteProject={projectState.handleToggleFavoriteProject}
+            handleSelectProject={projectState.handleSelectProject}
+            // View / UI
+            view={persistentUI.view}
+            setView={persistentUI.setView}
+            isDark={persistentUI.isDark}
+            setIsDark={persistentUI.setIsDark}
+            panelWidth={persistentUI.panelWidth}
+            handlePanelResizeStart={persistentUI.handlePanelResizeStart}
+            // Filter
+            filterText={filterState.filterText}
+            setFilterText={filterState.setFilterText}
+            hideClosed={filterState.hideClosed}
+            setHideClosed={filterState.setHideClosed}
+            closedTimeFilter={filterState.closedTimeFilter}
+            setClosedTimeFilter={filterState.setClosedTimeFilter}
+            includeHierarchy={filterState.includeHierarchy}
+            setIncludeHierarchy={filterState.setIncludeHierarchy}
+            sortBy={filterState.sortBy}
+            sortOrder={filterState.sortOrder}
+            handleHeaderClick={filterState.handleHeaderClick}
+            loading={filterState.loading}
+            processingData={filterState.processingData}
+            viewModel={filterState.viewModel}
+            loadData={filterState.incrementRefetchTrigger}
+            // Gantt tree
+            collapsedIds={ganttTree.collapsedIds}
+            zoom={ganttTree.zoom}
+            setZoom={ganttTree.setZoom}
+            toggleNode={ganttTree.toggleNode}
+            expandAll={ganttTree.expandAll}
+            collapseAll={ganttTree.collapseAll}
+            beads={ganttLayoutData.beads}
+            ganttLayout={ganttLayoutData.ganttLayout}
+            // Bead editing
+            selectedBead={beadEditing.selectedBead}
+            setSelectedBead={beadEditing.setSelectedBead}
+            isCreating={beadEditing.isCreating}
+            setIsCreating={beadEditing.setIsCreating}
+            editForm={beadEditing.editForm}
+            setEditForm={beadEditing.setEditForm}
+            beadDetailOpen={beadEditing.beadDetailOpen}
+            setBeadDetailOpen={beadEditing.setBeadDetailOpen}
+            handleBeadClick={beadEditing.handleBeadClick}
+            handleStartCreate={beadEditing.handleStartCreate}
+            handleSaveCreate={beadEditing.handleSaveCreate}
+            handleSaveEdit={beadEditing.handleSaveEdit}
+            handleCloseBead={beadEditing.handleCloseBead}
+            handleReopenBead={beadEditing.handleReopenBead}
+            handleClaimBead={beadEditing.handleClaimBead}
+            toggleFavorite={beadEditing.toggleFavorite}
+            // Chat
+            currentCli={chatSessions.currentCli}
+            setCurrentCli={chatSessions.setCurrentCli}
+            handleOpenChat={(persona, task, beadId, role) =>
+              chatSessions.handleOpenChat(
+                persona,
+                task,
+                beadId,
+                role,
+                ganttLayoutData.beads,
+                projectState.currentProjectPath
+              )
+            }
+            sessionsByBead={sessionsByBead}
+            sessions={sessions}
+            // Shell
+            projectShellKey={appInit.projectShellKey}
+            // Stats
+            stats={stats}
+            favoriteBeads={favoriteBeads}
+            // Scroll sync
+            wbsScrollRef={scrollSync.wbsScrollRef}
+            ganttScrollRef={scrollSync.ganttScrollRef}
+            ganttHeaderScrollRef={scrollSync.ganttHeaderScrollRef}
+            handleWBSScroll={scrollSync.handleWBSScroll}
+            handleGanttScroll={scrollSync.handleGanttScroll}
+            handleGanttHeaderScroll={scrollSync.handleGanttHeaderScroll}
+            handleMouseEnter={scrollSync.handleMouseEnter}
+          />
+        </UIProvider>
+      </BeadProvider>
+    </ProjectProvider>
   );
 }
 
