@@ -120,9 +120,9 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                                 // All other tools: plain text notification
                                 let description = input["description"].as_str().unwrap_or("");
                                 let message = if !description.is_empty() {
-                                    format!("🔧 {}: {}", tool_name, description)
+                                    format!("🔧 {}: {}\n", tool_name, description)
                                 } else {
-                                    format!("🔧 Using tool: {}", tool_name)
+                                    format!("🔧 Using tool: {}\n", tool_name)
                                 };
                                 return Some(AgentChunk {
                                     content: message,
