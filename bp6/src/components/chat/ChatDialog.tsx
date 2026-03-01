@@ -5,6 +5,7 @@ import { useAgentSession } from '../../hooks/useAgentSession';
 import { useDraggable } from '../../hooks/useDraggable';
 import { approveSuggestion, CliBackend, handoverToInteractive, PERSONA_ICONS, toggleWindowAlwaysOnTop, terminateSession } from '../../api';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
+import { markdownToHtml } from '../../utils/markdown';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
 import { Terminal as TerminalComponent } from '../terminal/Terminal';
@@ -88,7 +89,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   const isSessionEnded = !!sessionIdOverride && !currentSession && historyLoaded;
   const effectiveIsAgentReady = isAgentReady || isSessionEnded;
 
-  const safeStreamingMessage = sanitizeAgentHtml(streamingMessage);
+  const safeStreamingMessage = sanitizeAgentHtml(markdownToHtml(streamingMessage));
 
   const { position, isDragging, handleMouseDown } = useDraggable({ x: 100, y: 100 });
 

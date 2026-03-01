@@ -1,4 +1,4 @@
-use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{html, Options, Parser};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -193,33 +193,6 @@ fn markdown_to_html(markdown: &str) -> String {
     html_output
 }
 
-/// Convert a streaming markdown chunk to inline HTML.
-///
-/// Unlike `markdown_to_html`, this strips the outer paragraph wrapper that
-/// pulldown_cmark adds to every block of text. Without this, each individual
-/// streaming chunk gets wrapped in `<p>…</p>` causing visual line breaks
-/// mid-sentence when chunks are concatenated in the UI.
-///
-/// All other inline elements (bold, italic, inline code) and block elements
-/// that appear complete within a single chunk (code fences, headings, lists)
-/// are kept intact.
-fn markdown_chunk_to_html(chunk: &str) -> String {
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_FOOTNOTES);
-    options.insert(Options::ENABLE_TASKLISTS);
-
-    let parser = Parser::new_ext(chunk, options).filter(|event| {
-        !matches!(
-            event,
-            Event::Start(Tag::Paragraph) | Event::End(TagEnd::Paragraph)
-        )
-    });
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    html_output
-}
 
 /// Session logger for conversation persistence
 ///
@@ -865,10 +838,12 @@ fn run_cli_command_for_session(
                                 }
                             }
 
-                            // Convert chunk to inline HTML (paragraph wrappers stripped)
-                            // so partial streaming chunks don't create mid-sentence line breaks.
+                            // Emit raw markdown text. The frontend accumulates chunks into
+                            // the full streaming buffer and calls markdownToHtml() on the
+                            // complete text — this preserves paragraph breaks and newlines
+                            // correctly, which per-chunk HTML conversion cannot do.
                             let html_chunk = crate::agent::plugin::AgentChunk {
-                                content: markdown_chunk_to_html(&chunk.content),
+                                content: chunk.content.clone(),
                                 is_done: chunk.is_done,
                                 is_replacement: chunk.is_replacement,
                                 session_id: chunk.session_id.clone(),
