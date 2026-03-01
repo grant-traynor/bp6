@@ -199,14 +199,7 @@ export function useAgentSession({
 
     const setup = async () => {
       if (!shouldReset && sessionId) {
-        console.log('♻️  Reusing existing session:', sessionId);
-        // React may have cleaned up listeners when it re-ran this effect due to
-        // sessionId entering the dependency array. Re-establish them if missing.
-        if (!unlistenChunkRef.current) {
-          console.log('🔁 Listeners were removed by React cleanup — re-establishing for:', sessionId);
-          currentListenerSessionRef.current = null; // bypass the "already listening" guard
-          await setupEventListeners(sessionId);
-        }
+        // Context unchanged and session already running — nothing to do.
         return;
       }
 
@@ -327,7 +320,10 @@ export function useAgentSession({
       // Clearing it here causes the guard to fail when React Strict Mode re-runs the effect.
       console.log('🗑️ EFFECT CLEANUP: Cleanup complete (ref preserved)');
     };
-  }, [isOpen, persona, task, beadId, cliBackend, sessionId, setupEventListeners]);
+    // NOTE: sessionId is intentionally excluded from deps. Adding it causes React
+    // to clean up and re-register event listeners on every session start, which
+    // creates a second listener and duplicates all streamed content.
+  }, [isOpen, persona, task, beadId, cliBackend, setupEventListeners]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useCallback(async (message: string) => {
     if (!sessionId) {

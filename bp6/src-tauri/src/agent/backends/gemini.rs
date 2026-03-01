@@ -66,14 +66,12 @@ impl CliBackendPlugin for GeminiBackend {
         }
 
         // Handle Gemini message format: {"type": "message", "role": "assistant", "content": "..."}
-        // NOTE: Gemini stream-json emits cumulative full text per event (not deltas),
-        // so is_replacement=true tells the frontend to replace the buffer, not append.
         if json["type"] == "message" && json["role"] == "assistant" {
             if let Some(content) = json["content"].as_str() {
                 return Some(AgentChunk {
                     content: content.to_string(),
                     is_done: false,
-                    is_replacement: true,
+                    is_replacement: false,
                     session_id: None,
                     tool_use: None,
                 });
