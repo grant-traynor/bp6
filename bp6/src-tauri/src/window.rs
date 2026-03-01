@@ -150,7 +150,22 @@ pub async fn create_session_window(
         .resizable(true)
         .always_on_top(true);
 
-    // Apply saved state if available
+    // Compute default size: 30% of screen width, 50% of screen height.
+    let (default_w, default_h) = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| {
+            let scale = m.scale_factor();
+            let phys = m.size();
+            (
+                (phys.width as f64 / scale) * 0.30,
+                (phys.height as f64 / scale) * 0.50,
+            )
+        })
+        .unwrap_or((700.0, 550.0));
+
+    // Apply saved state if available, otherwise use screen-relative defaults
     if let Some(state) = saved_state {
         eprintln!("📍 Restoring window state: x={}, y={}, w={}, h={}, maximized={}",
                   state.x, state.y, state.width, state.height, state.is_maximized);
@@ -163,8 +178,9 @@ pub async fn create_session_window(
             builder = builder.maximized(true);
         }
     } else {
-        // Default size if no saved state
-        builder = builder.inner_size(800.0, 600.0);
+        builder = builder
+            .inner_size(default_w, default_h)
+            .center();
     }
 
     let _window = builder
