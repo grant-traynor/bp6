@@ -249,6 +249,8 @@ export interface ToolUseData {
 export interface AgentChunk {
   content: string;
   isDone: boolean;
+  /** When true, replace the streaming buffer with this content (Gemini sends full text per event) */
+  isReplacement?: boolean;
   sessionId?: string;
   toolUse?: ToolUseData;
 }

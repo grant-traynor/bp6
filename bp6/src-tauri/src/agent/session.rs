@@ -838,6 +838,7 @@ fn run_cli_command_for_session(
                                     chunk.content.clone()
                                 },
                                 is_done: chunk.is_done,
+                                is_replacement: chunk.is_replacement,
                                 session_id: chunk.session_id.clone(),
                                 tool_use: chunk.tool_use.clone(),
                             };
@@ -855,6 +856,7 @@ fn run_cli_command_for_session(
         let final_chunk = crate::agent::plugin::AgentChunk {
             content: "".to_string(),
             is_done: true,
+            is_replacement: false,
             session_id: Some(session_id_clone.clone()),
             tool_use: None,
         };

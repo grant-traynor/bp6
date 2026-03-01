@@ -63,6 +63,11 @@ pub struct AgentChunk {
     pub content: String,
     /// Whether this is the final chunk (session complete)
     pub is_done: bool,
+    /// When true, the frontend should REPLACE the streaming buffer with this content
+    /// rather than appending. Used by backends (e.g. Gemini) that emit cumulative
+    /// full-text in each event rather than incremental deltas.
+    #[serde(default)]
+    pub is_replacement: bool,
     /// Optional session identifier (UUID v4) for multi-session support
     /// Serializes as "sessionId" in JSON
     #[serde(skip_serializing_if = "Option::is_none")]

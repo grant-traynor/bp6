@@ -113,7 +113,7 @@ export function useAgentSession({
     const listenerId = `L-${Math.random().toString(36).substr(2, 9)}`;
 
     unlistenChunkRef.current = await listen<AgentChunk>(eventName, (event) => {
-      const { content, isDone, toolUse } = event.payload;
+      const { content, isDone, isReplacement, toolUse } = event.payload;
 
       console.log(`📨 LISTENER ${listenerId}: Event received | content length:`, content?.length || 0, '| isDone:', isDone, '| toolUse:', toolUse?.name);
 
@@ -160,7 +160,13 @@ export function useAgentSession({
         setIsLoading(false);
         setDebugLogs(prev => [...prev, '[System] Agent finished response.']);
       } else if (content) {
-        setStreamingMessage((prev) => prev + content);
+        // Gemini sends cumulative full text per event (isReplacement=true);
+        // Claude sends incremental deltas (isReplacement=false/undefined).
+        if (isReplacement) {
+          setStreamingMessage(content);
+        } else {
+          setStreamingMessage((prev) => prev + content);
+        }
       }
     });
 

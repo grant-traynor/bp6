@@ -58,6 +58,7 @@ impl CliBackendPlugin for GeminiBackend {
                 return Some(AgentChunk {
                     content: String::new(),
                     is_done: false,
+                    is_replacement: false,
                     session_id: Some(session_id.to_string()),
                     tool_use: None,
                 });
@@ -65,11 +66,14 @@ impl CliBackendPlugin for GeminiBackend {
         }
 
         // Handle Gemini message format: {"type": "message", "role": "assistant", "content": "..."}
+        // NOTE: Gemini stream-json emits cumulative full text per event (not deltas),
+        // so is_replacement=true tells the frontend to replace the buffer, not append.
         if json["type"] == "message" && json["role"] == "assistant" {
             if let Some(content) = json["content"].as_str() {
                 return Some(AgentChunk {
                     content: content.to_string(),
                     is_done: false,
+                    is_replacement: true,
                     session_id: None,
                     tool_use: None,
                 });
@@ -82,6 +86,7 @@ impl CliBackendPlugin for GeminiBackend {
                 return Some(AgentChunk {
                     content: format!("🔧 Using tool: {}", tool_name),
                     is_done: false,
+                    is_replacement: false,
                     session_id: None,
                     tool_use: None,
                 });
@@ -96,8 +101,9 @@ impl CliBackendPlugin for GeminiBackend {
                     return Some(AgentChunk {
                         content: format!("⚠️ Tool execution {}", status),
                         is_done: false,
+                        is_replacement: false,
                         session_id: None,
-                    tool_use: None,
+                        tool_use: None,
                     });
                 }
             }
@@ -120,8 +126,9 @@ impl CliBackendPlugin for GeminiBackend {
                         return Some(AgentChunk {
                             content: format!("❌ Error: {}", error_messages.join("; ")),
                             is_done: true,
+                            is_replacement: false,
                             session_id: None,
-                    tool_use: None,
+                            tool_use: None,
                         });
                     }
                 }
@@ -131,8 +138,9 @@ impl CliBackendPlugin for GeminiBackend {
             return Some(AgentChunk {
                 content: String::new(),
                 is_done: true,
+                is_replacement: false,
                 session_id: None,
-                    tool_use: None,
+                tool_use: None,
             });
         }
 
