@@ -194,6 +194,13 @@ export function useAgentSession({
     const setup = async () => {
       if (!shouldReset && sessionId) {
         console.log('♻️  Reusing existing session:', sessionId);
+        // React may have cleaned up listeners when it re-ran this effect due to
+        // sessionId entering the dependency array. Re-establish them if missing.
+        if (!unlistenChunkRef.current) {
+          console.log('🔁 Listeners were removed by React cleanup — re-establishing for:', sessionId);
+          currentListenerSessionRef.current = null; // bypass the "already listening" guard
+          await setupEventListeners(sessionId);
+        }
         return;
       }
 

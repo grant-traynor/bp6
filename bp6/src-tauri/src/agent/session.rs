@@ -2005,10 +2005,17 @@ pub fn spawn_pty_for_session(
     // We want raw terminal output
     let args = backend.build_pty_args(&cli_session_id);
 
+    // Resolve CLI binary to absolute path (bundled apps have minimal PATH)
+    let cli_path = crate::bd::resolve_cli_path(backend.command_name())
+        .ok_or_else(|| format!(
+            "The '{}' CLI is not found. Please ensure it is installed and available in your PATH.",
+            backend.command_name()
+        ))?;
+
     // Spawn agent CLI in PTY
     state.pty_manager.spawn(
         pty_session_id.clone(),
-        backend.command_name().to_string(),
+        cli_path.to_string_lossy().to_string(),
         args,
         Some(repo_root.to_string_lossy().to_string()),
         Some(80), // Default columns
