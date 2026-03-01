@@ -37,7 +37,6 @@ impl CliBackendPlugin for GeminiBackend {
             args.push(session_id.unwrap_or("latest").to_string());
         }
 
-        args.push("--prompt".to_string());
         args.push(prompt.to_string());
 
         args
@@ -167,9 +166,8 @@ mod tests {
         assert_eq!(args[0], "--output-format");
         assert_eq!(args[1], "stream-json");
         assert_eq!(args[2], "--yolo");
-        assert_eq!(args[3], "--prompt");
-        assert_eq!(args[4], "test prompt");
-        assert_eq!(args.len(), 5);
+        assert_eq!(args[3], "test prompt");
+        assert_eq!(args.len(), 4);
     }
 
     #[test]
