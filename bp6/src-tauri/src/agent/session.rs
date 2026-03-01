@@ -2247,17 +2247,13 @@ pub fn spawn_project_shell(
     }
 
     // Prefer tmux: `tmux new-session -A` attaches to existing session or creates new one
-    let tmux_available = std::process::Command::new("which")
-        .arg("tmux")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    let tmux_path = crate::bd::resolve_cli_path("tmux");
 
-    let (cmd, args) = if tmux_available {
+    let (cmd, args) = if let Some(tmux) = tmux_path {
         let session_name = tmux_session_name(&project_path);
         eprintln!("🖥️  spawn_project_shell: tmux session '{}' in {}", session_name, project_path);
         (
-            "tmux".to_string(),
+            tmux.to_string_lossy().to_string(),
             vec![
                 "new-session".to_string(),
                 "-A".to_string(),          // attach if session exists, else create
