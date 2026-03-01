@@ -9,6 +9,15 @@ marked.setOptions({
 });
 
 /**
+ * Convert a markdown string to an HTML string using marked.
+ * Used for rendering agent chat messages client-side.
+ */
+export function markdownToHtml(text: string): string {
+  if (!text) return '';
+  return marked.parse(text, { async: false }) as string;
+}
+
+/**
  * Renders markdown HTML content safely
  *
  * Note: The content is already converted to HTML by the Rust backend,

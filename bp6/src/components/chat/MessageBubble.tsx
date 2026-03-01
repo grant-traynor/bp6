@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import { sanitizeAgentHtml } from '../../utils/sanitizeAgentHtml';
 import { RawHtml } from '../shared/Markdown';
+import { markdownToHtml } from '../../utils/markdown';
 import { DiffView } from './DiffView';
 import { ToolUseData } from '../../api';
 
@@ -20,7 +21,7 @@ function renderContent(
   onApprove?: (command: string) => void,
   onEdit?: (command: string) => void
 ): React.ReactNode {
-  const safeContent = sanitizeAgentHtml(content);
+  const safeContent = sanitizeAgentHtml(markdownToHtml(content));
 
   // Check if content contains bd commands
   const bdCommandRegex = /<code>bd\s+[^<]+<\/code>|`bd\s+[^`]+`/g;

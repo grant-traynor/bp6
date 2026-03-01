@@ -830,13 +830,11 @@ fn run_cli_command_for_session(
                                 }
                             }
 
-                            // Convert markdown content to HTML before emitting
+                            // Emit raw markdown — the frontend converts to HTML using
+                            // marked so that partial streaming chunks are not wrapped
+                            // in block-level <p> tags mid-sentence.
                             let html_chunk = crate::agent::plugin::AgentChunk {
-                                content: if !chunk.content.is_empty() && !chunk.is_done {
-                                    markdown_to_html(&chunk.content)
-                                } else {
-                                    chunk.content.clone()
-                                },
+                                content: chunk.content.clone(),
                                 is_done: chunk.is_done,
                                 is_replacement: chunk.is_replacement,
                                 session_id: chunk.session_id.clone(),
