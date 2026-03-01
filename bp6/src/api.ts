@@ -580,6 +580,7 @@ export interface ConversationMessage {
   role: 'user' | 'assistant' | 'terminal';
   content: string;
   timestamp: string;
+  toolUse?: ToolUseData;
 }
 
 /**

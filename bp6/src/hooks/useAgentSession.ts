@@ -224,7 +224,8 @@ export function useAgentSession({
           const history = await loadSessionHistory(sessionIdOverride, targetBeadId || null);
           const historyMessages: Message[] = history.map(m => ({
             role: m.role as 'user' | 'assistant' | 'terminal',
-            content: m.content
+            content: m.content,
+            toolUse: m.toolUse
           }));
           setMessages(historyMessages);
           setDebugLogs(prev => [...prev, `[System] Loaded ${historyMessages.length} messages from history`]);
@@ -252,7 +253,8 @@ export function useAgentSession({
           console.log('📜 Loaded history:', history.length, 'messages');
           historyToLoad = history.map(m => ({
             role: m.role as 'user' | 'assistant' | 'terminal',
-            content: m.content
+            content: m.content,
+            toolUse: m.toolUse
           }));
           setMessages(historyToLoad);
           setDebugLogs(prev => [...prev, `[System] Loaded ${historyToLoad.length} messages from previous session`]);
@@ -285,7 +287,8 @@ export function useAgentSession({
           const history = await loadSessionHistory(newSessionId, beadId);
           const historyMessages: Message[] = history.map(m => ({
             role: m.role as 'user' | 'assistant' | 'terminal',
-            content: m.content
+            content: m.content,
+            toolUse: m.toolUse
           }));
           setMessages(historyMessages);
           setDebugLogs(prev => [...prev, `[System] Loaded ${historyMessages.length} messages from current session`]);

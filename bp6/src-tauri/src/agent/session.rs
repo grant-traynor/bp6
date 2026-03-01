@@ -165,6 +165,9 @@ pub struct ConversationMessage {
     pub content: String,
     /// Timestamp (ISO 8601 format)
     pub timestamp: String,
+    /// Structured tool use data (Edit/Write calls) — enables diff rendering in UI
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use: Option<crate::agent::plugin::ToolUseData>,
 }
 
 /// Convert markdown text to HTML
@@ -310,6 +313,10 @@ impl SessionLogger {
         backend: &str,
         chunk: &crate::agent::plugin::AgentChunk,
     ) -> std::io::Result<()> {
+        // Persist tool_use data in metadata so history can reconstruct diff views
+        let metadata = chunk.tool_use.as_ref().and_then(|tu| {
+            serde_json::to_value(tu).ok().map(|v| serde_json::json!({ "tool_use": v }))
+        });
         let event = LogEvent {
             timestamp: chrono::Utc::now().to_rfc3339(),
             session_id: session_id.to_string(),
@@ -322,7 +329,7 @@ impl SessionLogger {
                 LogEventType::Chunk
             },
             content: chunk.content.clone(),
-            metadata: None,
+            metadata,
         };
         self.log_event(event)
     }
@@ -1515,6 +1522,7 @@ pub fn get_session_history(
                         timestamp: current_timestamp
                             .take()
                             .unwrap_or_else(|| event.timestamp.clone()),
+                        tool_use: None,
                     });
                 }
                 // Accumulate consecutive PTY chunks into a single terminal block
@@ -1531,6 +1539,7 @@ pub fn get_session_history(
                         role: "terminal".to_string(),
                         content,
                         timestamp: current_pty_timestamp.take().unwrap_or_default(),
+                        tool_use: None,
                     });
                 }
                 match other {
@@ -1540,16 +1549,43 @@ pub fn get_session_history(
                             role: "user".to_string(),
                             content: markdown_to_html(&event.content),
                             timestamp: event.timestamp,
+                            tool_use: None,
                         });
                     }
                     LogEventType::Chunk => {
-                        // Assistant chunk - accumulate until done
-                        if current_assistant_message.is_none() {
-                            current_assistant_message = Some(String::new());
-                            current_timestamp = Some(event.timestamp);
-                        }
-                        if let Some(ref mut msg) = current_assistant_message {
-                            msg.push_str(&event.content);
+                        // Check for persisted tool_use data first
+                        let tool_use = event.metadata.as_ref()
+                            .and_then(|m| m.get("tool_use"))
+                            .and_then(|v| serde_json::from_value::<crate::agent::plugin::ToolUseData>(v.clone()).ok());
+
+                        if let Some(tool_use_data) = tool_use {
+                            // Flush any in-progress text before inserting the diff
+                            if let Some(content) = current_assistant_message.take() {
+                                messages.push(ConversationMessage {
+                                    role: "assistant".to_string(),
+                                    content: markdown_to_html(&content),
+                                    timestamp: current_timestamp
+                                        .take()
+                                        .unwrap_or_else(|| event.timestamp.clone()),
+                                    tool_use: None,
+                                });
+                            }
+                            // Emit as a standalone diff message
+                            messages.push(ConversationMessage {
+                                role: "assistant".to_string(),
+                                content: String::new(),
+                                timestamp: event.timestamp,
+                                tool_use: Some(tool_use_data),
+                            });
+                        } else {
+                            // Plain text chunk - accumulate until done
+                            if current_assistant_message.is_none() {
+                                current_assistant_message = Some(String::new());
+                                current_timestamp = Some(event.timestamp);
+                            }
+                            if let Some(ref mut msg) = current_assistant_message {
+                                msg.push_str(&event.content);
+                            }
                         }
                     }
                     LogEventType::SessionEnd => {
@@ -1561,6 +1597,7 @@ pub fn get_session_history(
                                 timestamp: current_timestamp
                                     .take()
                                     .unwrap_or_else(|| event.timestamp.clone()),
+                                tool_use: None,
                             });
                         }
                     }
@@ -1578,6 +1615,7 @@ pub fn get_session_history(
             role: "terminal".to_string(),
             content,
             timestamp: current_pty_timestamp.take().unwrap_or_default(),
+            tool_use: None,
         });
     }
 
