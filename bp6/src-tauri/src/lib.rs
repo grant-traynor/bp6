@@ -96,12 +96,14 @@ impl BeadsWatcher {
                                         if let Some(bp6_dir) = dump_path.parent() {
                                             let _ = std::fs::create_dir_all(bp6_dir);
                                         }
-                                        let _ = std::process::Command::new("bd")
-                                            .arg("export")
-                                            .arg("-o")
-                                            .arg(&dump_path)
-                                            .current_dir(repo_path)
-                                            .output();
+                                        if let Some(bd_path) = bd::resolve_cli_path("bd") {
+                                            let _ = std::process::Command::new(bd_path)
+                                                .arg("export")
+                                                .arg("-o")
+                                                .arg(&dump_path)
+                                                .current_dir(repo_path)
+                                                .output();
+                                        }
                                     }
                                 }
 
@@ -2232,12 +2234,14 @@ fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
     // notifying the frontend — ensures beads-updated reads the correct project.
     if let Some(repo_path) = bd::find_repo_root() {
         if let Some(dump_path) = bd::find_dump_file() {
-            let _ = std::process::Command::new("bd")
-                .arg("export")
-                .arg("-o")
-                .arg(&dump_path)
-                .current_dir(&repo_path)
-                .output();
+            if let Some(bd_path) = bd::resolve_cli_path("bd") {
+                let _ = std::process::Command::new(bd_path)
+                    .arg("export")
+                    .arg("-o")
+                    .arg(&dump_path)
+                    .current_dir(&repo_path)
+                    .output();
+            }
         }
     }
 
@@ -2325,12 +2329,14 @@ pub fn run() {
             // Seed dump file and start watching on startup
             if let Some(repo_path) = bd::find_repo_root() {
                 if let Some(dump_path) = bd::find_dump_file() {
-                    let _ = std::process::Command::new("bd")
-                        .arg("export")
-                        .arg("-o")
-                        .arg(&dump_path)
-                        .current_dir(&repo_path)
-                        .output();
+                    if let Some(bd_path) = bd::resolve_cli_path("bd") {
+                        let _ = std::process::Command::new(bd_path)
+                            .arg("export")
+                            .arg("-o")
+                            .arg(&dump_path)
+                            .current_dir(&repo_path)
+                            .output();
+                    }
                 }
                 if let Some(last_touched) = bd::find_last_touched() {
                     let _ = beads_watcher.watch_beads_file(last_touched);

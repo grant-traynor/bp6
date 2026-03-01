@@ -29,10 +29,63 @@ pub fn find_repo_root() -> Option<PathBuf> {
     None
 }
 
-pub fn check_bd_available() -> Result<(), String> {
-    if Command::new("bd").arg("--version").output().is_err() {
-        return Err("The 'bd' CLI is not found in the PATH. Please ensure it is installed and available.".to_string());
+/// Resolve the absolute path to a CLI binary by name.
+///
+/// Bundled macOS apps inherit a minimal PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+/// so `Command::new("foo")` fails even when `foo` is in the user's shell PATH.
+/// We check common install locations first, then fall back to asking the user's
+/// login shell via `which`.
+pub fn resolve_cli_path(name: &str) -> Option<PathBuf> {
+    // Check common install locations without spawning a shell.
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = [
+        format!("{}/.cargo/bin/{}", home, name),
+        format!("/usr/local/bin/{}", name),
+        format!("/opt/homebrew/bin/{}", name),
+        format!("{}/.local/bin/{}", home, name),
+        format!("/usr/bin/{}", name),
+        // npm globals (claude, gemini)
+        format!("{}/.npm-global/bin/{}", home, name),
+        format!("/usr/local/lib/node_modules/.bin/{}", name),
+    ];
+    for path in &candidates {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
     }
+
+    // Fall back to the login shell to pick up the user's full PATH.
+    let which_cmd = format!("which {}", name);
+    for shell in &["/bin/zsh", "/bin/bash"] {
+        if let Ok(output) = Command::new(shell)
+            .args(["-l", "-c", &which_cmd])
+            .output()
+        {
+            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path_str.is_empty() {
+                let p = PathBuf::from(&path_str);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Returns a `Command` pointed at the `bd` binary, or an error if it cannot be found.
+fn bd_command() -> Result<Command, String> {
+    match resolve_cli_path("bd") {
+        Some(path) => Ok(Command::new(path)),
+        None => Err("The 'bd' CLI is not found. Please ensure it is installed (e.g. cargo install beads) and available in your PATH.".to_string()),
+    }
+}
+
+pub fn check_bd_available() -> Result<(), String> {
+    bd_command()?.arg("--version").output()
+        .map_err(|e| format!("Failed to run 'bd --version': {}", e))?;
     Ok(())
 }
 
@@ -134,12 +187,14 @@ pub fn get_bead_by_id(id: &str) -> Result<Bead, String> {
 /// so the frontend reads fresh data when it re-fetches on beads-updated.
 fn flush_jsonl(repo_path: &std::path::Path) {
     if let Some(dump_path) = find_dump_file() {
-        let _ = Command::new("bd")
-            .arg("export")
-            .arg("-o")
-            .arg(&dump_path)
-            .current_dir(repo_path)
-            .output();
+        if let Ok(mut cmd) = bd_command() {
+            let _ = cmd
+                .arg("export")
+                .arg("-o")
+                .arg(&dump_path)
+                .current_dir(repo_path)
+                .output();
+        }
     }
 }
 
@@ -149,7 +204,7 @@ pub fn update_bead(updatedBead: Bead, app_handle: AppHandle) -> Result<(), Strin
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
-    let mut cmd = Command::new("bd");
+    let mut cmd = bd_command()?;
     cmd.arg("update")
         .arg(&updatedBead.id)
         .arg("--title").arg(&updatedBead.title)
@@ -209,7 +264,7 @@ pub fn close_bead(beadId: String, reason: Option<String>, app_handle: AppHandle)
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
-    let mut cmd = Command::new("bd");
+    let mut cmd = bd_command()?;
     cmd.arg("close").arg(&beadId);
 
     if let Some(r) = reason {
@@ -233,7 +288,7 @@ pub fn reopen_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> 
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
-    let mut cmd = Command::new("bd");
+    let mut cmd = bd_command()?;
     cmd.arg("reopen").arg(&beadId);
 
     let output = cmd.current_dir(&repo_path).output().map_err(|e| e.to_string())?;
@@ -253,7 +308,7 @@ pub fn claim_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
-    let mut cmd = Command::new("bd");
+    let mut cmd = bd_command()?;
     cmd.arg("update")
         .arg(&beadId)
         .arg("--status")
@@ -276,7 +331,7 @@ pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, Strin
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
-    let mut cmd = Command::new("bd");
+    let mut cmd = bd_command()?;
     cmd.arg("create")
         .arg(&newBead.title)
         .arg("--priority").arg(newBead.priority.to_string())
@@ -327,7 +382,7 @@ pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, Strin
         return Err("Create command succeeded but returned no ID".to_string());
     }
 
-    let mut update_cmd = Command::new("bd");
+    let mut update_cmd = bd_command()?;
     update_cmd.arg("update")
         .arg(&new_id)
         .arg("--status").arg(&newBead.status);
@@ -355,7 +410,7 @@ pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, Strin
 pub fn sync_project(project_path: String) -> Result<String, String> {
     check_bd_available()?;
     let path = std::path::Path::new(&project_path);
-    let output = Command::new("bd")
+    let output = bd_command()?
         .arg("sync")
         .current_dir(path)
         .output()
@@ -376,7 +431,7 @@ pub fn execute_bd(args: Vec<String>) -> Result<String, String> {
     check_bd_available()?;
     let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
 
-    let output = Command::new("bd")
+    let output = bd_command()?
         .args(args)
         .current_dir(repo_path)
         .output()

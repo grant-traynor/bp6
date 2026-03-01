@@ -554,7 +554,12 @@ fn run_cli_command_for_session(
         .get(backend_id)
         .ok_or_else(|| format!("Backend {:?} not registered", backend_id))?;
 
-    let mut cmd = Command::new(backend.command_name());
+    let cli_path = crate::bd::resolve_cli_path(backend.command_name())
+        .ok_or_else(|| format!(
+            "The '{}' CLI is not found. Please ensure it is installed and available in your PATH.",
+            backend.command_name()
+        ))?;
+    let mut cmd = Command::new(cli_path);
     let args = backend.build_args(&prompt, resume, cli_session_id.as_deref());
     cmd.args(&args);
     cmd.current_dir(&repo_root);
