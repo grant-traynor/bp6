@@ -1,4 +1,4 @@
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useCallback, useState } from "react";
 import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
 import "./stores/sessionStoreDiagnostics"; // Enable diagnostics
 
@@ -120,17 +120,32 @@ function App({
     React.Dispatch<React.SetStateAction<number>>
   >(() => {});
 
-  const projectState = useProjectState(
-    () => loadDataRef.current(),
+  // Stable ref-forwarding wrappers — must not change identity on re-render,
+  // otherwise handleOpenProject becomes unstable and causes init to loop.
+  const stableLoadData = useCallback(() => loadDataRef.current(), []);
+  const stableSetLoading = useCallback(
     (...args: Parameters<React.Dispatch<React.SetStateAction<boolean>>>) =>
       setLoadingRef.current(...args),
-    (...args: Parameters<React.Dispatch<React.SetStateAction<number>>>) =>
-      setProjectShellKeyRef.current(...args)
+    []
   );
+  const stableSetProjectShellKey = useCallback(
+    (...args: Parameters<React.Dispatch<React.SetStateAction<number>>>) =>
+      setProjectShellKeyRef.current(...args),
+    []
+  );
+
+  const projectState = useProjectState(
+    stableLoadData,
+    stableSetLoading,
+    stableSetProjectShellKey
+  );
+
+  // Reactive isReady gate — set to true once appInit completes
+  const [isReady, setIsReady] = useState(false);
 
   // Filter state — owns isReady gate, data fetching, sorting, etc.
   const filterState = useFilterState({
-    isReady: false, // patched by appInit via incrementRefetchTrigger
+    isReady,
     currentProjectPath: projectState.currentProjectPath,
     zoom: ganttTree.zoom,
     collapsedIds: ganttTree.collapsedIds,
@@ -182,14 +197,13 @@ function App({
       setCurrentProjectPath: projectState.setCurrentProjectPath,
       setHasProject: projectState.setHasProject,
       setLoading: filterState.setLoading,
-      setProjectShellKey: setProjectShellKeyRef.current,
     },
     projectState.handleOpenProject,
     filterState.incrementRefetchTrigger
   );
 
-  // Patch setProjectShellKey ref so projectState can update it
-  setProjectShellKeyRef.current = appInit.projectShellKey as unknown as React.Dispatch<React.SetStateAction<number>>;
+  // Wire the setter from useAppInitialization so projectState.handleOpenProject can increment it
+  setProjectShellKeyRef.current = appInit.setProjectShellKey;
 
   // Mark initialization complete when isReady flips
   useEffect(() => {
@@ -198,21 +212,11 @@ function App({
     }
   }, [appInit.isReady]);
 
-  // Re-create filterState with real isReady value.
-  // Since hooks can't be conditionally called, we use a second useFilterState
-  // instance — but that violates Rules of Hooks. Instead we patch via an effect:
-  // useFilterState gates its data fetching on isReady internally.
-  // We need to share isReady with it. The cleanest way is to call useFilterState
-  // with a stable ref-based isReady that we flip.
-  // Since we already declared filterState above with isReady=false, and
-  // useFilterState watches [isReady, ...] in its effect deps, we need to make
-  // isReady reactive. We'll use the incrementRefetchTrigger pattern:
-  // when appInit.isReady becomes true, fire once.
+  // Ungate data fetching once initialization completes
   useEffect(() => {
     if (appInit.isReady) {
-      filterState.incrementRefetchTrigger();
+      setIsReady(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appInit.isReady]);
 
   // Gantt layout computed from viewModel + zoom + collapsedIds

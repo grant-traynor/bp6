@@ -101,7 +101,7 @@ pub fn get_config_path() -> Result<PathBuf, String> {
     };
 
     // Create app-specific subdirectory
-    let app_dir = config_dir.join("com.pairti.bert");
+    let app_dir = config_dir.join("com.pairti.bp6");
 
     // Create directory if it doesn't exist
     if !app_dir.exists() {
@@ -215,7 +215,7 @@ mod tests {
         assert!(config_path.ends_with("settings.json"));
 
         // Verify it contains the app identifier
-        assert!(config_path.to_string_lossy().contains("com.pairti.bert"));
+        assert!(config_path.to_string_lossy().contains("com.pairti.bp6"));
 
         // Verify parent directory exists (created by get_config_path)
         assert!(config_path.parent().unwrap().exists());

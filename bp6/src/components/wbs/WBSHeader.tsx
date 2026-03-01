@@ -1,4 +1,4 @@
-import { ArrowUp, ArrowDown, ChevronsDown, ChevronsUp } from "lucide-react";
+import { ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "../../utils";
 
 type SortColumn = 'priority' | 'title' | 'type' | 'id';
@@ -8,17 +8,12 @@ interface WBSHeaderProps {
   sortBy: string;
   sortOrder: SortOrder;
   onHeaderClick: (column: SortColumn) => void;
-  beadCount: number;
-  onExpandAll: () => void;
-  onCollapseAll: () => void;
 }
 
 export function WBSHeader({
   sortBy,
   sortOrder,
   onHeaderClick,
-  onExpandAll,
-  onCollapseAll,
 }: WBSHeaderProps) {
   const sortIndicator = (col: SortColumn) => {
     if (sortBy !== col || sortOrder === 'none') return null;
@@ -69,22 +64,6 @@ export function WBSHeader({
       >
         <span>ID</span>
         {sortIndicator('id')}
-      </div>
-      <div className="flex items-center gap-1 ml-2">
-        <button
-          onClick={onExpandAll}
-          title="Expand All"
-          className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"
-        >
-          <ChevronsDown size={16} strokeWidth={2.5} />
-        </button>
-        <button
-          onClick={onCollapseAll}
-          title="Collapse All"
-          className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors"
-        >
-          <ChevronsUp size={16} strokeWidth={2.5} />
-        </button>
       </div>
     </div>
   );

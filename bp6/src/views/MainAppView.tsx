@@ -13,7 +13,10 @@ import { SessionsView } from "../components/sessions/SessionsView";
 import { ListView } from "../components/list/ListView";
 import { WBSPanel } from "../components/wbs/WBSPanel";
 import { WBSHeader } from "../components/wbs/WBSHeader";
+import { WBSFilters } from "../components/wbs/WBSFilters";
+import { FavoritesSection } from "../components/wbs/FavoritesSection";
 import { GanttPanel } from "../components/gantt/GanttPanel";
+import { GanttStateHeader } from "../components/gantt/GanttStateHeader";
 import { StatsBar } from "../components/layout/StatsBar";
 import { ProjectSelectionView } from "./ProjectSelectionView";
 import type { ViewType } from "../components/layout/Navigation";
@@ -208,6 +211,8 @@ export function MainAppView({
 }: MainAppViewProps) {
   // Distributions from viewModel metadata
   const distributions: BucketDistribution[] = viewModel?.metadata?.distributions ?? [];
+  // Shared width for gantt header and body — must match for scroll sync to work
+  const ganttTotalWidth = Math.max(5000 * zoom, (distributions.length || 0) * 100 * zoom);
 
   // Wrap handleOpenChat to match Navigation's expected signature (no beads/path args)
   const handleOpenChatForNav = (persona: string, task?: string, beadId?: string, role?: string) =>
@@ -261,7 +266,7 @@ export function MainAppView({
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Top filter/stats bar */}
           <div className="flex shrink-0 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] z-20">
-            {/* WBS filter column */}
+            {/* WBS column: title + expand/collapse + favorites + filters */}
             <div
               className="border-r-2 border-[var(--border-primary)] flex flex-col shrink-0"
               style={{
@@ -270,11 +275,39 @@ export function MainAppView({
                 maxWidth: `${MAX_PANEL_WIDTH}px`,
               }}
             >
-              <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between">
+              <div className="px-6 py-4 border-b-2 border-[var(--border-primary)]/50 flex items-center justify-between shrink-0">
                 <h2 className="text-sm font-black text-[var(--text-primary)] uppercase tracking-[0.25em] flex items-center gap-2">
                   Task Breakdown
                 </h2>
+                <div className="flex items-center gap-1">
+                  <button onClick={expandAll} title="Expand All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
+                  </button>
+                  <button onClick={() => collapseAll(viewModel?.tree)} title="Collapse All" className="p-1.5 hover:bg-[var(--background-tertiary)] rounded-md text-[var(--text-muted)] hover:text-indigo-500 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 11 12 6 7 11"/><polyline points="17 18 12 13 7 18"/></svg>
+                  </button>
+                </div>
               </div>
+              <FavoritesSection
+                favoriteBeads={favoriteBeads}
+                favoriteProjects={favoriteProjects}
+                onBeadClick={handleBeadClick}
+                onOpenChat={handleOpenChatForNav}
+                onOpenProject={handleOpenProject}
+                sessionsByBead={Object.fromEntries(
+                  Object.entries(sessionsByBead).map(([k, v]) => [k, v.map((s) => s.sessionId)])
+                )}
+              />
+              <WBSFilters
+                filterText={filterText}
+                onFilterTextChange={setFilterText}
+                hideClosed={hideClosed}
+                onHideClosedChange={setHideClosed}
+                closedTimeFilter={closedTimeFilter}
+                onClosedTimeFilterChange={setClosedTimeFilter}
+                includeHierarchy={includeHierarchy}
+                onIncludeHierarchyChange={setIncludeHierarchy}
+              />
             </div>
 
             {/* Stats + zoom bar */}
@@ -340,12 +373,9 @@ export function MainAppView({
                   sortBy={sortBy}
                   sortOrder={sortOrder === "none" ? "none" : sortOrder}
                   onHeaderClick={handleHeaderClick}
-                  beadCount={beads.length}
-                  onExpandAll={expandAll}
-                  onCollapseAll={() => collapseAll(viewModel?.tree)}
                 />
               </div>
-              {/* Gantt state header scroll area */}
+              {/* Gantt state header — scroll-synced with gantt body */}
               <div className="flex-1 overflow-hidden bg-[var(--background-tertiary)]">
                 <div
                   ref={ganttHeaderScrollRef}
@@ -353,15 +383,8 @@ export function MainAppView({
                   onMouseEnter={handleMouseEnter}
                   className="overflow-x-auto overflow-y-hidden no-scrollbar"
                 >
-                  <div
-                    style={{
-                      width: Math.max(
-                        5000 * zoom,
-                        (distributions.length || 0) * 100 * zoom
-                      ),
-                    }}
-                  >
-                    {/* GanttStateHeader is rendered inside GanttPanel */}
+                  <div style={{ width: ganttTotalWidth }}>
+                    <GanttStateHeader distributions={distributions} zoom={zoom} />
                   </div>
                 </div>
               </div>
@@ -370,32 +393,12 @@ export function MainAppView({
 
           {/* Main body row */}
           <div className="flex-1 flex overflow-hidden">
-            {/* WBS Panel */}
+            {/* WBS Panel — just the scrolling tree */}
             <WBSPanel
               nodes={viewModel?.tree ?? []}
               selectedBeadId={selectedBead?.id}
               onToggle={(id) => toggleNode(id, wbsScrollRef)}
               onBeadClick={handleBeadClick}
-              filterText={filterText}
-              onFilterTextChange={(v) => setFilterText(v)}
-              hideClosed={hideClosed}
-              onHideClosedChange={(v) => setHideClosed(v)}
-              closedTimeFilter={closedTimeFilter}
-              onClosedTimeFilterChange={(v) => setClosedTimeFilter(v)}
-              includeHierarchy={includeHierarchy}
-              onIncludeHierarchyChange={(v) => setIncludeHierarchy(v)}
-              onExpandAll={expandAll}
-              onCollapseAll={() => collapseAll(viewModel?.tree)}
-              favoriteBeads={favoriteBeads}
-              favoriteProjects={favoriteProjects}
-              onOpenChat={handleOpenChatForNav}
-              onOpenProject={handleOpenProject}
-              sessionsByBead={Object.fromEntries(
-                Object.entries(sessionsByBead).map(([k, v]) => [
-                  k,
-                  v.map((s) => s.sessionId),
-                ])
-              )}
               onSessionClick={createSessionWindow}
               panelWidth={panelWidth}
               minPanelWidth={MIN_PANEL_WIDTH}
@@ -415,9 +418,8 @@ export function MainAppView({
                 rowCount={ganttLayout.rowCount}
                 rowDepths={ganttLayout.rowDepths}
                 connectors={ganttLayout.connectors}
-                distributions={distributions}
                 zoom={zoom}
-                onZoomChange={setZoom}
+                totalWidth={ganttTotalWidth}
                 selectedBead={selectedBead}
                 onBeadClick={handleBeadClick}
                 onOpenChat={handleOpenChatForNav}

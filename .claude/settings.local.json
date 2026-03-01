@@ -68,7 +68,8 @@
       "Bash(npm search:*)",
       "Bash(git log:*)",
       "Bash(npm info:*)",
-      "mcp__dart__analyze_files"
+      "mcp__dart__analyze_files",
+      "Bash(sqlite3:*)"
     ]
   }
 }

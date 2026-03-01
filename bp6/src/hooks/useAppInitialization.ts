@@ -9,7 +9,7 @@ import {
   openProject,
   type Project,
 } from "../api";
-import { getCurrentWindow, PhysicalPosition, PhysicalSize, currentMonitor } from "@tauri-apps/api/window";
+import { getCurrentWindow, PhysicalPosition, PhysicalSize, availableMonitors, primaryMonitor } from "@tauri-apps/api/window";
 import { useSessionStore } from "../stores/sessionStore";
 
 // Time-based filter options for closed tasks
@@ -36,12 +36,12 @@ export interface StartupRestoreCallbacks {
   setCurrentProjectPath: (v: string) => void;
   setHasProject: (v: boolean) => void;
   setLoading: (v: boolean) => void;
-  setProjectShellKey: React.Dispatch<React.SetStateAction<number>>;
 }
 
 export interface UseAppInitializationReturn {
   isReady: boolean;
   projectShellKey: number;
+  setProjectShellKey: React.Dispatch<React.SetStateAction<number>>;
   loadProjects: () => Promise<void>;
   loadData: (showLoading?: boolean) => void;
 }
@@ -113,33 +113,57 @@ export function useAppInitialization(
         if (startupState) {
           console.log("Loaded startup state:", startupState);
 
-          // Restore window position/size with safety clamps
+          // Restore window position/size, handling monitor topology changes.
+          //
+          // The original bug: using currentMonitor() returns the monitor where Tauri
+          // created the window (always the primary / monitor A), so any saved position
+          // from a secondary monitor got clamped into monitor A's bounds.
+          //
+          // Fix: apply the saved position directly. Only fall back to centering on the
+          // primary monitor if the window would be entirely off-screen (e.g. a display
+          // was disconnected since last run). macOS does NOT do this automatically.
           const win = getCurrentWindow();
-          const monitor = await currentMonitor().catch(() => null);
           const minW = 960;
           const minH = 640;
 
           const savedW = startupState.window.width;
           const savedH = startupState.window.height;
-          const savedX = startupState.window.x;
-          const savedY = startupState.window.y;
+          const savedX = startupState.window.x ?? 0;
+          const savedY = startupState.window.y ?? 0;
 
-          const monitorSize = monitor?.size;
-          const monitorPos = (monitor as { position?: { x: number; y: number } })?.position || { x: 0, y: 0 };
+          const targetW = Math.max(savedW ?? minW, minW);
+          const targetH = Math.max(savedH ?? minH, minH);
 
-          const maxW = monitorSize?.width || savedW || minW;
-          const maxH = monitorSize?.height || savedH || minH;
+          // Check that at least 100×100 px of the window would land on some monitor.
+          const monitors = await availableMonitors().catch(() => []);
+          const isOnScreen = monitors.length === 0 || monitors.some((m) => {
+            const mPos = m.position ?? { x: 0, y: 0 };
+            const overlapX = Math.min(savedX + targetW, mPos.x + m.size.width) - Math.max(savedX, mPos.x);
+            const overlapY = Math.min(savedY + targetH, mPos.y + m.size.height) - Math.max(savedY, mPos.y);
+            return overlapX > 100 && overlapY > 100;
+          });
 
-          const targetW = Math.min(Math.max(savedW || maxW, minW), maxW);
-          const targetH = Math.min(Math.max(savedH || maxH, minH), maxH);
+          let targetX: number;
+          let targetY: number;
 
-          const maxX = monitorPos.x + (monitorSize?.width ?? targetW) - targetW;
-          const maxY = monitorPos.y + (monitorSize?.height ?? targetH) - targetH;
-
-          const targetX = Math.min(Math.max(savedX ?? monitorPos.x, monitorPos.x), maxX);
-          const targetY = Math.min(Math.max(savedY ?? monitorPos.y, monitorPos.y), maxY);
+          if (isOnScreen) {
+            // Use the saved position exactly — preserves multi-monitor placement.
+            targetX = savedX;
+            targetY = savedY;
+          } else {
+            // Saved monitor is gone — center on primary.
+            const primary = await primaryMonitor().catch(() => null) ?? monitors[0] ?? null;
+            const pPos = primary?.position ?? { x: 0, y: 0 };
+            const pSize = primary?.size ?? { width: 1920, height: 1080 };
+            targetX = pPos.x + Math.round((pSize.width - targetW) / 2);
+            targetY = pPos.y + Math.round((pSize.height - targetH) / 2);
+          }
 
           if (startupState.window.isMaximized) {
+            // Move to the target monitor before maximizing — macOS maximizes on
+            // whichever screen the window is currently on (default: primary / monitor A).
+            // A 1px nudge to any point on the target monitor is enough to steer it.
+            await win.setPosition(new PhysicalPosition(targetX, targetY));
             await win.maximize();
           } else {
             await win.setSize(new PhysicalSize(targetW, targetH));
@@ -218,7 +242,8 @@ export function useAppInitialization(
         }
       });
       useSessionStore.getState().cleanup();
-      hasInitialized.current = false;
+      // Do NOT reset hasInitialized — init must run exactly once for the app lifetime.
+      // Resetting it here would cause re-initialization on every dependency change.
     };
   }, [
     loadProjects,
@@ -241,6 +266,7 @@ export function useAppInitialization(
   return {
     isReady,
     projectShellKey,
+    setProjectShellKey,
     loadProjects,
     loadData,
   };
