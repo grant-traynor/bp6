@@ -32,6 +32,8 @@ export interface UsePersistentUIInput {
   sortOrder: string;
   zoom: number;
   collapsedIds: Set<string>;
+  /** When true, skip all startup.json persistence (session/chat windows) */
+  isSessionWindow?: boolean;
 }
 
 /**
@@ -53,6 +55,7 @@ export function usePersistentUI(input: UsePersistentUIInput): UsePersistentUIRet
     sortOrder,
     zoom,
     collapsedIds,
+    isSessionWindow = false,
   } = input;
 
   const [isDark, setIsDark] = useState<boolean>(() => {
@@ -85,6 +88,9 @@ export function usePersistentUI(input: UsePersistentUIInput): UsePersistentUIRet
 
   // Main window position/size persistence: debounced save on resize/move
   useEffect(() => {
+    // Session/chat windows must not overwrite the main app's startup.json
+    if (isSessionWindow) return;
+
     const saveCurrentWindowState = async () => {
       if (isInitializing.current) return;
       try {
@@ -151,6 +157,7 @@ export function usePersistentUI(input: UsePersistentUIInput): UsePersistentUIRet
       if (unlistenMove) unlistenMove();
     };
   }, [
+    isSessionWindow,
     filterText,
     hideClosed,
     closedTimeFilter,
@@ -164,6 +171,7 @@ export function usePersistentUI(input: UsePersistentUIInput): UsePersistentUIRet
 
   // Save WBS panel width to startup.json with debouncing
   useEffect(() => {
+    if (isSessionWindow) return;
     if (!hasProject) return;
     if (isInitializing.current) return;
 
@@ -205,6 +213,7 @@ export function usePersistentUI(input: UsePersistentUIInput): UsePersistentUIRet
 
     return () => clearTimeout(saveTimeout);
   }, [
+    isSessionWindow,
     panelWidth,
     hasProject,
     filterText,

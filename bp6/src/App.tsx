@@ -169,6 +169,7 @@ function App({
     sortOrder: filterState.sortOrder,
     zoom: ganttTree.zoom,
     collapsedIds: ganttTree.collapsedIds,
+    isSessionWindow,
   });
 
   // Keep filterStateRef in sync so persistentUI can observe latest values
@@ -199,7 +200,8 @@ function App({
       setLoading: filterState.setLoading,
     },
     projectState.handleOpenProject,
-    filterState.incrementRefetchTrigger
+    filterState.incrementRefetchTrigger,
+    isSessionWindow
   );
 
   // Wire the setter from useAppInitialization so projectState.handleOpenProject can increment it

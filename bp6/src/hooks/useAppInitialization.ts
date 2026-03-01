@@ -58,7 +58,8 @@ const PROJECT_SHELL_ID = "project-shell";
 export function useAppInitialization(
   callbacks: StartupRestoreCallbacks,
   onOpenProject: (path: string) => Promise<void>,
-  onLoadData: () => void
+  onLoadData: () => void,
+  isSessionWindow = false
 ): UseAppInitializationReturn {
   const [isReady, setIsReady] = useState(false);
   const [projectShellKey, setProjectShellKey] = useState(0);
@@ -110,7 +111,8 @@ export function useAppInitialization(
     const init = async () => {
       try {
         const startupState = await loadStartupState();
-        if (startupState) {
+        // Session/chat windows must not restore the main app's window state
+        if (startupState && !isSessionWindow) {
           console.log("Loaded startup state:", startupState);
 
           // Restore window position/size, handling monitor topology changes.
