@@ -117,12 +117,45 @@ impl CliBackendPlugin for ClaudeCodeBackend {
                                     });
                                 }
 
-                                // All other tools: plain text notification
-                                let description = input["description"].as_str().unwrap_or("");
-                                let message = if !description.is_empty() {
-                                    format!("🔧 {}: {}\n", tool_name, description)
+                                // All other tools: plain text notification with relevant input detail
+                                let detail = match tool_name {
+                                    "Read" => input["file_path"].as_str()
+                                        .map(|s| s.to_string()),
+                                    "Glob" => {
+                                        let pattern = input["pattern"].as_str().unwrap_or("");
+                                        let path = input["path"].as_str().unwrap_or("");
+                                        if !path.is_empty() {
+                                            Some(format!("{} in {}", pattern, path))
+                                        } else {
+                                            Some(pattern.to_string())
+                                        }
+                                    }
+                                    "Grep" => {
+                                        let pattern = input["pattern"].as_str().unwrap_or("");
+                                        let path = input["path"].as_str()
+                                            .or_else(|| input["glob"].as_str())
+                                            .unwrap_or("");
+                                        if !path.is_empty() {
+                                            Some(format!("{} in {}", pattern, path))
+                                        } else {
+                                            Some(pattern.to_string())
+                                        }
+                                    }
+                                    "Bash" => input["description"].as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .or_else(|| input["command"].as_str())
+                                        .map(|s| s.to_string()),
+                                    "WebFetch" | "WebSearch" => input["url"].as_str()
+                                        .or_else(|| input["query"].as_str())
+                                        .map(|s| s.to_string()),
+                                    _ => input["description"].as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .map(|s| s.to_string()),
+                                };
+                                let message = if let Some(d) = detail.filter(|s| !s.is_empty()) {
+                                    format!("🔧 {}: {}\n", tool_name, d)
                                 } else {
-                                    format!("🔧 Using tool: {}\n", tool_name)
+                                    format!("🔧 {}\n", tool_name)
                                 };
                                 return Some(AgentChunk {
                                     content: message,
