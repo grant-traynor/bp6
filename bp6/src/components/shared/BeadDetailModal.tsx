@@ -3,7 +3,7 @@ import {
   X, Pencil, Eye, User, Star, Clock, Tag, Trash2, Plus, ArrowRight, Link2, CheckSquare, ChevronDown,
 } from "lucide-react";
 import type { BeadNode } from "../../api";
-import { cn } from "../../utils";
+import { cn, unescapeBeadText } from "../../utils";
 
 import { Markdown } from "./Markdown";
 
@@ -165,7 +165,7 @@ export const BeadDetailModal = ({
       setFormData(editForm);
       setMode("edit");
     } else if (bead) {
-      setFormData(bead);
+      setFormData(unescapeBeadText(bead));
       setMode("view");
     }
   }, [bead?.id, isCreating]); // eslint-disable-line react-hooks/exhaustive-deps

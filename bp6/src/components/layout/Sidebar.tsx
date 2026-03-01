@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { User, Tag, Clock, Star, Trash2, Plus, ArrowRight, BrainCircuit, Sparkles, Terminal, MessageSquare, Link2, CheckSquare } from "lucide-react";
 import type { BeadNode } from "../../api";
+import { unescapeBeadText } from "../../utils";
 
 // Subcomponents
 import { CollapsibleSection } from "./sidebar/CollapsibleSection";
@@ -62,7 +63,7 @@ export const Sidebar = ({
     if (isCreating) {
       setFormData(editForm);
     } else if (selectedBead) {
-      setFormData(selectedBead);
+      setFormData(unescapeBeadText(selectedBead));
     }
   }, [selectedBead, isCreating, editForm]);
 
