@@ -177,9 +177,8 @@ pub async fn create_session_window(
             .position(state.x as f64, state.y as f64)
             .inner_size(state.width as f64, state.height as f64);
 
-        if state.is_maximized {
-            builder = builder.maximized(true);
-        }
+        // Never restore maximized for chat windows — they should always open
+        // at their saved size so they don't obscure the main app window.
     } else {
         builder = builder
             .inner_size(default_w, default_h)
