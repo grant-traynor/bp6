@@ -150,23 +150,31 @@ pub async fn create_session_window(
         .resizable(true)
         .always_on_top(true);
 
-    // Compute default size: 30% of active display width, 50% of active display height.
-    // Use the monitor the main window is currently on, falling back to primary.
+    // Compute default size and center position using the monitor the main window
+    // is currently on, falling back to primary.
+    // NOTE: .center() always centers on the PRIMARY monitor — we must compute
+    // the center manually so the chat window appears on the correct screen.
     let active_monitor = app
         .get_webview_window("main")
         .and_then(|w| w.current_monitor().ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten());
 
-    let (default_w, default_h) = active_monitor
+    // Extract logical size AND logical origin of the active monitor
+    let (default_w, default_h, monitor_x, monitor_y) = active_monitor
         .map(|m| {
             let scale = m.scale_factor();
             let phys = m.size();
-            (
-                (phys.width as f64 / scale) * 0.30,
-                (phys.height as f64 / scale) * 0.50,
-            )
+            let pos = m.position();
+            let w = (phys.width as f64 / scale) * 0.30;
+            let h = (phys.height as f64 / scale) * 0.50;
+            let mx = pos.x as f64 / scale;
+            let my = pos.y as f64 / scale;
+            let mw = phys.width as f64 / scale;
+            let mh = phys.height as f64 / scale;
+            // Center the chat window within this monitor
+            (w, h, mx + (mw - w) / 2.0, my + (mh - h) / 2.0)
         })
-        .unwrap_or((700.0, 550.0));
+        .unwrap_or((700.0, 550.0, 0.0, 0.0));
 
     // Apply saved state if available, otherwise use screen-relative defaults
     if let Some(state) = saved_state {
@@ -180,9 +188,10 @@ pub async fn create_session_window(
         // Never restore maximized for chat windows — they should always open
         // at their saved size so they don't obscure the main app window.
     } else {
+        // Position centered on the active monitor (not .center() which uses primary)
         builder = builder
             .inner_size(default_w, default_h)
-            .center();
+            .position(monitor_x, monitor_y);
     }
 
     let _window = builder
