@@ -9,7 +9,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useSessionStore } from '../../stores/sessionStore';
 import { Terminal as TerminalComponent } from '../terminal/Terminal';
 import { RawHtml } from '../shared/Markdown';
-import { markdownToHtml } from '../../utils/markdown';
 import { invoke } from '@tauri-apps/api/core';
 
 interface ChatDialogProps {
@@ -89,7 +88,7 @@ const ChatDialog: React.FC<ChatDialogProps> = ({
   const isSessionEnded = !!sessionIdOverride && !currentSession && historyLoaded;
   const effectiveIsAgentReady = isAgentReady || isSessionEnded;
 
-  const safeStreamingMessage = sanitizeAgentHtml(markdownToHtml(streamingMessage));
+  const safeStreamingMessage = sanitizeAgentHtml(streamingMessage);
 
   const { position, isDragging, handleMouseDown } = useDraggable({ x: 100, y: 100 });
 
