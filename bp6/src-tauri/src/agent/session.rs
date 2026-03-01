@@ -871,13 +871,21 @@ fn run_cli_command_for_session(
                             // Emit to session-specific channel
                             let event_name = format!("agent-chunk-{}", session_id_clone);
                             let _ = handle_clone.emit(&event_name, html_chunk);
+
+                            // Break after signalling completion so the thread doesn't hang
+                            // waiting for EOF if a subprocess (e.g. a bash tool spawned by
+                            // Claude Code) keeps the stdout pipe write-end open after the
+                            // agent process exits.
+                            if chunk.is_done {
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Emit final completion chunk
+        // Emit final completion chunk (safety-net: fires promptly now that the loop exits)
         let final_chunk = crate::agent::plugin::AgentChunk {
             content: "".to_string(),
             is_done: true,
