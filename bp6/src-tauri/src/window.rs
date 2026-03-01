@@ -150,11 +150,14 @@ pub async fn create_session_window(
         .resizable(true)
         .always_on_top(true);
 
-    // Compute default size: 30% of screen width, 50% of screen height.
-    let (default_w, default_h) = app
-        .primary_monitor()
-        .ok()
-        .flatten()
+    // Compute default size: 30% of active display width, 50% of active display height.
+    // Use the monitor the main window is currently on, falling back to primary.
+    let active_monitor = app
+        .get_webview_window("main")
+        .and_then(|w| w.current_monitor().ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+
+    let (default_w, default_h) = active_monitor
         .map(|m| {
             let scale = m.scale_factor();
             let phys = m.size();

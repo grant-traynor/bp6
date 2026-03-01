@@ -145,28 +145,34 @@ export function useAppInitialization(
 
           let targetX: number;
           let targetY: number;
+          let finalW = targetW;
+          let finalH = targetH;
 
           if (isOnScreen) {
             // Use the saved position exactly — preserves multi-monitor placement.
             targetX = savedX;
             targetY = savedY;
           } else {
-            // Saved monitor is gone — center on primary.
+            // Saved monitor is gone — recover onto primary.
+            // Clamp size to fit the current primary (the saved size may have been
+            // from a much larger display, e.g. 6720×3720 from a big external monitor).
             const primary = await primaryMonitor().catch(() => null) ?? monitors[0] ?? null;
             const pPos = primary?.position ?? { x: 0, y: 0 };
             const pSize = primary?.size ?? { width: 1920, height: 1080 };
-            targetX = pPos.x + Math.round((pSize.width - targetW) / 2);
-            targetY = pPos.y + Math.round((pSize.height - targetH) / 2);
+            finalW = Math.min(targetW, pSize.width);
+            finalH = Math.min(targetH, pSize.height);
+            targetX = pPos.x + Math.round((pSize.width - finalW) / 2);
+            targetY = pPos.y + Math.round((pSize.height - finalH) / 2);
           }
 
           if (startupState.window.isMaximized) {
-            // Move to the target monitor before maximizing — macOS maximizes on
-            // whichever screen the window is currently on (default: primary / monitor A).
-            // A 1px nudge to any point on the target monitor is enough to steer it.
-            await win.setPosition(new PhysicalPosition(targetX, targetY));
+            // Nudge to the center of the target monitor before maximizing — macOS
+            // maximizes on whichever screen the window is currently on.
+            // Use the final (clamped) center so the nudge lands on-screen.
+            await win.setPosition(new PhysicalPosition(targetX + Math.round(finalW / 2), targetY + Math.round(finalH / 2)));
             await win.maximize();
           } else {
-            await win.setSize(new PhysicalSize(targetW, targetH));
+            await win.setSize(new PhysicalSize(finalW, finalH));
             await win.setPosition(new PhysicalPosition(targetX, targetY));
           }
 
