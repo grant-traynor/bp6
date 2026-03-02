@@ -304,8 +304,6 @@ function App({
     return (
       <SessionWindowView
         sessionId={sessionId}
-        sessionMetaIndex={chatSessions.sessionMetaIndex}
-        setSessionMetaIndex={chatSessions.setSessionMetaIndex}
       />
     );
   }

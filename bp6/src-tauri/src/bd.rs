@@ -55,6 +55,18 @@ pub fn resolve_cli_path(name: &str) -> Option<PathBuf> {
         }
     }
 
+    // Check nvm default node version (nvm installs to ~/.nvm/versions/node/<version>/bin/)
+    let nvm_alias_path = format!("{}/.nvm/alias/default", home);
+    if let Ok(version) = std::fs::read_to_string(&nvm_alias_path) {
+        let version = version.trim();
+        // Resolve lts/* or other aliases by checking the actual alias files
+        let nvm_bin = format!("{}/.nvm/versions/node/{}/bin/{}", home, version, name);
+        let p = PathBuf::from(&nvm_bin);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+
     // Fall back to the login shell to pick up the user's full PATH.
     let which_cmd = format!("which {}", name);
     for shell in &["/bin/zsh", "/bin/bash"] {

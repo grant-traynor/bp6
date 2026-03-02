@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -19,39 +18,9 @@ pub enum SessionStatus {
     Error,
 }
 
-/// Execution mode for a session (headless or interactive)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum ExecutionMode {
-    Headless,
-    Interactive,
-}
-
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        ExecutionMode::Interactive
-    }
-}
-
-/// View mode for a session (chat or terminal/CLI)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum ViewMode {
-    Chat,
-    Terminal,
-}
-
-impl Default for ViewMode {
-    fn default() -> Self {
-        ViewMode::Chat
-    }
-}
-
-/// Internal session state tracking a running agent process
+/// Internal session state tracking a running agent PTY session
 #[derive(Debug)]
 pub struct SessionState {
-    /// The running CLI process handle
-    pub process: Child,
     /// The bead/issue ID this session is working on (if any)
     pub bead_id: Option<String>,
     /// The persona/role for this session (specialist, product-manager, qa-engineer)
@@ -68,16 +37,6 @@ pub struct SessionState {
     pub created_at: SystemTime,
     /// The CLI-provided session ID for resume capability (if available)
     pub cli_session_id: Option<String>,
-    /// Execution mode (headless or interactive)
-    pub execution_mode: ExecutionMode,
-    /// View mode (chat or terminal/CLI)
-    pub view_mode: ViewMode,
-    /// PTY session ID (if in terminal mode)
-    pub pty_session_id: Option<String>,
-    /// Queue of pending commands for headless execution
-    pub command_queue: Option<Vec<String>>,
-    /// Total commands in original queue (for progress tracking)
-    pub total_commands: Option<usize>,
     /// Timestamp of last activity (last chunk received)
     pub last_activity: SystemTime,
     /// Whether this session has unread messages
@@ -110,14 +69,6 @@ pub struct SessionInfo {
     pub created_at: u64,
     /// The CLI-provided session ID for resume capability (if available)
     pub cli_session_id: Option<String>,
-    /// Execution mode (headless or interactive)
-    pub execution_mode: ExecutionMode,
-    /// View mode (chat or terminal/CLI)
-    pub view_mode: ViewMode,
-    /// Number of commands remaining in queue (for headless mode)
-    pub commands_remaining: Option<usize>,
-    /// Total commands in original queue (for headless mode)
-    pub total_commands: Option<usize>,
     /// Timestamp of last activity (seconds since UNIX epoch)
     pub last_activity: u64,
     /// Whether this session has unread messages
@@ -445,30 +396,6 @@ impl AgentState {
     }
 }
 
-fn kill_process_group(pid: u32) {
-    #[cfg(unix)]
-    {
-        unsafe {
-            // Use SIGINT (2) to simulate CTRL-C
-            libc::kill(-(pid as i32), libc::SIGINT);
-            // Give it a moment to stop, then SIGKILL if it's still there
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            libc::kill(-(pid as i32), libc::SIGKILL);
-        }
-    }
-}
-
-fn interrupt_process_group(pid: u32) {
-    #[cfg(unix)]
-    {
-        unsafe {
-            // Send SIGINT (2) to simulate CTRL-C and interrupt the current operation
-            // Does NOT send SIGKILL - allows process to handle the interrupt gracefully
-            libc::kill(-(pid as i32), libc::SIGINT);
-        }
-    }
-}
-
 // Multi-session helper functions
 
 /// Convert all sessions to SessionInfo and emit session-list-changed event
@@ -512,10 +439,6 @@ fn list_active_sessions_internal(sessions: &HashMap<String, SessionState>) -> Ve
                 .unwrap_or_default()
                 .as_secs(),
             cli_session_id: state.cli_session_id.clone(),
-            execution_mode: state.execution_mode.clone(),
-            view_mode: state.view_mode.clone(),
-            commands_remaining: state.command_queue.as_ref().map(|q| q.len()),
-            total_commands: state.total_commands,
             last_activity: state
                 .last_activity
                 .duration_since(std::time::UNIX_EPOCH)
@@ -526,425 +449,6 @@ fn list_active_sessions_internal(sessions: &HashMap<String, SessionState>) -> Ve
             project_path: state.project_path.clone(),
         })
         .collect()
-}
-
-// Backend-specific functions removed - now handled by CliBackendPlugin implementations
-
-/// Run CLI command for a specific session (multi-session architecture)
-///
-/// Spawns a CLI process, manages stdout/stderr reading in separate threads,
-/// and includes session_id in all emitted chunks. Returns the Child process
-/// handle (with stdout/stderr already taken) for storage in SessionState.
-fn run_cli_command_for_session(
-    backend_id: crate::agent::plugin::BackendId,
-    app_handle: AppHandle,
-    state: &AgentState,
-    session_id: String,
-    bead_id: Option<String>,
-    persona: String,
-    prompt: String,
-    resume: bool,
-    cli_session_id: Option<String>,
-) -> Result<Child, String> {
-    let repo_root = crate::bd::find_repo_root().ok_or_else(|| {
-        "Could not locate project root (.beads directory). Please ensure a project is loaded."
-            .to_string()
-    })?;
-
-    eprintln!(
-        "🎯 Starting session {} in directory: {}",
-        session_id,
-        repo_root.display()
-    );
-
-    let backend = state
-        .backend_registry
-        .get(backend_id)
-        .ok_or_else(|| format!("Backend {:?} not registered", backend_id))?;
-
-    let cli_path = crate::bd::resolve_cli_path(backend.command_name())
-        .ok_or_else(|| format!(
-            "The '{}' CLI is not found. Please ensure it is installed and available in your PATH.",
-            backend.command_name()
-        ))?;
-    let mut cmd = Command::new(cli_path);
-    let args = backend.build_args(&prompt, resume, cli_session_id.as_deref());
-    cmd.args(&args);
-    cmd.current_dir(&repo_root);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setpgid(0, 0);
-                Ok(())
-            });
-        }
-    }
-
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
-                let install_cmd = match backend_id {
-                    crate::agent::plugin::BackendId::Gemini => {
-                        "npm install -g @google/generative-ai-cli"
-                    }
-                    crate::agent::plugin::BackendId::ClaudeCode => {
-                        "See https://docs.anthropic.com/en/docs/claude-code for installation"
-                    }
-                };
-                format!(
-                    "{} CLI not found. Please install it first: {}",
-                    backend.command_name(),
-                    install_cmd
-                )
-            } else {
-                format!(
-                    "Failed to spawn {} in {}: {}",
-                    backend.command_name(),
-                    repo_root.display(),
-                    e
-                )
-            };
-            let _ = app_handle.emit("agent-stderr", format!("[Error] {}", error_msg));
-            error_msg
-        })?;
-
-    eprintln!("🚀 Session {} - Sending prompt:\n{}", session_id, prompt);
-    let _ = app_handle.emit(
-        "agent-stderr",
-        format!("[Session {}] Sending prompt:\n{}", session_id, prompt),
-    );
-
-    // Extract stdout/stderr before spawning threads
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-
-    // Spawn stdout reader thread with logging
-    let handle_clone = app_handle.clone();
-    let backend_clone = backend.clone();
-    let session_id_clone = session_id.clone();
-    let bead_id_clone = bead_id.clone();
-    let persona_clone = persona.clone();
-    let backend_name = backend.command_name().to_string();
-    let prompt_clone = prompt.clone();
-
-    std::thread::spawn(move || {
-        // Initialize session logger
-        let mut logger = match SessionLogger::new(bead_id_clone.as_deref(), &session_id_clone) {
-            Ok(logger) => {
-                eprintln!(
-                    "📝 Session {} logging to: {}",
-                    session_id_clone,
-                    logger.file_path().display()
-                );
-                Some(logger)
-            }
-            Err(e) => {
-                eprintln!("⚠️  Failed to create session logger: {}", e);
-                None
-            }
-        };
-
-        // Log session start event
-        if let Some(ref mut logger) = logger {
-            let start_event = LogEvent {
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                session_id: session_id_clone.clone(),
-                bead_id: bead_id_clone.clone(),
-                persona: persona_clone.clone(),
-                backend: backend_name.clone(),
-                event_type: LogEventType::SessionStart,
-                content: String::new(),
-                metadata: Some(serde_json::json!({
-                    "session_id": session_id_clone,
-                })),
-            };
-            let _ = logger.log_event(start_event);
-
-            // Log the user's prompt as a Message event
-            let prompt_event = LogEvent {
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                session_id: session_id_clone.clone(),
-                bead_id: bead_id_clone.clone(),
-                persona: persona_clone.clone(),
-                backend: backend_name.clone(),
-                event_type: LogEventType::Message,
-                content: prompt_clone.clone(),
-                metadata: None,
-            };
-            let _ = logger.log_event(prompt_event);
-        }
-
-        // Track whether agent-session-ready has been emitted for this session invocation
-        let mut agent_ready_emitted = false;
-
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
-                if line_str.trim().starts_with('{') {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line_str) {
-                        // Parse using backend plugin
-                        if let Some(mut chunk) = backend_clone.parse_stdout_line(&json) {
-                            // If chunk contains a CLI session ID (e.g., from Gemini init message),
-                            // store it in the SessionState for future resume operations
-                            if let Some(ref cli_session_id) = chunk.session_id {
-                                if let Some(agent_state) = handle_clone.try_state::<AgentState>() {
-                                    let mut sessions = agent_state.sessions.lock().unwrap();
-                                    if let Some(session) = sessions.get_mut(&session_id_clone) {
-                                        eprintln!("📝 Captured CLI session ID for {}: {}", session_id_clone, cli_session_id);
-                                        session.cli_session_id = Some(cli_session_id.clone());
-                                    }
-                                }
-                            }
-
-                            // Set session ID to internal session ID for event routing
-                            chunk.session_id = Some(session_id_clone.clone());
-
-                            // Log the chunk
-                            if let Some(ref mut logger) = logger {
-                                let _ = logger.log_chunk(
-                                    &session_id_clone,
-                                    bead_id_clone.as_deref(),
-                                    &persona_clone,
-                                    &backend_name,
-                                    &chunk,
-                                );
-                            }
-
-                            // Update session activity tracking
-                            if let Some(agent_state) = handle_clone.try_state::<AgentState>() {
-                                let mut sessions = agent_state.sessions.lock().unwrap();
-                                if let Some(session) = sessions.get_mut(&session_id_clone) {
-                                    session.last_activity = SystemTime::now();
-                                    session.has_unread = true;
-                                    if !chunk.is_done {
-                                        session.message_count += 1;
-                                    }
-                                }
-
-                                // NOTE: Don't emit session-list-changed on every chunk - causes constant flashing
-                                // Activity indicators will update on next session-list-changed event
-                                // (triggered by session create/terminate/mark-read)
-                            }
-
-                            // bp6-ns67: Emit agent-session-ready on first chunk from the agent
-                            if !agent_ready_emitted {
-                                agent_ready_emitted = true;
-                                let _ = handle_clone.emit(
-                                    "agent-session-ready",
-                                    serde_json::json!({ "session_id": session_id_clone }),
-                                );
-                                eprintln!("🟢 Emitted agent-session-ready for session: {}", session_id_clone);
-                            }
-
-                            // Check if command is done and there are more commands in queue
-                            if chunk.is_done {
-                                if let Some(agent_state) = handle_clone.try_state::<AgentState>() {
-                                    // Check if this is a headless session with queued commands
-                                    let queue_info = {
-                                        let sessions = agent_state.sessions.lock().unwrap();
-                                        if let Some(session) = sessions.get(&session_id_clone) {
-                                            if session.execution_mode == ExecutionMode::Headless {
-                                                if let Some(ref queue) = session.command_queue {
-                                                    if !queue.is_empty() {
-                                                        Some((
-                                                            queue[0].clone(),
-                                                            session.cli_session_id.clone(),
-                                                            session.backend_id,
-                                                            session.bead_id.clone(),
-                                                            session.persona.clone(),
-                                                        ))
-                                                    } else {
-                                                        None
-                                                    }
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    };
-
-                                    if let Some((next_command, cli_session_id, backend_id, bead_id, persona)) = queue_info {
-                                        eprintln!("📋 Command queue: executing next command for session {}", session_id_clone);
-
-                                        // Execute next command in queue
-                                        let handle_for_executor = handle_clone.clone();
-                                        let session_id_for_executor = session_id_clone.clone();
-
-                                        std::thread::spawn(move || {
-                                            if let Some(state) = handle_for_executor.try_state::<AgentState>() {
-                                                match run_cli_command_for_session(
-                                                    backend_id,
-                                                    handle_for_executor.clone(),
-                                                    &state,
-                                                    session_id_for_executor.clone(),
-                                                    bead_id,
-                                                    persona,
-                                                    next_command.clone(),
-                                                    true, // resume = true
-                                                    cli_session_id,
-                                                ) {
-                                                    Ok(child) => {
-                                                        // Update session state with new process
-                                                        let mut sessions = state.sessions.lock().unwrap();
-                                                        if let Some(session) = sessions.get_mut(&session_id_for_executor) {
-                                                            session.process = child;
-
-                                                            // Remove executed command from queue
-                                                            if let Some(ref mut queue) = session.command_queue {
-                                                                queue.remove(0);
-
-                                                                // Check if queue is now empty
-                                                                if queue.is_empty() {
-                                                                    eprintln!("✅ Command queue completed for session {}", session_id_for_executor);
-
-                                                                    // Emit queue-completed event
-                                                                    let _ = handle_for_executor.emit(
-                                                                        "headless-queue-completed",
-                                                                        serde_json::json!({
-                                                                            "sessionId": session_id_for_executor,
-                                                                        }),
-                                                                    );
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        eprintln!("❌ Failed to execute next command in queue: {}", e);
-
-                                                        // Emit error event
-                                                        let _ = handle_for_executor.emit(
-                                                            "command-error",
-                                                            serde_json::json!({
-                                                                "sessionId": session_id_for_executor,
-                                                                "command": next_command,
-                                                                "error": e,
-                                                            }),
-                                                        );
-                                                    }
-                                                }
-                                            }
-                                        });
-                                    }
-                                }
-                            }
-
-                            // Emit raw markdown text. The frontend accumulates chunks into
-                            // the full streaming buffer and calls markdownToHtml() on the
-                            // complete text — this preserves paragraph breaks and newlines
-                            // correctly, which per-chunk HTML conversion cannot do.
-                            let html_chunk = crate::agent::plugin::AgentChunk {
-                                content: chunk.content.clone(),
-                                is_done: chunk.is_done,
-                                is_replacement: chunk.is_replacement,
-                                session_id: chunk.session_id.clone(),
-                                tool_use: chunk.tool_use.clone(),
-                            };
-
-                            // Emit to session-specific channel
-                            let event_name = format!("agent-chunk-{}", session_id_clone);
-                            let _ = handle_clone.emit(&event_name, html_chunk);
-
-                            // Break after signalling completion so the thread doesn't hang
-                            // waiting for EOF if a subprocess (e.g. a bash tool spawned by
-                            // Claude Code) keeps the stdout pipe write-end open after the
-                            // agent process exits.
-                            if chunk.is_done {
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Emit final completion chunk (safety-net: fires promptly now that the loop exits)
-        let final_chunk = crate::agent::plugin::AgentChunk {
-            content: "".to_string(),
-            is_done: true,
-            is_replacement: false,
-            session_id: Some(session_id_clone.clone()),
-            tool_use: None,
-        };
-
-        // Log session end
-        if let Some(ref mut logger) = logger {
-            let end_event = LogEvent {
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                session_id: session_id_clone.clone(),
-                bead_id: bead_id_clone.clone(),
-                persona: persona_clone.clone(),
-                backend: backend_name.clone(),
-                event_type: LogEventType::SessionEnd,
-                content: String::new(),
-                metadata: None,
-            };
-            let _ = logger.log_event(end_event);
-        }
-
-        // Emit to session-specific channel
-        let event_name = format!("agent-chunk-{}", session_id_clone);
-        let _ = handle_clone.emit(&event_name, final_chunk);
-    });
-
-    // Spawn stderr reader thread
-    let handle_clone_stderr = app_handle.clone();
-    let session_id_clone = session_id.clone();
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            if let Ok(line_str) = line {
-                eprintln!("🤖 Session {} Stderr: {}", session_id_clone, line_str);
-                let _ = handle_clone_stderr.emit(
-                    "agent-stderr",
-                    format!("[{}] {}", session_id_clone, line_str),
-                );
-            }
-        }
-    });
-
-    Ok(child)
-}
-
-/// DEPRECATED: Single-session CLI command runner (use run_cli_command_for_session for multi-session)
-/// This wrapper is kept for backward compatibility with existing callers
-#[allow(dead_code)]
-fn run_cli_command(
-    backend_id: crate::agent::plugin::BackendId,
-    app_handle: AppHandle,
-    state: &AgentState,
-    prompt: String,
-    resume: bool,
-) -> Result<(), String> {
-    // Get CLI session ID from state for backward compatibility
-    let cli_session_id = state.current_session_id.lock().unwrap().clone();
-
-    // Generate a temporary session ID for single-session mode
-    let temp_session_id = Uuid::new_v4().to_string();
-
-    // Call new function and discard Child handle
-    let _child = run_cli_command_for_session(
-        backend_id,
-        app_handle,
-        state,
-        temp_session_id,
-        None,                  // No bead_id for deprecated single-session mode
-        "unknown".to_string(), // Default persona for deprecated mode
-        prompt,
-        resume,
-        cli_session_id,
-    )?;
-
-    Ok(())
 }
 
 /// Build prompt using persona plugin system
@@ -1023,11 +527,10 @@ pub fn start_agent_session(
     role: Option<String>,
     project_path: Option<String>,
 ) -> Result<String, String> {
-    // Generate unique session ID
     let session_id = Uuid::new_v4().to_string();
 
     // Parse CLI backend from argument, falling back to persisted setting
-    let backend = if let Some(backend_str) = cli_backend {
+    let backend_id = if let Some(backend_str) = cli_backend {
         match backend_str.to_lowercase().as_str() {
             "gemini" => crate::agent::plugin::BackendId::Gemini,
             "claude" | "claude-code" => crate::agent::plugin::BackendId::ClaudeCode,
@@ -1041,41 +544,165 @@ pub fn start_agent_session(
         settings.cli_backend
     };
 
-    // Build initial prompt using persona plugin system
+    // Build context prompt — injected into PTY stdin after session starts
     let prompt = build_prompt_with_persona(&state, &persona, task.as_deref(), bead_id.as_deref(), role.as_deref())?;
 
-    // Start the CLI process for this session
-    // Pass our session_id to the CLI backend so it uses the same UUID
-    let child = run_cli_command_for_session(
-        backend,
-        app_handle.clone(),
-        &state,
+    // Resolve project root for the PTY working directory
+    let resolved_project_path = project_path.unwrap_or_default();
+    let repo_root: std::path::PathBuf = if !resolved_project_path.is_empty() {
+        std::path::PathBuf::from(&resolved_project_path)
+    } else {
+        crate::bd::find_repo_root()
+            .ok_or_else(|| "Could not locate project root (.beads directory). Please ensure a project is loaded.".to_string())?
+    };
+
+    // Get backend plugin and resolve CLI binary path
+    let backend = state
+        .backend_registry
+        .get(backend_id)
+        .ok_or_else(|| format!("Backend {:?} not registered", backend_id))?;
+
+    let cli_path = crate::bd::resolve_cli_path(backend.command_name())
+        .ok_or_else(|| format!(
+            "The '{}' CLI is not found. Please ensure it is installed and available in your PATH.",
+            backend.command_name()
+        ))?;
+
+    // Build PTY args for a new session (no --resume)
+    let args = match backend_id {
+        crate::agent::plugin::BackendId::ClaudeCode => vec![
+            "--session-id".to_string(),
+            session_id.clone(),
+            "--dangerously-skip-permissions".to_string(),
+        ],
+        crate::agent::plugin::BackendId::Gemini => vec![
+            "--yolo".to_string(),
+        ],
+    };
+
+    eprintln!("🚀 Starting PTY session {} ({:?}) in {}", session_id, backend_id, repo_root.display());
+
+    // Spawn the agent CLI in a PTY — this is the single entry point, no mode switching
+    state.pty_manager.spawn(
         session_id.clone(),
-        bead_id.clone(),
-        persona.clone(),
-        prompt,
-        false,                    // resume = false for new session
-        Some(session_id.clone()), // Pass our session_id to the CLI backend
+        cli_path.to_string_lossy().to_string(),
+        args,
+        Some(repo_root.to_string_lossy().to_string()),
+        Some(80),
+        Some(24),
     )?;
 
-    // Create SessionState and store in HashMap
+    // Inject context prompt into PTY stdin after a short delay to allow the agent to initialize
+    {
+        let pty_manager = state.pty_manager.clone();
+        let session_id_clone = session_id.clone();
+        let prompt_clone = prompt.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let prompt_with_newline = format!("{}\n", prompt_clone);
+            if let Err(e) = pty_manager.write(&session_id_clone, prompt_with_newline.as_bytes()) {
+                eprintln!("⚠️  Failed to inject context prompt for session {}: {}", session_id_clone, e);
+            }
+        });
+    }
+
+    // Start reader thread: forwards PTY output as pty-data events and logs to JSONL
+    {
+        let pty_manager = state.pty_manager.clone();
+        let app_handle_clone = app_handle.clone();
+        let session_id_clone = session_id.clone();
+        let bead_id_for_log = bead_id.clone();
+        let persona_for_log = persona.clone();
+        let backend_name_for_log = format!("{:?}", backend_id).to_lowercase();
+
+        std::thread::spawn(move || {
+            let mut utf8_buf: Vec<u8> = Vec::new();
+            let mut log_text_buf = String::new();
+            let mut last_log_flush = std::time::Instant::now();
+            const LOG_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+            let mut logger = SessionLogger::new(bead_id_for_log.as_deref(), &session_id_clone).ok();
+
+            loop {
+                match pty_manager.read(&session_id_clone) {
+                    Ok(data) => {
+                        if data.is_empty() {
+                            break; // EOF — agent exited
+                        }
+                        utf8_buf.extend_from_slice(&data);
+
+                        let valid_len = match std::str::from_utf8(&utf8_buf) {
+                            Ok(_) => utf8_buf.len(),
+                            Err(e) => e.valid_up_to(),
+                        };
+
+                        if valid_len > 0 {
+                            let output = unsafe {
+                                std::str::from_utf8_unchecked(&utf8_buf[..valid_len])
+                            }.to_string();
+                            utf8_buf.drain(..valid_len);
+
+                            log_text_buf.push_str(&strip_ansi(&output));
+
+                            let _ = app_handle_clone.emit(
+                                "pty-data",
+                                serde_json::json!({
+                                    "sessionId": session_id_clone,
+                                    "data": output,
+                                }),
+                            );
+                        }
+
+                        if last_log_flush.elapsed() >= LOG_FLUSH_INTERVAL && !log_text_buf.is_empty() {
+                            if let Some(ref mut log) = logger {
+                                let _ = log.log_pty_output(
+                                    &session_id_clone,
+                                    bead_id_for_log.as_deref(),
+                                    &persona_for_log,
+                                    &backend_name_for_log,
+                                    &log_text_buf,
+                                );
+                            }
+                            log_text_buf.clear();
+                            last_log_flush = std::time::Instant::now();
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("PTY read error for session {}: {}", session_id_clone, e);
+                        break;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+
+            // Final flush on PTY close
+            if !log_text_buf.is_empty() {
+                if let Some(ref mut log) = logger {
+                    let _ = log.log_pty_output(
+                        &session_id_clone,
+                        bead_id_for_log.as_deref(),
+                        &persona_for_log,
+                        &backend_name_for_log,
+                        &log_text_buf,
+                    );
+                }
+            }
+
+            eprintln!("PTY stream ended for session: {}", session_id_clone);
+        });
+    }
+
+    // Store SessionState
     let now = SystemTime::now();
-    let resolved_project_path = project_path.unwrap_or_default();
     let session_state = SessionState {
-        process: child,
         bead_id: bead_id.clone(),
         persona: persona.clone(),
         task: task.clone(),
         role: role.clone(),
-        backend_id: backend,
+        backend_id,
         status: SessionStatus::Running,
         created_at: now,
-        cli_session_id: Some(session_id.clone()), // Store the session ID for resuming
-        execution_mode: ExecutionMode::Interactive,
-        view_mode: ViewMode::Chat, // Default to chat mode
-        pty_session_id: None, // No PTY session initially
-        command_queue: None,
-        total_commands: None,
+        cli_session_id: Some(session_id.clone()),
         last_activity: now,
         has_unread: false,
         message_count: 0,
@@ -1087,172 +714,20 @@ pub fn start_agent_session(
         sessions.insert(session_id.clone(), session_state);
     }
 
-    // Update active session ID
+    // Update active session
     {
         let mut active = state.active_session_id.lock().unwrap();
         *active = Some(session_id.clone());
     }
 
-    // Emit session-created event
     let _ = app_handle.emit("session-created", session_id.clone());
-
-    // Emit session-list-changed event
     {
         let sessions = state.sessions.lock().unwrap();
         emit_session_list_changed(&app_handle, &sessions);
     }
-
-    // Emit active-session-changed event
     let _ = app_handle.emit("active-session-changed", session_id.clone());
 
     Ok(session_id)
-}
-
-#[tauri::command]
-#[allow(non_snake_case)]
-pub fn send_agent_message(
-    app_handle: AppHandle,
-    sessionId: String,
-    message: String,
-    state: State<'_, AgentState>,
-) -> Result<(), String> {
-    // Get session info from HashMap
-    let (backend_id, cli_session_id, bead_id, persona) = {
-        let sessions = state.sessions.lock().unwrap();
-        let session = sessions
-            .get(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-
-        (
-            session.backend_id,
-            session.cli_session_id.clone(),
-            session.bead_id.clone(),
-            session.persona.clone(),
-        )
-    };
-
-    // Resume the session with the message
-    let child = run_cli_command_for_session(
-        backend_id,
-        app_handle.clone(),
-        &state,
-        sessionId.clone(),
-        bead_id,
-        persona,
-        message,
-        true, // resume = true
-        cli_session_id,
-    )?;
-
-    // Update the SessionState with the new process handle
-    {
-        let mut sessions = state.sessions.lock().unwrap();
-        if let Some(session_state) = sessions.get_mut(&sessionId) {
-            session_state.process = child;
-            session_state.status = SessionStatus::Running;
-        }
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-#[allow(non_snake_case)]
-pub fn stop_agent_session(
-    app_handle: AppHandle,
-    sessionId: String,
-    state: State<'_, AgentState>,
-) -> Result<(), String> {
-    // Remove session from HashMap and get the Child handle and PTY session ID
-    let (child, pty_session_id) = {
-        let mut sessions = state.sessions.lock().unwrap();
-        let session_state = sessions
-            .remove(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-        (session_state.process, session_state.pty_session_id)
-    };
-
-    // Kill the PTY session if it exists
-    if let Some(pty_id) = pty_session_id {
-        eprintln!("🗑️  Cleaning up PTY session: {}", pty_id);
-        let _ = state.pty_manager.kill(&pty_id);
-    }
-
-    // Kill the process
-    kill_process_group(child.id());
-
-    // Update active session if this was the active one
-    {
-        let mut active = state.active_session_id.lock().unwrap();
-        if active.as_ref() == Some(&sessionId) {
-            *active = None;
-        }
-    }
-
-    // Emit session-terminated event
-    let _ = app_handle.emit("session-terminated", sessionId);
-
-    // Emit session-list-changed event
-    {
-        let sessions = state.sessions.lock().unwrap();
-        emit_session_list_changed(&app_handle, &sessions);
-    }
-
-    Ok(())
-}
-
-/// Interrupt an agent session without terminating it
-///
-/// Sends SIGINT to the running CLI process to interrupt the current streaming response,
-/// but keeps the session alive in the sessions HashMap for follow-up messages.
-/// This is the equivalent of pressing CTRL-C in the CLI.
-///
-/// # Arguments
-/// * `sessionId` - The session ID to interrupt
-///
-/// # Errors
-/// Returns an error if the session doesn't exist
-#[tauri::command]
-#[allow(non_snake_case)]
-pub fn interrupt_agent_session(
-    sessionId: String,
-    state: State<'_, AgentState>,
-) -> Result<(), String> {
-    eprintln!("⏸️  Interrupting session: {}", sessionId);
-
-    // Get the process ID without removing the session from HashMap
-    let pid = {
-        let sessions = state.sessions.lock().unwrap();
-        let session_state = sessions
-            .get(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-        session_state.process.id()
-    };
-
-    // Send SIGINT to interrupt (but not kill) the process
-    interrupt_process_group(pid);
-
-    eprintln!(
-        "⏸️  Session {} interrupted (session remains alive)",
-        sessionId
-    );
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn approve_suggestion(command: String) -> Result<String, String> {
-    if !command.starts_with("bd ") {
-        return Err("Only 'bd' commands are supported for approval".to_string());
-    }
-
-    let args: Vec<String> = command
-        .split_whitespace()
-        .skip(1)
-        .map(|s| s.to_string())
-        .collect();
-
-    crate::bd::execute_bd(args)
 }
 
 /// List all active agent sessions
@@ -1369,23 +844,14 @@ pub fn terminate_session(
         }
     }
 
-    // Remove session and get the process handle and PTY session ID
-    let (child, pty_session_id) = {
+    // Kill the PTY (session_id == PTY key in the PTY-only architecture)
+    let _ = state.pty_manager.kill(&sessionId);
+
+    // Remove session from map
+    {
         let mut sessions = state.sessions.lock().unwrap();
-        let session_state = sessions
-            .remove(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-        (session_state.process, session_state.pty_session_id)
-    };
-
-    // Kill the PTY session if it exists
-    if let Some(pty_id) = pty_session_id {
-        eprintln!("🗑️  Cleaning up PTY session: {}", pty_id);
-        let _ = state.pty_manager.kill(&pty_id);
+        sessions.remove(&sessionId);
     }
-
-    // Kill the process
-    kill_process_group(child.id());
 
     // Update active session if needed
     {
@@ -1637,146 +1103,6 @@ pub fn mark_session_read(
     Ok(())
 }
 
-/// Start an agent session in headless mode with command queue
-///
-/// Creates a new session that runs commands non-interactively in the background.
-/// Useful for "warm-start" workflows where an agent pre-loads context before user interaction.
-///
-/// # Arguments
-/// * `app_handle` - Tauri app handle for event emission
-/// * `state` - AgentState containing session management
-/// * `settings_state` - Settings state for backend preference
-/// * `bead_id` - Optional bead/issue ID this session works on
-/// * `persona` - Persona type (specialist, product-manager, qa-engineer)
-/// * `backend_id` - CLI backend to use (gemini, claude-code)
-/// * `commands` - Queue of commands to execute sequentially
-///
-/// # Returns
-/// SessionInfo with session_id and cli_session_id
-///
-/// # Errors
-/// Returns error if backend not found, command queue empty, or process spawn fails
-#[tauri::command]
-pub fn start_agent_session_headless(
-    app_handle: AppHandle,
-    state: State<'_, AgentState>,
-    settings_state: State<'_, crate::SettingsState>,
-    bead_id: Option<String>,
-    persona: String,
-    backend_id: String,
-    commands: Vec<String>,
-    project_path: Option<String>,
-) -> Result<SessionInfo, String> {
-    // Validate command queue
-    if commands.is_empty() {
-        return Err("Command queue cannot be empty".to_string());
-    }
-
-    // Generate unique session ID
-    let session_id = Uuid::new_v4().to_string();
-
-    // Parse backend ID
-    let backend = match backend_id.to_lowercase().as_str() {
-        "gemini" => crate::agent::plugin::BackendId::Gemini,
-        "claude" | "claude-code" => crate::agent::plugin::BackendId::ClaudeCode,
-        _ => {
-            // Fallback to settings preference
-            let settings = settings_state.settings.lock().map_err(|e| e.to_string())?;
-            settings.cli_backend
-        }
-    };
-
-    // Get first command from queue
-    let first_command = commands[0].clone();
-    let remaining_commands = if commands.len() > 1 {
-        Some(commands[1..].to_vec())
-    } else {
-        None
-    };
-
-    // Start the CLI process with first command
-    // Pass session_id so the CLI backend uses the same UUID
-    let child = run_cli_command_for_session(
-        backend,
-        app_handle.clone(),
-        &state,
-        session_id.clone(),
-        bead_id.clone(),
-        persona.clone(),
-        first_command,
-        false,                    // resume = false for new session
-        Some(session_id.clone()), // Pass our session_id to the CLI backend
-    )?;
-
-    // Create SessionState in headless mode
-    let now = SystemTime::now();
-    let total_commands_count = commands.len();
-    let resolved_project_path = project_path.unwrap_or_default();
-    let session_state = SessionState {
-        process: child,
-        bead_id: bead_id.clone(),
-        persona: persona.clone(),
-        task: None,
-        role: None,
-        backend_id: backend,
-        status: SessionStatus::Running,
-        created_at: now,
-        cli_session_id: Some(session_id.clone()),
-        execution_mode: ExecutionMode::Headless,
-        view_mode: ViewMode::Chat, // Default to chat mode
-        pty_session_id: None, // No PTY session initially
-        command_queue: remaining_commands,
-        total_commands: Some(total_commands_count),
-        last_activity: now,
-        has_unread: false,
-        message_count: 0,
-        project_path: resolved_project_path.clone(),
-    };
-
-    // Store in sessions map
-    {
-        let mut sessions = state.sessions.lock().unwrap();
-        sessions.insert(session_id.clone(), session_state);
-    }
-
-    // Build SessionInfo for return
-    let session_info = SessionInfo {
-        session_id: session_id.clone(),
-        bead_id,
-        persona,
-        task: None,
-        role: None,
-        backend_id: backend,
-        status: SessionStatus::Running,
-        created_at: now
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-        cli_session_id: Some(session_id.clone()),
-        execution_mode: ExecutionMode::Headless,
-        view_mode: ViewMode::Chat,
-        commands_remaining: Some(total_commands_count - 1), // First command is already executing
-        total_commands: Some(total_commands_count),
-        last_activity: now
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-        has_unread: false,
-        message_count: 0,
-        project_path: resolved_project_path,
-    };
-
-    // Emit session-created event
-    let _ = app_handle.emit("session-created", session_id.clone());
-
-    // Emit session-list-changed event
-    {
-        let sessions = state.sessions.lock().unwrap();
-        emit_session_list_changed(&app_handle, &sessions);
-    }
-
-    Ok(session_info)
-}
 
 // ============================================================================
 // Session Resume Index Commands
@@ -1852,80 +1178,16 @@ pub fn touch_session(
     Ok(())
 }
 
-// ============================================================================
-// Interactive Handover Commands
-// ============================================================================
-
-/// Handover headless session to interactive mode
-///
-/// Transitions a headless session to interactive mode, allowing the user to take control.
-/// The process continues running - this simply updates the execution mode and clears the
-/// command queue. Future messages will be sent interactively via send_agent_message.
-///
-/// # Arguments
-/// * `app_handle` - Tauri app handle for event emission
-/// * `session_id` - The session ID to transition to interactive mode
-/// * `state` - AgentState containing sessions
-///
-/// # Returns
-/// Ok(()) on success, or error if session not found or already interactive
-///
-/// # Errors
-/// - Session not found
-/// - Session is not in headless mode
-#[tauri::command]
-#[allow(non_snake_case)]
-pub fn handover_to_interactive(
-    app_handle: AppHandle,
-    sessionId: String,
-    state: State<'_, AgentState>,
-) -> Result<(), String> {
-    eprintln!("🔄 Handover to interactive: {}", sessionId);
-
-    // Update session state
-    {
-        let mut sessions = state.sessions.lock().unwrap();
-        let session = sessions
-            .get_mut(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-
-        // Validate current mode
-        if session.execution_mode != ExecutionMode::Headless {
-            return Err("Session is not in headless mode".to_string());
-        }
-
-        // Update execution mode to Interactive
-        session.execution_mode = ExecutionMode::Interactive;
-
-        // Clear command queue
-        session.command_queue = None;
-
-        eprintln!("  ✅ Session {} now interactive", sessionId);
-    }
-
-    // Emit mode-changed event
-    let _ = app_handle.emit(
-        "mode-changed",
-        serde_json::json!({
-            "sessionId": sessionId,
-            "executionMode": "interactive",
-        }),
-    );
-
-    // Re-emit session-list-changed to update UI
-    {
-        let sessions = state.sessions.lock().unwrap();
-        emit_session_list_changed(&app_handle, &sessions);
-    }
-
-    Ok(())
-}
 
 // ============================================================================
 // PTY Terminal Interface Commands
 // ============================================================================
 
 /// Write data to a PTY session
+///
+/// In the PTY-only architecture, session_id == PTY key for agent sessions.
+/// Project shells (spawn_project_shell) also use their session_id as PTY key,
+/// so this function handles both transparently.
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn write_to_pty(
@@ -1933,25 +1195,7 @@ pub fn write_to_pty(
     data: String,
     state: State<AgentState>,
 ) -> Result<(), String> {
-    // Extract PTY session ID while holding lock, then release immediately.
-    // Falls back to using sessionId directly (for project shells not tied to an agent session).
-    let pty_session_id = {
-        let sessions = state.sessions.lock().unwrap();
-
-        if let Some(session) = sessions.get(&sessionId) {
-            session
-                .pty_session_id
-                .as_ref()
-                .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
-                .clone()
-        } else {
-            // No agent session — use sessionId as direct PTY key (project shells)
-            sessionId.clone()
-        }
-    }; // Lock released here
-
-    // Write to PTY without holding the sessions lock
-    state.pty_manager.write(&pty_session_id, data.as_bytes())
+    state.pty_manager.write(&sessionId, data.as_bytes())
 }
 
 /// Resize a PTY session
@@ -1963,305 +1207,9 @@ pub fn resize_pty(
     rows: u16,
     state: State<AgentState>,
 ) -> Result<(), String> {
-    // Extract PTY session ID while holding lock, then release immediately.
-    // Falls back to using sessionId directly (for project shells not tied to an agent session).
-    let pty_session_id = {
-        let sessions = state.sessions.lock().unwrap();
-
-        let pty_id = if let Some(session) = sessions.get(&sessionId) {
-            session
-                .pty_session_id
-                .as_ref()
-                .ok_or_else(|| format!("Session {} not in terminal mode", sessionId))?
-                .clone()
-        } else {
-            // No agent session — use sessionId as direct PTY key (project shells)
-            sessionId.clone()
-        };
-        pty_id
-    }; // Lock released here
-
-    // Resize PTY without holding the sessions lock
-    state.pty_manager.resize(&pty_session_id, cols, rows)?;
-
-    Ok(())
+    state.pty_manager.resize(&sessionId, cols, rows)
 }
 
-/// Spawn a PTY for an existing session (for terminal mode)
-/// This spawns the agent CLI with --resume in PTY mode (raw output, not JSON)
-#[tauri::command]
-#[allow(non_snake_case)]
-pub fn spawn_pty_for_session(
-    sessionId: String,
-    state: State<AgentState>,
-    app_handle: AppHandle,
-) -> Result<(), String> {
-    let mut sessions = state.sessions.lock().unwrap();
-
-    let session = sessions
-        .get_mut(&sessionId)
-        .ok_or_else(|| format!("Session {} not found", sessionId))?;
-
-    // Check if already in terminal mode — idempotent, just update view_mode and return
-    if session.pty_session_id.is_some() {
-        session.view_mode = ViewMode::Terminal;
-        return Ok(());
-    }
-
-    // CRITICAL FIX: Kill the existing chat process before spawning PTY
-    // The chat process is using the same session ID, which causes conflicts
-    eprintln!("🔄 Switching session {} to CLI mode - terminating chat process", sessionId);
-    let chat_process_pid = session.process.id();
-    kill_process_group(chat_process_pid);
-
-    // Give Claude more time to release the session lock
-    // 500ms should be sufficient for the session to be fully released
-    eprintln!("⏱️  Waiting for session lock to be released...");
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    // Get backend and CLI session ID for resuming
-    let backend_id = session.backend_id;
-    let cli_session_id = session
-        .cli_session_id
-        .clone()
-        .ok_or_else(|| "Session has no CLI session ID for resume".to_string())?;
-
-    // Use the session's stored project_path so that switching projects doesn't cause
-    // the PTY to launch in the wrong directory. find_repo_root() walks from the process
-    // cwd which changes when the user opens a different project.
-    let session_project_path = session.project_path.clone();
-
-    // Get backend plugin
-    let backend = state
-        .backend_registry
-        .get(backend_id)
-        .ok_or_else(|| format!("Backend {:?} not registered", backend_id))?;
-
-    // Use session's own project path; fall back to find_repo_root only if unset.
-    let repo_root: std::path::PathBuf = if !session_project_path.is_empty() {
-        std::path::PathBuf::from(&session_project_path)
-    } else {
-        crate::bd::find_repo_root()
-            .ok_or_else(|| "Could not locate project root (.beads directory)".to_string())?
-    };
-
-    // Generate PTY session ID
-    let pty_session_id = format!("pty-{}", sessionId);
-
-    // Build args for PTY mode (resume without JSON output)
-    // Note: For PTY, we DON'T want --output-format stream-json
-    // We want raw terminal output
-    let args = backend.build_pty_args(&cli_session_id);
-
-    // Resolve CLI binary to absolute path (bundled apps have minimal PATH)
-    let cli_path = crate::bd::resolve_cli_path(backend.command_name())
-        .ok_or_else(|| format!(
-            "The '{}' CLI is not found. Please ensure it is installed and available in your PATH.",
-            backend.command_name()
-        ))?;
-
-    // Spawn agent CLI in PTY
-    state.pty_manager.spawn(
-        pty_session_id.clone(),
-        cli_path.to_string_lossy().to_string(),
-        args,
-        Some(repo_root.to_string_lossy().to_string()),
-        Some(80), // Default columns
-        Some(24), // Default rows
-    )?;
-    
-    // Update session state
-    session.pty_session_id = Some(pty_session_id.clone());
-    session.view_mode = ViewMode::Terminal;
-    
-    // Capture session metadata needed by the logger thread
-    let bead_id_for_log = session.bead_id.clone();
-    let persona_for_log = session.persona.clone();
-    let backend_name_for_log = format!("{:?}", session.backend_id).to_lowercase();
-
-    // Spawn a thread to stream PTY output and log it for process review
-    let pty_manager = state.pty_manager.clone();
-    let app_handle_clone = app_handle.clone();
-    let session_id_clone = sessionId.clone();
-
-    std::thread::spawn(move || {
-        // Buffer for incomplete UTF-8 sequences split across PTY reads.
-        // from_utf8_lossy would replace partial sequences with U+FFFD; instead
-        // we carry over the trailing incomplete bytes to the next read.
-        let mut utf8_buf: Vec<u8> = Vec::new();
-
-        // Accumulate PTY text between log flushes (every 500ms).
-        let mut log_text_buf = String::new();
-        let mut last_log_flush = std::time::Instant::now();
-        const LOG_FLUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
-
-        let mut logger = SessionLogger::new(bead_id_for_log.as_deref(), &session_id_clone).ok();
-
-        loop {
-            match pty_manager.read(&pty_session_id) {
-                Ok(data) => {
-                    if data.is_empty() {
-                        // EOF - PTY closed
-                        break;
-                    }
-                    utf8_buf.extend_from_slice(&data);
-
-                    // Find the longest valid UTF-8 prefix and hold back any
-                    // trailing incomplete multi-byte sequence for the next read.
-                    let valid_len = match std::str::from_utf8(&utf8_buf) {
-                        Ok(_) => utf8_buf.len(),
-                        Err(e) => e.valid_up_to(),
-                    };
-
-                    if valid_len > 0 {
-                        // Safety: valid_len is guaranteed valid UTF-8 by from_utf8
-                        let output = unsafe {
-                            std::str::from_utf8_unchecked(&utf8_buf[..valid_len])
-                        }.to_string();
-                        utf8_buf.drain(..valid_len);
-
-                        // Accumulate for logging (strip ANSI for readability)
-                        log_text_buf.push_str(&strip_ansi(&output));
-
-                        let _ = app_handle_clone.emit(
-                            "pty-data",
-                            serde_json::json!({
-                                "sessionId": session_id_clone,
-                                "data": output,
-                            }),
-                        );
-                    }
-
-                    // Flush log buffer every 500ms
-                    if last_log_flush.elapsed() >= LOG_FLUSH_INTERVAL && !log_text_buf.is_empty() {
-                        if let Some(ref mut log) = logger {
-                            let _ = log.log_pty_output(
-                                &session_id_clone,
-                                bead_id_for_log.as_deref(),
-                                &persona_for_log,
-                                &backend_name_for_log,
-                                &log_text_buf,
-                            );
-                        }
-                        log_text_buf.clear();
-                        last_log_flush = std::time::Instant::now();
-                    }
-                }
-                Err(e) => {
-                    eprintln!("PTY read error for {}: {}", pty_session_id, e);
-                    break;
-                }
-            }
-
-            // Minimal yield to prevent thread from hogging CPU, but allow fast data flow
-            std::thread::sleep(std::time::Duration::from_millis(1));
-        }
-
-        // Final flush of any remaining buffered text on PTY close
-        if !log_text_buf.is_empty() {
-            if let Some(ref mut log) = logger {
-                let _ = log.log_pty_output(
-                    &session_id_clone,
-                    bead_id_for_log.as_deref(),
-                    &persona_for_log,
-                    &backend_name_for_log,
-                    &log_text_buf,
-                );
-            }
-        }
-
-        eprintln!("PTY stream ended for session: {}", session_id_clone);
-    });
-    
-    Ok(())
-}
-
-/// Detach PTY from a session (switch back to chat mode)
-/// This kills the PTY process and restarts the chat process
-#[tauri::command]
-#[allow(non_snake_case)]
-pub fn detach_pty_from_session(
-    sessionId: String,
-    state: State<AgentState>,
-    app_handle: AppHandle,
-) -> Result<(), String> {
-    eprintln!("🔄 Switching session {} from CLI to chat mode", sessionId);
-
-    // Extract session info and kill PTY
-    let (pty_session_id, backend_id, cli_session_id, bead_id, persona) = {
-        let mut sessions = state.sessions.lock().unwrap();
-
-        let session = sessions
-            .get_mut(&sessionId)
-            .ok_or_else(|| format!("Session {} not found", sessionId))?;
-
-        // Get PTY session ID
-        let pty_id = session
-            .pty_session_id
-            .take() // Remove from session
-            .ok_or_else(|| format!("Session {} has no PTY attached", sessionId))?;
-
-        // Get session info for restarting chat process
-        let backend = session.backend_id;
-        let cli_id = session.cli_session_id.clone()
-            .ok_or_else(|| "Session has no CLI session ID".to_string())?;
-        let bead = session.bead_id.clone();
-        let per = session.persona.clone();
-
-        // Switch back to chat mode
-        session.view_mode = ViewMode::Chat;
-
-        (pty_id, backend, cli_id, bead, per)
-    };
-
-    // Kill the PTY session
-    eprintln!("🗑️  Killing PTY session: {}", pty_session_id);
-    state.pty_manager.kill(&pty_session_id)?;
-
-    // Give Claude more time to release the session lock
-    eprintln!("⏱️  Waiting for session lock to be released...");
-    std::thread::sleep(std::time::Duration::from_millis(500));
-
-    // CRITICAL FIX: Restart the chat process so the session can continue
-    // We start it in "empty prompt" mode - it will just resume the session without sending a message
-    eprintln!("🔄 Restarting chat process for session {}", sessionId);
-    let child = run_cli_command_for_session(
-        backend_id,
-        app_handle.clone(),
-        &state,
-        sessionId.clone(),
-        bead_id,
-        persona,
-        String::new(), // Empty prompt - just resume the session
-        true, // resume = true
-        Some(cli_session_id),
-    )?;
-
-    // Update the session with the new process
-    {
-        let mut sessions = state.sessions.lock().unwrap();
-        if let Some(session) = sessions.get_mut(&sessionId) {
-            session.process = child;
-        }
-    }
-
-    // Emit view-mode-changed event
-    let _ = app_handle.emit(
-        "view-mode-changed",
-        serde_json::json!({
-            "sessionId": sessionId,
-            "viewMode": "chat",
-        }),
-    );
-
-    // Re-emit session-list-changed to update UI
-    {
-        let sessions = state.sessions.lock().unwrap();
-        emit_session_list_changed(&app_handle, &sessions);
-    }
-
-    Ok(())
-}
 
 /// Derive a safe tmux session name from a project path.
 /// Uses the last path component, sanitizes to alphanumeric + hyphens, max 20 chars.

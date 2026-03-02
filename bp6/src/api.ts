@@ -239,22 +239,6 @@ export function getPersonaIcon(personaOrRole: string): string {
   return PERSONA_ICONS[personaOrRole] || '🤖';
 }
 
-export interface ToolUseData {
-  name: string;
-  filePath: string;
-  oldString: string;
-  newString: string;
-}
-
-export interface AgentChunk {
-  content: string;
-  isDone: boolean;
-  /** When true, replace the streaming buffer with this content (Gemini sends full text per event) */
-  isReplacement?: boolean;
-  sessionId?: string;
-  toolUse?: ToolUseData;
-}
-
 /**
  * CLI backend type for agent sessions.
  * - 'gemini': Use Google Gemini CLI
@@ -284,61 +268,6 @@ export async function startAgentSession(
     return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend, role, projectPath });
   } catch (error) {
     console.error("Failed to start agent session:", error);
-    throw error;
-  }
-}
-
-/**
- * Send a message to a specific agent session.
- * @param sessionId - The session ID to send the message to
- * @param message - The message content
- */
-export async function sendAgentMessage(sessionId: string, message: string): Promise<void> {
-  try {
-    await invoke("send_agent_message", { sessionId, message });
-  } catch (error) {
-    console.error("Failed to send agent message:", error);
-    throw error;
-  }
-}
-
-/**
- * Stop a specific agent session.
- * @param sessionId - The session ID to stop
- */
-export async function stopAgentSession(sessionId: string): Promise<void> {
-  try {
-    await invoke("stop_agent_session", { sessionId });
-  } catch (error) {
-    console.error("Failed to stop agent session:", error);
-    throw error;
-  }
-}
-
-/**
- * Interrupt a specific agent session without terminating it.
- * Sends SIGINT to stop the current streaming response but keeps the session alive.
- * @param sessionId - The session ID to interrupt
- */
-export async function interruptAgentSession(sessionId: string): Promise<void> {
-  try {
-    await invoke("interrupt_agent_session", { sessionId });
-  } catch (error) {
-    console.error("Failed to interrupt agent session:", error);
-    throw error;
-  }
-}
-
-/**
- * Handover a headless session to interactive mode.
- * Clears the command queue and allows user to take control.
- * @param sessionId - The session ID to handover
- */
-export async function handoverToInteractive(sessionId: string): Promise<void> {
-  try {
-    await invoke("handover_to_interactive", { sessionId });
-  } catch (error) {
-    console.error("Failed to handover session to interactive:", error);
     throw error;
   }
 }
@@ -580,7 +509,6 @@ export interface ConversationMessage {
   role: 'user' | 'assistant' | 'terminal';
   content: string;
   timestamp: string;
-  toolUse?: ToolUseData;
 }
 
 /**
@@ -603,15 +531,6 @@ export async function loadSessionHistory(
   } catch (error) {
     console.error('Failed to load session history:', error);
     return [];
-  }
-}
-
-export async function approveSuggestion(command: string): Promise<string> {
-  try {
-    return await invoke<string>("approve_suggestion", { command });
-  } catch (error) {
-    console.error("Failed to approve suggestion:", error);
-    throw error;
   }
 }
 
