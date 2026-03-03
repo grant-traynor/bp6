@@ -22,6 +22,7 @@ vi.mock('./api', async () => {
     fetchProjectViewModel: vi.fn(),
     openProject: vi.fn().mockResolvedValue(undefined),
     getCliPreference: vi.fn().mockResolvedValue('gemini'),
+    getHistoricalSessions: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -86,8 +87,8 @@ describe('App Integration - Session Indicators', () => {
     expect(wbsItem).toBeDefined();
     expect(wbsItem.textContent).toContain('WBS Tree UI Indicators');
     
-    // Initially no session indicator
-    expect(screen.queryByTitle(/active session/)).toBeNull();
+    // Initially no session indicator icons
+    expect(screen.queryByTitle(/product manager/)).toBeNull();
 
     // Trigger the event (payload uses camelCase as serde transforms it)
     await act(async () => {
@@ -110,9 +111,9 @@ describe('App Integration - Session Indicators', () => {
       });
     });
 
-    // Now session indicator should be visible
-    const indicator = await screen.findByTitle(/1 active session/);
+    // Now session indicator should be visible (title: "product manager (running)")
+    const indicator = await screen.findByTitle(/product manager/);
     expect(indicator).toBeDefined();
-    expect(indicator.textContent).toContain('📋');
+    expect(indicator.textContent).toContain('🤖');
   });
 });

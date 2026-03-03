@@ -2487,3 +2487,13 @@ pub async fn resume_specific_session(
 
     Ok(session_id)
 }
+
+/// Return all historical sessions discovered by scanning ~/.bp6/sessions/.
+/// Pull-based alternative to the sessions-discovered event — called once during
+/// store initialisation so there are no event-timing race conditions.
+#[tauri::command]
+pub fn get_historical_sessions() -> Vec<SessionInfo> {
+    let sessions = scan_historical_sessions();
+    eprintln!("🔍 get_historical_sessions: returning {} sessions", sessions.len());
+    sessions
+}

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
-import { SessionInfo, listActiveSessions, onSessionListChanged, onSessionsDiscovered, UnlistenFn } from '../api';
+import { SessionInfo, listActiveSessions, onSessionListChanged, getHistoricalSessions, UnlistenFn } from '../api';
 
 interface SessionStore {
   // State
@@ -92,10 +92,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       set({ sessions: sessionList || [] });
     });
 
-    // Listen for startup-discovered historical sessions
-    onSessionsDiscovered((discovered) => {
-      console.log('🔍 sessions-discovered received:', discovered.length, 'sessions');
-      set({ discoveredSessions: discovered || [] });
+    // Pull historical sessions via command (reliable — no timing race with events)
+    getHistoricalSessions().then((discovered) => {
+      console.log('🔍 getHistoricalSessions: got', discovered.length, 'sessions');
+      set({ discoveredSessions: discovered });
     });
 
     // bp6-ldgi: Listen for agent-session-ready events — refresh sessions so messageCount is current

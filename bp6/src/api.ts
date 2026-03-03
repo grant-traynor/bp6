@@ -575,16 +575,17 @@ export async function onProjectsUpdated(callback: () => void): Promise<UnlistenF
 }
 
 /**
- * Listen for historically-discovered sessions emitted at startup.
- * @param callback - Function to call with the discovered session list
- * @returns A promise that resolves to an unlisten function for cleanup
+ * Fetch all historical sessions by scanning ~/.bp6/sessions/ on the backend.
+ * Pull-based — call once during store init instead of relying on the
+ * sessions-discovered event (which fires before the frontend listener is ready).
  */
-export async function onSessionsDiscovered(
-  callback: (sessions: SessionInfo[]) => void
-): Promise<UnlistenFn> {
-  return listen<SessionInfo[]>('sessions-discovered', (event) => {
-    callback(event.payload);
-  });
+export async function getHistoricalSessions(): Promise<SessionInfo[]> {
+  try {
+    return await invoke<SessionInfo[]>('get_historical_sessions');
+  } catch (error) {
+    console.error('Failed to get historical sessions:', error);
+    return [];
+  }
 }
 
 /**

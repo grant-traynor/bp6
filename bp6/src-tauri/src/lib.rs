@@ -2293,6 +2293,7 @@ pub fn run() {
             agent::session::write_to_pty, agent::session::resize_pty, agent::session::save_session_image,
             agent::session::get_session_stats,
             agent::session::resume_specific_session,
+            agent::session::get_historical_sessions,
             agent::session::spawn_project_shell, agent::session::kill_project_shell,
             settings::get_cli_preference, settings::set_cli_preference,
             startup::save_startup_state, startup::load_startup_state,
@@ -2322,19 +2323,6 @@ pub fn run() {
             let window_registry = window::WindowRegistry::new();
             app.manage(window_registry);
 
-            // Scan historical sessions at startup and emit sessions-discovered
-            {
-                let scan_handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    let sessions = tauri::async_runtime::spawn_blocking(
-                        agent::session::scan_historical_sessions
-                    )
-                    .await
-                    .unwrap_or_default();
-                    eprintln!("🔍 Discovered {} historical sessions", sessions.len());
-                    let _ = scan_handle.emit("sessions-discovered", sessions);
-                });
-            }
 
             // Initialize file watcher and immediately watch the current project's
             // beads.db if one is available from the launch directory.
