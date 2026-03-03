@@ -1,16 +1,18 @@
 import { create } from 'zustand';
 import { listen } from '@tauri-apps/api/event';
-import { SessionInfo, listActiveSessions, onSessionListChanged, UnlistenFn } from '../api';
+import { SessionInfo, listActiveSessions, onSessionListChanged, onSessionsDiscovered, UnlistenFn } from '../api';
 
 interface SessionStore {
   // State
   sessions: SessionInfo[];
+  discoveredSessions: SessionInfo[];
   isInitialized: boolean;
   // bp6-ldgi: Track which sessions have had their first agent message
   agentReadySessions: Set<string>;
 
   // Actions
   setSessions: (sessions: SessionInfo[]) => void;
+  setDiscoveredSessions: (sessions: SessionInfo[]) => void;
   loadSessions: () => Promise<void>;
   refreshSessions: () => Promise<void>;  // Manual refresh
   initializeStore: () => Promise<UnlistenFn | undefined>;
@@ -31,10 +33,25 @@ export const groupSessionsByBead = (sessions: SessionInfo[]): Record<string, Ses
   return grouped;
 };
 
+/**
+ * Merge running sessions and discovered historical sessions.
+ * Running sessions take precedence — if a discovered session has the same
+ * sessionId as a running session, the running one wins (dedup by sessionId).
+ */
+export const getAllSessions = (
+  running: SessionInfo[],
+  discovered: SessionInfo[]
+): SessionInfo[] => {
+  const runningIds = new Set(running.map(s => s.sessionId));
+  const historical = discovered.filter(s => !runningIds.has(s.sessionId));
+  return [...running, ...historical];
+};
+
 // Store instance
 export const useSessionStore = create<SessionStore>((set, get) => ({
   // Initial state
   sessions: [],
+  discoveredSessions: [],
   isInitialized: false,
   agentReadySessions: new Set<string>(),
 
@@ -42,6 +59,10 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   setSessions: (sessions) => {
     console.log('📝 setSessions called with:', sessions);
     set({ sessions });
+  },
+
+  setDiscoveredSessions: (sessions) => {
+    set({ discoveredSessions: sessions });
   },
 
   loadSessions: async () => {
@@ -60,15 +81,21 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     await get().loadSessions();
   },
 
-  // Initialize store: load sessions and set up event listener
+  // Initialize store: load sessions and set up event listeners
   initializeStore: async () => {
     // Load initial sessions
     await get().loadSessions();
 
-    // Set up event listener (single source of truth)
+    // Set up event listener for running sessions (single source of truth)
     const unlisten = await onSessionListChanged((sessionList) => {
       console.log('🎉 session-list-changed received in store:', sessionList);
       set({ sessions: sessionList || [] });
+    });
+
+    // Listen for startup-discovered historical sessions
+    onSessionsDiscovered((discovered) => {
+      console.log('🔍 sessions-discovered received:', discovered.length, 'sessions');
+      set({ discoveredSessions: discovered || [] });
     });
 
     // bp6-ldgi: Listen for agent-session-ready events — refresh sessions so messageCount is current
@@ -86,7 +113,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   cleanup: () => {
-    set({ sessions: [], isInitialized: false, agentReadySessions: new Set<string>() });
+    set({ sessions: [], discoveredSessions: [], isInitialized: false, agentReadySessions: new Set<string>() });
   },
 
   // bp6-ldgi: Mark a session as agent-ready

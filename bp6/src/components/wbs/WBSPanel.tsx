@@ -1,4 +1,4 @@
-import type { BeadNode } from "../../api";
+import type { BeadNode, SessionInfo } from "../../api";
 import { WBSTreeList } from "./WBSTreeItem";
 import { ResizeHandle } from "../shared/ResizeHandle";
 import { WBSSkeleton } from "../shared/Skeleton";
@@ -11,6 +11,7 @@ interface WBSPanelProps {
   onBeadClick: (bead: BeadNode) => void;
 
   // Sessions
+  sessionsByBead: Record<string, SessionInfo[]>;
   onSessionClick: (sessionId: string) => void;
 
   // Panel sizing
@@ -34,6 +35,7 @@ export function WBSPanel({
   selectedBeadId,
   onToggle,
   onBeadClick,
+  sessionsByBead,
   onSessionClick,
   panelWidth,
   minPanelWidth,
@@ -65,7 +67,7 @@ export function WBSPanel({
             onToggle={onToggle}
             onClick={onBeadClick}
             selectedId={selectedBeadId}
-            sessionsByBead={{}}
+            sessionsByBead={sessionsByBead}
             onSessionClick={onSessionClick}
           />
         )}

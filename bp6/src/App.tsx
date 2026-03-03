@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo, useCallback, useState } from "react";
-import { useSessionStore, groupSessionsByBead } from "./stores/sessionStore";
+import { useSessionStore, groupSessionsByBead, getAllSessions } from "./stores/sessionStore";
 import "./stores/sessionStoreDiagnostics"; // Enable diagnostics
 
 // Hooks
@@ -102,11 +102,16 @@ function App({
   // Chat sessions (standalone)
   const chatSessions = useChatSessions();
 
-  // Sessions from Zustand store
+  // Sessions from Zustand store (running + discovered historical)
   const sessions = useSessionStore((state) => state.sessions);
+  const discoveredSessions = useSessionStore((state) => state.discoveredSessions);
+  const allSessions = useMemo(
+    () => getAllSessions(sessions, discoveredSessions),
+    [sessions, discoveredSessions]
+  );
   const sessionsByBead = useMemo(
-    () => groupSessionsByBead(sessions),
-    [sessions]
+    () => groupSessionsByBead(allSessions),
+    [allSessions]
   );
 
   // Project state: needs loadData + setLoading + setProjectShellKey

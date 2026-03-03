@@ -184,22 +184,20 @@ export async function fetchProjectViewModel(params: FilterParams): Promise<Proje
 // NOTE: Rust uses #[serde(rename_all = "camelCase")], so fields are camelCase in JSON
 export interface SessionInfo {
   sessionId: string;
-  beadId: string | null;  // Optional bead ID
-  persona: string;        // PersonaType as string
-  task?: string | null;   // Task string
-  role?: string | null;   // Specialist role
-  backendId: string;      // BackendId as string
-  status: 'running' | 'paused';
-  createdAt: number;      // Unix timestamp in seconds (Rust u64)
-  cliSessionId?: string | null;  // CLI session ID for resume capability
-  executionMode: 'headless' | 'interactive';  // Execution mode
-  viewMode?: 'chat' | 'terminal';  // View mode (chat or terminal/CLI) - optional for backwards compatibility
-  commandsRemaining?: number | null;  // Number of commands remaining in queue (headless only)
-  totalCommands?: number | null;      // Total commands in original queue (headless only)
-  lastActivity: number;   // Unix timestamp of last activity (Rust u64)
-  hasUnread: boolean;     // Whether session has unread messages
-  messageCount: number;   // Number of messages in session
-  projectPath: string;    // Project root path at session creation time
+  beadId: string | null;
+  persona: string;
+  task?: string | null;
+  role?: string | null;
+  backendId: string;
+  status: 'running' | 'paused' | 'stopped';
+  createdAt: number;
+  cliSessionId?: string | null;
+  lastActivity: number;
+  hasUnread: boolean;
+  messageCount: number;
+  projectPath: string;
+  beadTitle?: string | null;
+  beadDescriptionPreview?: string | null;
 }
 
 // Persona icon mapping (aligned with PersonaType enum and Navigation.tsx)
@@ -262,10 +260,11 @@ export async function startAgentSession(
   beadId?: string,
   cliBackend?: CliBackend,
   role?: string,
-  projectPath?: string
+  projectPath?: string,
+  forceNew?: boolean
 ): Promise<string> {
   try {
-    return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend, role, projectPath });
+    return await invoke<string>("start_agent_session", { persona, task, beadId, cliBackend, role, projectPath, forceNew });
   } catch (error) {
     console.error("Failed to start agent session:", error);
     throw error;
@@ -573,6 +572,34 @@ export async function onProjectsUpdated(callback: () => void): Promise<UnlistenF
   return listen("projects-updated", () => {
     callback();
   });
+}
+
+/**
+ * Listen for historically-discovered sessions emitted at startup.
+ * @param callback - Function to call with the discovered session list
+ * @returns A promise that resolves to an unlisten function for cleanup
+ */
+export async function onSessionsDiscovered(
+  callback: (sessions: SessionInfo[]) => void
+): Promise<UnlistenFn> {
+  return listen<SessionInfo[]>('sessions-discovered', (event) => {
+    callback(event.payload);
+  });
+}
+
+/**
+ * Resume a specific historical session by its session ID.
+ * Reads the sidecar on disk, spawns the PTY, registers in AgentState.
+ * @param sessionId - The session UUID to resume
+ * @returns The session ID (call createSessionWindow with it afterward)
+ */
+export async function resumeSpecificSession(sessionId: string): Promise<string> {
+  try {
+    return await invoke<string>('resume_specific_session', { sessionId });
+  } catch (error) {
+    console.error('Failed to resume specific session:', error);
+    throw error;
+  }
 }
 
 // buildWBSTree function removed - now handled by Rust backend in get_processed_data

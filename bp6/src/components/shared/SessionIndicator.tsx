@@ -1,7 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../utils";
-import { PERSONA_ICONS, type SessionInfo } from "../../api";
+import { PERSONA_ICONS, type SessionInfo, createSessionWindow, resumeSpecificSession } from "../../api";
 
 interface SessionIndicatorProps {
   sessions: SessionInfo[];
@@ -9,127 +9,195 @@ interface SessionIndicatorProps {
   onSessionClick?: (sessionId: string) => void;
 }
 
-export const SessionIndicator = ({ sessions, className, onSessionClick }: SessionIndicatorProps) => {
-  const [isHovered, setIsHovered] = useState(false);
-  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
-  const anchorRef = useRef<HTMLDivElement>(null);
+interface PopoverProps {
+  session: SessionInfo;
+  anchorRect: DOMRect;
+  onClose: () => void;
+  onOpen: (session: SessionInfo) => void;
+}
 
-  if (!sessions || sessions.length === 0) return null;
+function SessionPopover({ session, anchorRect, onClose, onOpen }: PopoverProps) {
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const icon = PERSONA_ICONS[session.role || session.persona] || '🤖';
+  const personaLabel = (session.role || session.persona || '').replace(/-/g, ' ');
+  const isRunning = session.status === 'running';
 
-  const activeSessions = sessions.filter(s => s.status === 'running');
-  if (activeSessions.length === 0) return null;
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const handleClickOutside = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [onClose]);
 
-  const primarySession = activeSessions[0];
-  const icon = PERSONA_ICONS[primarySession.role || primarySession.persona] || '🤖';
-  const count = activeSessions.length;
+  // Position: above the anchor, centered
+  const top = anchorRect.top - 8;
+  const left = anchorRect.left + anchorRect.width / 2;
 
-  const handleMouseEnter = () => {
-    if (anchorRef.current) {
-      const rect = anchorRef.current.getBoundingClientRect();
-      setPopoverPos({
-        top: rect.top - 8, // will be shifted up by transform
-        left: rect.left + rect.width / 2,
-      });
-    }
-    setIsHovered(true);
-  };
-
-  const handleMouseLeave = () => {
-    setIsHovered(false);
-    setPopoverPos(null);
-  };
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (count === 1 && onSessionClick) {
-      onSessionClick(activeSessions[0].sessionId);
-    }
-  };
-
-  const handleSessionRowClick = (e: React.MouseEvent, sessionId: string) => {
-    e.stopPropagation();
-    if (onSessionClick) {
-      onSessionClick(sessionId);
-    }
-  };
-
-  const popover = isHovered && popoverPos && createPortal(
+  return createPortal(
     <div
-      className="fixed z-[9999] min-w-[160px] max-w-[240px] pointer-events-none"
-      style={{
-        top: popoverPos.top,
-        left: popoverPos.left,
-        transform: 'translate(-50%, -100%)',
-      }}
+      ref={popoverRef}
+      className="fixed z-[9999] min-w-[180px] max-w-[240px]"
+      style={{ top, left, transform: 'translate(-50%, -100%)' }}
       onClick={e => e.stopPropagation()}
     >
-      <div className="pointer-events-auto bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-lg shadow-xl p-2 text-left mb-2">
-        {activeSessions.map(session => {
-          const sessionIcon = PERSONA_ICONS[session.role || session.persona] || '🤖';
-          const personaLabel = (session.role || session.persona || '').replace(/-/g, ' ');
-          const taskLabel = session.task || '';
-          return (
-            <div
-              key={session.sessionId}
-              className={cn(
-                "flex flex-col gap-0.5 px-2 py-1.5 rounded-md",
-                count > 1 && onSessionClick
-                  ? "hover:bg-[var(--background-tertiary)] cursor-pointer transition-colors"
-                  : ""
-              )}
-              onClick={count > 1 ? (e) => handleSessionRowClick(e, session.sessionId) : undefined}
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="text-[11px]">{sessionIcon}</span>
-                <span className="text-xs font-semibold text-[var(--text-primary)] capitalize truncate">
-                  {personaLabel}
-                </span>
-              </div>
-              {taskLabel && (
-                <span className="text-[10px] text-[var(--text-secondary)] truncate pl-5">
-                  {taskLabel}
-                </span>
-              )}
-            </div>
-          );
-        })}
-        <div className="mt-1 pt-1 border-t border-[var(--border-primary)]/50 px-2">
-          <span className="text-[9px] text-[var(--text-muted)] uppercase tracking-wider">
-            {count === 1 ? "Click to open chat" : "Click row to open chat"}
+      <div className="bg-[var(--background-secondary)] border border-[var(--border-primary)] rounded-lg shadow-xl p-3 text-left mb-2">
+        {/* Header row: icon + persona */}
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-base">{icon}</span>
+          <span className="text-xs font-semibold text-[var(--text-primary)] capitalize">
+            {personaLabel}
+          </span>
+          <span className={cn(
+            "ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wider",
+            isRunning
+              ? "bg-green-500/20 text-green-600 dark:text-green-400"
+              : "bg-[var(--background-tertiary)] text-[var(--text-muted)]"
+          )}>
+            {session.status}
           </span>
         </div>
+
+        {/* Task */}
+        {session.task && (
+          <p className="text-[10px] text-[var(--text-secondary)] mb-2 truncate">
+            {session.task}
+          </p>
+        )}
+
+        {/* Backend */}
+        <p className="text-[10px] text-[var(--text-muted)] mb-3">
+          {session.backendId}
+        </p>
+
+        {/* Open Session button */}
+        <button
+          className="w-full text-xs font-semibold bg-[var(--accent-primary)] text-white rounded-md px-3 py-1.5 hover:opacity-90 transition-opacity"
+          onClick={(e) => { e.stopPropagation(); onOpen(session); }}
+        >
+          Open Session
+        </button>
       </div>
     </div>,
     document.body
   );
+}
+
+export const SessionIndicator = ({ sessions, className, onSessionClick }: SessionIndicatorProps) => {
+  const [openPopover, setOpenPopover] = useState<{ idx: number; rect: DOMRect } | null>(null);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const VISIBLE = 3;
+
+  if (!sessions || sessions.length === 0) return null;
+
+  const canScrollLeft = scrollOffset > 0;
+  const canScrollRight = scrollOffset + VISIBLE < sessions.length;
+  const visibleSessions = sessions.slice(scrollOffset, scrollOffset + VISIBLE);
+
+  const handleIconClick = useCallback((localIdx: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const globalIdx = scrollOffset + localIdx;
+    const btn = buttonRefs.current[localIdx];
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    setOpenPopover(prev =>
+      prev?.idx === globalIdx ? null : { idx: globalIdx, rect }
+    );
+  }, [scrollOffset]);
+
+  const handleOpenSession = useCallback(async (session: SessionInfo) => {
+    setOpenPopover(null);
+    try {
+      if (session.status === 'stopped') {
+        const sessionId = await resumeSpecificSession(session.sessionId);
+        await createSessionWindow(sessionId);
+        onSessionClick?.(sessionId);
+      } else {
+        await createSessionWindow(session.sessionId);
+        onSessionClick?.(session.sessionId);
+      }
+    } catch (error) {
+      console.error('Failed to open session:', error);
+    }
+  }, [onSessionClick]);
+
+  const activeSession = openPopover !== null ? sessions[openPopover.idx] : null;
 
   return (
-    <>
-      <div
-        ref={anchorRef}
-        className={cn("relative flex items-center justify-center group/session", className)}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        onClick={handleClick}
-        style={{ cursor: onSessionClick ? 'pointer' : 'default' }}
-      >
-        {/* Pulsing Dot */}
-        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse-slow shadow-[0_0_8px_rgba(34,197,94,0.6)]" />
+    <div className={cn("flex items-center gap-0.5 shrink-0", className)}>
+      {/* Left scroll arrow */}
+      {canScrollLeft && (
+        <button
+          className="w-3.5 h-3.5 flex items-center justify-center text-[9px] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded transition-colors shrink-0"
+          onClick={(e) => { e.stopPropagation(); setScrollOffset(s => s - 1); setOpenPopover(null); }}
+          title="Scroll left"
+        >
+          ‹
+        </button>
+      )}
 
-        {/* Persona Icon Overlay */}
-        <div className="absolute -top-1 -right-1 text-[10px] bg-[var(--background-secondary)] rounded-full w-4 h-4 flex items-center justify-center border border-[var(--border-primary)] shadow-sm">
-          {icon}
-        </div>
+      {/* Session icon buttons */}
+      {visibleSessions.map((session, localIdx) => {
+        const globalIdx = scrollOffset + localIdx;
+        const icon = PERSONA_ICONS[session.role || session.persona] || '🤖';
+        const isRunning = session.status === 'running';
+        const isOpen = openPopover?.idx === globalIdx;
 
-        {/* Count Badge (if > 1) */}
-        {count > 1 && (
-          <div className="absolute -bottom-1 -left-1 text-[8px] font-black bg-[var(--accent-primary)] text-white rounded-full w-3.5 h-3.5 flex items-center justify-center border border-white dark:border-gray-900 shadow-sm">
-            {count}
+        return (
+          <div key={session.sessionId} className="relative shrink-0">
+            <button
+              ref={el => { buttonRefs.current[localIdx] = el; }}
+              title={`${(session.role || session.persona).replace(/-/g, ' ')} (${session.status})`}
+              onClick={(e) => handleIconClick(localIdx, e)}
+              className={cn(
+                "w-[22px] h-[22px] rounded-full flex items-center justify-center text-[11px] border transition-all relative",
+                isOpen
+                  ? "bg-[var(--accent-primary)]/20 border-[var(--accent-primary)]/60 scale-110"
+                  : isRunning
+                    ? "bg-green-500/15 border-green-500/40 hover:bg-green-500/25 hover:scale-110"
+                    : "bg-[var(--background-tertiary)] border-[var(--border-primary)] opacity-50 hover:opacity-80 hover:scale-110"
+              )}
+            >
+              {icon}
+              {isRunning && (
+                <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse-slow" />
+              )}
+            </button>
           </div>
-        )}
-      </div>
+        );
+      })}
 
-      {popover}
-    </>
+      {/* Right scroll arrow */}
+      {canScrollRight && (
+        <button
+          className="w-3.5 h-3.5 flex items-center justify-center text-[9px] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded transition-colors shrink-0"
+          onClick={(e) => { e.stopPropagation(); setScrollOffset(s => s + 1); setOpenPopover(null); }}
+          title="Scroll right"
+        >
+          ›
+        </button>
+      )}
+
+      {/* Popover portal */}
+      {activeSession && openPopover && (
+        <SessionPopover
+          session={activeSession}
+          anchorRect={openPopover.rect}
+          onClose={() => setOpenPopover(null)}
+          onOpen={handleOpenSession}
+        />
+      )}
+    </div>
   );
 };

@@ -108,7 +108,13 @@ export const WBSTreeItem = memo(function WBSTreeItem({
           )}>
             {node.title}
           </span>
-          <SessionIndicator sessions={sessions} className="shrink-0" onSessionClick={onSessionClick} />
+        </div>
+
+        {/* Dedicated session icons column */}
+        <div className="w-20 shrink-0 flex items-center justify-end pr-2 h-full">
+          {sessions && sessions.length > 0 && (
+            <SessionIndicator sessions={sessions} onSessionClick={onSessionClick} />
+          )}
         </div>
 
         <div className="w-20 shrink-0 px-2 flex items-center justify-center h-full">

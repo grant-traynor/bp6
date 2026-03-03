@@ -399,6 +399,7 @@ export function MainAppView({
               selectedBeadId={selectedBead?.id}
               onToggle={(id) => toggleNode(id, wbsScrollRef)}
               onBeadClick={handleBeadClick}
+              sessionsByBead={sessionsByBead}
               onSessionClick={createSessionWindow}
               panelWidth={panelWidth}
               minPanelWidth={MIN_PANEL_WIDTH}

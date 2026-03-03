@@ -6,6 +6,7 @@ import type { SessionInfo } from '../api';
 vi.mock('../api', () => ({
   listActiveSessions: vi.fn(),
   onSessionListChanged: vi.fn(),
+  onSessionsDiscovered: vi.fn(),
 }));
 
 describe('sessionStore', () => {
@@ -27,7 +28,6 @@ describe('sessionStore', () => {
         persona: 'product-manager',
         backendId: 'claude',
         status: 'running',
-          executionMode: 'interactive',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         hasUnread: false,
@@ -40,7 +40,6 @@ describe('sessionStore', () => {
         persona: 'engineer',
         backendId: 'claude',
         status: 'running',
-          executionMode: 'interactive',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         hasUnread: false,
@@ -64,7 +63,6 @@ describe('sessionStore', () => {
         persona: 'product-manager',
         backendId: 'claude',
         status: 'running',
-          executionMode: 'interactive',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         hasUnread: false,
@@ -77,7 +75,6 @@ describe('sessionStore', () => {
         persona: 'engineer',
         backendId: 'claude',
         status: 'running',
-          executionMode: 'interactive',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         hasUnread: false,
@@ -90,7 +87,6 @@ describe('sessionStore', () => {
         persona: 'designer',
         backendId: 'claude',
         status: 'running',
-          executionMode: 'interactive',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         hasUnread: false,
@@ -103,7 +99,6 @@ describe('sessionStore', () => {
         persona: 'researcher',
         backendId: 'claude',
         status: 'running',
-          executionMode: 'interactive',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         hasUnread: false,
@@ -143,7 +138,6 @@ describe('sessionStore', () => {
         persona: 'product-manager',
         backendId: 'claude',
         status: 'running',
-          executionMode: 'interactive',
         createdAt: Date.now(),
         lastActivity: Date.now(),
         hasUnread: false,
@@ -158,6 +152,7 @@ describe('sessionStore', () => {
     useSessionStore.getState().cleanup();
 
     expect(useSessionStore.getState().sessions).toEqual([]);
+    expect(useSessionStore.getState().discoveredSessions).toEqual([]);
     expect(useSessionStore.getState().isInitialized).toBe(false);
   });
 });
