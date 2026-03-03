@@ -468,6 +468,7 @@ fn write_session_meta(
     backend: crate::agent::plugin::BackendId,
     persona: &str,
     task: Option<&str>,
+    role: Option<&str>,
 ) {
     let home_dir = match dirs::home_dir() {
         Some(h) => h,
@@ -487,6 +488,7 @@ fn write_session_meta(
         "session_id": session_id,
         "backend": backend_str,
         "persona": persona,
+        "role": role,
         "task": task,
         "bead_id": bead_id,
         "started_at": SystemTime::now()
@@ -586,6 +588,8 @@ fn store_gemini_session_id(bead_id: Option<&str>, our_session_id: &str, gemini_u
 fn find_latest_session_id(
     bead_id: Option<&str>,
     backend: crate::agent::plugin::BackendId,
+    persona: &str,
+    role: Option<&str>,
 ) -> Option<(String, Option<String>)> {
     let home_dir = dirs::home_dir()?;
     let session_dir = home_dir
@@ -618,6 +622,19 @@ fn find_latest_session_id(
 
             if meta["backend"].as_str().map_or(true, |b| b != backend_str) {
                 return None; // Wrong backend — skip
+            }
+
+            // Persona must match: never resume an architect session as a specialist or vice versa
+            if meta["persona"].as_str() != Some(persona) {
+                return None; // Wrong persona — skip
+            }
+
+            // For specialist persona, role must also match to avoid cross-role resume
+            if persona == "specialist" {
+                let sidecar_role = meta["role"].as_str();
+                if sidecar_role != role {
+                    return None; // Wrong specialist role — skip
+                }
             }
 
             let gemini_uuid = meta["gemini_session_id"].as_str().map(String::from);
@@ -780,10 +797,10 @@ pub async fn start_agent_session(
         settings.cli_backend
     };
 
-    // Resume the most recent session for this bead + backend by scanning
+    // Resume the most recent session for this bead + backend + persona by scanning
     // ~/.bp6/sessions/<bead-id>/, unless the caller explicitly requests a fresh session.
     let (session_id, is_resume, stored_gemini_uuid) = if !force_new {
-        match find_latest_session_id(bead_id.as_deref(), backend_id) {
+        match find_latest_session_id(bead_id.as_deref(), backend_id, &persona, role.as_deref()) {
             Some((existing_id, gemini_uuid)) => (existing_id, true, gemini_uuid),
             None => (Uuid::new_v4().to_string(), false, None),
         }
@@ -922,6 +939,7 @@ pub async fn start_agent_session(
         backend_id,
         &persona,
         task.as_deref(),
+        role.as_deref(),
     );
 
     // Spawn the agent CLI in a PTY — this is the single entry point, no mode switching
@@ -2217,6 +2235,7 @@ pub fn scan_historical_sessions() -> Vec<SessionInfo> {
             };
 
             let persona = meta["persona"].as_str().unwrap_or("specialist").to_string();
+            let role = meta["role"].as_str().map(String::from);
             let task = meta["task"].as_str().map(String::from);
             let bead_id = meta["bead_id"].as_str().map(String::from);
             let started_at = meta["started_at"].as_u64().unwrap_or(0);
@@ -2226,7 +2245,7 @@ pub fn scan_historical_sessions() -> Vec<SessionInfo> {
                 bead_id,
                 persona,
                 task,
-                role: None,
+                role,
                 backend_id,
                 status: SessionStatus::Stopped,
                 created_at: started_at,
@@ -2299,6 +2318,7 @@ pub async fn resume_specific_session(
         _ => crate::agent::plugin::BackendId::ClaudeCode,
     };
     let persona = meta["persona"].as_str().unwrap_or("specialist").to_string();
+    let role = meta["role"].as_str().map(String::from);
     let task = meta["task"].as_str().map(String::from);
     let bead_id = meta["bead_id"].as_str().map(String::from);
     let gemini_session_id = meta["gemini_session_id"].as_str().map(String::from);
@@ -2474,7 +2494,7 @@ pub async fn resume_specific_session(
         bead_id: bead_id.clone(),
         persona: persona.clone(),
         task: task.clone(),
-        role: None,
+        role: role.clone(),
         backend_id,
         status: SessionStatus::Running,
         created_at: now,
