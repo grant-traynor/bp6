@@ -131,8 +131,10 @@ pub async fn create_session_window(
         let existing_label = registry.get_window_label(&sessionId).unwrap();
         eprintln!("⚠️  Window already exists for session {}: {}", sessionId, existing_label);
 
-        // Try to focus existing window
+        // Try to bring existing window to front (handles minimized / hidden / wrong Space)
         if let Some(window) = app.get_webview_window(&existing_label) {
+            let _ = window.unminimize();
+            let _ = window.show();
             let _ = window.set_focus();
             return Ok(existing_label);
         }
