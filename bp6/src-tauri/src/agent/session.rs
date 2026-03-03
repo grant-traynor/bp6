@@ -2399,28 +2399,47 @@ pub async fn resume_specific_session(
         let logger_for_thread = shared_logger;
 
         std::thread::spawn(move || {
+            // Buffer for incomplete UTF-8 sequences split across PTY reads.
+            // from_utf8_lossy would replace partial sequences with U+FFFD; instead
+            // we carry over the trailing incomplete bytes to the next read.
+            let mut utf8_buf: Vec<u8> = Vec::new();
+
             loop {
                 match pty_manager.read(&session_id_clone) {
                     Ok(data) => {
                         if data.is_empty() {
                             break;
                         }
-                        let output = String::from_utf8_lossy(&data).to_string();
-                        let _ = app_handle_clone.emit(
-                            "pty-data",
-                            serde_json::json!({
-                                "sessionId": session_id_clone,
-                                "data": output,
-                            }),
-                        );
-                        if let Some(ref l) = logger_for_thread {
-                            let _ = l.lock().unwrap().log_pty_output(
-                                &session_id_clone,
-                                bead_id_for_log.as_deref(),
-                                &persona_for_log,
-                                &backend_name_clone,
-                                &strip_ansi(&output),
+                        utf8_buf.extend_from_slice(&data);
+
+                        let valid_len = match std::str::from_utf8(&utf8_buf) {
+                            Ok(_) => utf8_buf.len(),
+                            Err(e) => e.valid_up_to(),
+                        };
+
+                        if valid_len > 0 {
+                            // Safety: valid_len is guaranteed valid UTF-8 by from_utf8
+                            let output = unsafe {
+                                std::str::from_utf8_unchecked(&utf8_buf[..valid_len])
+                            }.to_string();
+                            utf8_buf.drain(..valid_len);
+
+                            let _ = app_handle_clone.emit(
+                                "pty-data",
+                                serde_json::json!({
+                                    "sessionId": session_id_clone,
+                                    "data": output,
+                                }),
                             );
+                            if let Some(ref l) = logger_for_thread {
+                                let _ = l.lock().unwrap().log_pty_output(
+                                    &session_id_clone,
+                                    bead_id_for_log.as_deref(),
+                                    &persona_for_log,
+                                    &backend_name_clone,
+                                    &strip_ansi(&output),
+                                );
+                            }
                         }
                     }
                     Err(e) => {
