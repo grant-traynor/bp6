@@ -523,41 +523,6 @@ fn write_session_meta(
 ///
 /// Sessions are listed oldest-first, so the last line is the most recent.
 /// Returns None if no sessions exist or gemini cannot be run.
-/// Send a prompt to Gemini in non-interactive JSON mode and return the session_id.
-///
-/// Uses `gemini --prompt "<prompt>" --output-format json` which is fast, non-blocking
-/// from the UI's perspective (called via spawn_blocking), and returns structured JSON
-/// containing `session_id`. This is the canonical way to create a new Gemini session
-/// and capture its UUID without any PTY/TUI overhead.
-///
-/// The stdout contains non-JSON preamble lines ("Loaded cached credentials." etc.)
-/// before the JSON object — we skip to the first `{` to parse.
-fn create_gemini_session_via_json(
-    gemini_cli: &str,
-    project_path: &str,
-    prompt: &str,
-) -> Option<String> {
-    let output = std::process::Command::new(gemini_cli)
-        .args(["--prompt", prompt, "--output-format", "json"])
-        .current_dir(project_path)
-        .env("PWD", project_path)
-        .output()
-        .ok()?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    eprintln!("🔍 gemini JSON init output:\n{}", stdout.trim());
-
-    // Skip non-JSON preamble (credentials, server info) and parse from first `{`
-    let json_start = stdout.find('{')?;
-    let json: serde_json::Value = serde_json::from_str(&stdout[json_start..]).ok()?;
-    let session_id = json["session_id"].as_str().map(String::from);
-
-    if let Some(ref id) = session_id {
-        eprintln!("✅ Gemini JSON session created: {}", id);
-    }
-    session_id
-}
-
 /// Update the sidecar file for a session with the Gemini-assigned session UUID.
 /// This UUID is what `gemini --resume <uuid>` needs, distinct from our own session_id.
 fn store_gemini_session_id(bead_id: Option<&str>, our_session_id: &str, gemini_uuid: &str) {
@@ -888,39 +853,13 @@ pub async fn start_agent_session(
         crate::agent::plugin::BackendId::Gemini => {
             // Determine which Gemini session UUID to use:
             //
-            //   Resume + stored UUID → use it directly, no subprocess
-            //   Fresh (or resume without stored UUID) → run JSON init to create a new
-            //     session and capture its UUID; the initial prompt is sent there so the
-            //     PTY opens with context already loaded via `-r <uuid>`
-            let gemini_uuid = if is_resume {
-                stored_gemini_uuid
+            //   Resume + stored UUID -> use it directly
+            //   Fresh (or resume without stored UUID) -> spawn with --prompt-interactive
+            //     immediately so the user sees progress. We'll capture the new UUID
+            //     from the PTY output asynchronously.
+            if is_resume && stored_gemini_uuid.is_some() {
+                vec!["--yolo".to_string(), "-r".to_string(), stored_gemini_uuid.as_ref().unwrap().clone()]
             } else {
-                // Fresh session: send the initial prompt via non-interactive JSON mode.
-                // `gemini --prompt "<prompt>" --output-format json` returns session_id
-                // in the JSON output without any TUI/PTY overhead or --list-sessions hang.
-                let path = repo_root.to_str().unwrap_or("").to_string();
-                let cli = cli_path.to_string_lossy().to_string();
-                let init_prompt = prompt.clone();
-                let bead_id_for_store = bead_id.clone();
-                let session_id_for_store = session_id.clone();
-
-                let uuid = tauri::async_runtime::spawn_blocking(move || {
-                    create_gemini_session_via_json(&cli, &path, &init_prompt)
-                })
-                .await
-                .unwrap_or(None);
-
-                if let Some(ref u) = uuid {
-                    store_gemini_session_id(bead_id_for_store.as_deref(), &session_id_for_store, u);
-                }
-                uuid
-            };
-
-            if let Some(uuid) = gemini_uuid {
-                // Resume the session (or the newly JSON-initialised one)
-                vec!["--yolo".to_string(), "-r".to_string(), uuid]
-            } else {
-                // JSON init failed — fall back to interactive prompt
                 vec![
                     "--yolo".to_string(),
                     "--prompt-interactive".to_string(),
@@ -968,10 +907,6 @@ pub async fn start_agent_session(
     }
 
     // Start reader thread: forwards PTY output as pty-data events and logs to JSONL.
-    //
-    // For Gemini resume attempts we also watch for "Error resuming session:" in the
-    // output. If Gemini exits with that error we automatically respawn it as a fresh
-    // session (same session ID, same terminal window — transparent to the user).
     {
         let pty_manager = state.pty_manager.clone();
         let app_handle_clone = app_handle.clone();
@@ -981,11 +916,10 @@ pub async fn start_agent_session(
         let backend_name_for_log = backend_name_for_log.clone();
         let logger_for_thread = shared_logger.clone();
 
-        // Captures for Gemini resume-failure auto-restart.
-        // If the PTY prints "Error resuming session:" the stored UUID is stale.
-        // On EOF we create a fresh session via JSON init, store the new UUID, and respawn.
-        let watch_resume_error =
-            is_resume && backend_id == crate::agent::plugin::BackendId::Gemini;
+        // Captures for Gemini resume-failure auto-restart and UUID capture.
+        let watch_resume_error = is_resume && backend_id == crate::agent::plugin::BackendId::Gemini;
+        let capture_gemini_uuid = !is_resume && backend_id == crate::agent::plugin::BackendId::Gemini;
+        
         let fresh_restart_cli = cli_path.to_string_lossy().to_string();
         let fresh_restart_prompt = prompt.clone();
         let fresh_restart_dir = repo_root.to_string_lossy().to_string();
@@ -1001,6 +935,7 @@ pub async fn start_agent_session(
                 let mut log_text_buf = String::new();
                 let mut last_log_flush = std::time::Instant::now();
                 let mut resume_error_seen = false;
+                let mut gemini_uuid_captured = false;
 
                 loop {
                     match pty_manager.read(&session_id_clone) {
@@ -1021,9 +956,11 @@ pub async fn start_agent_session(
                                 }.to_string();
                                 utf8_buf.drain(..valid_len);
 
-                                // Detect Gemini resume failure before emitting to UI
+                                let stripped = strip_ansi(&output);
+
+                                // Detect Gemini resume failure
                                 if watch_resume_error && !resume_error_seen
-                                    && strip_ansi(&output).contains("Error resuming session:")
+                                    && stripped.contains("Error resuming session:")
                                 {
                                     resume_error_seen = true;
                                     eprintln!(
@@ -1032,7 +969,27 @@ pub async fn start_agent_session(
                                     );
                                 }
 
-                                log_text_buf.push_str(&strip_ansi(&output));
+                                // Capture Gemini UUID from output (new sessions)
+                                // Expected format: "Session ID: <uuid>"
+                                if capture_gemini_uuid && !gemini_uuid_captured {
+                                    if let Some(pos) = stripped.find("Session ID:") {
+                                        let rest = &stripped[pos + 11..].trim_start();
+                                        if let Some(uuid) = rest.split_whitespace().next() {
+                                            // Validate it looks like a UUID (approx)
+                                            if uuid.len() > 20 {
+                                                eprintln!("✅ Captured Gemini UUID from PTY: {}", uuid);
+                                                store_gemini_session_id(
+                                                    fresh_restart_bead_id.as_deref(),
+                                                    &fresh_restart_session_id,
+                                                    uuid
+                                                );
+                                                gemini_uuid_captured = true;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                log_text_buf.push_str(&stripped);
 
                                 let _ = app_handle_clone.emit(
                                     "pty-data",
@@ -1078,39 +1035,27 @@ pub async fn start_agent_session(
                     }
                 }
 
-                // If the resume UUID was stale, create a fresh session via JSON init,
-                // store the new UUID, and respawn the PTY with `-r <new_uuid>`.
+                // If the resume UUID was stale, restart as a fresh session via --prompt-interactive.
+                // The new UUID will be captured by the loop in the next iteration.
                 if resume_error_seen {
-                    eprintln!("🔄 Gemini UUID stale — creating fresh session for {}", session_id_clone);
-                    let new_uuid = create_gemini_session_via_json(
-                        &fresh_restart_cli,
-                        &fresh_restart_dir,
-                        &fresh_restart_prompt,
-                    );
-                    if let Some(ref u) = new_uuid {
-                        store_gemini_session_id(
-                            fresh_restart_bead_id.as_deref(),
-                            &fresh_restart_session_id,
-                            u,
-                        );
-                        let restart_args = vec![
-                            "--yolo".to_string(),
-                            "-r".to_string(),
-                            u.clone(),
-                        ];
-                        if pty_manager
-                            .spawn(
-                                session_id_clone.clone(),
-                                fresh_restart_cli.clone(),
-                                restart_args,
-                                Some(fresh_restart_dir.clone()),
-                                Some(80),
-                                Some(24),
-                            )
-                            .is_ok()
-                        {
-                            continue 'session;
-                        }
+                    eprintln!("🔄 Gemini UUID stale — restarting fresh for {}", session_id_clone);
+                    let restart_args = vec![
+                        "--yolo".to_string(),
+                        "--prompt-interactive".to_string(),
+                        fresh_restart_prompt.clone(),
+                    ];
+                    if pty_manager
+                        .spawn(
+                            session_id_clone.clone(),
+                            fresh_restart_cli.clone(),
+                            restart_args,
+                            Some(fresh_restart_dir.clone()),
+                            Some(80),
+                            Some(24),
+                        )
+                        .is_ok()
+                    {
+                        continue 'session;
                     }
                 }
 
@@ -2345,10 +2290,11 @@ pub async fn resume_specific_session(
             ]
         }
         crate::agent::plugin::BackendId::Gemini => {
-            if let Some(uuid) = gemini_session_id {
-                vec!["--yolo".to_string(), "-r".to_string(), uuid]
+            if let Some(ref uuid) = gemini_session_id {
+                vec!["--yolo".to_string(), "-r".to_string(), uuid.clone()]
             } else {
-                // No gemini UUID — build fresh prompt and init via JSON
+                // No gemini UUID — build fresh prompt and spawn with --prompt-interactive.
+                // We'll capture the new UUID from the PTY output.
                 let prompt = build_prompt_with_persona(
                     &state,
                     &persona,
@@ -2356,30 +2302,7 @@ pub async fn resume_specific_session(
                     bead_id.as_deref(),
                     None,
                 )?;
-                let path = repo_root.to_str().unwrap_or("").to_string();
-                let cli = cli_path.to_string_lossy().to_string();
-                let bead_id_clone = bead_id.clone();
-                let session_id_clone = session_id.clone();
-
-                let uuid = tauri::async_runtime::spawn_blocking(move || {
-                    create_gemini_session_via_json(&cli, &path, &prompt)
-                })
-                .await
-                .unwrap_or(None);
-
-                if let Some(ref u) = uuid {
-                    store_gemini_session_id(bead_id_clone.as_deref(), &session_id_clone, u);
-                    vec!["--yolo".to_string(), "-r".to_string(), u.clone()]
-                } else {
-                    let prompt2 = build_prompt_with_persona(
-                        &state,
-                        &persona,
-                        task.as_deref(),
-                        bead_id.as_deref(),
-                        None,
-                    )?;
-                    vec!["--yolo".to_string(), "--prompt-interactive".to_string(), prompt2]
-                }
+                vec!["--yolo".to_string(), "--prompt-interactive".to_string(), prompt]
             }
         }
     };
@@ -2418,11 +2341,17 @@ pub async fn resume_specific_session(
         let backend_name_clone = backend_name_for_log.clone();
         let logger_for_thread = shared_logger;
 
+        // Capture Gemini UUID if we don't have one yet
+        let capture_gemini_uuid = backend_id == crate::agent::plugin::BackendId::Gemini && gemini_session_id.is_none();
+        let fresh_restart_bead_id = bead_id.clone();
+        let fresh_restart_session_id = session_id.clone();
+
         std::thread::spawn(move || {
             // Buffer for incomplete UTF-8 sequences split across PTY reads.
             // from_utf8_lossy would replace partial sequences with U+FFFD; instead
             // we carry over the trailing incomplete bytes to the next read.
             let mut utf8_buf: Vec<u8> = Vec::new();
+            let mut gemini_uuid_captured = false;
 
             loop {
                 match pty_manager.read(&session_id_clone) {
@@ -2443,6 +2372,26 @@ pub async fn resume_specific_session(
                                 std::str::from_utf8_unchecked(&utf8_buf[..valid_len])
                             }.to_string();
                             utf8_buf.drain(..valid_len);
+
+                            let stripped = strip_ansi(&output);
+
+                            // Capture Gemini UUID from output if needed
+                            if capture_gemini_uuid && !gemini_uuid_captured {
+                                if let Some(pos) = stripped.find("Session ID:") {
+                                    let rest = &stripped[pos + 11..].trim_start();
+                                    if let Some(uuid) = rest.split_whitespace().next() {
+                                        if uuid.len() > 20 {
+                                            eprintln!("✅ Captured Gemini UUID from resumed PTY: {}", uuid);
+                                            store_gemini_session_id(
+                                                fresh_restart_bead_id.as_deref(),
+                                                &fresh_restart_session_id,
+                                                uuid
+                                            );
+                                            gemini_uuid_captured = true;
+                                        }
+                                    }
+                                }
+                            }
 
                             let _ = app_handle_clone.emit(
                                 "pty-data",
@@ -2535,4 +2484,101 @@ pub fn get_historical_sessions() -> Vec<SessionInfo> {
     let sessions = scan_historical_sessions();
     eprintln!("🔍 get_historical_sessions: returning {} sessions", sessions.len());
     sessions
+}
+
+// ============================================================================
+// Inactivity Reaper (bp6-26ba)
+// ============================================================================
+
+/// Start a background thread that kills agent sessions idle for more than 1 hour.
+///
+/// Runs every 5 minutes and checks `last_activity` on every running session.
+/// Any session that has been inactive for more than 3600 seconds is terminated
+/// and a `session-list-changed` event is emitted to update the UI.
+///
+/// This function is called once at application startup from `lib.rs`, after
+/// `AgentState` has been registered with Tauri's `.manage()`.  It obtains a
+/// typed reference to `AgentState` from the `AppHandle` on every tick so that
+/// no extra `Arc` wrapping is needed on the managed state.
+pub fn start_inactivity_reaper(app_handle: AppHandle) {
+    const CHECK_INTERVAL_SECS: u64 = 300;  // 5 minutes
+    const IDLE_TIMEOUT_SECS: u64 = 3600;   // 1 hour
+
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(CHECK_INTERVAL_SECS));
+
+            // Borrow AgentState from Tauri's managed state registry.
+            let state: tauri::State<'_, AgentState> = match app_handle.try_state::<AgentState>() {
+                Some(s) => s,
+                None => {
+                    // AgentState not yet registered — shouldn't happen, but skip this tick.
+                    continue;
+                }
+            };
+
+            let sessions_to_kill: Vec<String> = {
+                let sessions = state.sessions.lock().unwrap();
+                sessions
+                    .iter()
+                    .filter_map(|(session_id, session_state)| {
+                        if session_state.status != SessionStatus::Running {
+                            return None;
+                        }
+                        let elapsed = session_state
+                            .last_activity
+                            .elapsed()
+                            .unwrap_or(std::time::Duration::ZERO);
+                        if elapsed.as_secs() > IDLE_TIMEOUT_SECS {
+                            eprintln!(
+                                "Inactivity reaper: session {} idle for {}s — terminating",
+                                session_id,
+                                elapsed.as_secs()
+                            );
+                            Some(session_id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
+
+            if sessions_to_kill.is_empty() {
+                continue;
+            }
+
+            for session_id in &sessions_to_kill {
+                // Kill PTY
+                let _ = state.pty_manager.kill(session_id);
+
+                // Remove from sessions map
+                state.sessions.lock().unwrap().remove(session_id);
+
+                // Clean up logger and input buffer
+                state.session_loggers.lock().unwrap().remove(session_id);
+                state.input_buffers.lock().unwrap().remove(session_id);
+
+                // Update active session if this was the active one
+                {
+                    let mut active_id = state.active_session_id.lock().unwrap();
+                    if active_id.as_ref() == Some(session_id) {
+                        let sessions = state.sessions.lock().unwrap();
+                        *active_id = sessions.keys().next().cloned();
+                    }
+                }
+
+                // Emit session-terminated event
+                let _ = app_handle.emit(
+                    "session-terminated",
+                    serde_json::json!({ "sessionId": session_id }),
+                );
+            }
+
+            // Emit session-list-changed once after all kills
+            {
+                let sessions = state.sessions.lock().unwrap();
+                emit_session_list_changed(&app_handle, &sessions);
+            }
+        }
+    });
 }

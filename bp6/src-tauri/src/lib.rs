@@ -2316,6 +2316,9 @@ pub fn run() {
             // Initialize agent state
             app.manage(agent::AgentState::new());
 
+            // Start background reaper that kills sessions idle for more than 1 hour.
+            agent::session::start_inactivity_reaper(app.handle().clone());
+
             // Initialize settings state
             app.manage(SettingsState::new());
 

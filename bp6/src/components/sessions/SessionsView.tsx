@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { ChevronDown, ChevronRight, FolderOpen, MessageSquare, Activity, Square } from "lucide-react";
-import { SessionInfo, PERSONA_ICONS } from "../../api";
+import { ChevronDown, ChevronRight, FolderOpen, MessageSquare, Activity, Square, Play } from "lucide-react";
+import { SessionInfo, PERSONA_ICONS, resumeSpecificSession, createSessionWindow } from "../../api";
 import { cn } from "../../utils";
 
 interface SessionsViewProps {
@@ -67,6 +67,17 @@ function SessionRow({
 }) {
   const icon = getPersonaIcon(session.persona, session.role);
   const abbrevId = abbreviateSessionId(session.sessionId);
+  const isRunning = session.status === "running";
+
+  async function handleResume(e: React.MouseEvent) {
+    e.stopPropagation();
+    try {
+      await resumeSpecificSession(session.sessionId);
+      await createSessionWindow(session.sessionId);
+    } catch (err) {
+      console.error("Failed to resume session:", err);
+    }
+  }
 
   return (
     <div className="flex items-center border-b border-[var(--border-primary)]/40 last:border-b-0 group">
@@ -109,14 +120,24 @@ function SessionRow({
         </div>
       </button>
 
-      {/* Terminate button — visible on hover */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onTerminate(); }}
-        className="flex-shrink-0 p-2 mr-2 text-[var(--text-muted)] hover:text-rose-500 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-        title="Terminate session"
-      >
-        <Square size={13} strokeWidth={2.5} fill="currentColor" />
-      </button>
+      {/* Action button — visible on hover */}
+      {isRunning ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); onTerminate(); }}
+          className="flex-shrink-0 p-2 mr-2 text-[var(--text-muted)] hover:text-rose-500 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+          title="Terminate session"
+        >
+          <Square size={13} strokeWidth={2.5} fill="currentColor" />
+        </button>
+      ) : (
+        <button
+          onClick={handleResume}
+          className="flex-shrink-0 p-2 mr-2 text-[var(--text-muted)] hover:text-emerald-500 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+          title="Resume session"
+        >
+          <Play size={13} strokeWidth={2.5} fill="currentColor" />
+        </button>
+      )}
     </div>
   );
 }
@@ -276,9 +297,9 @@ export function SessionsView({
               strokeWidth={1.5}
               className="text-[var(--text-muted)] mb-4 opacity-40"
             />
-            <p className="text-sm font-bold text-[var(--text-muted)]">No active sessions</p>
+            <p className="text-sm font-bold text-[var(--text-muted)]">No sessions</p>
             <p className="text-xs text-[var(--text-muted)] mt-1 opacity-70">
-              Start a chat or agent session to see it here
+              Start or resume a session to see it here
             </p>
           </div>
         ) : (

@@ -419,7 +419,7 @@ function App({
               )
             }
             sessionsByBead={sessionsByBead}
-            sessions={sessions}
+            sessions={allSessions}
             // Shell
             projectShellKey={appInit.projectShellKey}
             // Stats
