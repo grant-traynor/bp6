@@ -57,25 +57,27 @@ export function useChatSessions(): UseChatSessionsReturn {
     loadCliPreference();
   }, []);
 
-  // Read live sessions from Zustand store
+  // Read sessions from Zustand store
   const sessions = useSessionStore((state) => state.sessions);
+  const discoveredSessions = useSessionStore((state) => state.discoveredSessions);
 
   // Evict dead sessions: drop chatSessionMap entries for sessions no longer alive in backend
   useEffect(() => {
-    const activeIds = new Set(sessions.map((s) => s.sessionId));
+    const allSessions = [...sessions, ...discoveredSessions];
+    const knownIds = new Set(allSessions.map((s) => s.sessionId));
 
     setChatSessionMap((prev) => {
       const next = { ...prev };
       let changed = false;
       Object.entries(prev).forEach(([key, sid]) => {
-        if (!activeIds.has(sid)) {
+        if (!knownIds.has(sid)) {
           delete next[key];
           changed = true;
         }
       });
       return changed ? next : prev;
     });
-  }, [sessions]);
+  }, [sessions, discoveredSessions]);
 
   // Persist chatSessionMap to localStorage
   useEffect(() => {
@@ -101,15 +103,18 @@ export function useChatSessions(): UseChatSessionsReturn {
           ? sessions.some((s) => s.sessionId === targetSessionId)
           : false;
 
-        // Create new session if it doesn't exist
+        // Create or Resume session if it doesn't exist in our map
         if (!sessionExists) {
+          // startAgentSession will automatically resume the latest matching session
+          // if forceNew is not provided/false.
           targetSessionId = await startAgentSession(
             persona,
             task ?? undefined,
             beadId ?? undefined,
             currentCli,
             role,
-            currentProjectPath || undefined
+            currentProjectPath || undefined,
+            false // forceNew
           );
           await useSessionStore.getState().refreshSessions();
         }
