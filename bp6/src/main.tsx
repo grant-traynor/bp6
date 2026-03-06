@@ -38,6 +38,10 @@ const sessionId = isSessionWindow
 
 console.log('🪟 Window context:', { windowLabel, isSessionWindow, sessionId });
 
+// Focus follows mouse: focus this window whenever the cursor enters it.
+// Eliminates the double-click (focus window, then click item) problem.
+document.addEventListener('mouseenter', () => { currentWindow.setFocus().catch(() => {}); });
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App

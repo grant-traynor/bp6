@@ -2517,6 +2517,10 @@ pub fn start_inactivity_reaper(app_handle: AppHandle) {
                 }
             };
 
+            // Sessions with an open window are excluded from the reaper —
+            // the user is actively looking at them even if the agent is idle.
+            let window_registry = app_handle.try_state::<crate::window::WindowRegistry>();
+
             let sessions_to_kill: Vec<String> = {
                 let sessions = state.sessions.lock().unwrap();
                 sessions
@@ -2524,6 +2528,12 @@ pub fn start_inactivity_reaper(app_handle: AppHandle) {
                     .filter_map(|(session_id, session_state)| {
                         if session_state.status != SessionStatus::Running {
                             return None;
+                        }
+                        // Skip sessions that have an open window.
+                        if let Some(ref registry) = window_registry {
+                            if registry.has_window_for_session(session_id) {
+                                return None;
+                            }
                         }
                         let elapsed = session_state
                             .last_activity
