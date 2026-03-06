@@ -3,18 +3,16 @@ use std::sync::Arc;
 use axum::{
     Router,
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, HeaderValue, StatusCode},
     routing::{get, post},
     Json,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::time::{sleep, Duration};
-
 use crate::dag::{NewQueueItem, QueueItemOption};
 use crate::project::{ProjectState, QueueItemAddedEvent, QueueItemResolvedEvent};
-use crate::restate::{RESTATE_ADMIN_PORT, RESTATE_SERVICES_PORT};
+use crate::restate::RESTATE_SERVICES_PORT;
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -216,9 +214,15 @@ async fn handle_list_pending(
     Ok(Json(json!(items)))
 }
 
-/// GET /poe-queue/discover — Restate service discovery endpoint
-async fn handle_discover() -> Json<Value> {
-    Json(json!({
+/// GET /discover (and /poe-queue/discover) — Restate endpoint manifest
+///
+/// Restate 1.x requires:
+///   Content-Type: application/vnd.restate.endpointmanifest.v1+json
+/// and the manifest must include minProtocolVersion / maxProtocolVersion.
+async fn handle_discover() -> (HeaderMap, String) {
+    let manifest = json!({
+        "minProtocolVersion": 1,
+        "maxProtocolVersion": 1,
         "protocolMode": "REQUEST_RESPONSE",
         "services": [{
             "name": "poe-queue",
@@ -226,53 +230,24 @@ async fn handle_discover() -> Json<Value> {
             "handlers": [
                 { "name": "createItem", "ty": "EXCLUSIVE" },
                 { "name": "resolveItem", "ty": "EXCLUSIVE" },
-                { "name": "listPending", "ty": "SHARED" }
+                { "name": "listPending",  "ty": "SHARED"    }
             ]
         }]
-    }))
-}
+    });
 
-// ── Restate registration ──────────────────────────────────────────────────────
-
-async fn register_with_restate(port: u16) {
-    let url = format!("http://127.0.0.1:{}/deployments", RESTATE_ADMIN_PORT);
-    let body = json!({ "uri": format!("http://localhost:{}", port) });
-    let client = reqwest::Client::new();
-
-    for attempt in 1..=5u8 {
-        match client.post(&url).json(&body).send().await {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    eprintln!(
-                        "[queue_service] Registered with Restate at {} (attempt {})",
-                        url, attempt
-                    );
-                    return;
-                } else {
-                    eprintln!(
-                        "[queue_service] Restate registration returned {} (attempt {})",
-                        resp.status(),
-                        attempt
-                    );
-                }
-            }
-            Err(e) => {
-                eprintln!(
-                    "[queue_service] Restate registration failed (attempt {}): {}",
-                    attempt, e
-                );
-            }
-        }
-
-        if attempt < 5 {
-            sleep(Duration::from_secs(1)).await;
-        }
-    }
-
-    eprintln!(
-        "[queue_service] Could not register with Restate after 5 attempts — continuing without it"
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/vnd.restate.endpointmanifest.v1+json"),
     );
+    (headers, manifest.to_string())
 }
+
+// Note: We intentionally do NOT register with Restate's /deployments API.
+// The queue service uses Restate only for its awakeables REST API (durable promises).
+// Full service registration requires implementing the Restate invocation binary protocol
+// (versions 5-6 as of Restate 1.6.x), which is out of scope here. The /discover endpoint
+// exists for introspection only.
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 
@@ -314,17 +289,9 @@ pub fn spawn_queue_service(app: AppHandle) {
         };
 
         eprintln!(
-            "[queue_service] Listening on http://127.0.0.1:{}",
+            "[queue_service] Listening on http://127.0.0.1:{} (awakeables mode — no Restate registration)",
             QUEUE_SERVICE_PORT
         );
-
-        // Register with Restate in the background — give it a moment to be ready
-        let reg_port = QUEUE_SERVICE_PORT;
-        tokio::spawn(async move {
-            // Brief delay so Restate has time to finish starting
-            sleep(Duration::from_secs(3)).await;
-            register_with_restate(reg_port).await;
-        });
 
         if let Err(e) = axum::serve(listener, router).await {
             eprintln!("[queue_service] Server error: {}", e);
