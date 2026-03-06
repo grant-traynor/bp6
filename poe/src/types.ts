@@ -103,6 +103,18 @@ export interface QueueItemOption {
 
 export type QueueItemStatus = "pending" | "resolved" | "dismissed";
 
+// ── Skill types ─────────────────────────────────────────────────────────────────
+
+export interface SkillMeta {
+  id: string;
+  name: string;
+  description: string;
+  tags: string[];
+  appliesTo: string[];
+  source: "global" | "user" | "project";
+  path: string;
+}
+
 export interface QueueItem {
   id: string;
   projectId: string;

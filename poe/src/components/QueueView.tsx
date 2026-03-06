@@ -5,15 +5,24 @@ import { queueItemsListAtom, projectAtom } from "../store/dag";
 import type { QueueItem } from "../types";
 
 function QueueItemCard({ item }: { item: QueueItem }) {
+  const [selectedOptionId, setSelectedOptionId] = useState<string | null>(null);
+  const [userContext, setUserContext] = useState("");
   const [resolving, setResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleResolve = async (optionId: string) => {
+  const selectedOption = item.options.find((o) => o.id === selectedOptionId) ?? null;
+
+  const handleConfirm = async () => {
+    if (!selectedOptionId) return;
     setResolving(true);
     setError(null);
     try {
       await invoke("resolve_queue_item", {
-        params: { itemId: item.id, chosenOptionId: optionId },
+        params: {
+          itemId: item.id,
+          chosenOptionId: selectedOptionId,
+          userContext: userContext.trim() || null,
+        },
       });
     } catch (err) {
       setError(err as string);
@@ -26,13 +35,14 @@ function QueueItemCard({ item }: { item: QueueItem }) {
 
   return (
     <div className="mac-card" style={{ padding: "16px 18px" }}>
+      {/* Header */}
       <div className="flex items-start justify-between gap-4" style={{ marginBottom: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", lineHeight: 1.4 }}>
             {item.question}
           </p>
           <p className="mono" style={{ color: "var(--text-tertiary)", fontSize: 11, marginTop: 4 }}>
-            {item.agentId} · {item.id.slice(0, 8)}
+            {item.agentId.slice(0, 8)} · {item.id.slice(0, 8)}
           </p>
         </div>
         <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor, whiteSpace: "nowrap", flexShrink: 0 }}>
@@ -40,27 +50,73 @@ function QueueItemCard({ item }: { item: QueueItem }) {
         </span>
       </div>
 
+      {/* Option list */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {item.options.map((opt) => (
-          <button
-            key={opt.id}
-            onClick={() => handleResolve(opt.id)}
-            disabled={resolving}
-            className="mac-btn"
-            style={{
-              width: "100%", justifyContent: "flex-start", textAlign: "left",
-              padding: "8px 12px", flexDirection: "column", alignItems: "flex-start", gap: 2,
-            }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 500 }}>{opt.label}</span>
-            {opt.description && (
-              <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 400 }}>
-                {opt.description}
-              </span>
-            )}
-          </button>
-        ))}
+        {item.options.map((opt) => {
+          const isSelected = selectedOptionId === opt.id;
+          return (
+            <button
+              key={opt.id}
+              onClick={() => setSelectedOptionId(isSelected ? null : opt.id)}
+              disabled={resolving}
+              className="mac-btn"
+              style={{
+                width: "100%", justifyContent: "flex-start", textAlign: "left",
+                padding: "8px 12px", flexDirection: "column", alignItems: "flex-start", gap: 2,
+                background: isSelected ? "var(--content-secondary-bg)" : undefined,
+                border: isSelected ? "1px solid var(--border-strong)" : undefined,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+                <span style={{
+                  width: 14, height: 14, borderRadius: "50%", flexShrink: 0,
+                  border: `2px solid ${isSelected ? "var(--status-running)" : "var(--border-strong)"}`,
+                  background: isSelected ? "var(--status-running)" : "transparent",
+                  display: "inline-block",
+                }} />
+                <span style={{ fontSize: 12, fontWeight: isSelected ? 600 : 500 }}>{opt.label}</span>
+              </div>
+              {opt.description && (
+                <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 400, paddingLeft: 20 }}>
+                  {opt.description}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
+
+      {/* Context input + confirm — shown once an option is selected */}
+      {selectedOption && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          <textarea
+            value={userContext}
+            onChange={(e) => setUserContext(e.target.value)}
+            placeholder={`Additional context for "${selectedOption.label}" (optional)…`}
+            className="mac-input mono"
+            style={{ fontSize: 11, height: 72, resize: "vertical" }}
+            autoFocus
+          />
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={handleConfirm}
+              disabled={resolving}
+              className="mac-btn mac-btn-primary"
+              style={{ flex: 1, justifyContent: "center", fontSize: 11, padding: "5px 10px" }}
+            >
+              {resolving ? "Sending…" : `Confirm: ${selectedOption.label}`}
+            </button>
+            <button
+              onClick={() => { setSelectedOptionId(null); setUserContext(""); }}
+              disabled={resolving}
+              className="mac-btn mac-btn-ghost"
+              style={{ fontSize: 11, padding: "5px 10px" }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <p className="mono" style={{

@@ -34,6 +34,42 @@ const AGENT_SILENCE_TIMEOUT_SECS: u64 = 120;
 /// How often the watchdog polls all active agents.
 const AGENT_WATCHDOG_INTERVAL_SECS: u64 = 30;
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+/// Strip ANSI escape sequences from PTY output (e.g. color codes, cursor movement).
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // ESC — consume until end-of-sequence (a letter or a few special terminators)
+            match chars.peek() {
+                Some(&'[') => {
+                    chars.next(); // consume '['
+                    // CSI sequence: consume until we hit a letter
+                    for ch in chars.by_ref() {
+                        if ch.is_ascii_alphabetic() { break; }
+                    }
+                }
+                Some(&']') => {
+                    chars.next(); // consume ']'
+                    // OSC sequence: consume until BEL or ESC
+                    for ch in chars.by_ref() {
+                        if ch == '\x07' || ch == '\x1b' { break; }
+                    }
+                }
+                _ => {
+                    // Other: consume one char
+                    chars.next();
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 // ── AgentHandle ────────────────────────────────────────────────────────────────
 
 pub struct AgentHandle {
@@ -340,6 +376,8 @@ pub fn spawn_agent_internal(
         std::thread::spawn(move || {
             let reader = BufReader::new(master_reader);
             let mut done_received = false;
+            // Track markdown code fences so we don't parse example JSON inside them as real events.
+            let mut in_code_fence = false;
 
             for line_result in reader.lines() {
                 let line = match line_result {
@@ -347,7 +385,7 @@ pub fn spawn_agent_internal(
                     Err(_) => break,
                 };
 
-                let trimmed = line.trim().to_string();
+                let trimmed = strip_ansi(line.trim());
                 if trimmed.is_empty() {
                     continue;
                 }
@@ -362,6 +400,11 @@ pub fn spawn_agent_internal(
 
                 eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
 
+                // Track code fence state — toggle on any ``` line
+                if trimmed.starts_with("```") {
+                    in_code_fence = !in_code_fence;
+                }
+
                 if let Some(wf_id) = &workflow_id_bg {
                     let _ = app_for_thread.emit(
                         "agent:stdout",
@@ -371,6 +414,11 @@ pub fn spawn_agent_internal(
                             ts: chrono::Utc::now().to_rfc3339(),
                         },
                     );
+                }
+
+                // Only process poe: events for lines outside markdown code fences.
+                if in_code_fence {
+                    continue;
                 }
 
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&trimmed) {

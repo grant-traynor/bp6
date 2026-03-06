@@ -9,8 +9,10 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { workflowsListAtom, agentStdoutAtom, selectedNodeIdAtom } from "../store/dag";
 import type { WorkflowInfo } from "../types";
 
-function elapsed(startedAt: string): string {
+function elapsed(startedAt: string | undefined): string {
+  if (!startedAt) return "";
   const ms = Date.now() - new Date(startedAt).getTime();
+  if (isNaN(ms)) return "";
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
@@ -117,7 +119,12 @@ function AgentPanel({ workflow }: { workflow: WorkflowInfo }) {
 
 export function AgentActivityView() {
   const workflows = useAtomValue(workflowsListAtom);
-  const active = workflows.filter((w) => w.status === "running" || w.status === "paused" || w.status === "blocked");
+  // Show all workflows — completed/failed stay visible for inspection.
+  // Sort: running first, then by recency.
+  const active = [...workflows].sort((a, b) => {
+    const rank = (s: string) => s === "running" ? 0 : s === "paused" ? 1 : s === "blocked" ? 2 : 3;
+    return rank(a.status) - rank(b.status);
+  });
 
   if (active.length === 0) {
     return (

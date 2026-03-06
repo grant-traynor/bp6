@@ -54,9 +54,14 @@ export function useDagEvents() {
 
   useEffect(() => {
     const unlisten: Array<() => void> = [];
+    // Guard against React Strict Mode double-mount: if cleanup runs before a listen()
+    // Promise resolves, immediately call the returned unlisten fn rather than registering it.
+    let cancelled = false;
+    const reg = (p: Promise<() => void>) =>
+      p.then((u) => cancelled ? u() : unlisten.push(u));
 
     // ── project:opened — new project added to the open set ────────────────────
-    listen<ProjectWithSnapshot>("project:opened", (event) => {
+    reg(listen<ProjectWithSnapshot>("project:opened", (event) => {
       const { info, snapshot } = event.payload;
       setProject(info);
       setOpenProjects((prev) => {
@@ -65,10 +70,10 @@ export function useDagEvents() {
         return next;
       });
       loadSnapshot(snapshot, setNodes, setEdges, setQueueItems);
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── project:switched — active project changed (stays in open set) ─────────
-    listen<ProjectWithSnapshot>("project:switched", (event) => {
+    reg(listen<ProjectWithSnapshot>("project:switched", (event) => {
       const { info, snapshot } = event.payload;
       setProject(info);
       setOpenProjects((prev) => {
@@ -78,10 +83,10 @@ export function useDagEvents() {
         return next;
       });
       loadSnapshot(snapshot, setNodes, setEdges, setQueueItems);
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── project:closed — remove from open set; clear active if it was active ──
-    listen<{ projectDir: string }>("project:closed", (event) => {
+    reg(listen<{ projectDir: string }>("project:closed", (event) => {
       const { projectDir } = event.payload;
       setOpenProjects((prev) => {
         const next = new Map(prev);
@@ -95,82 +100,83 @@ export function useDagEvents() {
         return prev;
       });
       // DAG will be replaced by project:switched if another project becomes active.
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── queue:item:added ───────────────────────────────────────────────────────
-    listen<{ item: QueueItem }>("queue:item:added", (event) => {
+    reg(listen<{ item: QueueItem }>("queue:item:added", (event) => {
       setQueueItems((prev) => {
         const next = new Map(prev);
         next.set(event.payload.item.id, event.payload.item);
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── queue:item:resolved ────────────────────────────────────────────────────
-    listen<{ itemId: string }>("queue:item:resolved", (event) => {
+    reg(listen<{ itemId: string }>("queue:item:resolved", (event) => {
       setQueueItems((prev) => {
         const next = new Map(prev);
         next.delete(event.payload.itemId);
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── dag:node:upserted ──────────────────────────────────────────────────────
-    listen<{ node: DagNode }>("dag:node:upserted", (event) => {
+    reg(listen<{ node: DagNode }>("dag:node:upserted", (event) => {
       setNodes((prev) => {
         const next = new Map(prev);
         next.set(event.payload.node.id, event.payload.node);
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── dag:node:deleted ───────────────────────────────────────────────────────
-    listen<{ id: string }>("dag:node:deleted", (event) => {
+    reg(listen<{ id: string }>("dag:node:deleted", (event) => {
       setNodes((prev) => {
         const next = new Map(prev);
         next.delete(event.payload.id);
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── dag:edge:upserted ──────────────────────────────────────────────────────
-    listen<{ edge: DagEdge }>("dag:edge:upserted", (event) => {
+    reg(listen<{ edge: DagEdge }>("dag:edge:upserted", (event) => {
       setEdges((prev) => {
         const next = new Map(prev);
         next.set(event.payload.edge.id, event.payload.edge);
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── dag:edge:deleted ───────────────────────────────────────────────────────
-    listen<{ id: string }>("dag:edge:deleted", (event) => {
+    reg(listen<{ id: string }>("dag:edge:deleted", (event) => {
       setEdges((prev) => {
         const next = new Map(prev);
         next.delete(event.payload.id);
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── workflow:status ────────────────────────────────────────────────────────
-    listen<WorkflowInfo>("workflow:status", (event) => {
+    reg(listen<WorkflowInfo>("workflow:status", (event) => {
       setWorkflows((prev) => {
         const next = new Map(prev);
         next.set(event.payload.workflowId, event.payload);
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     // ── agent:stdout ───────────────────────────────────────────────────────────
-    listen<AgentStdoutLine>("agent:stdout", (event) => {
+    reg(listen<AgentStdoutLine>("agent:stdout", (event) => {
       setAgentStdout((prev) => {
         const next = new Map(prev);
         const lines = [...(prev.get(event.payload.workflowId) ?? []), event.payload];
         next.set(event.payload.workflowId, lines.slice(-500));
         return next;
       });
-    }).then((u) => unlisten.push(u));
+    }));
 
     return () => {
+      cancelled = true;
       unlisten.forEach((fn) => fn());
     };
   }, [setNodes, setEdges, setProject, setQueueItems, setWorkflows, setAgentStdout, setOpenProjects]);

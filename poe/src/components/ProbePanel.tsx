@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSetAtom } from "jotai";
 import { selectedNodeIdAtom } from "../store/dag";
-import type { ProbeData, DagNode, DagEdge } from "../types";
+import type { ProbeData, DagNode, DagEdge, SkillMeta } from "../types";
 
 // ── V-lifecycle workflow types ──────────────────────────────────────────────────
 
@@ -185,6 +185,30 @@ function AssignToAgentControls({ node }: { node: DagNode }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // Skills
+  const [skills, setSkills] = useState<SkillMeta[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    invoke<SkillMeta[]>("list_skills").then((all) => {
+      setSkills(all);
+      // Pre-select skills whose applies_to matches the current workflow type
+      const defaults = new Set(
+        all.filter((s) => s.appliesTo.includes(workflowType)).map((s) => s.id)
+      );
+      setSelectedSkills(defaults);
+    }).catch(() => {});
+  }, [workflowType]);
+
+  function toggleSkill(id: string) {
+    setSelectedSkills((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   // Already has an active workflow — don't show assign controls
   if (workflowId) return null;
   if (!["Task", "Feature", "Epic", "Review"].includes(node.nodeType)) return null;
@@ -194,7 +218,7 @@ function AssignToAgentControls({ node }: { node: DagNode }) {
     setMsg(null);
     try {
       const nodeTitle = String(node.data.title ?? node.data.name ?? node.id);
-      const prompt = `You are working on a ${node.nodeType}: "${nodeTitle}". Report progress using poe: JSON events.`;
+      const prompt = `You are working on a ${node.nodeType}: "${nodeTitle}".`;
       const parsedArgs = [...args.split(/\s+/).filter(Boolean), prompt];
       const result = await invoke<{ workflow: { id: string }; agentId: string }>(
         "create_workflow",
@@ -205,6 +229,7 @@ function AssignToAgentControls({ node }: { node: DagNode }) {
             cmd,
             args: parsedArgs,
             fanout,
+            skillIds: Array.from(selectedSkills),
           },
         }
       );
@@ -249,6 +274,46 @@ function AssignToAgentControls({ node }: { node: DagNode }) {
             ))}
           </select>
         </div>
+
+        {/* Skill picker */}
+        {skills.length > 0 && (
+          <div>
+            <label className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", display: "block", marginBottom: 4 }}>
+              Skills ({selectedSkills.size} selected)
+            </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {skills.map((s) => (
+                <label
+                  key={s.id}
+                  style={{
+                    display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer",
+                    padding: "4px 6px", borderRadius: 4,
+                    background: selectedSkills.has(s.id) ? "var(--content-secondary-bg)" : "transparent",
+                    border: `1px solid ${selectedSkills.has(s.id) ? "var(--border)" : "transparent"}`,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedSkills.has(s.id)}
+                    onChange={() => toggleSkill(s.id)}
+                    style={{ marginTop: 1, flexShrink: 0 }}
+                  />
+                  <div>
+                    <div className="mono" style={{ fontSize: 11, color: "var(--text-primary)", fontWeight: selectedSkills.has(s.id) ? 600 : 400 }}>
+                      {s.name}
+                    </div>
+                    {s.description && (
+                      <div className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", marginTop: 1 }}>
+                        {s.description}
+                      </div>
+                    )}
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
         {(node.nodeType === "Epic" || node.nodeType === "Feature") && (
           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 11, color: "var(--text-secondary)" }}>
             <input
