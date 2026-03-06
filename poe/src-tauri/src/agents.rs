@@ -400,7 +400,7 @@ pub fn spawn_agent_internal(
 
                 eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
 
-                // Track code fence state — toggle on any ``` line
+                // Track code fence state — toggle on any ``` line.
                 if trimmed.starts_with("```") {
                     in_code_fence = !in_code_fence;
                 }
@@ -416,8 +416,10 @@ pub fn spawn_agent_internal(
                     );
                 }
 
-                // Only process poe: events for lines outside markdown code fences.
-                if in_code_fence {
+                // Skip fence delimiter lines themselves (```json, ```, etc.) — never events.
+                // Do NOT skip content inside fences: agents often wrap their poe: JSON
+                // output in ```json blocks, and we must still parse those as real events.
+                if trimmed.starts_with("```") {
                     continue;
                 }
 
