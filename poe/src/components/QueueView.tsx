@@ -22,55 +22,70 @@ function QueueItemCard({ item }: { item: QueueItem }) {
   };
 
   const priorityLabel = ["P0", "P1", "P2", "P3"][item.priority] ?? `P${item.priority}`;
+  const priorityColor = item.priority === 0 ? "var(--status-failed)" : item.priority === 1 ? "var(--status-paused)" : "var(--text-tertiary)";
 
   return (
-    <li className="border-4 border-black p-5 space-y-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <p className="font-black text-base leading-snug">{item.question}</p>
-          <p className="font-mono text-xs text-stone-400">
-            {item.agentId} · {item.id.slice(0, 8)} · {priorityLabel}
+    <div className="mac-card" style={{ padding: "16px 18px" }}>
+      <div className="flex items-start justify-between gap-4" style={{ marginBottom: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", lineHeight: 1.4 }}>
+            {item.question}
+          </p>
+          <p className="mono" style={{ color: "var(--text-tertiary)", fontSize: 11, marginTop: 4 }}>
+            {item.agentId} · {item.id.slice(0, 8)}
           </p>
         </div>
-        <span className="font-mono text-xs border-2 border-black px-2 py-0.5 whitespace-nowrap">
-          pending
+        <span style={{ fontSize: 11, fontWeight: 600, color: priorityColor, whiteSpace: "nowrap", flexShrink: 0 }}>
+          {priorityLabel}
         </span>
       </div>
 
-      <ul className="grid gap-2">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {item.options.map((opt) => (
-          <li key={opt.id}>
-            <button
-              onClick={() => handleResolve(opt.id)}
-              disabled={resolving}
-              className="w-full text-left border-2 border-black px-4 py-2 font-mono text-sm hover:bg-black hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <span className="font-bold">{opt.label}</span>
-              {opt.description && (
-                <span className="block text-xs text-stone-500 mt-0.5">{opt.description}</span>
-              )}
-            </button>
-          </li>
+          <button
+            key={opt.id}
+            onClick={() => handleResolve(opt.id)}
+            disabled={resolving}
+            className="mac-btn"
+            style={{
+              width: "100%", justifyContent: "flex-start", textAlign: "left",
+              padding: "8px 12px", flexDirection: "column", alignItems: "flex-start", gap: 2,
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 500 }}>{opt.label}</span>
+            {opt.description && (
+              <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 400 }}>
+                {opt.description}
+              </span>
+            )}
+          </button>
         ))}
-      </ul>
+      </div>
 
       {error && (
-        <p className="font-mono text-xs text-red-600 border-2 border-red-600 px-3 py-1">
+        <p className="mono" style={{
+          fontSize: 11, color: "var(--status-failed)", background: "var(--status-failed-bg)",
+          padding: "5px 10px", borderRadius: 5, marginTop: 10,
+        }}>
           {error}
         </p>
       )}
 
       {Object.keys(item.contextSnapshot).length > 0 && (
-        <details className="border border-stone-200">
-          <summary className="font-mono text-xs text-stone-400 px-3 py-1.5 cursor-pointer select-none">
-            context snapshot
+        <details style={{ marginTop: 10 }}>
+          <summary className="mono" style={{ fontSize: 11, color: "var(--text-tertiary)", cursor: "pointer", userSelect: "none" }}>
+            Context snapshot
           </summary>
-          <pre className="font-mono text-xs p-3 overflow-auto max-h-48 text-stone-600">
+          <pre className="mono" style={{
+            fontSize: 11, color: "var(--text-secondary)", background: "var(--content-secondary-bg)",
+            padding: "8px 10px", borderRadius: 5, overflow: "auto", maxHeight: 160, marginTop: 6,
+            border: "1px solid var(--border)",
+          }}>
             {JSON.stringify(item.contextSnapshot, null, 2)}
           </pre>
         </details>
       )}
-    </li>
+    </div>
   );
 }
 
@@ -79,29 +94,34 @@ export function QueueView() {
   const items = useAtomValue(queueItemsListAtom);
 
   return (
-    <div className="flex-1 overflow-auto p-6">
-      <div className="max-w-3xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="font-black text-xl tracking-tight border-b-4 border-black pb-1">
+    <div className="flex-1 overflow-auto" style={{ padding: "20px 24px" }}>
+      <div style={{ maxWidth: 640, margin: "0 auto" }}>
+        {/* Header */}
+        <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}>
             Decision Queue
           </h2>
-          <span className="font-mono text-xs text-stone-400">
-            {items.length} pending · {project?.projectId.slice(0, 8)}
+          <span className="mono" style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
+            {items.length} pending
+            {project && <> · {project.projectId.slice(0, 8)}</>}
           </span>
         </div>
 
         {items.length === 0 ? (
-          <div className="border-4 border-dashed border-stone-300 p-12 text-center">
-            <p className="font-mono text-stone-400 text-sm">
+          <div style={{
+            border: "1px dashed var(--border-strong)", borderRadius: 10,
+            padding: "48px 24px", textAlign: "center",
+          }}>
+            <p style={{ fontSize: 13, color: "var(--text-tertiary)", margin: 0 }}>
               No decisions pending — agents are running.
             </p>
           </div>
         ) : (
-          <ul className="space-y-4">
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {items.map((item) => (
               <QueueItemCard key={item.id} item={item} />
             ))}
-          </ul>
+          </div>
         )}
       </div>
     </div>

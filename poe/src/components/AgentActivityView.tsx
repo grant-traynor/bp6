@@ -9,15 +9,6 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { workflowsListAtom, agentStdoutAtom, selectedNodeIdAtom } from "../store/dag";
 import type { WorkflowInfo } from "../types";
 
-const STATUS_DOT: Record<string, string> = {
-  running: "bg-blue-500 animate-pulse",
-  paused: "bg-amber-400",
-  blocked: "bg-red-500",
-  completed: "bg-green-500",
-  cancelled: "bg-stone-400",
-  failed: "bg-red-700",
-};
-
 function elapsed(startedAt: string): string {
   const ms = Date.now() - new Date(startedAt).getTime();
   const s = Math.floor(ms / 1000);
@@ -26,6 +17,15 @@ function elapsed(startedAt: string): string {
   if (m < 60) return `${m}m ${s % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+const STATUS_COLORS: Record<string, string> = {
+  running:   "var(--status-running)",
+  paused:    "var(--status-paused)",
+  blocked:   "var(--status-blocked)",
+  completed: "var(--status-completed)",
+  cancelled: "var(--status-cancelled)",
+  failed:    "var(--status-failed)",
+};
 
 function AgentPanel({ workflow }: { workflow: WorkflowInfo }) {
   const agentStdout = useAtomValue(agentStdoutAtom);
@@ -47,33 +47,46 @@ function AgentPanel({ workflow }: { workflow: WorkflowInfo }) {
     }
   }, [lines.length]);
 
-  const dot = STATUS_DOT[workflow.status] ?? "bg-stone-300";
+  const dotColor = STATUS_COLORS[workflow.status] ?? "var(--text-placeholder)";
 
   return (
-    <div className="border-4 border-black flex flex-col">
+    <div className="mac-card" style={{ overflow: "hidden", padding: 0 }}>
       {/* Agent header */}
-      <div className="border-b-4 border-black px-4 py-2 flex items-center justify-between bg-white">
-        <div className="flex items-center gap-3">
-          <span className={`w-3 h-3 rounded-full ${dot} shrink-0`} />
+      <div className="mac-toolbar flex items-center justify-between" style={{ padding: "8px 14px" }}>
+        <div className="flex items-center gap-8">
+          <span style={{
+            width: 7, height: 7, borderRadius: "50%", background: dotColor,
+            flexShrink: 0, display: "inline-block",
+            boxShadow: workflow.status === "running" ? `0 0 0 3px ${dotColor}30` : undefined,
+          }} />
           <div>
-            <p className="font-bold text-sm font-mono">{workflow.agentId}</p>
-            <p className="font-mono text-xs text-stone-400">
-              wf: {workflow.workflowId.slice(0, 12)}…
+            <p style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", margin: 0 }}>
+              {workflow.agentId}
+            </p>
+            <p className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", margin: 0 }}>
+              {workflow.workflowId.slice(0, 14)}…
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-6">
           {workflow.currentStep && (
-            <span className="font-mono text-xs border-2 border-black px-2 py-0.5">
+            <span className="mono" style={{
+              fontSize: 10, color: "var(--text-secondary)",
+              background: "var(--content-secondary-bg)", padding: "2px 8px", borderRadius: 4,
+              border: "1px solid var(--border)",
+            }}>
               {workflow.currentStep}
             </span>
           )}
-          <span className="font-mono text-xs text-stone-400">{elapsed(workflow.startedAt)}</span>
+          <span className="mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+            {elapsed(workflow.startedAt)}
+          </span>
           <button
             onClick={() => setSelectedNodeId(workflow.nodeId)}
-            className="font-mono text-xs border-2 border-black px-2 py-0.5 hover:bg-black hover:text-white transition-colors"
+            className="mac-btn"
+            style={{ padding: "3px 10px", fontSize: 11 }}
           >
-            Probe →
+            Inspect
           </button>
         </div>
       </div>
@@ -81,13 +94,18 @@ function AgentPanel({ workflow }: { workflow: WorkflowInfo }) {
       {/* Stdout stream */}
       <div
         ref={logRef}
-        className="flex-1 overflow-auto bg-stone-950 text-green-400 font-mono text-xs p-3 min-h-32 max-h-48"
+        className="mono"
+        style={{
+          overflow: "auto", background: "#0D1117", color: "#3FB950",
+          fontSize: 11, padding: "10px 14px", minHeight: 100, maxHeight: 180,
+          lineHeight: 1.6,
+        }}
       >
         {lines.length === 0 ? (
-          <span className="text-stone-600">waiting for output…</span>
+          <span style={{ color: "#3D444D" }}>waiting for output…</span>
         ) : (
           lines.map((l, i) => (
-            <div key={i} className="whitespace-pre-wrap break-all leading-5">
+            <div key={i} style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
               {l.line}
             </div>
           ))
@@ -104,10 +122,13 @@ export function AgentActivityView() {
   if (active.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="border-4 border-dashed border-stone-300 p-16 text-center">
-          <p className="font-mono text-stone-400 text-sm">No agents running.</p>
-          <p className="font-mono text-stone-300 text-xs mt-1">
-            Agents will appear here when workflows start (Phase 3).
+        <div style={{
+          border: "1px dashed var(--border-strong)", borderRadius: 10,
+          padding: "48px 32px", textAlign: "center",
+        }}>
+          <p style={{ fontSize: 13, color: "var(--text-tertiary)", margin: 0 }}>No agents running.</p>
+          <p style={{ fontSize: 11, color: "var(--text-placeholder)", marginTop: 4 }}>
+            Agents will appear here when workflows start.
           </p>
         </div>
       </div>
@@ -115,7 +136,7 @@ export function AgentActivityView() {
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4 space-y-4">
+    <div className="flex-1 overflow-auto" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
       {active.map((wf) => (
         <AgentPanel key={wf.workflowId} workflow={wf} />
       ))}

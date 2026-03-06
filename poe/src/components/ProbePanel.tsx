@@ -31,23 +31,27 @@ function inferWorkflowType(nodeType: string): WorkflowType {
 
 // ── Edge pill ──────────────────────────────────────────────────────────────────
 
-const EDGE_COLORS: Record<string, string> = {
-  "blocks": "bg-red-100 border-red-400 text-red-700",
-  "depends-on": "bg-amber-100 border-amber-400 text-amber-700",
-  "generated-by": "bg-blue-100 border-blue-400 text-blue-700",
-  "approved-by": "bg-green-100 border-green-400 text-green-700",
-  "discovered-from": "bg-purple-100 border-purple-400 text-purple-700",
-  "implements": "bg-stone-100 border-stone-400 text-stone-700",
-  "tests": "bg-cyan-100 border-cyan-400 text-cyan-700",
-  "contradicts": "bg-rose-100 border-rose-400 text-rose-700",
+const EDGE_COLORS: Record<string, { color: string; bg: string }> = {
+  "blocks":           { color: "var(--status-failed)",    bg: "var(--status-failed-bg)" },
+  "depends-on":       { color: "var(--status-paused)",    bg: "var(--status-paused-bg)" },
+  "generated-by":     { color: "var(--status-running)",   bg: "var(--status-running-bg)" },
+  "approved-by":      { color: "var(--status-completed)", bg: "var(--status-completed-bg)" },
+  "discovered-from":  { color: "#9B59B6",                 bg: "rgba(155,89,182,0.08)" },
+  "implements":       { color: "var(--text-secondary)",   bg: "var(--content-secondary-bg)" },
+  "tests":            { color: "#17A2B8",                 bg: "rgba(23,162,184,0.08)" },
+  "contradicts":      { color: "var(--status-failed)",    bg: "var(--status-failed-bg)" },
 };
 
 function EdgePill({ edge, nodeLabel }: { edge: DagEdge; nodeLabel: string }) {
-  const cls = EDGE_COLORS[edge.edgeType] ?? "bg-stone-100 border-stone-300 text-stone-600";
+  const meta = EDGE_COLORS[edge.edgeType] ?? { color: "var(--text-secondary)", bg: "var(--content-secondary-bg)" };
   return (
-    <div className={`border-2 px-2 py-1 text-xs font-mono flex items-center gap-2 ${cls}`}>
-      <span className="font-bold">{edge.edgeType}</span>
-      <span className="opacity-70">→ {nodeLabel}</span>
+    <div className="mono" style={{
+      fontSize: 11, padding: "3px 8px", borderRadius: 4,
+      color: meta.color, background: meta.bg,
+      display: "flex", alignItems: "center", gap: 6,
+    }}>
+      <span style={{ fontWeight: 600 }}>{edge.edgeType}</span>
+      <span style={{ opacity: 0.7 }}>→ {nodeLabel}</span>
     </div>
   );
 }
@@ -57,10 +61,11 @@ function NodeChip({ node, onClick }: { node: DagNode; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="border-2 border-black px-2 py-1 text-xs font-mono hover:bg-black hover:text-white transition-colors text-left"
+      className="mac-btn"
+      style={{ fontSize: 11, padding: "3px 8px", textAlign: "left", justifyContent: "flex-start" }}
     >
-      <span className="font-bold">{node.nodeType}</span>{" "}
-      <span className="opacity-70">{title}</span>
+      <span style={{ fontWeight: 600 }}>{node.nodeType}</span>{" "}
+      <span style={{ opacity: 0.7 }}>{title}</span>
     </button>
   );
 }
@@ -69,8 +74,8 @@ function NodeChip({ node, onClick }: { node: DagNode; onClick: () => void }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="border-t-2 border-stone-200 pt-3 mt-3">
-      <p className="font-mono text-xs font-bold text-stone-500 uppercase tracking-wider mb-2">{title}</p>
+    <div style={{ borderTop: "1px solid var(--divider)", paddingTop: 10, marginTop: 10 }}>
+      <p className="mac-section-header" style={{ padding: "0 0 6px 0", margin: 0 }}>{title}</p>
       {children}
     </div>
   );
@@ -122,36 +127,43 @@ function StopRedirectControls({ node }: { node: DagNode }) {
   return (
     <Section title="Controls">
       {msg && (
-        <p className="font-mono text-xs border-2 border-black px-2 py-1 mb-2 bg-stone-50">{msg}</p>
+        <p className="mono" style={{
+          fontSize: 11, color: "var(--text-secondary)", background: "var(--content-secondary-bg)",
+          padding: "5px 8px", borderRadius: 5, marginBottom: 8, border: "1px solid var(--border)",
+        }}>{msg}</p>
       )}
       {/* Redirect */}
-      <div className="space-y-1 mb-3">
+      <div style={{ marginBottom: 10 }}>
         <textarea
           value={redirectText}
           onChange={(e) => setRedirectText(e.target.value)}
           placeholder="Redirect instruction…"
-          className="w-full border-2 border-black font-mono text-xs p-2 resize-none h-16 focus:outline-none focus:border-blue-500"
+          className="mac-input mono"
+          style={{ height: 56, resize: "none", fontSize: 11, marginBottom: 5 }}
         />
         <button
           onClick={handleRedirect}
           disabled={busy || !redirectText.trim()}
-          className="w-full border-2 border-black font-mono text-xs py-1 hover:bg-black hover:text-white transition-colors disabled:opacity-40"
+          className="mac-btn"
+          style={{ width: "100%", justifyContent: "center", fontSize: 11, padding: "5px 10px" }}
         >
           Redirect Agent
         </button>
       </div>
       {/* Stop */}
-      <div className="space-y-1">
+      <div>
         <input
           value={stopReason}
           onChange={(e) => setStopReason(e.target.value)}
           placeholder="Stop reason (optional)…"
-          className="w-full border-2 border-black font-mono text-xs p-2 focus:outline-none focus:border-red-400"
+          className="mac-input mono"
+          style={{ fontSize: 11, marginBottom: 5 }}
         />
         <button
           onClick={handleStop}
           disabled={busy}
-          className="w-full border-2 border-red-600 text-red-700 font-mono text-xs py-1 hover:bg-red-600 hover:text-white transition-colors disabled:opacity-40"
+          className="mac-btn mac-btn-destructive"
+          style={{ width: "100%", justifyContent: "center", fontSize: 11, padding: "5px 10px" }}
         >
           Stop Workflow
         </button>
@@ -196,7 +208,7 @@ function AssignToAgentControls({ node }: { node: DagNode }) {
           },
         }
       );
-      setMsg(`Started — wf: ${result.workflow.id.slice(0, 12)}… agent: ${result.agentId.slice(0, 8)}…`);
+      setMsg(`Started — wf: ${result.workflow.id.slice(0, 12)}…`);
     } catch (e) {
       setMsg(`Error: ${e}`);
     } finally {
@@ -207,33 +219,30 @@ function AssignToAgentControls({ node }: { node: DagNode }) {
   return (
     <Section title="Assign to Agent">
       {msg && (
-        <p className="font-mono text-xs border-2 border-black px-2 py-1 mb-2 bg-stone-50 break-all">
-          {msg}
-        </p>
+        <p className="mono" style={{
+          fontSize: 11, color: "var(--text-secondary)", background: "var(--content-secondary-bg)",
+          padding: "5px 8px", borderRadius: 5, marginBottom: 8, wordBreak: "break-all",
+          border: "1px solid var(--border)",
+        }}>{msg}</p>
       )}
-      <div className="space-y-2">
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <div>
-          <label className="font-mono text-xs text-stone-400 block mb-0.5">Command</label>
-          <input
-            value={cmd}
-            onChange={(e) => setCmd(e.target.value)}
-            className="w-full border-2 border-black font-mono text-xs p-1.5 focus:outline-none"
-          />
+          <label className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", display: "block", marginBottom: 3 }}>Command</label>
+          <input value={cmd} onChange={(e) => setCmd(e.target.value)} className="mac-input mono" style={{ fontSize: 11 }} />
         </div>
         <div>
-          <label className="font-mono text-xs text-stone-400 block mb-0.5">Args (space-separated, prompt appended)</label>
-          <input
-            value={args}
-            onChange={(e) => setArgs(e.target.value)}
-            className="w-full border-2 border-black font-mono text-xs p-1.5 focus:outline-none"
-          />
+          <label className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", display: "block", marginBottom: 3 }}>
+            Args (prompt appended)
+          </label>
+          <input value={args} onChange={(e) => setArgs(e.target.value)} className="mac-input mono" style={{ fontSize: 11 }} />
         </div>
         <div>
-          <label className="font-mono text-xs text-stone-400 block mb-0.5">Workflow Type</label>
+          <label className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", display: "block", marginBottom: 3 }}>Workflow Type</label>
           <select
             value={workflowType}
             onChange={(e) => setWorkflowType(e.target.value as WorkflowType)}
-            className="w-full border-2 border-black font-mono text-xs p-1.5 bg-white focus:outline-none"
+            className="mac-input mono"
+            style={{ fontSize: 11 }}
           >
             {WORKFLOW_TYPES.map((t) => (
               <option key={t} value={t}>{t}</option>
@@ -241,19 +250,20 @@ function AssignToAgentControls({ node }: { node: DagNode }) {
           </select>
         </div>
         {(node.nodeType === "Epic" || node.nodeType === "Feature") && (
-          <label className="flex items-center gap-2 font-mono text-xs cursor-pointer">
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 11, color: "var(--text-secondary)" }}>
             <input
               type="checkbox"
               checked={fanout}
               onChange={(e) => setFanout(e.target.checked)}
             />
-            Fan-out to child Task/Feature nodes
+            Fan-out to child nodes
           </label>
         )}
         <button
           onClick={handleAssign}
           disabled={busy || !cmd.trim()}
-          className="w-full border-2 border-blue-600 text-blue-700 font-mono text-xs py-1.5 hover:bg-blue-600 hover:text-white transition-colors disabled:opacity-40 font-bold"
+          className="mac-btn mac-btn-primary"
+          style={{ width: "100%", justifyContent: "center", fontSize: 11, padding: "6px 12px" }}
         >
           {busy ? "Starting…" : "▶ Assign to Agent"}
         </button>
@@ -293,48 +303,53 @@ export function ProbePanel({ nodeId }: ProbePanelProps) {
     String(n.data.title ?? n.data.name ?? n.id.slice(0, 8));
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="flex flex-col h-full" style={{ background: "var(--inspector-bg)" }}>
       {/* Header */}
-      <div className="border-b-4 border-black px-4 py-2 flex items-center justify-between shrink-0">
-        <span className="font-black text-sm tracking-tight">Probe</span>
-        <div className="flex gap-2">
-          <button
-            onClick={load}
-            className="font-mono text-xs border-2 border-black px-2 py-0.5 hover:bg-stone-100"
-          >
+      <div className="mac-toolbar flex items-center justify-between shrink-0" style={{ padding: "0 12px", height: 36 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>Inspector</span>
+        <div className="flex gap-1">
+          <button onClick={load} className="mac-btn mac-btn-ghost" style={{ padding: "2px 6px" }} title="Refresh">
             ↻
           </button>
-          <button
-            onClick={() => setSelectedNodeId(null)}
-            className="font-mono text-xs border-2 border-black px-2 py-0.5 hover:bg-black hover:text-white transition-colors"
-          >
+          <button onClick={() => setSelectedNodeId(null)} className="mac-btn mac-btn-ghost" style={{ padding: "2px 6px" }} title="Close">
             ✕
           </button>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto" style={{ padding: "12px 14px" }}>
         {loading && (
-          <p className="font-mono text-xs text-stone-400 animate-pulse">Loading…</p>
+          <p className="mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>Loading…</p>
         )}
         {error && (
-          <p className="font-mono text-xs text-red-600 border-2 border-red-400 p-2">{error}</p>
+          <p className="mono" style={{
+            fontSize: 11, color: "var(--status-failed)", background: "var(--status-failed-bg)",
+            padding: "6px 10px", borderRadius: 5,
+          }}>{error}</p>
         )}
 
         {data && (
           <>
             {/* Node identity */}
             <div>
-              <p className="font-mono text-xs text-stone-400 mb-0.5">{data.node.nodeType}</p>
-              <p className="font-black text-base leading-tight">
+              <p className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 2 }}>
+                {data.node.nodeType}
+              </p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", lineHeight: 1.4, margin: 0 }}>
                 {String(data.node.data.title ?? data.node.data.name ?? data.node.id)}
               </p>
-              <p className="font-mono text-xs text-stone-400 mt-0.5">{data.node.id}</p>
+              <p className="mono" style={{ fontSize: 10, color: "var(--text-placeholder)", marginTop: 3 }}>
+                {data.node.id}
+              </p>
             </div>
 
             {/* Data fields */}
             <Section title="Data">
-              <pre className="font-mono text-xs bg-stone-50 border-2 border-stone-200 p-2 overflow-auto max-h-32 whitespace-pre-wrap">
+              <pre className="mono" style={{
+                fontSize: 10, background: "var(--content-secondary-bg)", padding: "8px 10px",
+                borderRadius: 5, overflow: "auto", maxHeight: 120, whiteSpace: "pre-wrap",
+                border: "1px solid var(--border)", color: "var(--text-secondary)",
+              }}>
                 {JSON.stringify(data.node.data, null, 2)}
               </pre>
             </Section>
@@ -342,7 +357,7 @@ export function ProbePanel({ nodeId }: ProbePanelProps) {
             {/* Incoming edges */}
             {data.incomingEdges.length > 0 && (
               <Section title={`Incoming (${data.incomingEdges.length})`}>
-                <div className="space-y-1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {data.incomingEdges.map((e) => {
                     const src = data.connectedNodes.find((n) => n.id === e.fromId);
                     return (
@@ -356,7 +371,7 @@ export function ProbePanel({ nodeId }: ProbePanelProps) {
             {/* Outgoing edges */}
             {data.outgoingEdges.length > 0 && (
               <Section title={`Outgoing (${data.outgoingEdges.length})`}>
-                <div className="space-y-1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {data.outgoingEdges.map((e) => {
                     const tgt = data.connectedNodes.find((n) => n.id === e.toId);
                     return (
@@ -370,7 +385,7 @@ export function ProbePanel({ nodeId }: ProbePanelProps) {
             {/* Decision history */}
             {data.decisions.length > 0 && (
               <Section title={`Decisions (${data.decisions.length})`}>
-                <div className="space-y-1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {data.decisions.map((n) => (
                     <NodeChip key={n.id} node={n} onClick={() => setSelectedNodeId(n.id)} />
                   ))}
@@ -381,7 +396,7 @@ export function ProbePanel({ nodeId }: ProbePanelProps) {
             {/* Artifacts */}
             {data.artifacts.length > 0 && (
               <Section title={`Artifacts (${data.artifacts.length})`}>
-                <div className="space-y-1">
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {data.artifacts.map((n) => (
                     <NodeChip key={n.id} node={n} onClick={() => setSelectedNodeId(n.id)} />
                   ))}

@@ -19,38 +19,30 @@ const NODE_ORDER: NodeType[] = [
   "Review",
 ];
 
-const TYPE_COLORS: Record<string, string> = {
-  Project: "bg-black text-white",
-  Epic: "bg-stone-800 text-white",
-  Feature: "bg-stone-600 text-white",
-  Task: "bg-stone-400 text-black",
-  Decision: "bg-amber-400 text-black",
-  AgentOutput: "bg-blue-500 text-white",
-  KnowledgeArtifact: "bg-green-600 text-white",
-  Review: "bg-purple-500 text-white",
+const TYPE_LABEL_COLORS: Record<string, { color: string; bg: string }> = {
+  Project:           { color: "var(--text-primary)",   bg: "var(--card-bg)" },
+  Epic:              { color: "var(--text-primary)",   bg: "var(--content-secondary-bg)" },
+  Feature:           { color: "var(--text-secondary)", bg: "transparent" },
+  Task:              { color: "var(--text-secondary)", bg: "transparent" },
+  Decision:          { color: "var(--status-paused)",  bg: "var(--status-paused-bg)" },
+  AgentOutput:       { color: "var(--status-running)", bg: "var(--status-running-bg)" },
+  KnowledgeArtifact: { color: "var(--status-completed)", bg: "var(--status-completed-bg)" },
+  Review:            { color: "#9B59B6",               bg: "rgba(155,89,182,0.08)" },
 };
 
-const STATUS_BADGE: Record<string, string> = {
-  running: "border-2 border-blue-500 text-blue-600 bg-blue-50 animate-pulse",
-  paused: "border-2 border-amber-400 text-amber-700 bg-amber-50",
-  blocked: "border-2 border-red-400 text-red-700 bg-red-50",
-  completed: "border-2 border-green-500 text-green-700 bg-green-50",
-  cancelled: "border-2 border-stone-400 text-stone-500 bg-stone-100 line-through",
-  failed: "border-2 border-red-600 text-red-700 bg-red-100",
-};
-
-function statusBadge(node: DagNode) {
+function StatusBadge({ node }: { node: DagNode }) {
   const status = String(node.data.status ?? "");
-  if (!status) return null;
-  const cls = STATUS_BADGE[status] ?? "border-2 border-stone-300 text-stone-500";
+  if (!status) return <span style={{ color: "var(--text-placeholder)", fontSize: 11 }}>—</span>;
   return (
-    <span className={`font-mono text-xs px-2 py-0.5 ${cls}`}>{status}</span>
+    <span className={`status-badge status-${status}`} style={{ fontSize: 10 }}>
+      {status}
+    </span>
   );
 }
 
 function indentForType(nodeType: string): number {
   const idx = NODE_ORDER.indexOf(nodeType as NodeType);
-  return Math.max(0, idx) * 12;
+  return Math.max(0, idx) * 10;
 }
 
 export function GanttView() {
@@ -68,9 +60,12 @@ export function GanttView() {
   if (nodes.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <div className="border-4 border-dashed border-stone-300 p-16 text-center">
-          <p className="font-mono text-stone-400 text-sm">No DAG nodes yet.</p>
-          <p className="font-mono text-stone-300 text-xs mt-1">Open a project to load the DAG.</p>
+        <div style={{
+          border: "1px dashed var(--border-strong)", borderRadius: 10,
+          padding: "48px 32px", textAlign: "center",
+        }}>
+          <p style={{ fontSize: 13, color: "var(--text-tertiary)", margin: 0 }}>No DAG nodes yet.</p>
+          <p style={{ fontSize: 11, color: "var(--text-placeholder)", marginTop: 4 }}>Open a project to load the DAG.</p>
         </div>
       </div>
     );
@@ -79,17 +74,23 @@ export function GanttView() {
   return (
     <div className="flex-1 overflow-auto">
       {/* Header */}
-      <div className="sticky top-0 bg-white border-b-4 border-black grid grid-cols-[1fr_auto_auto] gap-0 z-10">
-        <span className="font-mono text-xs font-bold px-4 py-2 border-r-2 border-stone-200">NODE</span>
-        <span className="font-mono text-xs font-bold px-4 py-2 border-r-2 border-stone-200 w-28 text-center">TYPE</span>
-        <span className="font-mono text-xs font-bold px-4 py-2 w-28 text-center">STATUS</span>
+      <div className="mac-toolbar sticky top-0 z-10" style={{ display: "grid", gridTemplateColumns: "1fr 90px 100px" }}>
+        <span className="mono" style={{ padding: "8px 16px", fontSize: 10, fontWeight: 600, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em", borderRight: "1px solid var(--divider)" }}>
+          Node
+        </span>
+        <span className="mono" style={{ padding: "8px 10px", fontSize: 10, fontWeight: 600, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center", borderRight: "1px solid var(--divider)" }}>
+          Type
+        </span>
+        <span className="mono" style={{ padding: "8px 10px", fontSize: 10, fontWeight: 600, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>
+          Status
+        </span>
       </div>
 
       {/* Rows */}
       <div>
         {sorted.map((node) => {
           const indent = indentForType(node.nodeType);
-          const typeColor = TYPE_COLORS[node.nodeType] ?? "bg-stone-200 text-black";
+          const typeMeta = TYPE_LABEL_COLORS[node.nodeType] ?? { color: "var(--text-secondary)", bg: "transparent" };
           const title = String(node.data.title ?? node.data.name ?? node.id.slice(0, 8));
           const depCount = edges.filter((e) => e.toId === node.id).length;
 
@@ -97,37 +98,50 @@ export function GanttView() {
             <button
               key={node.id}
               onClick={() => setSelectedNodeId(node.id)}
-              className="w-full grid grid-cols-[1fr_auto_auto] gap-0 border-b-2 border-stone-200 hover:bg-stone-50 text-left transition-colors"
+              style={{
+                width: "100%", display: "grid", gridTemplateColumns: "1fr 90px 100px",
+                borderBottom: "1px solid var(--divider)", background: "transparent",
+                cursor: "pointer", textAlign: "left", border: "none", borderBottomColor: "var(--divider)",
+                borderBottomWidth: 1, borderBottomStyle: "solid",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sidebar-hover-bg)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
-              <div className="px-4 py-2 border-r-2 border-stone-200 flex items-center gap-2 min-w-0">
-                <span style={{ paddingLeft: indent }} className="shrink-0" />
-                <span className="font-medium text-sm truncate">{title}</span>
+              <div style={{ padding: "7px 16px", borderRight: "1px solid var(--divider)", display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                <span style={{ paddingLeft: indent, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, fontWeight: node.nodeType === "Project" || node.nodeType === "Epic" ? 600 : 400, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {title}
+                </span>
                 {depCount > 0 && (
-                  <span className="font-mono text-xs text-stone-400 shrink-0">
+                  <span className="mono" style={{ fontSize: 10, color: "var(--text-placeholder)", flexShrink: 0 }}>
                     ←{depCount}
                   </span>
                 )}
               </div>
-              <div className="px-2 py-2 border-r-2 border-stone-200 flex items-center justify-center w-28">
-                <span className={`font-mono text-xs px-1.5 py-0.5 ${typeColor}`}>
+              <div style={{ padding: "7px 10px", borderRight: "1px solid var(--divider)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span className="mono" style={{
+                  fontSize: 10, padding: "2px 6px", borderRadius: 4,
+                  color: typeMeta.color, background: typeMeta.bg,
+                }}>
                   {node.nodeType}
                 </span>
               </div>
-              <div className="px-2 py-2 flex items-center justify-center w-28">
-                {statusBadge(node) ?? (
-                  <span className="font-mono text-xs text-stone-300">—</span>
-                )}
+              <div style={{ padding: "7px 10px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <StatusBadge node={node} />
               </div>
             </button>
           );
         })}
       </div>
 
-      {/* Stats bar */}
-      <div className="border-t-4 border-black px-4 py-2 flex gap-4 bg-stone-50">
-        <span className="font-mono text-xs text-stone-500">{nodes.length} nodes</span>
-        <span className="font-mono text-xs text-stone-500">{edges.length} edges</span>
-        <span className="font-mono text-xs text-stone-400">click row to probe</span>
+      {/* Footer */}
+      <div style={{
+        padding: "6px 16px", display: "flex", gap: 16,
+        borderTop: "1px solid var(--divider)",
+      }}>
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{nodes.length} nodes</span>
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{edges.length} edges</span>
+        <span className="mono" style={{ fontSize: 11, color: "var(--text-placeholder)" }}>click row to inspect</span>
       </div>
     </div>
   );

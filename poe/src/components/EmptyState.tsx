@@ -2,11 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useSetAtom } from "jotai";
+import { ChevronDown, Star, X, FolderOpen } from "lucide-react";
 import { projectAtom } from "../store/dag";
 import { useRecentProjects, type RecentProject } from "../hooks/useRecentProjects";
 import type { ProjectInfo } from "../types";
-
-// ── Project row in dropdown ────────────────────────────────────────────────────
 
 function ProjectRow({
   project,
@@ -23,40 +22,47 @@ function ProjectRow({
 
   return (
     <div
-      className="flex items-center gap-2 px-3 py-2 hover:bg-stone-100 cursor-pointer"
+      className="flex items-center gap-2 cursor-pointer"
+      style={{
+        padding: "7px 12px",
+        background: hovered ? "var(--sidebar-hover-bg)" : "transparent",
+        transition: "background 0.1s",
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={() => onOpen(project)}
     >
       <div className="flex-1 min-w-0">
-        <p className="font-mono text-sm font-bold truncate">{project.name}</p>
-        <p className="font-mono text-xs text-stone-400 truncate">{project.path}</p>
+        <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }} className="truncate">
+          {project.name}
+        </p>
+        <p className="mono truncate" style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
+          {project.path}
+        </p>
       </div>
       {hovered && (
         <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
           <button
             onClick={() => onToggleFavourite(project.path)}
-            className={`text-xs px-1.5 py-0.5 border border-stone-300 hover:border-black transition-colors ${
-              project.isFavourite ? "text-amber-500" : "text-stone-400"
-            }`}
+            className="mac-btn mac-btn-ghost"
+            style={{ padding: "2px 5px", color: project.isFavourite ? "var(--status-paused)" : "var(--text-tertiary)" }}
             title={project.isFavourite ? "Unpin" : "Pin"}
           >
-            ★
+            <Star size={12} fill={project.isFavourite ? "currentColor" : "none"} />
           </button>
           <button
             onClick={() => onRemove(project.path)}
-            className="text-xs px-1.5 py-0.5 border border-stone-300 text-stone-400 hover:border-red-400 hover:text-red-500 transition-colors"
+            className="mac-btn mac-btn-ghost"
+            style={{ padding: "2px 5px", color: "var(--text-tertiary)" }}
             title="Remove"
           >
-            ✕
+            <X size={12} />
           </button>
         </div>
       )}
     </div>
   );
 }
-
-// ── Main component ─────────────────────────────────────────────────────────────
 
 export function EmptyState() {
   const setProject = useSetAtom(projectAtom);
@@ -106,70 +112,73 @@ export function EmptyState() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-8 bg-stone-50">
-      <div className="text-center space-y-2">
-        <h1 className="text-4xl font-black tracking-tight border-b-4 border-black pb-2">POE</h1>
-        <p className="text-stone-500 font-mono text-sm">Project Orchestration Engine</p>
+    <div
+      className="flex flex-col items-center justify-center h-full gap-8"
+      style={{ background: "var(--content-secondary-bg)" }}
+    >
+      {/* Logo */}
+      <div className="text-center" style={{ userSelect: "none" }}>
+        <h1 style={{ fontSize: 40, fontWeight: 700, letterSpacing: "-0.03em", color: "var(--text-primary)", marginBottom: 6 }}>
+          POE
+        </h1>
+        <p style={{ fontSize: 14, color: "var(--text-secondary)" }}>Project Orchestration Engine</p>
       </div>
 
+      {/* Dropdown button */}
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={handleButtonClick}
-          className="border-4 border-black bg-black text-white font-mono font-bold px-8 py-4 text-sm uppercase tracking-widest hover:bg-white hover:text-black transition-colors flex items-center gap-3"
+          className="mac-btn mac-btn-primary"
+          style={{ padding: "8px 20px", fontSize: 14, gap: 8, borderRadius: 8 }}
         >
+          <FolderOpen size={15} />
           Open Project
-          {hasRecents && (
-            <span className="text-xs opacity-60">{dropdownOpen ? "▲" : "▼"}</span>
-          )}
+          {hasRecents && <ChevronDown size={13} style={{ opacity: 0.8, transform: dropdownOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />}
         </button>
 
         {dropdownOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-white border-4 border-black z-50 min-w-72 shadow-lg">
+          <div
+            className="mac-card absolute mt-1 z-50 overflow-hidden"
+            style={{ top: "100%", left: 0, right: 0, minWidth: 320, borderRadius: 10 }}
+          >
             {favourites.length > 0 && (
               <>
-                <div className="px-3 py-1.5 border-b-2 border-stone-200 bg-stone-50">
-                  <span className="font-mono text-xs font-bold text-stone-400 uppercase tracking-wider">★ Pinned</span>
-                </div>
+                <p className="mac-section-header" style={{ paddingTop: 8 }}>Pinned</p>
                 {favourites.map((p) => (
-                  <ProjectRow key={p.path} project={p}
-                    onOpen={(proj) => openDir(proj.path)}
-                    onToggleFavourite={toggleFavourite}
-                    onRemove={remove}
-                  />
+                  <ProjectRow key={p.path} project={p} onOpen={(proj) => openDir(proj.path)} onToggleFavourite={toggleFavourite} onRemove={remove} />
                 ))}
+                <div className="mac-divider" />
               </>
             )}
 
             {recentNonFav.length > 0 && (
               <>
-                <div className="px-3 py-1.5 border-b-2 border-stone-200 bg-stone-50">
-                  <span className="font-mono text-xs font-bold text-stone-400 uppercase tracking-wider">Recent</span>
-                </div>
+                <p className="mac-section-header" style={{ paddingTop: favourites.length ? 4 : 8 }}>Recent</p>
                 {recentNonFav.map((p) => (
-                  <ProjectRow key={p.path} project={p}
-                    onOpen={(proj) => openDir(proj.path)}
-                    onToggleFavourite={toggleFavourite}
-                    onRemove={remove}
-                  />
+                  <ProjectRow key={p.path} project={p} onOpen={(proj) => openDir(proj.path)} onToggleFavourite={toggleFavourite} onRemove={remove} />
                 ))}
+                <div className="mac-divider" />
               </>
             )}
 
-            <div className="border-t-2 border-stone-200">
-              <button
-                onClick={handleBrowse}
-                className="w-full px-3 py-2.5 text-left font-mono text-sm hover:bg-stone-100 flex items-center gap-2 transition-colors"
-              >
-                <span className="text-stone-400">📁</span>
-                <span>Browse…</span>
-              </button>
-            </div>
+            <button
+              onClick={handleBrowse}
+              className="flex items-center gap-2 w-full"
+              style={{
+                padding: "8px 12px", fontSize: 13,
+                color: "var(--accent)", background: "transparent",
+                border: "none", cursor: "pointer", fontFamily: "inherit",
+              }}
+            >
+              <FolderOpen size={13} />
+              Browse…
+            </button>
           </div>
         )}
       </div>
 
       {error && (
-        <p className="font-mono text-xs text-red-600 border-2 border-red-400 px-3 py-2 max-w-sm text-center">
+        <p style={{ fontSize: 12, color: "var(--status-failed)", background: "var(--status-failed-bg)", padding: "6px 12px", borderRadius: 6, maxWidth: 360 }}>
           {error}
         </p>
       )}

@@ -1,11 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useAtom, useAtomValue } from "jotai";
+import { X } from "lucide-react";
 import { projectAtom, nodesListAtom, edgesListAtom } from "../store/dag";
 
 export function ProjectHeader() {
   const [project, setProject] = useAtom(projectAtom);
   const nodes = useAtomValue(nodesListAtom);
   const edges = useAtomValue(edgesListAtom);
+
+  if (!project) return null;
 
   async function handleClose() {
     try {
@@ -16,28 +19,21 @@ export function ProjectHeader() {
     }
   }
 
-  if (!project) return null;
-
   return (
-    <header className="border-b-4 border-black bg-white flex items-center justify-between px-4 py-2">
-      <div className="flex items-center gap-4">
-        <span className="font-black text-lg tracking-tight">{project.name}</span>
-        <span className="font-mono text-xs text-stone-400 border border-stone-300 px-1">
+    <div className="mac-toolbar flex items-center justify-between px-4 shrink-0" style={{ height: 36, minHeight: 36 }}>
+      <div className="flex items-center gap-3">
+        <span className="mono" style={{ color: "var(--text-tertiary)", fontSize: 11 }}>
           {nodes.length} nodes · {edges.length} edges
         </span>
       </div>
-
       <div className="flex items-center gap-2">
-        <span className="font-mono text-xs text-stone-400 truncate max-w-xs">
+        <span className="mono truncate" style={{ color: "var(--text-tertiary)", fontSize: 11, maxWidth: 280 }}>
           {project.projectDir}
         </span>
-        <button
-          onClick={handleClose}
-          className="border-2 border-black font-mono text-xs px-2 py-1 hover:bg-black hover:text-white transition-colors"
-        >
-          Close
+        <button onClick={handleClose} className="mac-btn mac-btn-ghost" style={{ padding: "2px 6px" }} title="Close project">
+          <X size={12} />
         </button>
       </div>
-    </header>
+    </div>
   );
 }

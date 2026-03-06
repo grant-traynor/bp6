@@ -1,20 +1,263 @@
 @import "tailwindcss";
 
+/* ── macOS design tokens ─────────────────────────────────────────────────────── */
+
 :root {
-  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
-  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
   line-height: 1.5;
-  color: #1a1a1a;
-  background-color: #f5f5f0;
+  -webkit-font-smoothing: antialiased;
+
+  --sidebar-bg:              #F2F2F7;
+  --sidebar-border:          rgba(0, 0, 0, 0.1);
+  --sidebar-text:            #3A3A3C;
+  --sidebar-text-secondary:  #8E8E93;
+  --sidebar-selected-bg:     rgba(0, 122, 255, 0.1);
+  --sidebar-selected-text:   #007AFF;
+  --sidebar-hover-bg:        rgba(0, 0, 0, 0.04);
+  --sidebar-section-text:    #8E8E93;
+
+  --content-bg:              #FFFFFF;
+  --content-secondary-bg:    #F9F9FB;
+
+  --toolbar-bg:              rgba(242, 242, 247, 0.85);
+  --toolbar-border:          rgba(0, 0, 0, 0.1);
+
+  --inspector-bg:            #F2F2F7;
+  --inspector-border:        rgba(0, 0, 0, 0.1);
+
+  --text-primary:            #1D1D1F;
+  --text-secondary:          #6E6E73;
+  --text-tertiary:           #8E8E93;
+  --text-placeholder:        #C7C7CC;
+
+  --border:                  rgba(0, 0, 0, 0.08);
+  --border-strong:           rgba(0, 0, 0, 0.15);
+  --divider:                 rgba(0, 0, 0, 0.08);
+
+  --accent:                  #007AFF;
+  --accent-hover:            #0066DD;
+  --accent-text:             #FFFFFF;
+
+  --card-bg:                 #FFFFFF;
+  --card-border:             rgba(0, 0, 0, 0.06);
+  --card-shadow:             0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --card-shadow-hover:       0 4px 12px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
+
+  --input-bg:                #FFFFFF;
+  --input-border:            rgba(0, 0, 0, 0.2);
+  --input-focus-border:      #007AFF;
+
+  --status-running:          #007AFF;
+  --status-running-bg:       rgba(0, 122, 255, 0.08);
+  --status-paused:           #FF9500;
+  --status-paused-bg:        rgba(255, 149, 0, 0.08);
+  --status-blocked:          #FF3B30;
+  --status-blocked-bg:       rgba(255, 59, 48, 0.08);
+  --status-completed:        #34C759;
+  --status-completed-bg:     rgba(52, 199, 89, 0.08);
+  --status-cancelled:        #8E8E93;
+  --status-cancelled-bg:     rgba(142, 142, 147, 0.08);
+  --status-failed:           #FF3B30;
+  --status-failed-bg:        rgba(255, 59, 48, 0.08);
+
+  --destructive:             #FF3B30;
+  --destructive-hover:       #E0341F;
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
+/* ── Dark mode ────────────────────────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sidebar-bg:              #1C1C1E;
+    --sidebar-border:          rgba(255, 255, 255, 0.08);
+    --sidebar-text:            #EBEBF5;
+    --sidebar-text-secondary:  #8E8E93;
+    --sidebar-selected-bg:     rgba(10, 132, 255, 0.2);
+    --sidebar-selected-text:   #0A84FF;
+    --sidebar-hover-bg:        rgba(255, 255, 255, 0.05);
+    --sidebar-section-text:    #636366;
+    --content-bg:              #000000;
+    --content-secondary-bg:    #1C1C1E;
+    --toolbar-bg:              rgba(28, 28, 30, 0.85);
+    --toolbar-border:          rgba(255, 255, 255, 0.08);
+    --inspector-bg:            #1C1C1E;
+    --inspector-border:        rgba(255, 255, 255, 0.08);
+    --text-primary:            #FFFFFF;
+    --text-secondary:          #8E8E93;
+    --text-tertiary:           #636366;
+    --text-placeholder:        #48484A;
+    --border:                  rgba(255, 255, 255, 0.08);
+    --border-strong:           rgba(255, 255, 255, 0.15);
+    --divider:                 rgba(255, 255, 255, 0.07);
+    --accent:                  #0A84FF;
+    --accent-hover:            #409CFF;
+    --accent-text:             #FFFFFF;
+    --card-bg:                 #2C2C2E;
+    --card-border:             rgba(255, 255, 255, 0.06);
+    --card-shadow:             0 1px 3px rgba(0,0,0,0.4);
+    --card-shadow-hover:       0 4px 12px rgba(0,0,0,0.5);
+    --input-bg:                #2C2C2E;
+    --input-border:            rgba(255, 255, 255, 0.2);
+    --input-focus-border:      #0A84FF;
+    --status-running:          #0A84FF;   --status-running-bg:       rgba(10, 132, 255, 0.15);
+    --status-paused:           #FF9F0A;   --status-paused-bg:        rgba(255, 159, 10, 0.15);
+    --status-blocked:          #FF453A;   --status-blocked-bg:       rgba(255, 69, 58, 0.15);
+    --status-completed:        #32D74B;   --status-completed-bg:     rgba(50, 215, 75, 0.15);
+    --status-cancelled:        #636366;   --status-cancelled-bg:     rgba(99, 99, 102, 0.15);
+    --status-failed:           #FF453A;   --status-failed-bg:        rgba(255, 69, 58, 0.15);
+    --destructive:             #FF453A;
+    --destructive-hover:       #FF6961;
+  }
 }
 
-#root {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
+[data-theme="dark"] {
+  --sidebar-bg:              #1C1C1E;
+  --sidebar-border:          rgba(255, 255, 255, 0.08);
+  --sidebar-text:            #EBEBF5;
+  --sidebar-text-secondary:  #8E8E93;
+  --sidebar-selected-bg:     rgba(10, 132, 255, 0.2);
+  --sidebar-selected-text:   #0A84FF;
+  --sidebar-hover-bg:        rgba(255, 255, 255, 0.05);
+  --sidebar-section-text:    #636366;
+  --content-bg:              #000000;
+  --content-secondary-bg:    #1C1C1E;
+  --toolbar-bg:              rgba(28, 28, 30, 0.85);
+  --toolbar-border:          rgba(255, 255, 255, 0.08);
+  --inspector-bg:            #1C1C1E;
+  --inspector-border:        rgba(255, 255, 255, 0.08);
+  --text-primary:            #FFFFFF;
+  --text-secondary:          #8E8E93;
+  --text-tertiary:           #636366;
+  --text-placeholder:        #48484A;
+  --border:                  rgba(255, 255, 255, 0.08);
+  --border-strong:           rgba(255, 255, 255, 0.15);
+  --divider:                 rgba(255, 255, 255, 0.07);
+  --accent:                  #0A84FF;
+  --accent-hover:            #409CFF;
+  --card-bg:                 #2C2C2E;
+  --card-border:             rgba(255, 255, 255, 0.06);
+  --card-shadow:             0 1px 3px rgba(0,0,0,0.4);
+  --card-shadow-hover:       0 4px 12px rgba(0,0,0,0.5);
+  --input-bg:                #2C2C2E;
+  --input-border:            rgba(255, 255, 255, 0.2);
+  --input-focus-border:      #0A84FF;
+  --status-running:          #0A84FF;   --status-running-bg:       rgba(10, 132, 255, 0.15);
+  --status-paused:           #FF9F0A;   --status-paused-bg:        rgba(255, 159, 10, 0.15);
+  --status-blocked:          #FF453A;   --status-blocked-bg:       rgba(255, 69, 58, 0.15);
+  --status-completed:        #32D74B;   --status-completed-bg:     rgba(50, 215, 75, 0.15);
+  --status-cancelled:        #636366;   --status-cancelled-bg:     rgba(99, 99, 102, 0.15);
+  --status-failed:           #FF453A;   --status-failed-bg:        rgba(255, 69, 58, 0.15);
+  --destructive:             #FF453A;
+  --destructive-hover:       #FF6961;
 }
+
+[data-theme="light"] {
+  --sidebar-bg:              #F2F2F7;
+  --sidebar-border:          rgba(0, 0, 0, 0.1);
+  --sidebar-text:            #3A3A3C;
+  --sidebar-selected-bg:     rgba(0, 122, 255, 0.1);
+  --sidebar-selected-text:   #007AFF;
+  --sidebar-hover-bg:        rgba(0, 0, 0, 0.04);
+  --content-bg:              #FFFFFF;
+  --content-secondary-bg:    #F9F9FB;
+  --toolbar-bg:              rgba(242, 242, 247, 0.85);
+  --toolbar-border:          rgba(0, 0, 0, 0.1);
+  --inspector-bg:            #F2F2F7;
+  --inspector-border:        rgba(0, 0, 0, 0.1);
+  --text-primary:            #1D1D1F;
+  --text-secondary:          #6E6E73;
+  --text-tertiary:           #8E8E93;
+  --border:                  rgba(0, 0, 0, 0.08);
+  --accent:                  #007AFF;
+  --card-bg:                 #FFFFFF;
+  --card-border:             rgba(0, 0, 0, 0.06);
+  --input-bg:                #FFFFFF;
+  --input-border:            rgba(0, 0, 0, 0.2);
+  --destructive:             #FF3B30;
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────────── */
+
+body { margin: 0; min-height: 100vh; background: var(--content-bg); color: var(--text-primary); }
+#root { height: 100vh; display: flex; flex-direction: column; }
+
+/* ── Semantic utilities ───────────────────────────────────────────────────────── */
+
+.mac-sidebar   { background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); color: var(--sidebar-text); }
+.mac-content   { background: var(--content-bg); color: var(--text-primary); }
+.mac-inspector { background: var(--inspector-bg); border-left: 1px solid var(--inspector-border); color: var(--text-primary); }
+
+.mac-toolbar {
+  background: var(--toolbar-bg);
+  border-bottom: 1px solid var(--toolbar-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.mac-card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--card-shadow);
+  border-radius: 8px;
+  transition: box-shadow 0.15s;
+}
+.mac-card:hover { box-shadow: var(--card-shadow-hover); }
+
+.mac-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 12px; border-radius: 6px;
+  font-size: 13px; font-family: inherit; font-weight: 400;
+  cursor: pointer; transition: all 0.15s;
+  border: 1px solid var(--border-strong);
+  background: var(--card-bg); color: var(--text-primary);
+}
+.mac-btn:hover { background: var(--sidebar-hover-bg); }
+.mac-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 500; }
+.mac-btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.mac-btn-destructive { color: var(--destructive); border-color: var(--destructive); }
+.mac-btn-destructive:hover { background: var(--destructive); color: #fff; }
+.mac-btn-ghost { border-color: transparent; background: transparent; }
+.mac-btn-ghost:hover { background: var(--sidebar-hover-bg); border-color: transparent; }
+
+.mac-input {
+  background: var(--input-bg); border: 1px solid var(--input-border);
+  border-radius: 6px; color: var(--text-primary);
+  font-family: inherit; font-size: 13px;
+  padding: 5px 8px; outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%; box-sizing: border-box;
+}
+.mac-input:focus { border-color: var(--input-focus-border); box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15); }
+
+.mac-sidebar-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: 6px; margin: 1px 6px;
+  font-size: 13px; color: var(--sidebar-text);
+  cursor: pointer; transition: background 0.1s; user-select: none;
+}
+.mac-sidebar-item:hover { background: var(--sidebar-hover-bg); }
+.mac-sidebar-item.active { background: var(--sidebar-selected-bg); color: var(--sidebar-selected-text); font-weight: 500; }
+
+.mac-section-header {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--sidebar-section-text);
+  padding: 12px 12px 4px;
+}
+
+.mac-divider { height: 1px; background: var(--divider); margin: 6px 0; }
+
+/* Status badges */
+.status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+.status-running   { color: var(--status-running);   background: var(--status-running-bg); }
+.status-paused    { color: var(--status-paused);    background: var(--status-paused-bg); }
+.status-blocked   { color: var(--status-blocked);   background: var(--status-blocked-bg); }
+.status-completed { color: var(--status-completed); background: var(--status-completed-bg); }
+.status-cancelled { color: var(--status-cancelled); background: var(--status-cancelled-bg); }
+.status-failed    { color: var(--status-failed);    background: var(--status-failed-bg); }
+
+.mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace; font-size: 12px; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }

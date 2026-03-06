@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { useAtomValue, useAtom } from "jotai";
+import {
+  Inbox, GitBranch, Bot, Settings2, Sun, Moon, Monitor,
+} from "lucide-react";
 import { projectAtom, selectedNodeIdAtom } from "./store/dag";
 import { useDagEvents } from "./hooks/useDagEvents";
+import { useTheme } from "./hooks/useTheme";
 import { EmptyState } from "./components/EmptyState";
 import { ProjectHeader } from "./components/ProjectHeader";
 import { QueueView } from "./components/QueueView";
@@ -13,12 +17,32 @@ import { ProvenanceView } from "./components/ProvenanceView";
 
 type Tab = "queue" | "dag" | "agents" | "restate";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "queue", label: "Queue" },
-  { id: "dag", label: "DAG" },
-  { id: "agents", label: "Agents" },
-  { id: "restate", label: "Restate" },
+const NAV_ITEMS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: "queue",   label: "Queue",   icon: <Inbox size={15} /> },
+  { id: "dag",     label: "DAG",     icon: <GitBranch size={15} /> },
+  { id: "agents",  label: "Agents",  icon: <Bot size={15} /> },
+  { id: "restate", label: "Restate", icon: <Settings2 size={15} /> },
 ];
+
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const next: Record<string, () => void> = {
+    system: () => setTheme("dark"),
+    dark:   () => setTheme("light"),
+    light:  () => setTheme("system"),
+  };
+  const icon = theme === "dark" ? <Moon size={13} /> : theme === "light" ? <Sun size={13} /> : <Monitor size={13} />;
+  return (
+    <button
+      onClick={next[theme]}
+      title={`Theme: ${theme}`}
+      className="mac-btn mac-btn-ghost"
+      style={{ padding: "4px 6px" }}
+    >
+      {icon}
+    </button>
+  );
+}
 
 export default function App() {
   const project = useAtomValue(projectAtom);
@@ -26,81 +50,86 @@ export default function App() {
   const [selectedNodeId] = useAtom(selectedNodeIdAtom);
   const [showProvenance, setShowProvenance] = useState(false);
 
-  // Wire up all reactive event subscriptions
   useDagEvents();
+  useTheme(); // Apply theme on mount
 
-  if (!project) {
-    return <EmptyState />;
-  }
+  if (!project) return <EmptyState />;
 
   return (
-    <div className="flex flex-col h-full">
-      <ProjectHeader />
-
-      {/* Tab bar */}
-      <div className="border-b-4 border-black flex shrink-0">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`font-mono text-xs px-4 py-2 border-r-4 border-black transition-colors ${
-              activeTab === tab.id
-                ? "bg-black text-white font-bold"
-                : "bg-white text-black hover:bg-stone-100"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Content + Probe panel */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Main content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {activeTab === "queue" && <QueueView />}
-          {activeTab === "dag" && <GanttView />}
-          {activeTab === "agents" && <AgentActivityView />}
-          {activeTab === "restate" && <RestateView />}
+    <div className="flex h-full" style={{ background: "var(--content-bg)" }}>
+      {/* ── Left sidebar ────────────────────────────────────────────────────── */}
+      <div className="mac-sidebar flex flex-col shrink-0" style={{ width: 200 }}>
+        {/* Project name */}
+        <div className="mac-toolbar flex items-center px-3" style={{ height: 44, minHeight: 44 }}>
+          <span className="font-semibold truncate" style={{ fontSize: 13, color: "var(--text-primary)" }}>
+            {project.name}
+          </span>
         </div>
 
-        {/* Probe panel — slides in when a node is selected */}
-        {selectedNodeId && (
-          <div className="w-96 border-l-4 border-black flex flex-col overflow-hidden shrink-0">
-            {/* Provenance sub-view toggle */}
-            {showProvenance ? (
-              <div className="flex flex-col flex-1 overflow-hidden">
-                <div className="border-b-2 border-stone-200 px-3 py-1.5 flex items-center shrink-0">
-                  <button
-                    onClick={() => setShowProvenance(false)}
-                    className="font-mono text-xs border-2 border-black px-2 py-0.5 hover:bg-stone-100"
-                  >
-                    ← Back
-                  </button>
-                  <span className="font-mono text-xs font-bold ml-3">Provenance</span>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  <ProvenanceView nodeId={selectedNodeId} />
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col flex-1 overflow-hidden">
-                {/* Provenance button in probe header area */}
-                <div className="flex-1 overflow-hidden">
-                  <ProbePanel nodeId={selectedNodeId} />
-                </div>
-                <div className="border-t-2 border-stone-200 px-4 py-2 shrink-0">
-                  <button
-                    onClick={() => setShowProvenance(true)}
-                    className="w-full border-2 border-black font-mono text-xs py-1 hover:bg-stone-100 transition-colors"
-                  >
-                    Provenance →
-                  </button>
-                </div>
-              </div>
-            )}
+        {/* Nav items */}
+        <nav className="flex-1 pt-2 overflow-y-auto">
+          <p className="mac-section-header">Navigator</p>
+          {NAV_ITEMS.map((item) => (
+            <div
+              key={item.id}
+              className={`mac-sidebar-item ${activeTab === item.id ? "active" : ""}`}
+              onClick={() => setActiveTab(item.id)}
+            >
+              <span style={{ opacity: activeTab === item.id ? 1 : 0.6 }}>{item.icon}</span>
+              {item.label}
+            </div>
+          ))}
+        </nav>
+
+        {/* Bottom controls */}
+        <div className="flex items-center justify-end px-3 py-2 mac-divider" style={{ borderTop: "1px solid var(--divider)" }}>
+          <ThemeToggle />
+        </div>
+      </div>
+
+      {/* ── Content + Inspector ──────────────────────────────────────────────── */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <ProjectHeader />
+
+        <div className="flex-1 flex overflow-hidden">
+          {/* Main content */}
+          <div className="flex-1 flex flex-col overflow-hidden mac-content">
+            {activeTab === "queue"   && <QueueView />}
+            {activeTab === "dag"     && <GanttView />}
+            {activeTab === "agents"  && <AgentActivityView />}
+            {activeTab === "restate" && <RestateView />}
           </div>
-        )}
+
+          {/* Inspector / Probe panel */}
+          {selectedNodeId && (
+            <div className="mac-inspector flex flex-col shrink-0 overflow-hidden" style={{ width: 300 }}>
+              {showProvenance ? (
+                <>
+                  <div className="mac-toolbar flex items-center gap-2 px-3" style={{ height: 36, minHeight: 36 }}>
+                    <button className="mac-btn mac-btn-ghost" style={{ padding: "2px 6px", fontSize: 12 }} onClick={() => setShowProvenance(false)}>
+                      ← Back
+                    </button>
+                    <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>Provenance</span>
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <ProvenanceView nodeId={selectedNodeId} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex-1 overflow-hidden">
+                    <ProbePanel nodeId={selectedNodeId} />
+                  </div>
+                  <div style={{ borderTop: "1px solid var(--divider)", padding: "8px 12px" }}>
+                    <button className="mac-btn" style={{ width: "100%", justifyContent: "center", fontSize: 12 }} onClick={() => setShowProvenance(true)}>
+                      Provenance →
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
