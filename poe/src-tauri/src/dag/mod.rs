@@ -209,6 +209,31 @@ pub struct WorkflowRecord {
     pub session_id: Option<String>,
 }
 
+// ── Lifecycle state ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LifecycleStateRow {
+    pub project_id: String,
+    pub step: u32,
+    pub substep: Option<String>,
+    pub status: String,
+    pub pending_approval_id: Option<String>,
+    /// The agent_id of the currently running lifecycle step agent (if any).
+    pub active_agent_id: Option<String>,
+    /// JSON array of Task node IDs produced by the Step 3 PM agent.
+    /// Populated when step=3 poe:done fires; consumed by Step 4 execution fan-out.
+    pub stage_task_ids: Option<String>,
+    /// JSON array of task node IDs that have been completed by their task agents.
+    /// Populated incrementally as task agents emit poe:done in Step 4.
+    pub completed_task_ids: Option<String>,
+    /// JSON map of {agent_id: task_id} for currently running task agents in Step 4.
+    /// Used to route poe:done back to the correct task_id and detect fan-in.
+    pub active_task_agent_ids: Option<String>,
+    /// Which execution stage/phase we are on (default 1). Incremented before PM review.
+    pub stage_number: Option<i64>,
+}
+
 // ── Schema migrations ──────────────────────────────────────────────────────────
 
 const MIGRATIONS: &[&str] = &[
@@ -265,36 +290,41 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_queue_items_project ON queue_items(project_id);
     CREATE INDEX IF NOT EXISTS idx_queue_items_status  ON queue_items(status);
     "#,
-    // v3: workflows
+    // v3: workflows — removed in bp6-ims.1 (lifecycle engine replaces SQLite workflows table)
+    // Kept as empty migration to preserve schema_migrations version numbering.
+    r#"SELECT 1;"#,
+    // v4: fan-in — removed in bp6-ims.1
+    r#"SELECT 1;"#,
+    // v5: claude session ID — removed in bp6-ims.1
+    r#"SELECT 1;"#,
+    // v6: lifecycle state machine per project (bp6-ims.2)
     r#"
-    CREATE TABLE IF NOT EXISTS workflows (
-        id            TEXT PRIMARY KEY,
-        project_id    TEXT NOT NULL,
-        node_id       TEXT NOT NULL,
-        agent_id      TEXT,
-        workflow_type TEXT NOT NULL,
-        status        TEXT NOT NULL DEFAULT 'pending',
-        current_step  TEXT,
-        config        TEXT NOT NULL DEFAULT '{}',
-        started_at    TEXT NOT NULL,
-        updated_at    TEXT NOT NULL,
-        completed_at  TEXT,
-        error         TEXT
+    CREATE TABLE IF NOT EXISTS lifecycle_state (
+        project_id          TEXT PRIMARY KEY,
+        step                INTEGER NOT NULL DEFAULT 0,
+        substep             TEXT,
+        status              TEXT NOT NULL DEFAULT 'idle',
+        pending_approval_id TEXT,
+        updated_at          TEXT NOT NULL
     );
-
-    CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);
-    CREATE INDEX IF NOT EXISTS idx_workflows_node    ON workflows(node_id);
-    CREATE INDEX IF NOT EXISTS idx_workflows_status  ON workflows(status);
     "#,
-    // v4: fan-in — parent/child workflow relationships
+    // v7: track active lifecycle step agent (bp6-ims.5)
+    r#"ALTER TABLE lifecycle_state ADD COLUMN active_agent_id TEXT;"#,
+    // v8: store Task node IDs collected after Step 3 PM agent completes (bp6-ims.7)
+    r#"ALTER TABLE lifecycle_state ADD COLUMN stage_task_ids TEXT;"#,
+    // v9: Step 4 execution tracking — completed tasks, active task agents, stage number (bp6-ims.8)
     r#"
-    ALTER TABLE workflows ADD COLUMN parent_workflow_id TEXT;
-    ALTER TABLE workflows ADD COLUMN child_workflow_ids TEXT NOT NULL DEFAULT '[]';
-    CREATE INDEX IF NOT EXISTS idx_workflows_parent ON workflows(parent_workflow_id);
+    ALTER TABLE lifecycle_state ADD COLUMN completed_task_ids TEXT;
+    ALTER TABLE lifecycle_state ADD COLUMN active_task_agent_ids TEXT;
+    ALTER TABLE lifecycle_state ADD COLUMN stage_number INTEGER DEFAULT 1;
     "#,
-    // v5: claude session ID for --session-id / --resume crash recovery
+    // v10: advisor session state — project advisor PTY session persistence (bp6-coj.1)
     r#"
-    ALTER TABLE workflows ADD COLUMN session_id TEXT;
+    CREATE TABLE IF NOT EXISTS advisor_state (
+        project_id TEXT PRIMARY KEY,
+        session_id TEXT,
+        agent_id   TEXT
+    );
     "#,
 ];
 
@@ -1093,6 +1123,330 @@ impl DagStore {
         }
 
         self.get_queue_item(id)
+    }
+
+    // ── KnowledgeArtifact helpers ──────────────────────────────────────────────
+
+    /// Returns all KnowledgeArtifact nodes for `project_id` whose `step` field is
+    /// strictly less than `up_to_step`, ordered by step ascending.
+    pub fn get_artefacts_for_step(
+        &self,
+        project_id: &str,
+        up_to_step: u32,
+    ) -> Result<Vec<DagNode>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, type, project_id, data, created_at, updated_at
+                 FROM nodes
+                 WHERE type = 'KnowledgeArtifact'
+                   AND project_id = ?1
+                   AND CAST(json_extract(data, '$.step') AS INTEGER) < ?2
+                 ORDER BY CAST(json_extract(data, '$.step') AS INTEGER) ASC",
+            )
+            .map_err(|e| format!("Failed to prepare get_artefacts_for_step query: {}", e))?;
+
+        let nodes = stmt
+            .query_map(params![project_id, up_to_step as i64], |row| {
+                let data_str: String = row.get(3)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    data_str,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| format!("Failed to query artefacts: {}", e))?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, node_type, project_id, data_str, created_at, updated_at)| {
+                serde_json::from_str(&data_str).ok().map(|data| DagNode {
+                    id,
+                    node_type,
+                    project_id,
+                    data,
+                    created_at,
+                    updated_at,
+                })
+            })
+            .collect();
+
+        Ok(nodes)
+    }
+
+    /// Returns all Task nodes for `project_id`.
+    /// Used by Step 3 completion handler to collect the IDs of tasks decomposed
+    /// by the PM agent, which Step 4 will execute in parallel.
+    pub fn get_task_nodes_for_project(&self, project_id: &str) -> Result<Vec<DagNode>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, type, project_id, data, created_at, updated_at
+                 FROM nodes
+                 WHERE type = 'Task'
+                   AND project_id = ?1
+                 ORDER BY created_at ASC",
+            )
+            .map_err(|e| format!("Failed to prepare get_task_nodes_for_project query: {}", e))?;
+
+        let nodes = stmt
+            .query_map(params![project_id], |row| {
+                let data_str: String = row.get(3)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    data_str,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| format!("Failed to query task nodes: {}", e))?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, node_type, project_id, data_str, created_at, updated_at)| {
+                serde_json::from_str(&data_str).ok().map(|data| DagNode {
+                    id,
+                    node_type,
+                    project_id,
+                    data,
+                    created_at,
+                    updated_at,
+                })
+            })
+            .collect();
+
+        Ok(nodes)
+    }
+
+    // ── Lifecycle state CRUD ───────────────────────────────────────────────────
+
+    /// Upsert the lifecycle state for a project.
+    pub fn upsert_lifecycle_state(&self, state: &LifecycleStateRow) -> Result<(), String> {
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO lifecycle_state (project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(project_id) DO UPDATE SET
+                     step = excluded.step,
+                     substep = excluded.substep,
+                     status = excluded.status,
+                     pending_approval_id = excluded.pending_approval_id,
+                     active_agent_id = excluded.active_agent_id,
+                     stage_task_ids = excluded.stage_task_ids,
+                     completed_task_ids = excluded.completed_task_ids,
+                     active_task_agent_ids = excluded.active_task_agent_ids,
+                     stage_number = excluded.stage_number,
+                     updated_at = excluded.updated_at",
+                params![
+                    state.project_id,
+                    state.step as i64,
+                    state.substep,
+                    state.status,
+                    state.pending_approval_id,
+                    state.active_agent_id,
+                    state.stage_task_ids,
+                    state.completed_task_ids,
+                    state.active_task_agent_ids,
+                    state.stage_number,
+                    now
+                ],
+            )
+            .map_err(|e| format!("Failed to upsert lifecycle_state: {}", e))?;
+        Ok(())
+    }
+
+    /// Get the lifecycle state for a project; returns a default idle row if not found.
+    pub fn get_lifecycle_state(&self, project_id: &str) -> Result<LifecycleStateRow, String> {
+        match self.conn.query_row(
+            "SELECT project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number FROM lifecycle_state WHERE project_id = ?1",
+            params![project_id],
+            |row| {
+                Ok(LifecycleStateRow {
+                    project_id: row.get(0)?,
+                    step: row.get::<_, i64>(1)? as u32,
+                    substep: row.get(2)?,
+                    status: row.get(3)?,
+                    pending_approval_id: row.get(4)?,
+                    active_agent_id: row.get(5)?,
+                    stage_task_ids: row.get(6)?,
+                    completed_task_ids: row.get(7)?,
+                    active_task_agent_ids: row.get(8)?,
+                    stage_number: row.get(9)?,
+                })
+            },
+        ) {
+            Ok(row) => Ok(row),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(LifecycleStateRow {
+                project_id: project_id.to_string(),
+                step: 0,
+                substep: None,
+                status: "idle".to_string(),
+                pending_approval_id: None,
+                active_agent_id: None,
+                stage_task_ids: None,
+                completed_task_ids: None,
+                active_task_agent_ids: None,
+                stage_number: Some(1),
+            }),
+            Err(e) => Err(format!("Failed to get lifecycle_state for {}: {}", project_id, e)),
+        }
+    }
+
+    /// Get all edges where `to_id = node_id` (i.e., dependencies OF this node).
+    pub fn get_incoming_edges(&self, node_id: &str) -> Result<Vec<DagEdge>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, from_id, to_id, type, data, created_at
+                 FROM edges WHERE to_id = ?1",
+            )
+            .map_err(|e| format!("get_incoming_edges prepare: {}", e))?;
+
+        let edges = stmt
+            .query_map(params![node_id], |row| {
+                let data_str: String = row.get(4)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    data_str,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| format!("get_incoming_edges query: {}", e))?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, from_id, to_id, edge_type, data_str, created_at)| {
+                serde_json::from_str(&data_str).ok().map(|data| DagEdge {
+                    id,
+                    from_id,
+                    to_id,
+                    edge_type,
+                    data,
+                    created_at,
+                })
+            })
+            .collect();
+
+        Ok(edges)
+    }
+
+    /// Returns task nodes from `all_task_ids` that are ready to execute —
+    /// i.e., all their `depends-on` or `blocks` (incoming) edges point to nodes
+    /// that are already in `completed_ids`.
+    ///
+    /// Tasks already in `completed_ids` are excluded from the result.
+    pub fn get_ready_tasks(
+        &self,
+        all_task_ids: &[String],
+        completed_ids: &[String],
+    ) -> Result<Vec<DagNode>, String> {
+        let completed_set: std::collections::HashSet<&str> =
+            completed_ids.iter().map(|s| s.as_str()).collect();
+
+        let mut ready = Vec::new();
+
+        for task_id in all_task_ids {
+            // Skip already-completed tasks
+            if completed_set.contains(task_id.as_str()) {
+                continue;
+            }
+
+            // Get all incoming edges for this task node
+            let incoming = self.get_incoming_edges(task_id)?;
+
+            // A task is ready if it has no incoming dependency edges,
+            // or all sources of those edges are in completed_ids.
+            let deps: Vec<&DagEdge> = incoming
+                .iter()
+                .filter(|e| e.edge_type == "depends-on" || e.edge_type == "blocks")
+                .collect();
+
+            let all_deps_done = deps.is_empty()
+                || deps.iter().all(|e| completed_set.contains(e.from_id.as_str()));
+
+            if all_deps_done {
+                // Fetch the node record
+                match self.conn.query_row(
+                    "SELECT id, type, project_id, data, created_at, updated_at FROM nodes WHERE id = ?1",
+                    params![task_id],
+                    |row| {
+                        let data_str: String = row.get(3)?;
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            data_str,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
+                        ))
+                    },
+                ) {
+                    Ok((id, node_type, project_id, data_str, created_at, updated_at)) => {
+                        if let Ok(data) = serde_json::from_str(&data_str) {
+                            ready.push(DagNode {
+                                id,
+                                node_type,
+                                project_id,
+                                data,
+                                created_at,
+                                updated_at,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[dag] get_ready_tasks: failed to fetch node {}: {}", task_id, e);
+                    }
+                }
+            }
+        }
+
+        Ok(ready)
+    }
+
+    /// Builds a formatted context string from a slice of KnowledgeArtifact nodes
+    /// for injection into agent prompts.
+    pub fn build_artefact_context(artefacts: &[DagNode]) -> String {
+        if artefacts.is_empty() {
+            return String::new();
+        }
+        artefacts
+            .iter()
+            .map(|node| {
+                let title = node.data["title"].as_str().unwrap_or("Untitled");
+                let step = node.data["step"].as_u64().unwrap_or(0);
+                let content = node.data["content"].as_str().unwrap_or("");
+                format!("## {} (Step {})\n{}\n---", title, step, content)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    // ── Advisor state (bp6-coj.1) ──────────────────────────────────────────────
+
+    pub fn get_advisor_state(&self, project_id: &str) -> Result<(Option<String>, Option<String>), String> {
+        let result = self.conn.query_row(
+            "SELECT session_id, agent_id FROM advisor_state WHERE project_id = ?1",
+            params![project_id],
+            |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+        );
+        match result {
+            Ok(pair) => Ok(pair),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
+            Err(e) => Err(format!("Failed to get advisor state: {}", e)),
+        }
+    }
+
+    pub fn set_advisor_state(&self, project_id: &str, session_id: Option<&str>, agent_id: Option<&str>) -> Result<(), String> {
+        self.conn.execute(
+            "INSERT INTO advisor_state (project_id, session_id, agent_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(project_id) DO UPDATE SET session_id = excluded.session_id, agent_id = excluded.agent_id",
+            params![project_id, session_id, agent_id],
+        ).map_err(|e| format!("Failed to set advisor state: {}", e))?;
+        Ok(())
     }
 }
 

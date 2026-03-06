@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import {
   Inbox, GitBranch, Bot, Settings2, Sun, Moon, Monitor,
-  ChevronDown, FolderOpen, X, Star,
+  ChevronDown, FolderOpen, X, Star, MessageSquare,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -16,17 +16,19 @@ import { QueueView } from "./components/QueueView";
 import { GanttView } from "./components/GanttView";
 import { AgentActivityView } from "./components/AgentActivityView";
 import { RestateView } from "./components/RestateView";
+import { AdvisorView } from "./components/AdvisorView";
 import { ProbePanel } from "./components/ProbePanel";
 import { ProvenanceView } from "./components/ProvenanceView";
 import type { ProjectInfo } from "./types";
 
-type Tab = "queue" | "dag" | "agents" | "restate";
+type Tab = "queue" | "dag" | "agents" | "restate" | "advisor";
 
 const NAV_ITEMS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "queue",   label: "Queue",   icon: <Inbox size={15} /> },
   { id: "dag",     label: "DAG",     icon: <GitBranch size={15} /> },
   { id: "agents",  label: "Agents",  icon: <Bot size={15} /> },
   { id: "restate", label: "Restate", icon: <Settings2 size={15} /> },
+  { id: "advisor", label: "Advisor", icon: <MessageSquare size={15} /> },
 ];
 
 function ProjectSwitcher() {
@@ -304,6 +306,7 @@ export default function App() {
             {activeTab === "dag"     && <GanttView />}
             {activeTab === "agents"  && <AgentActivityView />}
             {activeTab === "restate" && <RestateView />}
+            {activeTab === "advisor" && <AdvisorView />}
           </div>
 
           {/* Inspector / Probe panel */}

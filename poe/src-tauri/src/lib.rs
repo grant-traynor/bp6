@@ -1,24 +1,26 @@
+pub mod advisor;
 pub mod agents;
 pub mod dag;
+pub mod lifecycle;
 pub mod project;
 pub mod queue_service;
 pub mod restate;
 pub mod skills;
-pub mod workflow;
 
 use tauri::Manager;
 
+use advisor::{start_advisor_query, send_advisor_message, reset_advisor_session, get_advisor_state};
 use agents::{kill_agent, spawn_agent, stop_agent_graceful, write_to_agent, AgentState};
 use project::{
     close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
-    get_provenance, get_snapshot, list_open_projects, list_queue_items, load_app_state,
-    open_project, probe_node, redirect_workflow, resolve_queue_item, save_app_state,
-    stop_workflow, switch_project, update_node, ProjectState,
+    get_artefacts_for_step, get_provenance, get_snapshot, list_open_projects, list_queue_items,
+    load_app_state, open_project, probe_node, redirect_workflow, resolve_queue_item,
+    save_app_state, stop_workflow, switch_project, update_node, ProjectState,
 };
+use lifecycle::{approve_lifecycle_step, get_lifecycle_status, spawn_lifecycle_service, start_lifecycle};
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
 use skills::{get_skill_content, list_skills};
-use workflow::{cancel_workflow, create_workflow, list_workflows};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -63,6 +65,9 @@ pub fn run() {
             // Spawn POE queue service (Restate virtual object HTTP server on port 9082)
             spawn_queue_service(app.handle().clone());
 
+            // Spawn lifecycle service (Restate SDK HTTP endpoint on port 9083)
+            spawn_lifecycle_service();
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -103,15 +108,20 @@ pub fn run() {
             kill_agent,
             stop_agent_graceful,
             write_to_agent,
-            create_workflow,
-            list_workflows,
-            cancel_workflow,
+            get_lifecycle_status,
+            start_lifecycle,
+            approve_lifecycle_step,
             list_skills,
             get_skill_content,
             switch_project,
             list_open_projects,
             load_app_state,
             save_app_state,
+            get_artefacts_for_step,
+            start_advisor_query,
+            send_advisor_message,
+            reset_advisor_session,
+            get_advisor_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");

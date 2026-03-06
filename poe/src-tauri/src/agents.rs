@@ -190,7 +190,7 @@ struct PoeStep {
     detail: Option<String>,
 }
 
-/// Phase 3: Artifact produced by agent.
+/// Phase 3: Artifact produced by agent (legacy format).
 #[derive(Debug, Deserialize)]
 struct PoeArtifact {
     /// "code" | "doc" | "test" | "decision"
@@ -198,6 +198,17 @@ struct PoeArtifact {
     #[serde(rename = "nodeId")]
     node_id: Option<String>,
     content: String,
+}
+
+/// bp6-ims.3: Knowledge artefact emitted by agent (new format).
+/// Produces a KnowledgeArtifact DAG node and writes a markdown file to
+/// `<project_dir>/docs/<filename>`.
+#[derive(Debug, Deserialize)]
+struct PoeKnowledgeArtifact {
+    filename: String,
+    title: String,
+    content: String,
+    step: u32,
 }
 
 /// Phase 3: Workflow step complete.
@@ -517,6 +528,12 @@ pub fn spawn_agent_internal(
                             }
                         }
                         Some("poe:artifact") => {
+                            // Try the new KnowledgeArtifact format first (has `filename` field).
+                            // Fall back to the legacy AgentOutput format if that fails.
+                            if let Ok(ka) = serde_json::from_value::<PoeKnowledgeArtifact>(val.clone()) {
+                                handle_poe_knowledge_artifact(&app_for_thread, ka);
+                                continue;
+                            }
                             if let (Ok(artifact), Some(nid)) = (
                                 serde_json::from_value::<PoeArtifact>(val),
                                 &node_id_bg,
@@ -526,21 +543,32 @@ pub fn spawn_agent_internal(
                             }
                         }
                         Some("poe:done") => {
-                            if let (Ok(done_msg), Some(wf_id), Some(nid)) = (
-                                serde_json::from_value::<PoeDone>(val),
-                                &workflow_id_bg,
-                                &node_id_bg,
-                            ) {
+                            if let Ok(done_msg) = serde_json::from_value::<PoeDone>(val) {
                                 done_received = true;
-                                handle_poe_done(
-                                    &app_for_thread,
-                                    &agent_id_bg,
-                                    wf_id,
-                                    nid,
-                                    &started_at_bg,
-                                    &workflow_type_bg,
-                                    done_msg,
-                                );
+                                match (&workflow_id_bg, &node_id_bg) {
+                                    (Some(wf_id), Some(nid)) => {
+                                        handle_poe_done(
+                                            &app_for_thread,
+                                            &agent_id_bg,
+                                            wf_id,
+                                            nid,
+                                            &started_at_bg,
+                                            &workflow_type_bg,
+                                            done_msg,
+                                        );
+                                    }
+                                    (Some(wf_id), None) => {
+                                        // Lifecycle step agent: no node_id, but has workflow_id
+                                        // (workflow_id == project_id for lifecycle agents).
+                                        handle_lifecycle_poe_done(
+                                            &app_for_thread,
+                                            &agent_id_bg,
+                                            wf_id,
+                                            done_msg,
+                                        );
+                                    }
+                                    _ => {}
+                                }
                                 continue;
                             }
                         }
@@ -1022,6 +1050,48 @@ fn handle_poe_artifact(app: &AppHandle, work_node_id: &str, artifact: PoeArtifac
     }
 }
 
+/// bp6-ims.3: create a KnowledgeArtifact DAG node and write the markdown file to
+/// `<project_dir>/docs/<filename>`.
+fn handle_poe_knowledge_artifact(app: &AppHandle, ka: PoeKnowledgeArtifact) {
+    fn inner(app: &AppHandle, ka: PoeKnowledgeArtifact) -> Result<(), String> {
+        let project_state = app.state::<ProjectState>();
+
+        // Write the file to <project_dir>/docs/<filename>
+        if let Some(active_dir) = project_state.active_dir_str() {
+            let docs_dir = std::path::Path::new(&active_dir).join("docs");
+            std::fs::create_dir_all(&docs_dir)
+                .map_err(|e| format!("Failed to create docs dir: {}", e))?;
+            let file_path = docs_dir.join(&ka.filename);
+            std::fs::write(&file_path, &ka.content)
+                .map_err(|e| format!("Failed to write artefact file {}: {}", ka.filename, e))?;
+            eprintln!("[agents] poe:artifact written to {}", file_path.display());
+        } else {
+            eprintln!("[agents] poe:artifact: no active project — skipping file write for {}", ka.filename);
+        }
+
+        // Create a KnowledgeArtifact DAG node
+        let node = project_state.with_active(|store, project_id| {
+            store.upsert_node(
+                &NodeType::KnowledgeArtifact,
+                project_id,
+                serde_json::json!({
+                    "filename": ka.filename,
+                    "title": ka.title,
+                    "content": ka.content,
+                    "step": ka.step,
+                }),
+            )
+        })?;
+
+        let _ = app.emit("dag:node:upserted", NodeUpsertedEvent { node });
+        Ok(())
+    }
+
+    if let Err(e) = inner(app, ka) {
+        eprintln!("[agents] Failed to create KnowledgeArtifact node: {}", e);
+    }
+}
+
 /// Phase 3: mark workflow completed, update DAG node status, emit events.
 fn handle_poe_done(
     app: &AppHandle,
@@ -1083,6 +1153,114 @@ fn handle_poe_done(
     if let Some(parent_id) = parent_workflow_id {
         check_parent_fan_in(app, &parent_id, workflow_id);
     }
+}
+
+/// bp6-ims.5: Handle poe:done for a lifecycle step agent (no node_id).
+///
+/// When a lifecycle step agent emits poe:done, transition the lifecycle state
+/// from "running" to "awaiting_approval" so the frontend can prompt for approval.
+/// The `workflow_id` for lifecycle agents equals the project_id.
+fn handle_lifecycle_poe_done(
+    app: &AppHandle,
+    agent_id: &str,
+    project_id: &str,
+    done: PoeDone,
+) {
+    use crate::dag::LifecycleStateRow;
+
+    eprintln!(
+        "[lifecycle] poe:done for lifecycle agent_id={} project='{}': {}",
+        agent_id, project_id, done.summary
+    );
+
+    let project_state = app.state::<ProjectState>();
+
+    let result: Result<(), String> = project_state.with_active(|store, _| {
+        let current = store.get_lifecycle_state(project_id)?;
+
+        // Only transition if this agent is the active one for this project
+        if current.active_agent_id.as_deref() != Some(agent_id) {
+            eprintln!(
+                "[lifecycle] poe:done: agent_id={} is not the active agent for '{}' (active={:?}) — ignoring",
+                agent_id, project_id, current.active_agent_id
+            );
+            return Ok(());
+        }
+
+        if current.status != "running" {
+            eprintln!(
+                "[lifecycle] poe:done: project='{}' not in 'running' status (was '{}') — ignoring",
+                project_id, current.status
+            );
+            return Ok(());
+        }
+
+        // For Step 3 (PM agent), collect all Task nodes and store their IDs
+        // so Step 4 fan-out knows which tasks to execute.
+        let stage_task_ids = if current.step == 3 {
+            match store.get_task_nodes_for_project(project_id) {
+                Ok(tasks) => {
+                    let ids: Vec<String> = tasks.iter().map(|n| n.id.clone()).collect();
+                    eprintln!(
+                        "[lifecycle] Step 3 poe:done for '{}': collected {} Task node(s)",
+                        project_id,
+                        ids.len()
+                    );
+                    match serde_json::to_string(&ids) {
+                        Ok(json) => Some(json),
+                        Err(e) => {
+                            eprintln!("[lifecycle] Failed to serialize task IDs for '{}': {}", project_id, e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[lifecycle] Failed to query task nodes for '{}': {}", project_id, e);
+                    None
+                }
+            }
+        } else {
+            current.stage_task_ids.clone()
+        };
+
+        let updated = LifecycleStateRow {
+            project_id: project_id.to_string(),
+            step: current.step,
+            substep: current.substep,
+            status: "awaiting_approval".to_string(),
+            pending_approval_id: None,
+            active_agent_id: Some(agent_id.to_string()),
+            stage_task_ids,
+            completed_task_ids: current.completed_task_ids.clone(),
+            active_task_agent_ids: current.active_task_agent_ids.clone(),
+            stage_number: current.stage_number,
+        };
+        store.upsert_lifecycle_state(&updated)?;
+
+        eprintln!(
+            "[lifecycle] Step {} for '{}' complete — status → awaiting_approval",
+            current.step, project_id
+        );
+        Ok(())
+    });
+
+    if let Err(e) = result {
+        eprintln!(
+            "[lifecycle] Failed to update lifecycle state on poe:done for '{}': {}",
+            project_id, e
+        );
+    }
+
+    // Emit a lifecycle:status event so the frontend updates immediately
+    let _ = app.emit(
+        "lifecycle:status",
+        serde_json::json!({
+            "projectId": project_id,
+            "agentId": agent_id,
+            "status": "awaiting_approval",
+            "summary": done.summary,
+        }),
+    );
 }
 
 /// Fan-in gate: check all children of `parent_id` and complete/fail the parent
