@@ -1,11 +1,15 @@
-import { useState } from "react";
-import { useAtomValue, useAtom } from "jotai";
+import { useState, useRef, useEffect } from "react";
+import { useAtom, useAtomValue } from "jotai";
 import {
   Inbox, GitBranch, Bot, Settings2, Sun, Moon, Monitor,
+  ChevronDown, FolderOpen,
 } from "lucide-react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { projectAtom, selectedNodeIdAtom } from "./store/dag";
 import { useDagEvents } from "./hooks/useDagEvents";
 import { useTheme } from "./hooks/useTheme";
+import { useRecentProjects } from "./hooks/useRecentProjects";
 import { EmptyState } from "./components/EmptyState";
 import { ProjectHeader } from "./components/ProjectHeader";
 import { QueueView } from "./components/QueueView";
@@ -14,6 +18,7 @@ import { AgentActivityView } from "./components/AgentActivityView";
 import { RestateView } from "./components/RestateView";
 import { ProbePanel } from "./components/ProbePanel";
 import { ProvenanceView } from "./components/ProvenanceView";
+import type { ProjectInfo } from "./types";
 
 type Tab = "queue" | "dag" | "agents" | "restate";
 
@@ -23,6 +28,117 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "agents",  label: "Agents",  icon: <Bot size={15} /> },
   { id: "restate", label: "Restate", icon: <Settings2 size={15} /> },
 ];
+
+function ProjectSwitcher() {
+  const [project, setProject] = useAtom(projectAtom);
+  const { favourites, recentNonFav, recordOpen } = useRecentProjects();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  async function switchTo(dir: string) {
+    setOpen(false);
+    try {
+      if (project) await invoke("close_project");
+      const info = await invoke<ProjectInfo>("open_project", { dir });
+      void recordOpen(info.projectDir, info.name);
+      setProject(info);
+    } catch (err) {
+      console.error("Failed to switch project:", err);
+    }
+  }
+
+  async function handleBrowse() {
+    setOpen(false);
+    const selected = await openDialog({ directory: true, multiple: false, title: "Open Project Directory" });
+    if (!selected || typeof selected !== "string") return;
+    await switchTo(selected);
+  }
+
+  const allRecents = [...favourites, ...recentNonFav];
+
+  return (
+    <div className="relative" ref={ref} style={{ width: "100%" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "0 12px", height: 44, background: "transparent", border: "none",
+          cursor: "pointer", gap: 6,
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sidebar-hover-bg)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
+          {project?.name ?? "No Project"}
+        </span>
+        <ChevronDown size={12} style={{ color: "var(--text-tertiary)", flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+      </button>
+
+      {open && (
+        <div
+          className="mac-card absolute z-50 overflow-hidden"
+          style={{ top: "100%", left: 8, right: 8, borderRadius: 10 }}
+        >
+          {allRecents.length > 0 && (
+            <>
+              {allRecents.map((p) => {
+                const isActive = p.path === project?.projectDir;
+                return (
+                  <button
+                    key={p.path}
+                    onClick={() => switchTo(p.path)}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 12px", background: "transparent", border: "none",
+                      cursor: "pointer", textAlign: "left",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sidebar-hover-bg)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <span style={{
+                      width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                      background: isActive ? "var(--accent)" : "transparent",
+                      border: isActive ? "none" : "1px solid var(--border-strong)",
+                    }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p style={{ fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? "var(--accent)" : "var(--text-primary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.name}
+                      </p>
+                      <p className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.path}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+              <div className="mac-divider" />
+            </>
+          )}
+          <button
+            onClick={handleBrowse}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 12px", background: "transparent", border: "none",
+              cursor: "pointer", color: "var(--accent)", fontSize: 12, fontFamily: "inherit",
+            }}
+          >
+            <FolderOpen size={12} />
+            Open Project…
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ThemeToggle() {
   const { theme, setTheme } = useTheme();
@@ -59,11 +175,9 @@ export default function App() {
     <div className="flex h-full" style={{ background: "var(--content-bg)" }}>
       {/* ── Left sidebar ────────────────────────────────────────────────────── */}
       <div className="mac-sidebar flex flex-col shrink-0" style={{ width: 200 }}>
-        {/* Project name */}
-        <div className="mac-toolbar flex items-center px-3" style={{ height: 44, minHeight: 44 }}>
-          <span className="font-semibold truncate" style={{ fontSize: 13, color: "var(--text-primary)" }}>
-            {project.name}
-          </span>
+        {/* Project switcher */}
+        <div className="mac-toolbar" style={{ minHeight: 44 }}>
+          <ProjectSwitcher />
         </div>
 
         {/* Nav items */}
