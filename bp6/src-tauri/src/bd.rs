@@ -442,7 +442,7 @@ pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, Strin
 }
 
 #[tauri::command]
-pub fn sync_project(project_path: String) -> Result<String, String> {
+pub fn sync_project(project_path: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     check_bd_available()?;
     let path = std::path::Path::new(&project_path);
     let output = bd_command()?
@@ -459,5 +459,6 @@ pub fn sync_project(project_path: String) -> Result<String, String> {
     }
 
     flush_jsonl(path);
+    let _ = app_handle.emit("beads-updated", ());
     Ok(stdout)
 }
