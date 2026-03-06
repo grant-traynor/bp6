@@ -5,7 +5,8 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NodeType, ProbeData, QueueItem, QueueItemOption};
+use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NewWorkflow, NodeType, ProbeData, QueueItem, QueueItemOption};
+use crate::agents::{spawn_agent_internal, SpawnAgentParams};
 
 // ── Open project entry ─────────────────────────────────────────────────────────
 
@@ -170,6 +171,22 @@ pub async fn open_project(
             )?.id
         }
     };
+
+    // Bootstrap: auto-create a "Requirements" Epic on brand-new empty projects.
+    {
+        let children = store.list_nodes(&project_id)?;
+        let has_assignable = children
+            .iter()
+            .any(|n| matches!(n.node_type.as_str(), "Epic" | "Feature" | "Task"));
+        if !has_assignable {
+            let epic = store.upsert_node(
+                &NodeType::Epic,
+                &project_id,
+                serde_json::json!({ "title": "Requirements", "status": "open" }),
+            )?;
+            store.add_edge(&project_id, &epic.id, &EdgeType::Implements, serde_json::json!({}))?;
+        }
+    }
 
     let snapshot = store.snapshot(&project_id)?;
     let info = ProjectInfo {
@@ -452,11 +469,130 @@ pub async fn list_queue_items(state: State<'_, ProjectState>) -> Result<Vec<Queu
     proj.store.list_queue_items(&proj.project_id)
 }
 
+/// Spawn a continuation agent for a one-shot workflow that has already exited.
+/// Prepends the resolved decision context to the original task prompt.
+async fn auto_continue_workflow(
+    app: &AppHandle,
+    state: &State<'_, ProjectState>,
+    agent_state: &State<'_, crate::agents::AgentState>,
+    orig_wf: &crate::dag::WorkflowRecord,
+    question: &str,
+    chosen_label: &str,
+    user_context: Option<&str>,
+    active_dir: &str,
+    project_id: &str,
+) {
+    // Extract original cmd + args from the workflow config
+    let cmd = orig_wf.config["cmd"].as_str().unwrap_or("claude").to_string();
+    let args: Vec<String> = orig_wf.config["args"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+
+    if args.is_empty() {
+        eprintln!("[project] auto_continue: no args in original workflow config");
+        return;
+    }
+
+    // Build the resolution block to prepend
+    let mut resolution_block = format!(
+        "[PREVIOUS DECISION RESOLVED]\nQuestion: {}\nAnswer: {}\n",
+        question, chosen_label
+    );
+    if let Some(ctx) = user_context {
+        let ctx = ctx.trim();
+        if !ctx.is_empty() {
+            resolution_block.push_str(&format!("Additional context: {}\n", ctx));
+        }
+    }
+    resolution_block.push('\n');
+
+    // Prepend to the task prompt (last arg)
+    let mut new_args = args;
+    if let Some(last) = new_args.last_mut() {
+        *last = format!("{}{}", resolution_block, last);
+    }
+
+    // Create a child workflow record
+    let new_wf = {
+        let projects = state.projects.lock().unwrap();
+        let proj = match projects.get(active_dir) {
+            Some(p) => p,
+            None => return,
+        };
+        match proj.store.create_workflow_record(NewWorkflow {
+            project_id: project_id.to_string(),
+            node_id: orig_wf.node_id.clone(),
+            agent_id: None,
+            workflow_type: orig_wf.workflow_type.clone(),
+            config: serde_json::json!({ "cmd": &cmd, "args": &new_args }),
+            parent_workflow_id: Some(orig_wf.id.clone()),
+        }) {
+            Ok(wf) => wf,
+            Err(e) => {
+                eprintln!("[project] auto_continue: failed to create workflow record: {}", e);
+                return;
+            }
+        }
+    };
+
+    // Update the DAG node back to in_progress
+    {
+        let projects = state.projects.lock().unwrap();
+        if let Some(proj) = projects.get(active_dir) {
+            if let Ok(node) = proj.store.get_node(&orig_wf.node_id) {
+                let mut data = node.data.clone();
+                data["status"] = serde_json::json!("in_progress");
+                data["workflowId"] = serde_json::json!(&new_wf.id);
+                if let Ok(updated) = proj.store.update_node(&orig_wf.node_id, data) {
+                    let _ = app.emit("dag:node:upserted", NodeUpsertedEvent { node: updated });
+                }
+            }
+        }
+    }
+
+    // Spawn the continuation agent
+    let mut env = HashMap::new();
+    env.insert("POE_WORKFLOW_ID".to_string(), new_wf.id.clone());
+    env.insert("POE_NODE_ID".to_string(), orig_wf.node_id.clone());
+    env.insert("POE_WORKFLOW_TYPE".to_string(), orig_wf.workflow_type.clone());
+
+    match spawn_agent_internal(
+        SpawnAgentParams {
+            cmd,
+            args: new_args,
+            env: Some(env),
+            agent_id: None,
+            workflow_id: Some(new_wf.id.clone()),
+            node_id: Some(orig_wf.node_id.clone()),
+            workflow_type: Some(orig_wf.workflow_type.clone()),
+        },
+        app,
+        agent_state,
+    ) {
+        Ok(spawned) => {
+            let projects = state.projects.lock().unwrap();
+            if let Some(proj) = projects.get(active_dir) {
+                let _ = proj.store.update_workflow_status(
+                    &new_wf.id, "running", Some(&spawned.agent_id), None,
+                );
+            }
+            eprintln!(
+                "[project] auto_continue: spawned continuation agent={} workflow={}",
+                spawned.agent_id, new_wf.id
+            );
+        }
+        Err(e) => eprintln!("[project] auto_continue: failed to spawn agent: {}", e),
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveQueueItemParams {
     pub item_id: String,
     pub chosen_option_id: String,
+    /// Optional free-text context supplied by the human alongside their choice.
+    pub user_context: Option<String>,
 }
 
 #[tauri::command]
@@ -464,6 +600,7 @@ pub async fn resolve_queue_item(
     params: ResolveQueueItemParams,
     app: AppHandle,
     state: State<'_, ProjectState>,
+    agent_state: State<'_, crate::agents::AgentState>,
 ) -> Result<(), String> {
     let (item, project_id, active_dir) = {
         let active_dir = state.active_dir_str().ok_or("No project open")?;
@@ -484,6 +621,7 @@ pub async fn resolve_queue_item(
         "queueItemId": item.id,
         "chosenOptionId": chosen.id,
         "chosenOptionLabel": chosen.label,
+        "userContext": params.user_context,
     });
 
     let decision_node = {
@@ -496,6 +634,7 @@ pub async fn resolve_queue_item(
                 "question": item.question,
                 "chosenOptionId": chosen.id,
                 "chosenOptionLabel": chosen.label,
+                "userContext": params.user_context,
                 "agentId": item.agent_id,
                 "queueItemId": item.id,
             }),
@@ -524,12 +663,75 @@ pub async fn resolve_queue_item(
         proj.store.resolve_queue_item_in_db(&item.id, resolution)?;
     }
 
+    // For one-shot agents (claude -p): if the workflow is already terminal,
+    // auto-spawn a continuation with the decision resolution baked into the prompt.
+    // Only continue when this is the LAST pending decision for the workflow —
+    // if other queue items are still unresolved, wait for all of them first.
+    if let Some(ref workflow_id) = item.workflow_id {
+        let should_continue = {
+            let projects = state.projects.lock().unwrap();
+            projects.get(&active_dir).and_then(|proj| {
+                let wf = proj.store.get_workflow(workflow_id).ok()?;
+                if wf.status != "completed" && wf.status != "failed" {
+                    return None; // still running — PTY write above handles it
+                }
+                // Count remaining pending queue items for this workflow
+                // (the item we just resolved is already marked resolved in DB)
+                let pending = proj.store.list_queue_items(&project_id).ok()?
+                    .into_iter()
+                    .filter(|qi| {
+                        qi.workflow_id.as_deref() == Some(workflow_id)
+                            && qi.status == "pending"
+                            && qi.id != item.id
+                    })
+                    .count();
+                if pending == 0 { Some(wf) } else { None }
+            })
+        };
+
+        if let Some(orig_wf) = should_continue {
+            auto_continue_workflow(
+                &app,
+                &state,
+                &agent_state,
+                &orig_wf,
+                &item.question,
+                &chosen.label,
+                params.user_context.as_deref(),
+                &active_dir,
+                &project_id,
+            ).await;
+        }
+    }
+
+    // Write resolution to PTY stdin for interactive agents.
+    // Format as a clear human message so it reads naturally in any LLM conversation.
+    {
+        let mut msg = format!(
+            "\n[DECISION RESOLVED]\nQuestion: {}\nChosen: {}\n",
+            item.question, chosen.label
+        );
+        if let Some(ref ctx) = params.user_context {
+            if !ctx.trim().is_empty() {
+                msg.push_str(&format!("Context: {}\n", ctx.trim()));
+            }
+        }
+        msg.push('\n');
+
+        if let Err(e) = agent_state.write_to_workflow_agent(
+            item.workflow_id.as_deref().unwrap_or(""),
+            &msg,
+        ) {
+            // Non-fatal — agent may have already exited (e.g. claude -p one-shot mode)
+            eprintln!("[project] PTY write for decision resolution (non-fatal): {}", e);
+        }
+    }
+
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node })
         .map_err(|e| format!("Failed to emit: {}", e))?;
     app.emit("queue:item:resolved", QueueItemResolvedEvent { item_id: item.id.clone() })
         .map_err(|e| format!("Failed to emit: {}", e))?;
 
-    eprintln!("[PTY stub] Resolution for agent '{}': option '{}'", item.agent_id, chosen.id);
     Ok(())
 }
 

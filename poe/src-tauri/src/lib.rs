@@ -3,6 +3,7 @@ pub mod dag;
 pub mod project;
 pub mod queue_service;
 pub mod restate;
+pub mod skills;
 pub mod workflow;
 
 use tauri::Manager;
@@ -16,6 +17,7 @@ use project::{
 };
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
+use skills::{get_skill_content, list_skills};
 use workflow::{cancel_workflow, create_workflow, list_workflows};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -104,6 +106,8 @@ pub fn run() {
             create_workflow,
             list_workflows,
             cancel_workflow,
+            list_skills,
+            get_skill_content,
             switch_project,
             list_open_projects,
             load_app_state,
