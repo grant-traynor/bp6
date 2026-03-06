@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import type { DagNode, DagEdge, ProjectInfo } from "../types";
+import type { DagNode, DagEdge, ProjectInfo, QueueItem } from "../types";
 
 // ── Atoms ──────────────────────────────────────────────────────────────────────
 
@@ -9,8 +9,16 @@ export const nodesAtom = atom<Map<string, DagNode>>(new Map());
 
 export const edgesAtom = atom<Map<string, DagEdge>>(new Map());
 
+export const queueItemsAtom = atom<Map<string, QueueItem>>(new Map());
+
 // ── Derived ────────────────────────────────────────────────────────────────────
 
 export const nodesListAtom = atom((get) => Array.from(get(nodesAtom).values()));
 
 export const edgesListAtom = atom((get) => Array.from(get(edgesAtom).values()));
+
+export const queueItemsListAtom = atom((get) =>
+  Array.from(get(queueItemsAtom).values()).sort(
+    (a, b) => a.priority - b.priority || a.createdAt.localeCompare(b.createdAt)
+  )
+);

@@ -89,6 +89,46 @@ impl EdgeType {
     }
 }
 
+// ── Queue item types ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueItemOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+}
+
+/// Input for creating a new queue item.
+pub struct NewQueueItem {
+    pub project_id: String,
+    pub agent_id: String,
+    pub workflow_id: Option<String>,
+    pub awakeable_id: Option<String>,
+    pub question: String,
+    pub options: Vec<QueueItemOption>,
+    pub context_snapshot: serde_json::Value,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueItem {
+    pub id: String,
+    pub project_id: String,
+    pub agent_id: String,
+    pub workflow_id: Option<String>,
+    pub awakeable_id: Option<String>,
+    pub question: String,
+    pub options: Vec<QueueItemOption>,
+    pub context_snapshot: serde_json::Value,
+    pub priority: i32,
+    pub status: String,
+    pub created_at: String,
+    pub resolved_at: Option<String>,
+    pub resolution: Option<serde_json::Value>,
+}
+
 // ── Data structures ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,7 +195,60 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_edges_to   ON edges(to_id);
     CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type);
     "#,
+    // v2: queue items
+    r#"
+    CREATE TABLE IF NOT EXISTS queue_items (
+        id               TEXT PRIMARY KEY,
+        project_id       TEXT NOT NULL,
+        agent_id         TEXT NOT NULL,
+        workflow_id      TEXT,
+        awakeable_id     TEXT,
+        question         TEXT NOT NULL,
+        options          TEXT NOT NULL DEFAULT '[]',
+        context_snapshot TEXT NOT NULL DEFAULT '{}',
+        priority         INTEGER NOT NULL DEFAULT 2,
+        status           TEXT NOT NULL DEFAULT 'pending',
+        created_at       TEXT NOT NULL,
+        resolved_at      TEXT,
+        resolution       TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_queue_items_project ON queue_items(project_id);
+    CREATE INDEX IF NOT EXISTS idx_queue_items_status  ON queue_items(status);
+    "#,
 ];
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+type QueueItemRow = (String, String, String, Option<String>, Option<String>, String, String, String, i32, String, String, Option<String>, Option<String>);
+
+fn parse_queue_item_row(
+    (id, project_id, agent_id, workflow_id, awakeable_id, question, options_str, context_str, priority, status, created_at, resolved_at, resolution_str): QueueItemRow,
+) -> Result<QueueItem, String> {
+    let options: Vec<QueueItemOption> = serde_json::from_str(&options_str)
+        .map_err(|e| format!("Failed to parse options: {}", e))?;
+    let context_snapshot: serde_json::Value = serde_json::from_str(&context_str)
+        .map_err(|e| format!("Failed to parse context_snapshot: {}", e))?;
+    let resolution: Option<serde_json::Value> = resolution_str
+        .map(|s| serde_json::from_str(&s))
+        .transpose()
+        .map_err(|e| format!("Failed to parse resolution: {}", e))?;
+    Ok(QueueItem {
+        id,
+        project_id,
+        agent_id,
+        workflow_id,
+        awakeable_id,
+        question,
+        options,
+        context_snapshot,
+        priority,
+        status,
+        created_at,
+        resolved_at,
+        resolution,
+    })
+}
 
 // ── DagStore ───────────────────────────────────────────────────────────────────
 
@@ -421,6 +514,129 @@ impl DagStore {
             nodes: self.list_nodes(project_id)?,
             edges: self.list_edges(project_id)?,
         })
+    }
+
+    // ── Queue item CRUD ────────────────────────────────────────────────────────
+
+    pub fn create_queue_item(&self, input: NewQueueItem) -> Result<QueueItem, String> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let options_str = serde_json::to_string(&input.options)
+            .map_err(|e| format!("Failed to serialize options: {}", e))?;
+        let context_str = serde_json::to_string(&input.context_snapshot)
+            .map_err(|e| format!("Failed to serialize context_snapshot: {}", e))?;
+
+        self.conn
+            .execute(
+                "INSERT INTO queue_items (id, project_id, agent_id, workflow_id, awakeable_id, question, options, context_snapshot, priority, status, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', ?10)",
+                params![id, input.project_id, input.agent_id, input.workflow_id, input.awakeable_id, input.question, options_str, context_str, input.priority, now],
+            )
+            .map_err(|e| format!("Failed to insert queue item: {}", e))?;
+
+        Ok(QueueItem {
+            id,
+            project_id: input.project_id,
+            agent_id: input.agent_id,
+            workflow_id: input.workflow_id,
+            awakeable_id: input.awakeable_id,
+            question: input.question,
+            options: input.options,
+            context_snapshot: input.context_snapshot,
+            priority: input.priority,
+            status: "pending".to_string(),
+            created_at: now,
+            resolved_at: None,
+            resolution: None,
+        })
+    }
+
+    pub fn get_queue_item(&self, id: &str) -> Result<QueueItem, String> {
+        self.conn
+            .query_row(
+                "SELECT id, project_id, agent_id, workflow_id, awakeable_id, question, options, context_snapshot, priority, status, created_at, resolved_at, resolution
+                 FROM queue_items WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, i32>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                    ))
+                },
+            )
+            .map_err(|e| format!("Failed to get queue item {}: {}", id, e))
+            .and_then(parse_queue_item_row)
+    }
+
+    pub fn list_queue_items(&self, project_id: &str) -> Result<Vec<QueueItem>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, project_id, agent_id, workflow_id, awakeable_id, question, options, context_snapshot, priority, status, created_at, resolved_at, resolution
+                 FROM queue_items WHERE project_id = ?1 AND status = 'pending'
+                 ORDER BY priority ASC, created_at ASC",
+            )
+            .map_err(|e| format!("Failed to prepare queue items query: {}", e))?;
+
+        let items = stmt
+            .query_map(params![project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, i32>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                ))
+            })
+            .map_err(|e| format!("Failed to query queue items: {}", e))?
+            .filter_map(|r| r.ok())
+            .filter_map(|row| parse_queue_item_row(row).ok())
+            .collect();
+
+        Ok(items)
+    }
+
+    pub fn resolve_queue_item_in_db(
+        &self,
+        id: &str,
+        resolution: serde_json::Value,
+    ) -> Result<QueueItem, String> {
+        let now = Utc::now().to_rfc3339();
+        let resolution_str = serde_json::to_string(&resolution)
+            .map_err(|e| format!("Failed to serialize resolution: {}", e))?;
+
+        let rows = self
+            .conn
+            .execute(
+                "UPDATE queue_items SET status = 'resolved', resolved_at = ?1, resolution = ?2 WHERE id = ?3 AND status = 'pending'",
+                params![now, resolution_str, id],
+            )
+            .map_err(|e| format!("Failed to resolve queue item: {}", e))?;
+
+        if rows == 0 {
+            return Err(format!("Queue item '{}' not found or already resolved", id));
+        }
+
+        self.get_queue_item(id)
     }
 }
 

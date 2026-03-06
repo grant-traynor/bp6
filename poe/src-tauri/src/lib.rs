@@ -5,10 +5,10 @@ pub mod restate;
 use tauri::Manager;
 
 use project::{
-    close_project, create_edge, create_node, delete_edge, delete_node, get_snapshot, open_project,
-    update_node, ProjectState,
+    close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
+    get_snapshot, list_queue_items, open_project, resolve_queue_item, update_node, ProjectState,
 };
-use restate::{spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
+use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,21 +26,26 @@ pub fn run() {
 
             let restate_state = app.state::<RestateState>();
 
-            match spawn_restate(&data_dir) {
-                Ok(child) => {
-                    *restate_state.child.lock().unwrap() = Some(child);
+            // If Restate is already healthy (e.g. left over from a previous launch), reuse it.
+            if is_restate_healthy() {
+                eprintln!("✅ Restate already running and healthy — skipping spawn");
+            } else {
+                match spawn_restate(&data_dir) {
+                    Ok(child) => {
+                        *restate_state.child.lock().unwrap() = Some(child);
 
-                    // Health-check in a background thread so we don't block the event loop
-                    std::thread::spawn(move || {
-                        match wait_for_restate_healthy() {
-                            Ok(_) => eprintln!("✅ Restate ready"),
-                            Err(e) => eprintln!("⚠️  Restate health check failed: {}", e),
-                        }
-                    });
-                }
-                Err(e) => {
-                    // Restate is optional — log but don't crash the app
-                    eprintln!("⚠️  Could not start Restate: {}", e);
+                        // Health-check in a background thread so we don't block the event loop
+                        std::thread::spawn(move || {
+                            match wait_for_restate_healthy() {
+                                Ok(_) => eprintln!("✅ Restate ready"),
+                                Err(e) => eprintln!("⚠️  Restate health check failed: {}", e),
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        // Restate is optional — log but don't crash the app
+                        eprintln!("⚠️  Could not start Restate: {}", e);
+                    }
                 }
             }
 
@@ -73,6 +78,9 @@ pub fn run() {
             get_snapshot,
             create_edge,
             delete_edge,
+            create_queue_item,
+            list_queue_items,
+            resolve_queue_item,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");

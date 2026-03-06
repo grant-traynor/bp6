@@ -48,3 +48,29 @@ export interface ProjectInfo {
   projectDir: string;
   name: string;
 }
+
+// ── Queue types ─────────────────────────────────────────────────────────────────
+
+export interface QueueItemOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export type QueueItemStatus = "pending" | "resolved" | "dismissed";
+
+export interface QueueItem {
+  id: string;
+  projectId: string;
+  agentId: string;
+  workflowId?: string;
+  awakeableId?: string;
+  question: string;
+  options: QueueItemOption[];
+  contextSnapshot: Record<string, unknown>;
+  priority: number;
+  status: QueueItemStatus;
+  createdAt: string;
+  resolvedAt?: string;
+  resolution?: Record<string, unknown>;
+}
