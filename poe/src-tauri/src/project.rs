@@ -518,6 +518,7 @@ fn resume_workflow(
             workflow_type: Some(orig_wf.workflow_type.clone()),
             session_id: Some(session_id),
             resume: true,
+            cwd: Some(active_dir.to_string()),
         },
         app,
         agent_state,

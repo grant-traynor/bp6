@@ -75,6 +75,7 @@ fn create_one_workflow(
     args: &[String],
     env: Option<HashMap<String, String>>,
     parent_workflow_id: Option<String>,
+    cwd: Option<String>,
 ) -> Result<(WorkflowRecord, String), String> {
     // Get node context
     let node = project_state.with_active(|store, _| store.get_node(node_id))?;
@@ -118,6 +119,7 @@ fn create_one_workflow(
             workflow_type: Some(workflow_type.to_string()),
             session_id: Some(session_id),
             resume: false,
+            cwd: cwd.clone(),
         },
         app,
         agent_state,
@@ -195,6 +197,7 @@ pub async fn create_workflow(
         .to_string();
 
     let enriched_args = build_enriched_args(&app, &project_state, &params.args, &params.skill_ids);
+    let active_dir = project_state.active_dir_str();
 
     let (workflow, agent_id) = create_one_workflow(
         &app,
@@ -207,6 +210,7 @@ pub async fn create_workflow(
         &enriched_args,
         params.env.clone(),
         None,
+        active_dir.clone(),
     )?;
 
     // Fan-out to child Task/Feature nodes
@@ -244,6 +248,7 @@ pub async fn create_workflow(
                 &enriched_args,
                 params.env.clone(),
                 Some(workflow.id.clone()),
+                active_dir.clone(),
             ) {
                 Ok((child_wf, _)) => {
                     // Register this child on the parent so fan-in can gate completion.

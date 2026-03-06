@@ -273,6 +273,11 @@ pub struct SpawnAgentParams {
     /// When true, spawn claude --resume <session_id> instead of a fresh session.
     #[serde(default)]
     pub resume: bool,
+    /// Working directory for the agent process. Determines the workspace Claude
+    /// Code checks for trust — must be set to the project directory so trust
+    /// is saved per-project rather than defaulting to the app's cwd.
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -347,6 +352,9 @@ pub fn spawn_agent_internal(
     let mut cmd = CommandBuilder::new(&params.cmd);
     for arg in &effective_args {
         cmd.arg(arg);
+    }
+    if let Some(ref cwd) = params.cwd {
+        cmd.cwd(cwd);
     }
     // Seed with the parent process environment so PATH, HOME, etc. are available.
     // portable_pty's CommandBuilder starts with an empty env when any .env() call is made,
@@ -438,16 +446,21 @@ pub fn spawn_agent_internal(
                 eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
 
                 // Auto-confirm the Claude Code workspace-trust prompt.
-                // The TUI is in raw mode: Enter is \r (0x0D), not \n.
-                // "Enter to confirm" is the last line; "Yes, I trust this folder"
-                // catches the option line in case the footer arrives separately.
-                if trimmed.contains("Enter to confirm") || trimmed.contains("Yes, I trust this folder") {
-                    eprintln!("[agents:pty {}] auto-confirming trust-folder prompt", agent_id_bg);
-                    if let Ok(mut w) = writer_bg.lock() {
-                        let _ = w.write_all(b"\r");
-                        let _ = w.flush();
+                // The TUI spaces characters via cursor-movement escape sequences.
+                // After ANSI stripping those moves disappear, so the text arrives
+                // WITHOUT spaces: "Entertoconfirm·Esctocancel" not "Enter to confirm".
+                // Match on the space-free form; also strip spaces from trimmed so this
+                // works whether or not spaces survive stripping in future versions.
+                {
+                    let spaceless = trimmed.replace(' ', "");
+                    if spaceless.contains("Entertoconfirm") || spaceless.contains("Itrustthisfolder") {
+                        eprintln!("[agents:pty {}] auto-confirming trust-folder prompt", agent_id_bg);
+                        if let Ok(mut w) = writer_bg.lock() {
+                            let _ = w.write_all(b"\r");
+                            let _ = w.flush();
+                        }
+                        continue;
                     }
-                    continue;
                 }
 
                 // Track code fence state — toggle on any ``` line.
