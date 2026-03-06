@@ -108,6 +108,7 @@ export function useConversation(
 
   // Subscribe to agent:stdout events for the current turn
   useEffect(() => {
+    let active = true;
     let unlisten: (() => void) | null = null;
     let doneTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -117,6 +118,7 @@ export function useConversation(
     }
 
     listen<AgentStdoutLine>("agent:stdout", (event) => {
+      if (!active) return;
       if (event.payload.workflowId !== currentAgentIdRef.current) return;
 
       const events = parseStreamLine(event.payload.line);
@@ -154,10 +156,15 @@ export function useConversation(
         }
       }
     }).then((fn) => {
-      unlisten = fn;
+      if (!active) {
+        fn(); // cleanup already ran — unsubscribe immediately
+      } else {
+        unlisten = fn;
+      }
     });
 
     return () => {
+      active = false;
       unlisten?.();
       if (doneTimer) clearTimeout(doneTimer);
     };

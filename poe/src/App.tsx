@@ -378,8 +378,9 @@ export default function App() {
         <div className="flex-1 flex overflow-hidden">
           {/* Main content */}
           <div className="flex-1 flex flex-col overflow-hidden mac-content">
-            {activeTab === "conversation" && (
-              lifecycleStatus ? (
+            {/* Keep ConversationalView mounted at all times so conversation state survives tab switches */}
+            <div className="flex-1 flex flex-col overflow-hidden" style={{ display: activeTab === "conversation" ? "flex" : "none" }}>
+              {lifecycleStatus ? (
                 <ConversationalView
                   projectId={project.projectId}
                   lifecycleStatus={lifecycleStatus}
@@ -403,8 +404,8 @@ export default function App() {
                 <div className="flex-1 flex items-center justify-center">
                   <p className="mono" style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Loading lifecycle status…</p>
                 </div>
-              )
-            )}
+              )}
+            </div>
             {activeTab === "queue"      && <QueueView />}
             {activeTab === "dag"        && <GanttView />}
             {activeTab === "agents"     && <AgentActivityView />}
