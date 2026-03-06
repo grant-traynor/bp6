@@ -28,21 +28,37 @@ impl RestateState {
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 /// Resolve the path to the restate-server binary.
-/// Looks for it next to the executable, then in PATH.
+///
+/// Search order:
+/// 1. Alongside the executable (production bundle: Contents/MacOS/)
+/// 2. `poe/bin/restate-server` — relative to exe in dev
+///    (`target/debug/poe` → 3 levels up → project root → `bin/`)
+/// 3. PATH
 fn restate_binary_path() -> Result<std::path::PathBuf, String> {
-    // First: look alongside our own executable (bundled)
     if let Ok(exe) = std::env::current_exe() {
+        // 1. Alongside executable (prod bundle)
         if let Some(dir) = exe.parent() {
             let candidate = dir.join("restate-server");
             if candidate.exists() {
                 return Ok(candidate);
             }
+
+            // 2. poe/bin/ — works when running from target/debug/ in dev
+            //    target/debug/poe  →  ../../..  →  poe/  →  bin/restate-server
+            let dev_candidate = dir
+                .join("../../..") // debug/ → target/ → src-tauri/ → poe/
+                .join("bin/restate-server");
+            if let Ok(resolved) = dev_candidate.canonicalize() {
+                if resolved.exists() {
+                    return Ok(resolved);
+                }
+            }
         }
     }
 
-    // Second: fall back to PATH
+    // 3. Fall back to PATH
     which_restate().ok_or_else(|| {
-        "restate-server not found. Place the binary alongside the POE executable or in PATH.".to_string()
+        "restate-server not found.\n  Run:  poe/scripts/setup-restate.sh\n  Or place the binary in PATH.".to_string()
     })
 }
 
