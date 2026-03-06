@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
+use uuid::Uuid;
 
 use crate::agents::{spawn_agent_internal, AgentState, SpawnAgentParams, WorkflowStatusEvent};
 use crate::dag::{NewWorkflow, WorkflowRecord};
@@ -78,6 +79,10 @@ fn create_one_workflow(
     // Get node context
     let node = project_state.with_active(|store, _| store.get_node(node_id))?;
 
+    // Generate session ID before creating the workflow record so it is persisted
+    // before the agent starts — a crash immediately after spawn can still resume.
+    let session_id = Uuid::new_v4().to_string();
+
     // Create workflow record
     let workflow = project_state.with_active(|store, _| {
         store.create_workflow_record(NewWorkflow {
@@ -87,6 +92,7 @@ fn create_one_workflow(
             workflow_type: workflow_type.to_string(),
             config: serde_json::json!({ "cmd": cmd, "args": args }),
             parent_workflow_id: parent_workflow_id.clone(),
+            session_id: Some(session_id.clone()),
         })
     })?;
 
@@ -110,6 +116,8 @@ fn create_one_workflow(
             workflow_id: Some(workflow.id.clone()),
             node_id: Some(node_id.to_string()),
             workflow_type: Some(workflow_type.to_string()),
+            session_id: Some(session_id),
+            resume: false,
         },
         app,
         agent_state,

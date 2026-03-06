@@ -266,6 +266,13 @@ pub struct SpawnAgentParams {
     pub workflow_id: Option<String>,
     pub node_id: Option<String>,
     pub workflow_type: Option<String>,
+    /// Claude session UUID. If set and resume=false: passes --session-id <uuid> to claude.
+    /// If set and resume=true: passes --resume <uuid> (ignores args entirely).
+    #[serde(default)]
+    pub session_id: Option<String>,
+    /// When true, spawn claude --resume <session_id> instead of a fresh session.
+    #[serde(default)]
+    pub resume: bool,
 }
 
 #[derive(Serialize)]
@@ -317,8 +324,28 @@ pub fn spawn_agent_internal(
         })
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
+    // Build the effective argument list, injecting --session-id or --resume as needed.
+    let effective_args: Vec<String> = if params.resume {
+        // Resume mode: ignore original args entirely; claude resumes from its journal.
+        let sid = params.session_id.as_deref().unwrap_or("");
+        vec![
+            "--resume".to_string(),
+            sid.to_string(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ]
+    } else if let Some(ref sid) = params.session_id {
+        // Fresh session: prepend --session-id <uuid> before the caller's args.
+        let mut args = vec!["--session-id".to_string(), sid.clone()];
+        args.extend(params.args.iter().cloned());
+        args
+    } else {
+        params.args.clone()
+    };
+
     let mut cmd = CommandBuilder::new(&params.cmd);
-    for arg in &params.args {
+    for arg in &effective_args {
         cmd.arg(arg);
     }
     // Seed with the parent process environment so PATH, HOME, etc. are available.
@@ -502,6 +529,17 @@ pub fn spawn_agent_internal(
             );
 
             eprintln!("[agents] PTY EOF for agent_id={} done_received={}", agent_id_bg, done_received);
+
+            // Remove AgentHandle from registry so the watchdog's Arc::strong_count drops
+            // to 1 and it knows to exit. Without this, the handle stays in the map and
+            // the watchdog never detects that the agent has gone away. (bp6-7fi.4.1)
+            let _ = app_for_thread
+                .state::<AgentState>()
+                .handles
+                .lock()
+                .ok()
+                .map(|mut m| m.remove(&agent_id_bg));
+
             if !done_received {
                 if let (Some(wf_id), Some(nid)) = (&workflow_id_bg, &node_id_bg) {
                     handle_agent_crash(&app_for_thread, &agent_id_bg, wf_id, nid, &started_at_bg);

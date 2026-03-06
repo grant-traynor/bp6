@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NewWorkflow, NodeType, ProbeData, QueueItem, QueueItemOption};
+use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NodeType, ProbeData, QueueItem, QueueItemOption};
 use crate::agents::{spawn_agent_internal, SpawnAgentParams};
 
 // ── Open project entry ─────────────────────────────────────────────────────────
@@ -469,81 +469,84 @@ pub async fn list_queue_items(state: State<'_, ProjectState>) -> Result<Vec<Queu
     proj.store.list_queue_items(&proj.project_id)
 }
 
-/// Spawn a continuation agent for a one-shot workflow that has already exited.
-/// Prepends the resolved decision context to the original task prompt.
-async fn auto_continue_workflow(
+/// Resume an in-place workflow after a one-shot agent has exited due to a decision.
+///
+/// Instead of rebuilding the prompt and creating a new child record (which pollutes
+/// the fan-in child list), we spawn `claude --resume <session_id>` under the *same*
+/// workflow ID. The resolution context is written to the new agent's stdin by the
+/// existing PTY-write path in resolve_queue_item immediately after this returns.
+///
+/// CANONICAL RESOLUTION PATH NOTE:
+///   - UI path: resolve_queue_item (Tauri) calls this function then writes to PTY stdin.
+///   - HTTP path: handle_resolve_item in queue_service.rs resolves awakeables and
+///     writes to PTY stdin for interactive agents.
+/// These paths are mutually exclusive: the HTTP path is called by Restate (not by the
+/// UI directly), so both cannot fire for the same resolution event.
+fn resume_workflow(
     app: &AppHandle,
     state: &State<'_, ProjectState>,
     agent_state: &State<'_, crate::agents::AgentState>,
     orig_wf: &crate::dag::WorkflowRecord,
-    question: &str,
-    chosen_label: &str,
-    user_context: Option<&str>,
     active_dir: &str,
-    project_id: &str,
 ) {
-    // Extract original cmd + args from the workflow config
-    let cmd = orig_wf.config["cmd"].as_str().unwrap_or("claude").to_string();
-    let args: Vec<String> = orig_wf.config["args"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-        .unwrap_or_default();
-
-    if args.is_empty() {
-        eprintln!("[project] auto_continue: no args in original workflow config");
-        return;
-    }
-
-    // Build the resolution block to prepend
-    let mut resolution_block = format!(
-        "[PREVIOUS DECISION RESOLVED]\nQuestion: {}\nAnswer: {}\n",
-        question, chosen_label
-    );
-    if let Some(ctx) = user_context {
-        let ctx = ctx.trim();
-        if !ctx.is_empty() {
-            resolution_block.push_str(&format!("Additional context: {}\n", ctx));
-        }
-    }
-    resolution_block.push('\n');
-
-    // Prepend to the task prompt (last arg)
-    let mut new_args = args;
-    if let Some(last) = new_args.last_mut() {
-        *last = format!("{}{}", resolution_block, last);
-    }
-
-    // Create a child workflow record
-    let new_wf = {
-        let projects = state.projects.lock().unwrap();
-        let proj = match projects.get(active_dir) {
-            Some(p) => p,
-            None => return,
-        };
-        match proj.store.create_workflow_record(NewWorkflow {
-            project_id: project_id.to_string(),
-            node_id: orig_wf.node_id.clone(),
-            agent_id: None,
-            workflow_type: orig_wf.workflow_type.clone(),
-            config: serde_json::json!({ "cmd": &cmd, "args": &new_args }),
-            parent_workflow_id: Some(orig_wf.id.clone()),
-        }) {
-            Ok(wf) => wf,
-            Err(e) => {
-                eprintln!("[project] auto_continue: failed to create workflow record: {}", e);
-                return;
-            }
+    let session_id = match &orig_wf.session_id {
+        Some(id) => id.clone(),
+        None => {
+            eprintln!(
+                "[project] resume_workflow: workflow '{}' has no session_id — cannot resume",
+                orig_wf.id
+            );
+            return;
         }
     };
 
-    // Update the DAG node back to in_progress
+    let cmd = orig_wf.config["cmd"].as_str().unwrap_or("claude").to_string();
+
+    let mut env = HashMap::new();
+    env.insert("POE_WORKFLOW_ID".to_string(), orig_wf.id.clone());
+    env.insert("POE_NODE_ID".to_string(), orig_wf.node_id.clone());
+    env.insert("POE_WORKFLOW_TYPE".to_string(), orig_wf.workflow_type.clone());
+
+    let spawned = match spawn_agent_internal(
+        SpawnAgentParams {
+            cmd,
+            args: vec![],    // ignored when resume=true
+            env: Some(env),
+            agent_id: None,
+            workflow_id: Some(orig_wf.id.clone()),
+            node_id: Some(orig_wf.node_id.clone()),
+            workflow_type: Some(orig_wf.workflow_type.clone()),
+            session_id: Some(session_id),
+            resume: true,
+        },
+        app,
+        agent_state,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[project] resume_workflow: failed to spawn: {}", e);
+            return;
+        }
+    };
+
+    // Transition the existing workflow record back to running (clears completed_at/error).
+    {
+        let projects = state.projects.lock().unwrap();
+        if let Some(proj) = projects.get(active_dir) {
+            if let Err(e) = proj.store.resume_workflow_record(&orig_wf.id, &spawned.agent_id) {
+                eprintln!("[project] resume_workflow: failed to update DB: {}", e);
+            }
+        }
+    }
+
+    // Update the DAG node back to in_progress (same workflow ID — no new record).
     {
         let projects = state.projects.lock().unwrap();
         if let Some(proj) = projects.get(active_dir) {
             if let Ok(node) = proj.store.get_node(&orig_wf.node_id) {
                 let mut data = node.data.clone();
                 data["status"] = serde_json::json!("in_progress");
-                data["workflowId"] = serde_json::json!(&new_wf.id);
+                data["workflowId"] = serde_json::json!(&orig_wf.id);
                 if let Ok(updated) = proj.store.update_node(&orig_wf.node_id, data) {
                     let _ = app.emit("dag:node:upserted", NodeUpsertedEvent { node: updated });
                 }
@@ -551,39 +554,10 @@ async fn auto_continue_workflow(
         }
     }
 
-    // Spawn the continuation agent
-    let mut env = HashMap::new();
-    env.insert("POE_WORKFLOW_ID".to_string(), new_wf.id.clone());
-    env.insert("POE_NODE_ID".to_string(), orig_wf.node_id.clone());
-    env.insert("POE_WORKFLOW_TYPE".to_string(), orig_wf.workflow_type.clone());
-
-    match spawn_agent_internal(
-        SpawnAgentParams {
-            cmd,
-            args: new_args,
-            env: Some(env),
-            agent_id: None,
-            workflow_id: Some(new_wf.id.clone()),
-            node_id: Some(orig_wf.node_id.clone()),
-            workflow_type: Some(orig_wf.workflow_type.clone()),
-        },
-        app,
-        agent_state,
-    ) {
-        Ok(spawned) => {
-            let projects = state.projects.lock().unwrap();
-            if let Some(proj) = projects.get(active_dir) {
-                let _ = proj.store.update_workflow_status(
-                    &new_wf.id, "running", Some(&spawned.agent_id), None,
-                );
-            }
-            eprintln!(
-                "[project] auto_continue: spawned continuation agent={} workflow={}",
-                spawned.agent_id, new_wf.id
-            );
-        }
-        Err(e) => eprintln!("[project] auto_continue: failed to spawn agent: {}", e),
-    }
+    eprintln!(
+        "[project] resume_workflow: spawned --resume agent={} workflow={}",
+        spawned.agent_id, orig_wf.id
+    );
 }
 
 #[derive(Deserialize)]
@@ -690,17 +664,13 @@ pub async fn resolve_queue_item(
         };
 
         if let Some(orig_wf) = should_continue {
-            auto_continue_workflow(
+            resume_workflow(
                 &app,
                 &state,
                 &agent_state,
                 &orig_wf,
-                &item.question,
-                &chosen.label,
-                params.user_context.as_deref(),
                 &active_dir,
-                &project_id,
-            ).await;
+            );
         }
     }
 
