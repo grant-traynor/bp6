@@ -10,6 +10,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
+use crate::agents::AgentState;
 use crate::dag::{NewQueueItem, QueueItemOption};
 use crate::project::{ProjectState, QueueItemAddedEvent, QueueItemResolvedEvent};
 use crate::restate::RESTATE_SERVICES_PORT;
@@ -59,7 +60,7 @@ struct ResolveItemRequest {
 // ── Awakeable helpers ─────────────────────────────────────────────────────────
 
 /// Attempt to create a Restate awakeable. Returns None if Restate is unavailable.
-async fn try_create_awakeable() -> Option<String> {
+pub async fn try_create_awakeable() -> Option<String> {
     let url = format!("http://127.0.0.1:{}/restate/awakeables", RESTATE_SERVICES_PORT);
     let client = reqwest::Client::new();
     match client.post(&url).send().await {
@@ -171,6 +172,23 @@ async fn handle_resolve_item(
     // Step 2: Complete the Restate awakeable if present
     if let Some(awk_id) = item.awakeable_id.as_deref() {
         try_resolve_awakeable(awk_id, &body.resolution).await;
+    }
+
+    // Step 2b: Write resolution to agent stdin if workflow_id is present
+    if let Some(wf_id) = item.workflow_id.as_deref() {
+        let agent_state = app.state::<AgentState>();
+        let resolution_json = match serde_json::to_string(&body.resolution) {
+            Ok(s) => format!("{}\n", s),
+            Err(e) => {
+                eprintln!("[queue_service] Failed to serialize resolution for stdin: {}", e);
+                String::new()
+            }
+        };
+        if !resolution_json.is_empty() {
+            if let Err(e) = agent_state.write_to_workflow_agent(wf_id, &resolution_json) {
+                eprintln!("[queue_service] Failed to write resolution to agent stdin (workflow '{}'): {}", wf_id, e);
+            }
+        }
     }
 
     // Step 3: Mark resolved in SQLite

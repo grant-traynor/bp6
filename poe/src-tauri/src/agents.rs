@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use crate::dag::{EdgeType, NewQueueItem, NodeType, QueueItemOption};
 use crate::project::{NodeUpsertedEvent, ProjectState, QueueItemAddedEvent};
+use crate::restate::RESTATE_SERVICES_PORT;
 
 // ── AgentHandle ────────────────────────────────────────────────────────────────
 
@@ -256,11 +257,22 @@ pub fn spawn_agent_internal(
     for arg in &params.args {
         cmd.arg(arg);
     }
+    // Seed with the parent process environment so PATH, HOME, etc. are available.
+    // portable_pty's CommandBuilder starts with an empty env when any .env() call is made,
+    // so we must explicitly inherit the parent env before adding our own vars.
+    for (k, v) in std::env::vars() {
+        cmd.env(k, v);
+    }
     if let Some(env_map) = params.env {
         for (k, v) in env_map {
             cmd.env(k, v);
         }
     }
+
+    eprintln!(
+        "[agents] Spawning '{}' with args {:?} (workflow={:?})",
+        params.cmd, params.args, params.workflow_id
+    );
 
     let child = pair
         .slave
@@ -268,6 +280,7 @@ pub fn spawn_agent_internal(
         .map_err(|e| format!("Failed to spawn agent '{}': {}", params.cmd, e))?;
 
     let pid = child.process_id();
+    eprintln!("[agents] Spawned pid={:?} agent_id={}", pid, agent_id);
 
     let master_reader = pair
         .master
@@ -304,6 +317,7 @@ pub fn spawn_agent_internal(
                 if trimmed.is_empty() {
                     continue;
                 }
+                eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
 
                 if let Some(wf_id) = &workflow_id_bg {
                     let _ = app_for_thread.emit(
@@ -394,6 +408,7 @@ pub fn spawn_agent_internal(
                 },
             );
 
+            eprintln!("[agents] PTY EOF for agent_id={} done_received={}", agent_id_bg, done_received);
             if !done_received {
                 if let (Some(wf_id), Some(nid)) = (&workflow_id_bg, &node_id_bg) {
                     handle_agent_crash(&app_for_thread, &agent_id_bg, wf_id, nid, &started_at_bg);
@@ -519,6 +534,52 @@ pub fn write_to_agent(
 
 // ── Internal event handlers ────────────────────────────────────────────────────
 
+/// Attempt to create a Restate awakeable synchronously from a non-async context.
+/// Returns None if Restate is unavailable.
+fn create_awakeable_sync() -> Option<String> {
+    let url = format!("http://127.0.0.1:{}/restate/awakeables", RESTATE_SERVICES_PORT);
+    // Build a one-shot single-threaded runtime to run the async HTTP call.
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[agents] Failed to build tokio runtime for awakeable: {}", e);
+            return None;
+        }
+    };
+    rt.block_on(async move {
+        let client = reqwest::Client::new();
+        match client.post(&url).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(body) => body
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                        Err(e) => {
+                            eprintln!("[agents] Failed to parse awakeable response: {}", e);
+                            None
+                        }
+                    }
+                } else {
+                    eprintln!(
+                        "[agents] Restate returned {} when creating awakeable",
+                        resp.status()
+                    );
+                    None
+                }
+            }
+            Err(e) => {
+                eprintln!("[agents] Restate not available for awakeable creation: {}", e);
+                None
+            }
+        }
+    })
+}
+
 /// Phase 2: persist poe:decision → queue item.
 fn handle_poe_decision(
     app: &AppHandle,
@@ -526,6 +587,9 @@ fn handle_poe_decision(
     workflow_id: &Option<String>,
     decision: PoeDecision,
 ) {
+    // Create a Restate awakeable so resolution can unblock the agent.
+    let awakeable_id = create_awakeable_sync();
+
     let project_state = app.state::<ProjectState>();
 
     let context_snapshot = decision.context.unwrap_or(serde_json::json!({}));
@@ -536,7 +600,7 @@ fn handle_poe_decision(
             project_id: project_id.to_string(),
             agent_id: agent_id.to_string(),
             workflow_id: workflow_id.clone(),
-            awakeable_id: None,
+            awakeable_id: awakeable_id.clone(),
             question: decision.question.clone(),
             options: decision.options.clone(),
             context_snapshot: context_snapshot.clone(),
