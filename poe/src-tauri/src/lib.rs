@@ -52,12 +52,15 @@ pub fn run() {
                     // Clean up Restate on main window close
                     let app = window.app_handle();
                     let restate_state = app.state::<RestateState>();
-                    if let Ok(mut guard) = restate_state.child.lock() {
-                        if let Some(child) = guard.as_mut() {
-                            stop_restate(child);
-                        }
-                        *guard = None;
+                    // guard declared after restate_state → dropped before it (reverse order)
+                    let mut guard = restate_state
+                        .child
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if let Some(child) = guard.as_mut() {
+                        stop_restate(child);
                     }
+                    *guard = None;
                 }
             }
         })
