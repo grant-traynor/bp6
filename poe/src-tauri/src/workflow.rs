@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::agents::{spawn_agent_internal, AgentState, SpawnAgentParams, WorkflowStatusEvent};
 use crate::dag::{NewWorkflow, WorkflowRecord};
 use crate::project::{NodeUpsertedEvent, ProjectState};
+use crate::skills::build_skills_prompt;
 
 pub const WORKFLOW_TYPES: &[&str] = &[
     "RequirementsWorkflow",
@@ -35,6 +36,8 @@ pub struct CreateWorkflowParams {
     pub args: Vec<String>,
     pub env: Option<HashMap<String, String>>,
     pub fanout: Option<bool>,
+    /// Skill IDs to prepend as context. The last arg in `args` is treated as the task prompt.
+    pub skill_ids: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -70,6 +73,7 @@ fn create_one_workflow(
     cmd: &str,
     args: &[String],
     env: Option<HashMap<String, String>>,
+    parent_workflow_id: Option<String>,
 ) -> Result<(WorkflowRecord, String), String> {
     // Get node context
     let node = project_state.with_active(|store, _| store.get_node(node_id))?;
@@ -82,6 +86,7 @@ fn create_one_workflow(
             agent_id: None,
             workflow_type: workflow_type.to_string(),
             config: serde_json::json!({ "cmd": cmd, "args": args }),
+            parent_workflow_id: parent_workflow_id.clone(),
         })
     })?;
 
@@ -130,6 +135,37 @@ fn create_one_workflow(
     Ok((workflow, spawned.agent_id))
 }
 
+// ── Prompt enrichment ─────────────────────────────────────────────────────────
+
+/// Prepend skill context blocks to the task prompt (last element of args).
+/// Returns a new args vec with the enriched prompt in place of the last arg.
+fn build_enriched_args(
+    app: &AppHandle,
+    project_state: &ProjectState,
+    args: &[String],
+    skill_ids: &Option<Vec<String>>,
+) -> Vec<String> {
+    let ids = match skill_ids {
+        Some(ids) if !ids.is_empty() => ids,
+        _ => return args.to_vec(),
+    };
+
+    let project_dir = project_state
+        .active_dir_str()
+        .map(std::path::PathBuf::from);
+
+    let skills_block = build_skills_prompt(ids, app, project_dir.as_deref());
+    if skills_block.is_empty() {
+        return args.to_vec();
+    }
+
+    let mut new_args = args.to_vec();
+    if let Some(last) = new_args.last_mut() {
+        *last = format!("{}\n\n{}", skills_block, last);
+    }
+    new_args
+}
+
 // ── Tauri commands ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -150,6 +186,8 @@ pub async fn create_workflow(
         .unwrap_or_else(|| infer_workflow_type(&node_type))
         .to_string();
 
+    let enriched_args = build_enriched_args(&app, &project_state, &params.args, &params.skill_ids);
+
     let (workflow, agent_id) = create_one_workflow(
         &app,
         &project_state,
@@ -158,8 +196,9 @@ pub async fn create_workflow(
         &params.node_id,
         &workflow_type,
         &params.cmd,
-        &params.args,
+        &enriched_args,
         params.env.clone(),
+        None,
     )?;
 
     // Fan-out to child Task/Feature nodes
@@ -194,10 +233,19 @@ pub async fn create_workflow(
                 &child_node_id,
                 &child_wf_type,
                 &params.cmd,
-                &params.args,
+                &enriched_args,
                 params.env.clone(),
+                Some(workflow.id.clone()),
             ) {
-                Ok((child_wf, _)) => child_workflow_ids.push(child_wf.id),
+                Ok((child_wf, _)) => {
+                    // Register this child on the parent so fan-in can gate completion.
+                    if let Err(e) = project_state.with_active(|store, _| {
+                        store.add_child_workflow(&workflow.id, &child_wf.id)
+                    }) {
+                        eprintln!("[workflow] Failed to register child workflow '{}' on parent '{}': {}", child_wf.id, workflow.id, e);
+                    }
+                    child_workflow_ids.push(child_wf.id);
+                }
                 Err(e) => eprintln!("[workflow] Fan-out failed for '{}': {}", child_node_id, e),
             }
         }

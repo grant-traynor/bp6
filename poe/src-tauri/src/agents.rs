@@ -913,29 +913,35 @@ fn handle_poe_done(
         workflow_id, done.summary
     );
 
+    // Returns the parent_workflow_id if present (so we can trigger fan-in check).
     fn inner(
         app: &AppHandle,
         workflow_id: &str,
         node_id: &str,
         summary: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Option<String>, String> {
         let project_state = app.state::<ProjectState>();
-        let updated_node = project_state.with_active(|store, _| {
-            store.update_workflow_status(workflow_id, "completed", None, None)?;
+        let (updated_node, parent_workflow_id) = project_state.with_active(|store, _| {
+            let wf = store.update_workflow_status(workflow_id, "completed", None, None)?;
             let node = store.get_node(node_id)?;
             let mut data = node.data.clone();
             data["status"] = serde_json::json!("completed");
             data["workflowSummary"] = serde_json::json!(summary);
-            store.update_node(node_id, data)
+            let updated = store.update_node(node_id, data)?;
+            Ok((updated, wf.parent_workflow_id))
         })?;
 
         let _ = app.emit("dag:node:upserted", NodeUpsertedEvent { node: updated_node });
-        Ok(())
+        Ok(parent_workflow_id)
     }
 
-    if let Err(e) = inner(app, workflow_id, node_id, &done.summary) {
-        eprintln!("[agents] Failed to finalize workflow: {}", e);
-    }
+    let parent_workflow_id = match inner(app, workflow_id, node_id, &done.summary) {
+        Ok(pid) => pid,
+        Err(e) => {
+            eprintln!("[agents] Failed to finalize workflow: {}", e);
+            None
+        }
+    };
 
     let _ = app.emit(
         "workflow:status",
@@ -948,6 +954,156 @@ fn handle_poe_done(
             started_at: started_at.to_string(),
         },
     );
+
+    // Fan-in: if this workflow has a parent, check whether all siblings are done.
+    if let Some(parent_id) = parent_workflow_id {
+        check_parent_fan_in(app, &parent_id, workflow_id);
+    }
+}
+
+/// Fan-in gate: check all children of `parent_id` and complete/fail the parent
+/// if all children are in a terminal state.
+fn check_parent_fan_in(app: &AppHandle, parent_id: &str, completed_child_id: &str) {
+    eprintln!(
+        "[agents:fan-in] checking parent='{}' after child='{}' completed",
+        parent_id, completed_child_id
+    );
+
+    fn inner(app: &AppHandle, parent_id: &str) -> Result<(), String> {
+        let project_state = app.state::<ProjectState>();
+
+        // Fetch parent to get its node_id (needed for the status event).
+        let parent_wf = project_state.with_active(|store, _| store.get_workflow(parent_id))?;
+
+        // Only proceed if parent is still running (not already completed/cancelled/failed).
+        if parent_wf.status != "running" && parent_wf.status != "pending" {
+            return Ok(());
+        }
+
+        let child_ids = project_state.with_active(|store, _| {
+            store.get_child_workflow_ids(parent_id)
+        })?;
+
+        if child_ids.is_empty() {
+            return Ok(());
+        }
+
+        // Collect statuses of all children.
+        let mut all_completed = true;
+        let mut failed_ids: Vec<String> = Vec::new();
+
+        for child_id in &child_ids {
+            let status = project_state.with_active(|store, _| {
+                store.get_workflow_status(child_id)
+            })?;
+            match status.as_deref() {
+                Some("completed") => {}
+                Some("failed") => {
+                    all_completed = false;
+                    failed_ids.push(child_id.clone());
+                }
+                Some("cancelled") => {
+                    // Treat cancelled same as failed for fan-in purposes.
+                    all_completed = false;
+                    failed_ids.push(child_id.clone());
+                }
+                _ => {
+                    // Still running or pending — not ready yet.
+                    all_completed = false;
+                }
+            }
+        }
+
+        // Any failed children? Raise a queue item for the human.
+        if !failed_ids.is_empty() {
+            for failed_id in &failed_ids {
+                eprintln!(
+                    "[agents:fan-in] child '{}' failed — creating queue item for parent '{}'",
+                    failed_id, parent_id
+                );
+                let question = format!(
+                    "Child workflow {} failed. How should the parent workflow proceed?",
+                    failed_id
+                );
+                let options = vec![
+                    crate::dag::QueueItemOption {
+                        id: "retry".to_string(),
+                        label: "Retry".to_string(),
+                        description: Some("Re-spawn the failed child workflow.".to_string()),
+                    },
+                    crate::dag::QueueItemOption {
+                        id: "skip".to_string(),
+                        label: "Skip".to_string(),
+                        description: Some(
+                            "Mark the child as skipped and continue fan-in.".to_string(),
+                        ),
+                    },
+                    crate::dag::QueueItemOption {
+                        id: "abort".to_string(),
+                        label: "Abort".to_string(),
+                        description: Some("Fail the parent workflow entirely.".to_string()),
+                    },
+                ];
+                let item_result: Result<crate::dag::QueueItem, String> =
+                    project_state.with_active(|store, project_id| {
+                        store.create_queue_item(crate::dag::NewQueueItem {
+                            project_id: project_id.to_string(),
+                            agent_id: String::new(),
+                            workflow_id: Some(parent_id.to_string()),
+                            awakeable_id: None,
+                            question,
+                            options,
+                            context_snapshot: serde_json::json!({
+                                "parentWorkflowId": parent_id,
+                                "failedChildWorkflowId": failed_id,
+                            }),
+                            priority: 1,
+                        })
+                    });
+                match item_result {
+                    Ok(item) => {
+                        let _ = app.emit(
+                            "queue:item:added",
+                            crate::project::QueueItemAddedEvent { item },
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[agents:fan-in] Failed to create queue item: {}", e);
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        // All children completed — complete the parent.
+        if all_completed {
+            eprintln!(
+                "[agents:fan-in] all children of parent '{}' completed — marking parent done",
+                parent_id
+            );
+            project_state.with_active(|store, _| {
+                store.update_workflow_status(parent_id, "completed", None, None)
+            })?;
+
+            let _ = app.emit(
+                "workflow:status",
+                WorkflowStatusEvent {
+                    workflow_id: parent_id.to_string(),
+                    node_id: parent_wf.node_id.clone(),
+                    agent_id: parent_wf.agent_id.clone().unwrap_or_default(),
+                    status: "completed".to_string(),
+                    current_step: Some("fan-in:done".to_string()),
+                    started_at: parent_wf.started_at.clone(),
+                },
+            );
+        }
+
+        Ok(())
+    }
+
+    if let Err(e) = inner(app, parent_id) {
+        eprintln!("[agents:fan-in] Error during fan-in check for parent '{}': {}", parent_id, e);
+    }
 }
 
 /// Phase 3: agent PTY EOF without poe:done → mark workflow as failed.
@@ -960,7 +1116,7 @@ fn handle_agent_crash(
 ) {
     let project_state = app.state::<ProjectState>();
 
-    let failed = project_state
+    let (failed, parent_workflow_id) = project_state
         .with_active(|store, _| {
             let wf = store.get_workflow(workflow_id)?;
             if wf.status == "running" || wf.status == "pending" {
@@ -970,12 +1126,12 @@ fn handle_agent_crash(
                     None,
                     Some("Agent process exited unexpectedly"),
                 )?;
-                Ok(true)
+                Ok((true, wf.parent_workflow_id))
             } else {
-                Ok(false)
+                Ok((false, wf.parent_workflow_id))
             }
         })
-        .unwrap_or(false);
+        .unwrap_or((false, None));
 
     if failed {
         let _ = app.emit(
@@ -989,5 +1145,10 @@ fn handle_agent_crash(
                 started_at: started_at.to_string(),
             },
         );
+
+        // Fan-in: notify parent that a child has failed.
+        if let Some(parent_id) = parent_workflow_id {
+            check_parent_fan_in(app, &parent_id, workflow_id);
+        }
     }
 }

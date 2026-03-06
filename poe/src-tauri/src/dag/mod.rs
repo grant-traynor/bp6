@@ -180,6 +180,8 @@ pub struct NewWorkflow {
     pub agent_id: Option<String>,
     pub workflow_type: String,
     pub config: serde_json::Value,
+    /// If this workflow is spawned as a child, the parent's workflow id.
+    pub parent_workflow_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +199,10 @@ pub struct WorkflowRecord {
     pub updated_at: String,
     pub completed_at: Option<String>,
     pub error: Option<String>,
+    /// Parent workflow that is waiting for this one (fan-in).
+    pub parent_workflow_id: Option<String>,
+    /// JSON array of child workflow IDs spawned by this workflow.
+    pub child_workflow_ids: Vec<String>,
 }
 
 // ── Schema migrations ──────────────────────────────────────────────────────────
@@ -275,6 +281,12 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);
     CREATE INDEX IF NOT EXISTS idx_workflows_node    ON workflows(node_id);
     CREATE INDEX IF NOT EXISTS idx_workflows_status  ON workflows(status);
+    "#,
+    // v4: fan-in — parent/child workflow relationships
+    r#"
+    ALTER TABLE workflows ADD COLUMN parent_workflow_id TEXT;
+    ALTER TABLE workflows ADD COLUMN child_workflow_ids TEXT NOT NULL DEFAULT '[]';
+    CREATE INDEX IF NOT EXISTS idx_workflows_parent ON workflows(parent_workflow_id);
     "#,
 ];
 
@@ -838,9 +850,9 @@ impl DagStore {
 
         self.conn
             .execute(
-                "INSERT INTO workflows (id, project_id, node_id, agent_id, workflow_type, status, config, started_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?7)",
-                params![id, input.project_id, input.node_id, input.agent_id, input.workflow_type, config_str, now],
+                "INSERT INTO workflows (id, project_id, node_id, agent_id, workflow_type, status, config, started_at, updated_at, parent_workflow_id, child_workflow_ids)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?7, ?8, '[]')",
+                params![id, input.project_id, input.node_id, input.agent_id, input.workflow_type, config_str, now, input.parent_workflow_id],
             )
             .map_err(|e| format!("Failed to insert workflow: {}", e))?;
 
@@ -857,13 +869,15 @@ impl DagStore {
             updated_at: now,
             completed_at: None,
             error: None,
+            parent_workflow_id: input.parent_workflow_id,
+            child_workflow_ids: vec![],
         })
     }
 
     pub fn get_workflow(&self, id: &str) -> Result<WorkflowRecord, String> {
         self.conn
             .query_row(
-                "SELECT id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error
+                "SELECT id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error, parent_workflow_id, child_workflow_ids
                  FROM workflows WHERE id = ?1",
                 params![id],
                 |row| {
@@ -880,14 +894,18 @@ impl DagStore {
                         row.get::<_, String>(9)?,
                         row.get::<_, Option<String>>(10)?,
                         row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, String>(13)?,
                     ))
                 },
             )
             .map_err(|e| format!("Failed to get workflow {}: {}", id, e))
-            .and_then(|(id, project_id, node_id, agent_id, workflow_type, status, current_step, config_str, started_at, updated_at, completed_at, error)| {
+            .and_then(|(id, project_id, node_id, agent_id, workflow_type, status, current_step, config_str, started_at, updated_at, completed_at, error, parent_workflow_id, child_ids_str)| {
                 let config = serde_json::from_str(&config_str)
                     .map_err(|e| format!("Failed to parse workflow config: {}", e))?;
-                Ok(WorkflowRecord { id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error })
+                let child_workflow_ids: Vec<String> = serde_json::from_str(&child_ids_str)
+                    .unwrap_or_default();
+                Ok(WorkflowRecord { id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error, parent_workflow_id, child_workflow_ids })
             })
     }
 
@@ -895,7 +913,7 @@ impl DagStore {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error
+                "SELECT id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error, parent_workflow_id, child_workflow_ids
                  FROM workflows WHERE project_id = ?1 ORDER BY started_at DESC",
             )
             .map_err(|e| format!("Failed to prepare workflows query: {}", e))?;
@@ -915,13 +933,17 @@ impl DagStore {
                     row.get::<_, String>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, String>(13)?,
                 ))
             })
             .map_err(|e| format!("Failed to query workflows: {}", e))?
             .filter_map(|r| r.ok())
-            .filter_map(|(id, project_id, node_id, agent_id, workflow_type, status, current_step, config_str, started_at, updated_at, completed_at, error)| {
-                serde_json::from_str(&config_str).ok().map(|config| WorkflowRecord {
-                    id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error,
+            .filter_map(|(id, project_id, node_id, agent_id, workflow_type, status, current_step, config_str, started_at, updated_at, completed_at, error, parent_workflow_id, child_ids_str)| {
+                let config = serde_json::from_str(&config_str).ok()?;
+                let child_workflow_ids: Vec<String> = serde_json::from_str(&child_ids_str).unwrap_or_default();
+                Some(WorkflowRecord {
+                    id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error, parent_workflow_id, child_workflow_ids,
                 })
             })
             .collect();
@@ -967,6 +989,62 @@ impl DagStore {
             .map_err(|e| format!("Failed to update workflow step: {}", e))?;
 
         self.get_workflow(id)
+    }
+
+    // ── Fan-in helpers ─────────────────────────────────────────────────────────
+
+    /// Append `child_id` to the parent workflow's `child_workflow_ids` JSON array.
+    pub fn add_child_workflow(&self, parent_id: &str, child_id: &str) -> Result<(), String> {
+        let current_str: String = self.conn
+            .query_row(
+                "SELECT child_workflow_ids FROM workflows WHERE id = ?1",
+                params![parent_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Failed to read child_workflow_ids for {}: {}", parent_id, e))?;
+
+        let mut ids: Vec<String> = serde_json::from_str(&current_str).unwrap_or_default();
+        if !ids.contains(&child_id.to_string()) {
+            ids.push(child_id.to_string());
+        }
+        let updated_str = serde_json::to_string(&ids)
+            .map_err(|e| format!("Failed to serialize child_workflow_ids: {}", e))?;
+
+        self.conn
+            .execute(
+                "UPDATE workflows SET child_workflow_ids = ?1, updated_at = ?2 WHERE id = ?3",
+                params![updated_str, Utc::now().to_rfc3339(), parent_id],
+            )
+            .map_err(|e| format!("Failed to update child_workflow_ids for {}: {}", parent_id, e))?;
+
+        Ok(())
+    }
+
+    /// Return the list of child workflow IDs for `parent_id`.
+    pub fn get_child_workflow_ids(&self, parent_id: &str) -> Result<Vec<String>, String> {
+        let ids_str: String = self.conn
+            .query_row(
+                "SELECT child_workflow_ids FROM workflows WHERE id = ?1",
+                params![parent_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("Failed to read child_workflow_ids for {}: {}", parent_id, e))?;
+
+        serde_json::from_str(&ids_str)
+            .map_err(|e| format!("Failed to parse child_workflow_ids: {}", e))
+    }
+
+    /// Return the status string of a workflow, or None if not found.
+    pub fn get_workflow_status(&self, workflow_id: &str) -> Result<Option<String>, String> {
+        match self.conn.query_row(
+            "SELECT status FROM workflows WHERE id = ?1",
+            params![workflow_id],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(status) => Ok(Some(status)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(format!("Failed to get workflow status for {}: {}", workflow_id, e)),
+        }
     }
 
     pub fn resolve_queue_item_in_db(
