@@ -1,0 +1,12 @@
+/Users/gkt/src/Pairti/toolkit/bp6/poe/src-tauri/target/debug/deps/tinystr-01a8cae1e70d9a92.d: /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/lib.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/macros.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/ascii.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/asciibyte.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/error.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/int_ops.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/unvalidated.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/ule.rs
+
+/Users/gkt/src/Pairti/toolkit/bp6/poe/src-tauri/target/debug/deps/libtinystr-01a8cae1e70d9a92.rmeta: /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/lib.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/macros.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/ascii.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/asciibyte.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/error.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/int_ops.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/unvalidated.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/ule.rs
+
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/lib.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/macros.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/ascii.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/asciibyte.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/error.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/int_ops.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/unvalidated.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tinystr-0.8.2/src/ule.rs:

@@ -1,0 +1,11 @@
+/Users/gkt/src/Pairti/toolkit/bp6/poe/src-tauri/target/debug/deps/serde_urlencoded-5ba530162c93201a.d: /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/lib.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/de.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/mod.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/key.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/pair.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/part.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/value.rs
+
+/Users/gkt/src/Pairti/toolkit/bp6/poe/src-tauri/target/debug/deps/libserde_urlencoded-5ba530162c93201a.rmeta: /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/lib.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/de.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/mod.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/key.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/pair.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/part.rs /Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/value.rs
+
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/lib.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/de.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/mod.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/key.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/pair.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/part.rs:
+/Users/gkt/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_urlencoded-0.7.1/src/ser/value.rs:

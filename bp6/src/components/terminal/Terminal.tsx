@@ -126,6 +126,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onRe
     // the synchronous cleanup function.
     let unlistenFn: (() => void) | undefined;
     let resizeObserver: ResizeObserver | undefined;
+    let handlePaste: ((e: ClipboardEvent) => void) | undefined;
 
     // Open the terminal AFTER fonts are ready.
     //
@@ -175,6 +176,26 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onRe
           console.error('Failed to write to PTY:', error);
         });
       });
+
+      // Intercept paste events to save any image data before the TUI handles it
+      handlePaste = async (e: ClipboardEvent) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of Array.from(items)) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+              const buffer = await file.arrayBuffer();
+              const imageData = Array.from(new Uint8Array(buffer));
+              invoke('save_session_image', { sessionId, imageData }).catch((err) => {
+                console.error('Failed to save pasted image:', err);
+              });
+            }
+            break; // only handle the first image item
+          }
+        }
+      };
+      window.addEventListener('paste', handlePaste);
 
       // ORDERING IS CRITICAL:
       //   1. Register pty-data listener FIRST
@@ -304,6 +325,7 @@ export const Terminal: React.FC<TerminalProps> = ({ sessionId, projectPath, onRe
       if (resizeTimeoutRef.current) clearTimeout(resizeTimeoutRef.current);
       if (unlistenFn) unlistenFn();
       if (resizeObserver) resizeObserver.disconnect();
+      if (handlePaste) window.removeEventListener('paste', handlePaste);
       if (xtermRef.current) {
         xtermRef.current.dispose();
         xtermRef.current = null;

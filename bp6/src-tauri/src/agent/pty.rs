@@ -96,6 +96,12 @@ impl PtyManager {
         cmd.env("COLORTERM", "truecolor");
 
         if let Some(dir) = working_dir {
+            // Set both the process cwd and the PWD env var.
+            // Some tools (shells, Node.js path resolution) read $PWD explicitly;
+            // GUI-launched processes inherit a stale PWD from the app, so we must
+            // override it to match the actual working directory.
+            cmd.env("PWD", &dir);
+            eprintln!("📂 PTY cwd: {}", dir);
             cmd.cwd(OsString::from(dir));
         }
 

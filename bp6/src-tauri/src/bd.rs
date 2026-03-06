@@ -36,54 +36,77 @@ pub fn find_repo_root() -> Option<PathBuf> {
 /// We check common install locations first, then fall back to asking the user's
 /// login shell via `which`.
 pub fn resolve_cli_path(name: &str) -> Option<PathBuf> {
-    // Check common install locations without spawning a shell.
     let home = std::env::var("HOME").unwrap_or_default();
+
+    // Check well-known static paths first — fast and reliable for tools installed
+    // via cargo, homebrew, npm globals, etc.
     let candidates = [
         format!("{}/.cargo/bin/{}", home, name),
-        format!("/usr/local/bin/{}", name),
         format!("/opt/homebrew/bin/{}", name),
+        format!("/usr/local/bin/{}", name),
         format!("{}/.local/bin/{}", home, name),
         format!("/usr/bin/{}", name),
-        // npm globals (claude, gemini)
         format!("{}/.npm-global/bin/{}", home, name),
         format!("/usr/local/lib/node_modules/.bin/{}", name),
     ];
     for path in &candidates {
         let p = PathBuf::from(path);
         if p.exists() {
+            eprintln!("🔧 resolve_cli_path({}): static → {}", name, p.display());
             return Some(p);
         }
     }
 
-    // Check nvm default node version (nvm installs to ~/.nvm/versions/node/<version>/bin/)
-    let nvm_alias_path = format!("{}/.nvm/alias/default", home);
-    if let Ok(version) = std::fs::read_to_string(&nvm_alias_path) {
-        let version = version.trim();
-        // Resolve lts/* or other aliases by checking the actual alias files
-        let nvm_bin = format!("{}/.nvm/versions/node/{}/bin/{}", home, version, name);
-        let p = PathBuf::from(&nvm_bin);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-
-    // Fall back to the login shell to pick up the user's full PATH.
+    // Fall back to the login shell. Take only the last non-empty line of stdout
+    // because .zshrc/.zprofile often print banners/welcome messages before the path.
     let which_cmd = format!("which {}", name);
     for shell in &["/bin/zsh", "/bin/bash"] {
         if let Ok(output) = Command::new(shell)
             .args(["-l", "-c", &which_cmd])
             .output()
         {
-            let path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let path_str = stdout
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .last()
+                .map(|l| l.trim())
+                .unwrap_or("")
+                .to_string();
             if !path_str.is_empty() {
                 let p = PathBuf::from(&path_str);
                 if p.exists() {
+                    eprintln!("🔧 resolve_cli_path({}): shell which → {}", name, p.display());
                     return Some(p);
                 }
             }
         }
     }
 
+    // Last resort: nvm default alias, following alias chains.
+    let nvm_dir = format!("{}/.nvm", home);
+    let nvm_alias_path = format!("{}/alias/default", nvm_dir);
+    if let Ok(raw) = std::fs::read_to_string(&nvm_alias_path) {
+        let mut alias = raw.trim().to_string();
+        for _ in 0..3 {
+            if alias.starts_with('v') {
+                let nvm_bin = format!("{}/versions/node/{}/bin/{}", nvm_dir, alias, name);
+                let p = PathBuf::from(&nvm_bin);
+                if p.exists() {
+                    eprintln!("🔧 resolve_cli_path({}): nvm → {}", name, p.display());
+                    return Some(p);
+                }
+                break;
+            }
+            let next_path = format!("{}/alias/{}", nvm_dir, alias);
+            match std::fs::read_to_string(&next_path) {
+                Ok(next) => alias = next.trim().to_string(),
+                Err(_) => break,
+            }
+        }
+    }
+
+    eprintln!("⚠️  resolve_cli_path({}): not found", name);
     None
 }
 
@@ -437,21 +460,4 @@ pub fn sync_project(project_path: String) -> Result<String, String> {
 
     flush_jsonl(path);
     Ok(stdout)
-}
-
-pub fn execute_bd(args: Vec<String>) -> Result<String, String> {
-    check_bd_available()?;
-    let repo_path = find_repo_root().ok_or_else(|| "Could not locate .beads directory in any parent".to_string())?;
-
-    let output = bd_command()?
-        .args(args)
-        .current_dir(repo_path)
-        .output()
-        .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }

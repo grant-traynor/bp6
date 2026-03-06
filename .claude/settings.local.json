@@ -69,7 +69,12 @@
       "Bash(git log:*)",
       "Bash(npm info:*)",
       "mcp__dart__analyze_files",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(python3 -c \":*)",
+      "Bash(python3:*)",
+      "Bash(npx vitest:*)",
+      "Bash(security find-identity:*)",
+      "Bash(codesign:*)"
     ]
   }
 }

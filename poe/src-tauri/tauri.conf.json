@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "poe",
+  "version": "0.1.0",
+  "identifier": "com.pairti.poe",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1421",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "POE",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    },
+    "externalBin": []
+  },
+  "plugins": {
+    "dialog": {}
+  }
+}
