@@ -9,6 +9,10 @@ pub mod queue_service;
 pub mod restate;
 pub mod skills;
 
+pub struct McpServerState {
+    pub port: u16,
+}
+
 use tauri::Manager;
 
 use advisor::{confirm_advisor_session, start_advisor_query, send_advisor_message, reset_advisor_session, get_advisor_state};
@@ -26,10 +30,6 @@ use mcp_server::spawn_mcp_server;
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
 use skills::{get_skill_content, list_skills};
-
-pub struct McpServerState {
-    pub port: u16,
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

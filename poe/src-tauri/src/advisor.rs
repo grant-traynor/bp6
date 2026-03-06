@@ -13,6 +13,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
+use crate::McpServerState;
 use crate::agents::{AgentState, SpawnAgentParams, spawn_agent_internal};
 use crate::dag::DagStore;
 use crate::project::ProjectState;
@@ -89,22 +90,7 @@ pub fn build_advisor_context(store: &DagStore, project_id: &str, agent_state: &A
     if let Ok(items) = store.list_queue_items(project_id) {
         let open: Vec<_> = items.iter().filter(|i| i.status == "pending").collect();
         let total = open.len();
-        out.push_str(&format!("**Open Queue Items** ({total}):\n"));
-        if total == 0 {
-            out.push_str("- None\n");
-        } else {
-            for item in open.iter().take(5) {
-                let short_id = &item.id[..8.min(item.id.len())];
-                let q = item.question.chars().take(80).collect::<String>();
-                let ellipsis = if item.question.len() > 80 { "…" } else { "" };
-                let date = &item.created_at[..10.min(item.created_at.len())];
-                out.push_str(&format!("- [{short_id}] \"{q}{ellipsis}\" — open since {date}\n"));
-            }
-            if total > 5 {
-                out.push_str(&format!("- … and {} more\n", total - 5));
-            }
-        }
-        out.push('\n');
+        out.push_str(&format!("**Open Queue Items** ({total}):\n\n"));
     }
 
     // ── Active agents ──────────────────────────────────────────────────────────
@@ -134,44 +120,27 @@ pub fn build_advisor_context(store: &DagStore, project_id: &str, agent_state: &A
     }
     out.push('\n');
 
-    // ── Artefacts ──────────────────────────────────────────────────────────────
-    // Use step=100 to retrieve all artefacts (no real step exceeds this).
-    if let Ok(artefacts) = store.get_artefacts_for_step(project_id, 100) {
-        out.push_str("**Artefacts**:\n");
-        if artefacts.is_empty() {
-            out.push_str("- None yet\n");
-        } else {
-            let total_content: usize = artefacts
-                .iter()
-                .filter_map(|n| n.data.get("content").and_then(|v| v.as_str()))
-                .map(|s| s.len())
-                .sum();
-            let include_content = total_content < 3000;
-
-            for node in &artefacts {
-                let title    = node.data.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
-                let filename = node.data.get("filename").and_then(|v| v.as_str()).unwrap_or("");
-                let step     = node.data.get("step").and_then(|v| v.as_u64()).unwrap_or(0);
-
-                if include_content {
-                    let content = node.data.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                    let preview: String = content.chars().take(300).collect();
-                    let ellipsis = if content.len() > 300 { "…" } else { "" };
-                    out.push_str(&format!(
-                        "- {title} (Step {step}, {filename})\n  {preview}{ellipsis}\n"
-                    ));
-                } else {
-                    out.push_str(&format!("- {title} (Step {step}, {filename})\n"));
-                }
-            }
-        }
-        out.push('\n');
-    }
-
     out
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────────────
+
+fn write_mcp_config(project_id: &str, port: u16) -> Result<std::path::PathBuf, String> {
+    let short_id = &project_id[..8.min(project_id.len())];
+    let filename = format!("poe-mcp-{}-{}.json", short_id, uuid::Uuid::new_v4());
+    let path = std::env::temp_dir().join(filename);
+    let config = serde_json::json!({
+        "mcpServers": {
+            "poe": {
+                "url": format!("http://127.0.0.1:{}/sse", port)
+            }
+        }
+    });
+    std::fs::write(&path, serde_json::to_string(&config)
+        .map_err(|e| format!("JSON error: {}", e))?)
+        .map_err(|e| format!("Failed to write MCP config: {}", e))?;
+    Ok(path)
+}
 
 fn load_advisor_skill(app: &AppHandle, project_dir: &str) -> String {
     build_skills_prompt(
@@ -184,9 +153,11 @@ fn load_advisor_skill(app: &AppHandle, project_dir: &str) -> String {
 /// Spawn a one-shot advisor process. Returns agent_id (for agent:stdout subscription).
 fn spawn_advisor_turn(
     project_dir: &str,
+    project_id: &str,
     full_prompt: String,
     session_id: &str,
     is_resume: bool,
+    mcp_port: u16,
     app: &AppHandle,
     agent_state: &State<'_, AgentState>,
 ) -> Result<String, String> {
@@ -211,6 +182,15 @@ fn spawn_advisor_turn(
     }
     args.push(session_id.to_string());
 
+    // Write MCP config and add --mcp-config arg
+    let mcp_config_path = write_mcp_config(project_id, mcp_port).ok();
+    if let Some(ref config_path) = mcp_config_path {
+        if let Some(path_str) = config_path.to_str() {
+            args.push("--mcp-config".to_string());
+            args.push(path_str.to_string());
+        }
+    }
+
     spawn_agent_internal(
         SpawnAgentParams {
             cmd: "claude".to_string(),
@@ -228,6 +208,11 @@ fn spawn_advisor_turn(
         agent_state,
     )?;
 
+    // Clean up temp MCP config file (best effort)
+    if let Some(path) = mcp_config_path {
+        let _ = std::fs::remove_file(path);
+    }
+
     Ok(agent_id)
 }
 
@@ -238,6 +223,7 @@ async fn run_advisor_query(
     app: AppHandle,
     project_state: State<'_, ProjectState>,
     agent_state: State<'_, AgentState>,
+    mcp_state: State<'_, McpServerState>,
 ) -> Result<AdvisorStartResult, String> {
     let project_id = {
         let projects = project_state.projects.lock().unwrap();
@@ -278,9 +264,11 @@ async fn run_advisor_query(
 
     let agent_id = spawn_advisor_turn(
         &project_dir,
+        &project_id,
         full_prompt,
         &session_id,
         is_resume,
+        mcp_state.port,
         &app,
         &agent_state,
     )?;
@@ -304,8 +292,9 @@ pub async fn start_advisor_query(
     app: AppHandle,
     project_state: State<'_, ProjectState>,
     agent_state: State<'_, AgentState>,
+    mcp_state: State<'_, McpServerState>,
 ) -> Result<AdvisorStartResult, String> {
-    run_advisor_query(project_dir, query, app, project_state, agent_state).await
+    run_advisor_query(project_dir, query, app, project_state, agent_state, mcp_state).await
 }
 
 /// Send a follow-up message. Identical to start_advisor_query — always resumes
@@ -317,8 +306,9 @@ pub async fn send_advisor_message(
     app: AppHandle,
     project_state: State<'_, ProjectState>,
     agent_state: State<'_, AgentState>,
+    mcp_state: State<'_, McpServerState>,
 ) -> Result<AdvisorStartResult, String> {
-    run_advisor_query(project_dir, message, app, project_state, agent_state).await
+    run_advisor_query(project_dir, message, app, project_state, agent_state, mcp_state).await
 }
 
 /// Reset the advisor session. Clears stored session_id so next query starts fresh.
