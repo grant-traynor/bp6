@@ -276,11 +276,16 @@ async fn register_with_restate(port: u16) {
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 
-/// Spawn the Axum queue service in a background tokio task.
+/// Spawn the Axum queue service in a background OS thread with its own Tokio runtime.
+/// Using std::thread avoids the "no reactor running" panic when called from Tauri's
+/// synchronous setup closure (before the main Tokio runtime is active).
 pub fn spawn_queue_service(app: AppHandle) {
     let app = Arc::new(app);
 
-    tokio::spawn(async move {
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new()
+            .expect("Failed to create Tokio runtime for queue_service");
+        rt.block_on(async move {
         let router = Router::new()
             .route("/poe-queue/discover", get(handle_discover))
             .route(
@@ -317,5 +322,6 @@ pub fn spawn_queue_service(app: AppHandle) {
         if let Err(e) = axum::serve(listener, router).await {
             eprintln!("[queue_service] Server error: {}", e);
         }
+        });
     });
 }
