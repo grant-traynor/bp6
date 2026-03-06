@@ -399,6 +399,8 @@ pub fn spawn_agent_internal(
         let app_for_thread = app.clone();
         let last_output_at_bg = Arc::clone(&last_output_at);
         let silence_alerted_bg = Arc::clone(&silence_alerted);
+        // Clone writer into reader thread so we can auto-respond to interactive prompts.
+        let writer_bg = Arc::clone(&writer);
 
         std::thread::spawn(move || {
             let reader = BufReader::new(master_reader);
@@ -426,6 +428,18 @@ pub fn spawn_agent_internal(
                 }
 
                 eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
+
+                // ── Auto-respond to known Claude Code interactive prompts ──────────────
+                // The trust-folder prompt shows "Enter to confirm" on its last line with
+                // option ❯1 (Yes, I trust this folder) already selected. Send \n to confirm.
+                if trimmed.contains("Enter to confirm") {
+                    eprintln!("[agents:pty {}] auto-confirming trust-folder prompt", agent_id_bg);
+                    if let Ok(mut w) = writer_bg.lock() {
+                        let _ = w.write_all(b"\n");
+                        let _ = w.flush();
+                    }
+                    continue;
+                }
 
                 // Track code fence state — toggle on any ``` line.
                 if trimmed.starts_with("```") {
