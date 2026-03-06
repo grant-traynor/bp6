@@ -3,6 +3,7 @@ pub mod agents;
 pub mod conversation;
 pub mod dag;
 pub mod lifecycle;
+pub mod mcp_server;
 pub mod project;
 pub mod queue_service;
 pub mod restate;
@@ -21,9 +22,14 @@ use project::{
     save_app_state, stop_workflow, switch_project, update_node, ProjectState,
 };
 use lifecycle::{approve_lifecycle_step, get_lifecycle_status, spawn_lifecycle_service, start_lifecycle, submit_rework_items};
+use mcp_server::spawn_mcp_server;
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
 use skills::{get_skill_content, list_skills};
+
+pub struct McpServerState {
+    pub port: u16,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -86,6 +92,10 @@ pub fn run() {
                     Err(e) => eprintln!("⚠️  Lifecycle workflow registration failed: {}", e),
                 }
             });
+
+            // Spawn MCP HTTP/SSE server (port 9084+)
+            let mcp_port = spawn_mcp_server(app.handle().clone());
+            app.manage(McpServerState { port: mcp_port });
 
             Ok(())
         })
