@@ -670,7 +670,7 @@ pub fn spawn_agent_internal(
             .ok()
             .and_then(|m| m.get(&agent_id).and_then(|h| h.workflow_id.clone()));
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut interval = tokio::time::interval(
                 Duration::from_secs(AGENT_WATCHDOG_INTERVAL_SECS),
             );

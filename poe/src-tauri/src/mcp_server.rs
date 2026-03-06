@@ -534,6 +534,9 @@ pub fn spawn_mcp_server(app: tauri::AppHandle) -> u16 {
         let rt = tokio::runtime::Runtime::new()
             .expect("[mcp_server] Failed to create Tokio runtime");
         rt.block_on(async move {
+            listener
+                .set_nonblocking(true)
+                .expect("[mcp_server] Failed to set non-blocking mode on listener");
             let tokio_listener = tokio::net::TcpListener::from_std(listener)
                 .expect("[mcp_server] Failed to convert std listener to tokio listener");
 
