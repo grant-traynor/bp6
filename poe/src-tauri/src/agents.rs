@@ -1357,8 +1357,9 @@ fn handle_lifecycle_poe_done(
     }
 
     // ── Step 6: validity-analyst or rca-analyst completion ───────────────────
-    // For step 6, poe:done sets awaiting_approval (substep unchanged) so the
-    // human can review before we proceed to the next substep.
+    // bp6-khw: Step 6 is now API-driven (no PTY agent spawned). This branch is dead
+    // code — active_agent_id is None for step 6, so the check will never match.
+    // Kept as a guard in case a legacy agent somehow fires poe:done for step 6.
 
     let is_step6 = project_state.with_active(|store, _| {
         let current = store.get_lifecycle_state(project_id)?;
@@ -1366,38 +1367,19 @@ fn handle_lifecycle_poe_done(
     }).unwrap_or(false);
 
     if is_step6 {
-        let _ = project_state.with_active(|store, _| {
-            let current = store.get_lifecycle_state(project_id)?;
-            let updated = LifecycleStateRow {
-                status: "awaiting_approval".to_string(),
-                active_agent_id: Some(agent_id.to_string()),
-                ..current
-            };
-            store.upsert_lifecycle_state(&updated)
-        });
-        let substep = project_state.with_active(|store, _| {
-            let current = store.get_lifecycle_state(project_id)?;
-            Ok(current.substep.clone())
-        }).unwrap_or(None);
+        // This path should no longer be triggered (step 6 is API-driven).
         eprintln!(
-            "[lifecycle] Step 6 substep={:?} done for '{}' — status → awaiting_approval",
-            substep, project_id
-        );
-        let _ = app.emit(
-            "lifecycle:status",
-            serde_json::json!({
-                "projectId": project_id,
-                "agentId": agent_id,
-                "status": "awaiting_approval",
-                "step": 6,
-                "substep": substep,
-                "summary": done.summary,
-            }),
+            "[lifecycle] poe:done from unexpected step 6 PTY agent={} for '{}' — ignoring (step 6 is now API-driven)",
+            agent_id, project_id
         );
         return;
     }
 
-    // ── Normal lifecycle step completion (steps 1, 2, 3, 5, 6) ─────────────
+    // ── Normal lifecycle step completion (steps 3 and 5 rework-planning-loop) ─
+    // bp6-khw: Steps 1, 2, and 6 are now API-driven — no PTY agent is ever spawned
+    // for them, so active_agent_id will be None and the guard below will safely
+    // reject any stray poe:done.  Only step 3 (product-manager PTY) and step 5
+    // (rework-planning, handled above) reach this branch in normal operation.
 
     let result: Result<(), String> = project_state.with_active(|store, _| {
         let current = store.get_lifecycle_state(project_id)?;

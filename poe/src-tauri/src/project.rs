@@ -939,6 +939,142 @@ pub fn get_stage_metrics(
     state.with_active(|store, _| store.get_metrics_for_stage(&project_id, stage_number))
 }
 
+// ── Claude API helpers (bp6-41g) ───────────────────────────────────────────────
+
+/// Expose the ANTHROPIC_API_KEY environment variable to the frontend.
+/// The Tauri webview is a local process — not an untrusted browser context.
+#[tauri::command]
+pub fn get_anthropic_api_key() -> Result<String, String> {
+    std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| "ANTHROPIC_API_KEY environment variable not set".to_string())
+}
+
+/// Parameters for creating a lifecycle knowledge artefact from a Claude tool call.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateLifecycleArtifactParams {
+    pub project_id: String,
+    pub filename: String,
+    pub title: String,
+    pub content: String,
+    pub step: u32,
+}
+
+/// Called by the frontend when the Claude API returns an `emit_artifact` tool call.
+/// Writes the file to <project_dir>/docs/<filename>, creates a KnowledgeArtifact
+/// DAG node, emits dag:node:upserted, and returns the node_id.
+#[tauri::command]
+pub fn create_lifecycle_artifact(
+    params: CreateLifecycleArtifactParams,
+    project_state: State<'_, ProjectState>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    let active_dir = project_state.active_dir_str().ok_or("No project open")?;
+
+    // 1. Write file to <project_dir>/docs/<filename>
+    let docs_dir = std::path::Path::new(&active_dir).join("docs");
+    std::fs::create_dir_all(&docs_dir)
+        .map_err(|e| format!("Failed to create docs/: {}", e))?;
+    let file_path = docs_dir.join(&params.filename);
+    std::fs::write(&file_path, &params.content)
+        .map_err(|e| format!("Failed to write artifact file: {}", e))?;
+
+    // 2. Create KnowledgeArtifact DAG node
+    let node = {
+        let projects = project_state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.upsert_node(
+            &crate::dag::NodeType::KnowledgeArtifact,
+            &proj.project_id,
+            serde_json::json!({
+                "filename": params.filename,
+                "title": params.title,
+                "content": params.content,
+                "step": params.step,
+            }),
+        )?
+    };
+
+    // 3. Emit dag:node:upserted
+    app_handle
+        .emit("dag:node:upserted", NodeUpsertedEvent { node: node.clone() })
+        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
+
+    // 4. Return node_id
+    Ok(node.id)
+}
+
+/// Context returned to the frontend for building the Claude API system prompt.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationContext {
+    pub skill_content: String,
+    pub artefact_context: String,
+}
+
+/// Returns the skill body and formatted artefact context for a conversational step.
+#[tauri::command]
+pub fn get_conversation_context(
+    project_id: String,
+    step: u32,
+    skill_id: String,
+    project_state: State<'_, ProjectState>,
+) -> Result<ConversationContext, String> {
+    let active_dir = project_state.active_dir_str().ok_or("No project open")?;
+
+    // 1. Load skill content via skills::get_skill_body (reuse collect_skills path)
+    //    We call get_skill_content logic inline via the same pattern as the Tauri command.
+    let skill_content = {
+        // Re-use the project dir to search for skills
+        let project_dir_path = std::path::PathBuf::from(&active_dir);
+        // We need the AppHandle to resolve global skills dir, but we can fall back to
+        // reading directly. Use the same path the skills tauri command uses.
+        // Since we don't have AppHandle here, we read from the known search locations.
+        let skill_body = try_load_skill_body(&skill_id, &project_dir_path)?;
+        skill_body
+    };
+
+    // 2. Get artefacts for step (strictly less than current step)
+    let artefacts = {
+        let projects = project_state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.get_artefacts_for_step(&project_id, step)?
+    };
+
+    // 3. Build artefact context string
+    let artefact_context = crate::dag::DagStore::build_artefact_context(&artefacts);
+
+    Ok(ConversationContext {
+        skill_content,
+        artefact_context,
+    })
+}
+
+/// Try to load a skill's body content by searching the standard skill directories.
+/// Search order: ~/.poe/skills/, then <project_dir>/.poe/skills/
+/// (Global/resource dir not available without AppHandle.)
+fn try_load_skill_body(skill_id: &str, project_dir: &std::path::Path) -> Result<String, String> {
+    let filename = format!("{}.md", skill_id);
+
+    // User globals
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join(".poe").join("skills").join(&filename);
+        if p.exists() {
+            return crate::skills::get_skill_body(&p.to_string_lossy());
+        }
+    }
+
+    // Project-local
+    {
+        let p = project_dir.join(".poe").join("skills").join(&filename);
+        if p.exists() {
+            return crate::skills::get_skill_body(&p.to_string_lossy());
+        }
+    }
+
+    Err(format!("Skill '{}' not found in any skill directory", skill_id))
+}
+
 /// bp6-ims.11: Copy a project-local skill file to the user-level skill directory.
 ///
 /// Source: `<project_dir>/.poe/skills/<skill_id>.md`

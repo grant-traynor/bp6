@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use restate_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::agents::{spawn_agent_internal, AgentState, SpawnAgentParams};
 use crate::dag::{DagStore, LifecycleStateRow};
@@ -115,7 +115,6 @@ pub async fn get_lifecycle_status(
 pub async fn start_lifecycle(
     project_id: String,
     state: State<'_, ProjectState>,
-    agent_state: State<'_, AgentState>,
     app: AppHandle,
 ) -> Result<LifecycleStatus, String> {
     let current = state.with_active(|store, _| store.get_lifecycle_state(&project_id))?;
@@ -129,7 +128,8 @@ pub async fn start_lifecycle(
         return Ok(LifecycleStatus::from(current));
     }
 
-    // Persist step=1, status=running before spawning the agent
+    // bp6-khw: Step 1 is now API-driven (useConversation). No PTY agent is spawned.
+    // We persist the state and emit lifecycle:status; the frontend starts the conversation.
     let new_state = LifecycleStateRow {
         project_id: project_id.clone(),
         step: 1,
@@ -146,43 +146,18 @@ pub async fn start_lifecycle(
     state.with_active(|store, _| store.upsert_lifecycle_state(&new_state))?;
 
     eprintln!(
-        "[lifecycle] Started lifecycle for '{}' — step 1 ({})",
+        "[lifecycle] Started lifecycle for '{}' — step 1 ({}) [API-driven, no PTY]",
         project_id,
         step_name(1)
     );
 
-    // Spawn the step 1 agent (operational-analyst)
-    let project_dir = state.active_dir_str();
-    let agent_id = spawn_step_agent(
-        &project_id,
-        1,
-        None,
-        project_dir.as_deref(),
-        &state,
-        &agent_state,
-        &app,
-    )?;
-
-    eprintln!(
-        "[lifecycle] Spawned step 1 agent={} for project='{}'",
-        agent_id, project_id
-    );
-
-    // Store the active_agent_id in the lifecycle state
-    let updated_state = LifecycleStateRow {
-        project_id: project_id.clone(),
-        step: 1,
-        substep: None,
-        status: "running".to_string(),
-        pending_approval_id: None,
-        active_agent_id: Some(agent_id.clone()),
-        stage_task_ids: None,
-        completed_task_ids: None,
-        active_task_agent_ids: None,
-        stage_number: Some(1),
-        rework_items: None,
-    };
-    state.with_active(|store, _| store.upsert_lifecycle_state(&updated_state))?;
+    // Emit lifecycle:status so the frontend knows to start the conversation immediately.
+    app.emit("lifecycle:status", serde_json::json!({
+        "projectId": project_id,
+        "step": 1,
+        "substep": serde_json::Value::Null,
+        "status": "running",
+    })).ok();
 
     Ok(LifecycleStatus {
         step: 1,
@@ -190,7 +165,7 @@ pub async fn start_lifecycle(
         status: "running".to_string(),
         pending_approval_id: None,
         project_id,
-        active_agent_id: Some(agent_id),
+        active_agent_id: None,
         stage_task_count: None,
     })
 }
@@ -259,9 +234,11 @@ pub async fn approve_lifecycle_step(
         };
 
         return if let Some(next_sub) = next_substep {
-            // Advance to the next substep within step 2
+            // bp6-khw: Step 2 substeps are now API-driven (useConversation). No PTY agent spawned.
+            // Advance to the next substep within step 2, then emit lifecycle:status so the
+            // frontend knows to start the next conversation.
             eprintln!(
-                "[lifecycle] '{}' approved step 2.{} — advancing to step 2.{}",
+                "[lifecycle] '{}' approved step 2.{} — advancing to step 2.{} [API-driven, no PTY]",
                 project_id, current_substep, next_sub
             );
             let next_state = LifecycleStateRow {
@@ -278,40 +255,13 @@ pub async fn approve_lifecycle_step(
                 rework_items: None,
             };
             state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
-
-            let project_dir = state.active_dir_str();
-            // For the EM review substep, include all step 2 artefacts by querying step < 3
-            let artefact_step = if next_sub == "review" { 3 } else { 2 };
-            match spawn_step_agent_with_artefact_step(
-                &project_id,
-                2,
-                Some(next_sub),
-                artefact_step,
-                project_dir.as_deref(),
-                &state,
-                &agent_state,
-                &app,
-            ) {
-                Ok(agent_id) => {
-                    eprintln!(
-                        "[lifecycle] Spawned step 2.{} agent={} for project='{}'",
-                        next_sub, agent_id, project_id
-                    );
-                    let updated = LifecycleStateRow {
-                        active_agent_id: Some(agent_id),
-                        ..next_state.clone()
-                    };
-                    state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
-                    Ok(LifecycleStatus::from(updated))
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[lifecycle] Failed to spawn step 2.{} agent for '{}': {}",
-                        next_sub, project_id, e
-                    );
-                    Ok(LifecycleStatus::from(next_state))
-                }
-            }
+            app.emit("lifecycle:status", serde_json::json!({
+                "projectId": project_id,
+                "step": 2,
+                "substep": next_sub,
+                "status": "running",
+            })).ok();
+            Ok(LifecycleStatus::from(next_state))
         } else {
             // substep "review" approved — advance to step 3
             eprintln!(
@@ -435,38 +385,18 @@ pub async fn approve_lifecycle_step(
             };
             state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
 
-            // bp6-ims.11: spawn validity-analyst for step 6
-            let stage_num = current.stage_number.unwrap_or(1);
-            let validity_prompt = format!(
-                "Perform the validity check for Stage {}. Review the CONOPS and all guardrail documents against what was built this stage. Produce phase-{}-validity.md.",
-                stage_num, stage_num
+            // bp6-khw: Step 6 (validity, rca) is now API-driven. Emit lifecycle:status so
+            // the frontend knows to start the validity-analyst conversation.
+            eprintln!(
+                "[lifecycle] Advancing to step 6.validity for project='{}' [API-driven, no PTY]",
+                project_id
             );
-            let project_dir = state.active_dir_str();
-            match spawn_step_agent_with_prompt(
-                &project_id,
-                "validity-analyst",
-                &validity_prompt,
-                project_dir.as_deref(),
-                &state,
-                &agent_state,
-                &app,
-            ) {
-                Ok(validity_agent_id) => {
-                    eprintln!(
-                        "[lifecycle] Spawned validity-analyst agent={} for project='{}' stage={}",
-                        validity_agent_id, project_id, stage_num
-                    );
-                    let updated = LifecycleStateRow {
-                        active_agent_id: Some(validity_agent_id),
-                        ..next_state.clone()
-                    };
-                    state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
-                    return Ok(LifecycleStatus::from(updated));
-                }
-                Err(e) => {
-                    eprintln!("[lifecycle] Failed to spawn validity-analyst for '{}': {}", project_id, e);
-                }
-            }
+            app.emit("lifecycle:status", serde_json::json!({
+                "projectId": project_id,
+                "step": 6,
+                "substep": "validity",
+                "status": "running",
+            })).ok();
             return Ok(LifecycleStatus::from(next_state));
         } else {
             // rework → step 5: waiting for human to submit rework items via submit_rework_items
@@ -492,19 +422,16 @@ pub async fn approve_lifecycle_step(
 
     // Step 5 approval: "skip" → step 6
     if step == 5 && decision == "skip" {
-        return handle_step5_skip(&project_id, current, &state, &agent_state, &app);
+        return handle_step5_skip(&project_id, current, &state, &app);
     }
 
-    // Step 6: validity substep approved → spawn rca-analyst
+    // Step 6: validity substep approved → advance to rca substep (API-driven)
+    // bp6-khw: Step 6 is now API-driven. No PTY agent spawned; emit lifecycle:status
+    // so the frontend starts the rca-analyst conversation.
     if step == 6 && current.substep.as_deref() == Some("validity") {
         eprintln!(
-            "[lifecycle] '{}' approved step 6.validity — spawning rca-analyst",
+            "[lifecycle] '{}' approved step 6.validity — advancing to step 6.rca [API-driven, no PTY]",
             project_id
-        );
-        let stage_num = current.stage_number.unwrap_or(1);
-        let rca_prompt = format!(
-            "Perform root cause analysis for Stage {}. Analyse execution logs, failures, and interventions. Produce phase-{}-rca.md. Then update project-local skill files for any agents that showed systemic issues.",
-            stage_num, stage_num
         );
         let rca_state = LifecycleStateRow {
             project_id: project_id.clone(),
@@ -520,32 +447,12 @@ pub async fn approve_lifecycle_step(
             rework_items: None,
         };
         state.with_active(|store, _| store.upsert_lifecycle_state(&rca_state))?;
-        let project_dir = state.active_dir_str();
-        match spawn_step_agent_with_prompt(
-            &project_id,
-            "rca-analyst",
-            &rca_prompt,
-            project_dir.as_deref(),
-            &state,
-            &agent_state,
-            &app,
-        ) {
-            Ok(rca_agent_id) => {
-                eprintln!(
-                    "[lifecycle] Spawned rca-analyst agent={} for project='{}' stage={}",
-                    rca_agent_id, project_id, stage_num
-                );
-                let updated = LifecycleStateRow {
-                    active_agent_id: Some(rca_agent_id),
-                    ..rca_state.clone()
-                };
-                state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
-                return Ok(LifecycleStatus::from(updated));
-            }
-            Err(e) => {
-                eprintln!("[lifecycle] Failed to spawn rca-analyst for '{}': {}", project_id, e);
-            }
-        }
+        app.emit("lifecycle:status", serde_json::json!({
+            "projectId": project_id,
+            "step": 6,
+            "substep": "rca",
+            "status": "running",
+        })).ok();
         return Ok(LifecycleStatus::from(rca_state));
     }
 
@@ -646,50 +553,29 @@ pub async fn approve_lifecycle_step(
 
     state.with_active(|store, _| store.upsert_lifecycle_state(&new_state))?;
 
-    // Spawn the next step agent when advancing and not complete
-    let final_state = if new_state.status == "running" {
+    // bp6-khw: Steps 1 and 2 are API-driven; no PTY agent is spawned here.
+    // This generic block is only reached when approving step 1 (→ step 2) or step 6 rca
+    // looping back, but those are all API-driven.  Emit lifecycle:status so the frontend
+    // can start the next conversation immediately.
+    if new_state.status == "running" {
         let next_step = new_state.step;
         // For step 2, start with substep "1" (architecture-analyst).
         let substep = if next_step == 2 { Some("1") } else { None };
-
-        let project_dir = state.active_dir_str();
-        match spawn_step_agent(
-            &project_id,
+        eprintln!(
+            "[lifecycle] Advancing to step {}{} for project='{}' [API-driven, no PTY]",
             next_step,
-            substep,
-            project_dir.as_deref(),
-            &state,
-            &agent_state,
-            &app,
-        ) {
-            Ok(agent_id) => {
-                eprintln!(
-                    "[lifecycle] Spawned step {}{} agent={} for project='{}'",
-                    next_step,
-                    substep.map(|s| format!(".{}", s)).unwrap_or_default(),
-                    agent_id,
-                    project_id
-                );
-                let updated = LifecycleStateRow {
-                    active_agent_id: Some(agent_id),
-                    ..new_state.clone()
-                };
-                state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
-                updated
-            }
-            Err(e) => {
-                eprintln!(
-                    "[lifecycle] Failed to spawn step {} agent for '{}': {}",
-                    next_step, project_id, e
-                );
-                new_state
-            }
-        }
-    } else {
-        new_state
-    };
+            substep.map(|s| format!(".{}", s)).unwrap_or_default(),
+            project_id
+        );
+        app.emit("lifecycle:status", serde_json::json!({
+            "projectId": project_id,
+            "step": next_step,
+            "substep": substep,
+            "status": "running",
+        })).ok();
+    }
 
-    Ok(LifecycleStatus::from(final_state))
+    Ok(LifecycleStatus::from(new_state))
 }
 
 /// Submit rework items from the human after a Step 4 PM review decision of "rework".
@@ -728,7 +614,7 @@ pub fn submit_rework_items(
             "[lifecycle] submit_rework_items: empty items for '{}' — skipping to step 6",
             project_id
         );
-        return handle_step5_skip(&project_id, current, &project_state, &agent_state, &app_handle);
+        return handle_step5_skip(&project_id, current, &project_state, &app_handle);
     }
 
     // Store rework_items and transition to substep="rework-planning"
@@ -787,14 +673,12 @@ fn handle_step5_skip(
     project_id: &str,
     current: LifecycleStateRow,
     state: &ProjectState,
-    agent_state: &crate::agents::AgentState,
     app: &AppHandle,
 ) -> Result<LifecycleStatus, String> {
     eprintln!(
         "[lifecycle] '{}' step 5 skip — advancing to step 6",
         project_id
     );
-    let stage_num = current.stage_number.unwrap_or(1);
     let next_state = LifecycleStateRow {
         project_id: project_id.to_string(),
         step: 6,
@@ -810,37 +694,18 @@ fn handle_step5_skip(
     };
     state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
 
-    // bp6-ims.11: spawn validity-analyst
-    let validity_prompt = format!(
-        "Perform the validity check for Stage {}. Review the CONOPS and all guardrail documents against what was built this stage. Produce phase-{}-validity.md.",
-        stage_num, stage_num
+    // bp6-khw: Step 6 is now API-driven. Emit lifecycle:status so the frontend
+    // starts the validity-analyst conversation.
+    eprintln!(
+        "[lifecycle] (step5-skip) Advancing to step 6.validity for project='{}' [API-driven, no PTY]",
+        project_id
     );
-    let project_dir = state.active_dir_str();
-    match spawn_step_agent_with_prompt(
-        project_id,
-        "validity-analyst",
-        &validity_prompt,
-        project_dir.as_deref(),
-        state,
-        agent_state,
-        app,
-    ) {
-        Ok(validity_agent_id) => {
-            eprintln!(
-                "[lifecycle] (step5-skip) Spawned validity-analyst agent={} for project='{}' stage={}",
-                validity_agent_id, project_id, stage_num
-            );
-            let updated = LifecycleStateRow {
-                active_agent_id: Some(validity_agent_id),
-                ..next_state.clone()
-            };
-            state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
-            return Ok(LifecycleStatus::from(updated));
-        }
-        Err(e) => {
-            eprintln!("[lifecycle] Failed to spawn validity-analyst for '{}': {}", project_id, e);
-        }
-    }
+    app.emit("lifecycle:status", serde_json::json!({
+        "projectId": project_id,
+        "step": 6,
+        "substep": "validity",
+        "status": "running",
+    })).ok();
     Ok(LifecycleStatus::from(next_state))
 }
 
@@ -1008,80 +873,6 @@ fn spawn_step_agent(
     // 2. Get artefacts produced so far (steps < current step)
     let artefacts = project_state.with_active(|store, pid| {
         store.get_artefacts_for_step(pid, step)
-    })?;
-
-    // 3. Build artefact context string
-    let artefact_context = DagStore::build_artefact_context(&artefacts);
-
-    // 4. Build skill prompt
-    let project_dir_buf = project_dir.map(PathBuf::from);
-    let skill_prompt = build_skills_prompt(
-        &[skill_id.to_string()],
-        app,
-        project_dir_buf.as_deref(),
-    );
-
-    // 5. Compose agent prompt
-    let prompt = if artefact_context.is_empty() {
-        format!(
-            "{}\n\n---\nProject ID: {}\nLifecycle Step: {}\n\nBegin your analysis.",
-            skill_prompt, project_id, step_key
-        )
-    } else {
-        format!(
-            "{}\n\n---\n## Prior Artefacts\n\n{}\n\n---\nProject ID: {}\nLifecycle Step: {}\n\nUsing the prior artefacts as context, begin your analysis.",
-            skill_prompt, artefact_context, project_id, step_key
-        )
-    };
-
-    // 6. Spawn the agent
-    let spawned = spawn_agent_internal(
-        SpawnAgentParams {
-            cmd: "claude".to_string(),
-            args: vec![prompt],
-            env: None,
-            agent_id: None,
-            workflow_id: Some(project_id.to_string()),
-            node_id: None,
-            workflow_type: Some(format!("lifecycle-step-{}", step_key)),
-            session_id: None,
-            resume: false,
-            cwd: project_dir.map(|s| s.to_string()),
-        },
-        app,
-        agent_state,
-    )?;
-
-    Ok(spawned.agent_id)
-}
-
-/// Like `spawn_step_agent` but allows specifying an explicit `artefact_step`
-/// for the `get_artefacts_for_step` query. This is needed for step 2 substep
-/// "review" where the EM needs artefacts from steps 1 AND 2 (so artefact_step=3).
-fn spawn_step_agent_with_artefact_step(
-    project_id: &str,
-    step: u32,
-    substep: Option<&str>,
-    artefact_step: u32,
-    project_dir: Option<&str>,
-    project_state: &ProjectState,
-    agent_state: &AgentState,
-    app: &AppHandle,
-) -> Result<String, String> {
-    // 1. Look up skill_id from STEP_SPECIALIST_MAP
-    let step_key = match substep {
-        Some(sub) => format!("{}.{}", step, sub),
-        None => step.to_string(),
-    };
-    let skill_id = STEP_SPECIALIST_MAP
-        .iter()
-        .find(|(k, _)| *k == step_key.as_str())
-        .map(|(_, v)| *v)
-        .ok_or_else(|| format!("No skill mapped for step {}", step_key))?;
-
-    // 2. Get artefacts produced so far (steps < artefact_step)
-    let artefacts = project_state.with_active(|store, pid| {
-        store.get_artefacts_for_step(pid, artefact_step)
     })?;
 
     // 3. Build artefact context string

@@ -4,10 +4,11 @@
  * Per-agent real-time view. Subscribes to workflow:status and agent:stdout
  * events (ready for Phase 3). Shows live stdout stream, current step, elapsed time.
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { workflowsListAtom, agentStdoutAtom, selectedNodeIdAtom } from "../store/dag";
+import { workflowsListAtom, selectedNodeIdAtom } from "../store/dag";
 import type { WorkflowInfo } from "../types";
+import { XtermPane } from "./XtermPane";
 
 function elapsed(startedAt: string | undefined): string {
   if (!startedAt) return "";
@@ -30,10 +31,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 function AgentPanel({ workflow }: { workflow: WorkflowInfo }) {
-  const agentStdout = useAtomValue(agentStdoutAtom);
   const setSelectedNodeId = useSetAtom(selectedNodeIdAtom);
-  const lines = agentStdout.get(workflow.workflowId) ?? [];
-  const logRef = useRef<HTMLDivElement>(null);
   const [, setTick] = useState(0);
 
   // Re-render elapsed every 5s
@@ -41,13 +39,6 @@ function AgentPanel({ workflow }: { workflow: WorkflowInfo }) {
     const id = setInterval(() => setTick((t) => t + 1), 5000);
     return () => clearInterval(id);
   }, []);
-
-  // Auto-scroll stdout
-  useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [lines.length]);
 
   const dotColor = STATUS_COLORS[workflow.status] ?? "var(--text-placeholder)";
 
@@ -93,26 +84,8 @@ function AgentPanel({ workflow }: { workflow: WorkflowInfo }) {
         </div>
       </div>
 
-      {/* Stdout stream */}
-      <div
-        ref={logRef}
-        className="mono"
-        style={{
-          overflow: "auto", background: "#0D1117", color: "#3FB950",
-          fontSize: 11, padding: "10px 14px", minHeight: 100, maxHeight: 180,
-          lineHeight: 1.6,
-        }}
-      >
-        {lines.length === 0 ? (
-          <span style={{ color: "#3D444D" }}>waiting for output…</span>
-        ) : (
-          lines.map((l, i) => (
-            <div key={i} style={{ whiteSpace: "pre-wrap", wordBreak: "break-all" }}>
-              {l.line}
-            </div>
-          ))
-        )}
-      </div>
+      {/* Stdout stream — rendered via xterm.js for ANSI colour/cursor support */}
+      <XtermPane workflowId={workflow.workflowId} height={280} />
     </div>
   );
 }

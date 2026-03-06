@@ -12,10 +12,11 @@ use tauri::Manager;
 use advisor::{confirm_advisor_session, start_advisor_query, send_advisor_message, reset_advisor_session, get_advisor_state};
 use agents::{kill_agent, spawn_agent, stop_agent_graceful, write_to_agent, AgentState};
 use project::{
-    close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
-    get_artefacts_for_step, get_provenance, get_snapshot, get_stage_metrics, list_open_projects,
-    list_queue_items, load_app_state, open_project, probe_node, promote_skill, redirect_workflow,
-    resolve_queue_item, save_app_state, stop_workflow, switch_project, update_node, ProjectState,
+    close_project, create_edge, create_lifecycle_artifact, create_node, create_queue_item,
+    delete_edge, delete_node, get_anthropic_api_key, get_artefacts_for_step, get_conversation_context,
+    get_provenance, get_snapshot, get_stage_metrics, list_open_projects, list_queue_items,
+    load_app_state, open_project, probe_node, promote_skill, redirect_workflow, resolve_queue_item,
+    save_app_state, stop_workflow, switch_project, update_node, ProjectState,
 };
 use lifecycle::{approve_lifecycle_step, get_lifecycle_status, spawn_lifecycle_service, start_lifecycle, submit_rework_items};
 use queue_service::spawn_queue_service;
@@ -126,6 +127,9 @@ pub fn run() {
             confirm_advisor_session,
             get_stage_metrics,
             promote_skill,
+            get_anthropic_api_key,
+            create_lifecycle_artifact,
+            get_conversation_context,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");

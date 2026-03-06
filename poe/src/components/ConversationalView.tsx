@@ -1,16 +1,21 @@
 /**
- * bp6-ims.9: ConversationalView
+ * bp6-41g: ConversationalView
  *
  * Chat interface for lifecycle Steps 1-3 and Step 6 review.
- * Subscribes to agent:stdout events filtered by activeAgentId.
+ * Uses the Claude API directly (via useConversation) instead of a PTY agent.
  * Supports artifact approval and revision request flows.
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { useAtomValue } from "jotai";
 import { nodesAtom } from "../store/dag";
-import type { AgentStdoutLine, LifecycleStatus, DagNode } from "../types";
+import type { LifecycleStatus, DagNode } from "../types";
+import {
+  useConversation,
+  type ConversationMessage,
+  type ArtifactEvent,
+  type DecisionEvent,
+} from "../hooks/useConversation";
 
 // ── Step label map ────────────────────────────────────────────────────────────
 
@@ -30,12 +35,24 @@ function stepLabel(status: LifecycleStatus): string {
   return `Step ${step}`;
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Skill ID lookup ───────────────────────────────────────────────────────────
 
-interface ChatMessage {
-  role: "user" | "agent";
-  content: string;
-  ts: string;
+const STEP_SPECIALIST_MAP: Record<string, string> = {
+  "1": "operational-analyst",
+  "2.1": "architecture-analyst",
+  "2.2": "design-system-analyst",
+  "2.3": "user-analyst",
+  "2.4": "must-not-analyst",
+  "2.review": "engineering-manager",
+  "3": "product-manager",
+  "6.validity": "validity-analyst",
+  "6.rca": "rca-analyst",
+};
+
+function resolveSkillId(lifecycleStatus: LifecycleStatus): string {
+  const { step, substep } = lifecycleStatus;
+  const key = substep ? `${step}.${substep}` : String(step);
+  return STEP_SPECIALIST_MAP[key] ?? `step-${step}`;
 }
 
 // ── StatusBanner ──────────────────────────────────────────────────────────────
@@ -109,25 +126,39 @@ function StatusBanner({
 
 function ArtifactCard({
   node,
+  pendingArtifact,
   projectId,
   step,
-  agentId,
+  onRevisionSend,
 }: {
-  node: DagNode;
+  node: DagNode | null;
+  pendingArtifact: ArtifactEvent | null;
   projectId: string;
   step: number;
-  agentId: string | null;
+  onRevisionSend: (text: string) => Promise<void>;
 }) {
   const [revisionMode, setRevisionMode] = useState(false);
   const [revisionText, setRevisionText] = useState("");
   const [approving, setApproving] = useState(false);
   const [sendingRevision, setSendingRevision] = useState(false);
 
-  const title = typeof node.data.title === "string" ? node.data.title : node.id.slice(0, 12);
-  const content =
-    typeof node.data.content === "string"
-      ? node.data.content.slice(0, 500)
-      : JSON.stringify(node.data).slice(0, 500);
+  // Display from DAG node if available, otherwise from pendingArtifact
+  const title =
+    node != null
+      ? typeof node.data.title === "string"
+        ? node.data.title
+        : node.id.slice(0, 12)
+      : (pendingArtifact?.title ?? "Artifact");
+
+  const rawContent =
+    node != null
+      ? typeof node.data.content === "string"
+        ? node.data.content
+        : JSON.stringify(node.data)
+      : (pendingArtifact?.content ?? "");
+
+  const content = rawContent.slice(0, 500);
+  const truncated = rawContent.length > 500;
 
   const handleApprove = async () => {
     setApproving(true);
@@ -141,10 +172,10 @@ function ArtifactCard({
   };
 
   const handleRevision = async () => {
-    if (!revisionText.trim() || !agentId) return;
+    if (!revisionText.trim()) return;
     setSendingRevision(true);
     try {
-      await invoke("write_to_agent", { agentId, input: revisionText.trim() + "\n" });
+      await onRevisionSend(revisionText.trim());
       setRevisionText("");
       setRevisionMode(false);
     } catch (err) {
@@ -192,7 +223,7 @@ function ArtifactCard({
         }}
       >
         {content}
-        {typeof node.data.content === "string" && node.data.content.length > 500 && "…"}
+        {truncated && "…"}
       </pre>
 
       {revisionMode ? (
@@ -207,8 +238,8 @@ function ArtifactCard({
           />
           <div style={{ display: "flex", gap: 6 }}>
             <button
-              onClick={handleRevision}
-              disabled={sendingRevision || !revisionText.trim() || !agentId}
+              onClick={() => void handleRevision()}
+              disabled={sendingRevision || !revisionText.trim()}
               className="mac-btn mac-btn-primary"
               style={{ flex: 1, justifyContent: "center", fontSize: 11, padding: "5px 10px" }}
             >
@@ -227,7 +258,7 @@ function ArtifactCard({
       ) : (
         <div style={{ display: "flex", gap: 6 }}>
           <button
-            onClick={handleApprove}
+            onClick={() => void handleApprove()}
             disabled={approving}
             className="mac-btn mac-btn-primary"
             style={{ flex: 1, justifyContent: "center", fontSize: 11, padding: "5px 10px" }}
@@ -253,7 +284,7 @@ function ChatMessages({
   messages,
   isResponding,
 }: {
-  messages: ChatMessage[];
+  messages: ConversationMessage[];
   isResponding: boolean;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -297,7 +328,7 @@ function ChatMessages({
               padding: "8px 12px",
               borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
               background: msg.role === "user" ? "var(--accent)" : "var(--content-secondary-bg)",
-              border: msg.role === "agent" ? "1px solid var(--border)" : "none",
+              border: msg.role === "assistant" ? "1px solid var(--border)" : "none",
               fontSize: 12,
               lineHeight: 1.6,
               color: msg.role === "user" ? "#fff" : "var(--text-primary)",
@@ -426,110 +457,69 @@ export function ConversationalView({
   lifecycleStatus,
   onStartLifecycle,
 }: ConversationalViewProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isResponding, setIsResponding] = useState(false);
-  const responseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nodes = useAtomValue(nodesAtom);
+  const { status, step } = lifecycleStatus;
 
-  const { activeAgentId, status } = lifecycleStatus;
+  const skillId = resolveSkillId(lifecycleStatus);
 
-  // Find latest KnowledgeArtifact node for this project
+  const handleDecision = (_event: DecisionEvent) => {
+    // Decision items surface in the queue panel; no local UI action needed here.
+  };
+
+  const handleDone = () => {
+    // The agent has finished talking. The user still presses Approve explicitly.
+    // Nothing to do here — the lifecycleStatus.status will update via DAG events.
+  };
+
+  const { messages, streaming, pendingArtifact, apiKeyError, sendMessage, clearPendingArtifact } =
+    useConversation(projectId, step, skillId, handleDecision, handleDone);
+
+  // Find latest KnowledgeArtifact node for this project (from DAG)
   const artifactNode: DagNode | undefined = Array.from(nodes.values())
     .filter((n) => n.nodeType === "KnowledgeArtifact" && n.projectId === projectId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 
-  // Subscribe to agent stdout for the active agent
-  useEffect(() => {
-    if (!activeAgentId) return;
-
-    let unlistenFn: (() => void) | null = null;
-
-    listen<AgentStdoutLine>("agent:stdout", (event) => {
-      // Filter to only lines from the active agent (workflowId matches agentId convention)
-      if (event.payload.workflowId !== activeAgentId) return;
-
-      const line = event.payload.line;
-
-      // Filter poe: control lines
-      if (line.startsWith("poe:")) {
-        if (line.startsWith("poe:done")) {
-          setIsResponding(false);
-          if (responseTimerRef.current) clearTimeout(responseTimerRef.current);
-        }
-        return;
-      }
-
-      setIsResponding(true);
-
-      setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "agent") {
-          return [
-            ...prev.slice(0, -1),
-            { ...last, content: last.content + (last.content ? "\n" : "") + line },
-          ];
-        }
-        return [
-          ...prev,
-          { role: "agent", content: line, ts: new Date().toISOString() },
-        ];
-      });
-
-      // Reset done-detection timer (3s silence = done)
-      if (responseTimerRef.current) clearTimeout(responseTimerRef.current);
-      responseTimerRef.current = setTimeout(() => {
-        setIsResponding(false);
-      }, 3000);
-    }).then((fn) => {
-      unlistenFn = fn;
-    });
-
-    return () => {
-      unlistenFn?.();
-      if (responseTimerRef.current) clearTimeout(responseTimerRef.current);
-    };
-  }, [activeAgentId]);
-
-  // Reset messages when the active agent changes
-  useEffect(() => {
-    setMessages([]);
-    setIsResponding(false);
-  }, [activeAgentId]);
-
-  const handleSend = useCallback(
-    async (text: string) => {
-      if (!activeAgentId || status !== "running") return;
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "user", content: text, ts: new Date().toISOString() },
-      ]);
-
-      try {
-        await invoke("write_to_agent", { agentId: activeAgentId, input: text + "\n" });
-      } catch (err) {
-        console.error("write_to_agent error:", err);
-        setMessages((prev) => [
-          ...prev,
-          { role: "agent", content: `Error sending message: ${err}`, ts: new Date().toISOString() },
-        ]);
-      }
-    },
-    [activeAgentId, status]
-  );
-
   const showArtifactCard =
-    artifactNode !== undefined &&
+    (artifactNode !== undefined || pendingArtifact !== null) &&
     (status === "awaiting_approval" || status === "running");
 
-  const showApprovalBanner =
-    status === "awaiting_approval" && !showArtifactCard;
+  const showApprovalBanner = status === "awaiting_approval" && !showArtifactCard;
 
-  const inputDisabled = status !== "running" || !activeAgentId;
+  const inputDisabled = streaming || status === "complete";
+
+  const handleRevisionSend = async (text: string) => {
+    await sendMessage(text);
+  };
+
+  const handleSend = (text: string) => {
+    if (pendingArtifact) clearPendingArtifact();
+    void sendMessage(text);
+  };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <StatusBanner lifecycleStatus={lifecycleStatus} onStartLifecycle={onStartLifecycle} />
+
+      {/* API key error banner */}
+      {apiKeyError && (
+        <div
+          style={{
+            background: "var(--status-error-bg, #2d0a0a)",
+            borderBottom: "1px solid var(--status-error, #e05252)",
+            padding: "8px 16px",
+            fontSize: 12,
+            color: "var(--status-error, #e05252)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>API key missing</span>
+          <span style={{ color: "var(--text-secondary)" }}>
+            — Set ANTHROPIC_API_KEY environment variable and restart the app.
+          </span>
+        </div>
+      )}
 
       {/* Approval banner when awaiting but no artifact card */}
       {showApprovalBanner && (
@@ -553,15 +543,16 @@ export function ConversationalView({
       )}
 
       {/* Chat messages fill available space */}
-      <ChatMessages messages={messages} isResponding={isResponding} />
+      <ChatMessages messages={messages} isResponding={streaming} />
 
       {/* Artifact approval card */}
-      {showArtifactCard && artifactNode && (
+      {showArtifactCard && (
         <ArtifactCard
-          node={artifactNode}
+          node={artifactNode ?? null}
+          pendingArtifact={pendingArtifact}
           projectId={projectId}
-          step={lifecycleStatus.step}
-          agentId={activeAgentId}
+          step={step}
+          onRevisionSend={handleRevisionSend}
         />
       )}
 
