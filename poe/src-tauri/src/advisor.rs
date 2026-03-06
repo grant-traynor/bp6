@@ -38,16 +38,6 @@ pub struct AdvisorStateResult {
 
 // ── Context assembler (bp6-coj.2) ─────────────────────────────────────────────
 
-/// Lifecycle step names indexed by step number.
-const STEP_NAMES: [&str; 7] = [
-    "Idle",
-    "Concept Development",
-    "Guardrails Definition",
-    "Stage Planning",
-    "Autonomous Execution",
-    "Rework",
-    "Replanning & QA",
-];
 
 /// Build a structured markdown block describing current project state.
 /// Injected as a context prefix on every advisor turn so the advisor always
@@ -59,23 +49,9 @@ pub fn build_advisor_context(store: &DagStore, project_id: &str, agent_state: &A
     let mut out = format!("## Project State — {ts}\n\n");
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
-    match store.get_lifecycle_state(project_id) {
-        Ok(state) => {
-            let name = STEP_NAMES.get(state.step as usize).copied().unwrap_or("Unknown");
-            let substep = state
-                .substep
-                .as_deref()
-                .map(|s| format!(" — {s}"))
-                .unwrap_or_default();
-            out.push_str(&format!(
-                "**Lifecycle**: Step {} — {}{} ({})\n\n",
-                state.step, name, substep, state.status
-            ));
-        }
-        Err(_) => {
-            out.push_str("**Lifecycle**: Not yet initialised\n\n");
-        }
-    }
+    // bp6-1vf: Lifecycle state is now owned by Restate durable workflow.
+    // Sync context cannot await HTTP — omit lifecycle detail from advisor context.
+    out.push_str("**Lifecycle**: Managed by Restate (query via get_lifecycle_status)\n\n");
 
     // ── DAG summary ────────────────────────────────────────────────────────────
     if let Ok(snapshot) = store.snapshot(project_id) {

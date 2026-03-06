@@ -1,5 +1,6 @@
 pub mod advisor;
 pub mod agents;
+pub mod conversation;
 pub mod dag;
 pub mod lifecycle;
 pub mod project;
@@ -11,9 +12,10 @@ use tauri::Manager;
 
 use advisor::{confirm_advisor_session, start_advisor_query, send_advisor_message, reset_advisor_session, get_advisor_state};
 use agents::{kill_agent, spawn_agent, stop_agent_graceful, write_to_agent, AgentState};
+use conversation::{start_conversation_turn, continue_conversation_turn};
 use project::{
     close_project, create_edge, create_lifecycle_artifact, create_node, create_queue_item,
-    delete_edge, delete_node, get_anthropic_api_key, get_artefacts_for_step, get_conversation_context,
+    delete_edge, delete_node, get_artefacts_for_step,
     get_provenance, get_snapshot, get_stage_metrics, list_open_projects, list_queue_items,
     load_app_state, open_project, probe_node, promote_skill, redirect_workflow, resolve_queue_item,
     save_app_state, stop_workflow, switch_project, update_node, ProjectState,
@@ -66,8 +68,24 @@ pub fn run() {
             // Spawn POE queue service (Restate virtual object HTTP server on port 9082)
             spawn_queue_service(app.handle().clone());
 
-            // Spawn lifecycle service (Restate SDK HTTP endpoint on port 9083)
-            spawn_lifecycle_service();
+            // Spawn lifecycle workflow (Restate durable workflow HTTP endpoint on port 9083)
+            spawn_lifecycle_service(app.handle().clone());
+
+            // Register lifecycle workflow endpoint with Restate admin API
+            // Small delay allows the HTTP server to start before registration
+            tauri::async_runtime::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                let client = reqwest::Client::new();
+                match client
+                    .post("http://localhost:9070/deployments")
+                    .json(&serde_json::json!({"uri": "http://localhost:9083"}))
+                    .send()
+                    .await
+                {
+                    Ok(_) => eprintln!("✅ Lifecycle workflow registered with Restate"),
+                    Err(e) => eprintln!("⚠️  Lifecycle workflow registration failed: {}", e),
+                }
+            });
 
             Ok(())
         })
@@ -127,9 +145,9 @@ pub fn run() {
             confirm_advisor_session,
             get_stage_metrics,
             promote_skill,
-            get_anthropic_api_key,
             create_lifecycle_artifact,
-            get_conversation_context,
+            start_conversation_turn,
+            continue_conversation_turn,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");

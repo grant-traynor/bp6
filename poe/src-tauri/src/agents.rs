@@ -1171,644 +1171,104 @@ fn handle_poe_done(
     }
 }
 
-/// bp6-ims.5 + bp6-ims.8: Handle poe:done for a lifecycle step agent (no node_id).
+/// bp6-1vf: Handle poe:done for a lifecycle step agent (no node_id).
 ///
-/// For normal lifecycle steps (1, 2, 3, 5, 6): transitions state to awaiting_approval.
-/// For step 4 task agents: decrements active_task_agent_ids, spawns newly-ready tasks,
-///   and triggers PM review when all tasks complete.
-/// For step 4 PM review (substep="pm-review"): sets awaiting_approval gate.
+/// With Restate owning lifecycle state, this function resolves the appropriate
+/// Restate promise to unblock the workflow's run handler:
+///
+/// - Step 3 PM agent done → resolve "step-3-done"
+/// - Step 4/5 task agent done → resolve "task-{task_id}-done" (routed by workflow_type)
+/// - Step 5 rework-planning PM done → resolve "step-5-planning-done"
+///
+/// The Restate workflow run handler then decides what to do next (fan-out, etc.).
 fn handle_lifecycle_poe_done(
     app: &AppHandle,
     agent_id: &str,
     project_id: &str,
     done: PoeDone,
 ) {
-    use crate::dag::LifecycleStateRow;
-
     eprintln!(
         "[lifecycle] poe:done for lifecycle agent_id={} project='{}': {}",
         agent_id, project_id, done.summary
     );
 
-    let project_state = app.state::<ProjectState>();
-    let agent_state_handle = app.state::<AgentState>();
-
-    // ── Step 4 or Step 5: task agent fan-in check ───────────────────────────
-
-    let exec_task_id: Option<(u32, String)> = project_state.with_active(|store, _| {
-        let current = store.get_lifecycle_state(project_id)?;
-        if (current.step != 4 && current.step != 5) || current.status != "running" {
-            return Ok(None);
-        }
-        let active_map: HashMap<String, String> = current
-            .active_task_agent_ids
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
-        Ok(active_map.get(agent_id).cloned().map(|t| (current.step, t)))
-    }).unwrap_or(None);
-
-    if let Some((exec_step, task_id)) = exec_task_id {
-        handle_step4_task_done(app, agent_id, &task_id, project_id, exec_step, &done, &project_state, &agent_state_handle);
-        return;
-    }
-
-    // ── Step 4: PM review completion check ──────────────────────────────────
-
-    let is_pm_review = project_state.with_active(|store, _| {
-        let current = store.get_lifecycle_state(project_id)?;
-        Ok(current.step == 4
-            && current.substep.as_deref() == Some("pm-review")
-            && current.active_agent_id.as_deref() == Some(agent_id))
-    }).unwrap_or(false);
-
-    if is_pm_review {
-        eprintln!(
-            "[lifecycle] Step 4 PM review done for '{}' — status → awaiting_approval",
-            project_id
-        );
-        let _ = project_state.with_active(|store, _| {
-            let current = store.get_lifecycle_state(project_id)?;
-            let updated = LifecycleStateRow {
-                status: "awaiting_approval".to_string(),
-                active_agent_id: Some(agent_id.to_string()),
-                ..current
-            };
-            store.upsert_lifecycle_state(&updated)
-        });
-        let _ = app.emit(
-            "lifecycle:status",
-            serde_json::json!({
-                "projectId": project_id,
-                "agentId": agent_id,
-                "status": "awaiting_approval",
-                "substep": "pm-review",
-                "summary": done.summary,
-            }),
-        );
-        return;
-    }
-
-    // ── Step 5: rework-planning PM agent completion check ───────────────────
-
-    let is_rework_planning = project_state.with_active(|store, _| {
-        let current = store.get_lifecycle_state(project_id)?;
-        Ok(current.step == 5
-            && current.substep.as_deref() == Some("rework-planning")
-            && current.active_agent_id.as_deref() == Some(agent_id))
-    }).unwrap_or(false);
-
-    if is_rework_planning {
-        eprintln!(
-            "[lifecycle] Step 5 rework-planning PM done for '{}' — collecting rework tasks and fanning out",
-            project_id
-        );
-        // Collect all Task nodes created since last step, excluding already-completed tasks
-        let rework_task_ids: Result<Vec<String>, String> = project_state.with_active(|store, pid| {
-            let current = store.get_lifecycle_state(pid)?;
-            let already_completed: Vec<String> = current
-                .completed_task_ids
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_default();
-            let all_tasks = store.get_task_nodes_for_project(pid)?;
-            // Rework tasks are those not yet in the completed set
-            let new_task_ids: Vec<String> = all_tasks
-                .iter()
-                .map(|n| n.id.clone())
-                .filter(|id| !already_completed.contains(id))
-                .collect();
-            Ok(new_task_ids)
-        });
-
-        let new_task_ids = match rework_task_ids {
-            Ok(ids) => ids,
-            Err(e) => {
-                eprintln!("[lifecycle] Step 5 rework-planning: failed to collect tasks for '{}': {}", project_id, e);
-                return;
-            }
-        };
-
-        eprintln!(
-            "[lifecycle] Step 5 rework-planning: {} new rework task(s) for '{}'",
-            new_task_ids.len(), project_id
-        );
-
-        // Append new task IDs to stage_task_ids and reset tracking for step 5 execution
-        let updated_task_ids_json: Option<String> = {
-            let prior: Vec<String> = project_state.with_active(|store, _| {
-                let current = store.get_lifecycle_state(project_id)?;
-                Ok(current.stage_task_ids
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str(s).ok())
-                    .unwrap_or_default())
-            }).unwrap_or_default();
-            let mut combined = prior;
-            for id in &new_task_ids {
-                if !combined.contains(id) {
-                    combined.push(id.clone());
+    // Determine which promise to resolve from the agent's workflow_type
+    let promise_name: Option<String> = {
+        let agent_state = app.state::<AgentState>();
+        let guard = agent_state.handles.lock().unwrap_or_else(|e| e.into_inner());
+        guard.get(agent_id).and_then(|handle| {
+            handle.workflow_type.as_deref().map(|wt| {
+                if wt.starts_with("lifecycle-step-4-task-") || wt.starts_with("lifecycle-step-5-task-") {
+                    // Extract task_id from workflow_type: "lifecycle-step-4-task-{task_id}"
+                    let task_id = wt
+                        .trim_start_matches("lifecycle-step-4-task-")
+                        .trim_start_matches("lifecycle-step-5-task-");
+                    format!("task-{}-done", task_id)
+                } else if wt == "lifecycle-product-manager-review" || wt.contains("pm-review") {
+                    "step-5-planning-done".to_string()
+                } else if wt.contains("lifecycle-step-3") || wt == "lifecycle-product-manager-review"
+                    || wt == "lifecycle-3-review"
+                {
+                    "step-3-done".to_string()
+                } else {
+                    // Generic: resolve step-3-done (step 3 PM agent is the only PTY lifecycle agent)
+                    "step-3-done".to_string()
                 }
-            }
-            serde_json::to_string(&combined).ok()
-        };
+            })
+        })
+    };
 
-        let _ = project_state.with_active(|store, _| {
-            let current = store.get_lifecycle_state(project_id)?;
-            let updated = LifecycleStateRow {
-                substep: Some("execution".to_string()),
-                status: "running".to_string(),
-                stage_task_ids: updated_task_ids_json.clone(),
-                active_task_agent_ids: Some("{}".to_string()),
-                active_agent_id: None,
-                ..current
-            };
-            store.upsert_lifecycle_state(&updated)
-        });
-
-        // Fan-out: spawn execution workflow for the new rework tasks
-        let project_id_str = project_id.to_string();
-        let new_task_ids_json = serde_json::to_string(&new_task_ids).ok();
-        let app_clone = app.clone();
-        tauri::async_runtime::spawn(async move {
-            let project_state = app_clone.state::<ProjectState>();
-            let agent_state = app_clone.state::<AgentState>();
-            if let Err(e) = crate::lifecycle::spawn_execution_workflow(
-                &project_id_str,
-                new_task_ids_json.as_deref(),
-                &project_state,
-                &agent_state,
-                &app_clone,
-            ).await {
-                eprintln!("[lifecycle] Step 5 spawn_execution_workflow error for '{}': {}", project_id_str, e);
-            }
-        });
-
-        let _ = app.emit(
-            "lifecycle:status",
-            serde_json::json!({
-                "projectId": project_id,
-                "agentId": agent_id,
-                "status": "running",
-                "substep": "execution",
-                "summary": done.summary,
-            }),
-        );
-        return;
-    }
-
-    // ── Step 6: validity-analyst or rca-analyst completion ───────────────────
-    // bp6-khw: Step 6 is now API-driven (no PTY agent spawned). This branch is dead
-    // code — active_agent_id is None for step 6, so the check will never match.
-    // Kept as a guard in case a legacy agent somehow fires poe:done for step 6.
-
-    let is_step6 = project_state.with_active(|store, _| {
-        let current = store.get_lifecycle_state(project_id)?;
-        Ok(current.step == 6 && current.active_agent_id.as_deref() == Some(agent_id))
-    }).unwrap_or(false);
-
-    if is_step6 {
-        // This path should no longer be triggered (step 6 is API-driven).
-        eprintln!(
-            "[lifecycle] poe:done from unexpected step 6 PTY agent={} for '{}' — ignoring (step 6 is now API-driven)",
-            agent_id, project_id
-        );
-        return;
-    }
-
-    // ── Normal lifecycle step completion (steps 3 and 5 rework-planning-loop) ─
-    // bp6-khw: Steps 1, 2, and 6 are now API-driven — no PTY agent is ever spawned
-    // for them, so active_agent_id will be None and the guard below will safely
-    // reject any stray poe:done.  Only step 3 (product-manager PTY) and step 5
-    // (rework-planning, handled above) reach this branch in normal operation.
-
-    let result: Result<(), String> = project_state.with_active(|store, _| {
-        let current = store.get_lifecycle_state(project_id)?;
-
-        // Only transition if this agent is the active one for this project
-        if current.active_agent_id.as_deref() != Some(agent_id) {
-            eprintln!(
-                "[lifecycle] poe:done: agent_id={} is not the active agent for '{}' (active={:?}) — ignoring",
-                agent_id, project_id, current.active_agent_id
-            );
-            return Ok(());
-        }
-
-        if current.status != "running" {
-            eprintln!(
-                "[lifecycle] poe:done: project='{}' not in 'running' status (was '{}') — ignoring",
-                project_id, current.status
-            );
-            return Ok(());
-        }
-
-        // For Step 3 (PM agent), collect all Task nodes and store their IDs
-        // so Step 4 fan-out knows which tasks to execute.
-        let stage_task_ids = if current.step == 3 {
-            match store.get_task_nodes_for_project(project_id) {
-                Ok(tasks) => {
-                    let ids: Vec<String> = tasks.iter().map(|n| n.id.clone()).collect();
-                    eprintln!(
-                        "[lifecycle] Step 3 poe:done for '{}': collected {} Task node(s)",
-                        project_id,
-                        ids.len()
-                    );
-                    match serde_json::to_string(&ids) {
-                        Ok(json) => Some(json),
-                        Err(e) => {
-                            eprintln!("[lifecycle] Failed to serialize task IDs for '{}': {}", project_id, e);
-                            None
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[lifecycle] Failed to query task nodes for '{}': {}", project_id, e);
-                    None
-                }
-            }
-        } else {
-            current.stage_task_ids.clone()
-        };
-
-        let updated = LifecycleStateRow {
-            status: "awaiting_approval".to_string(),
-            active_agent_id: Some(agent_id.to_string()),
-            stage_task_ids,
-            ..current
-        };
-        store.upsert_lifecycle_state(&updated)?;
-
-        eprintln!(
-            "[lifecycle] Step {} for '{}' complete — status → awaiting_approval",
-            current.step, project_id
-        );
-        Ok(())
-    });
-
-    if let Err(e) = result {
-        eprintln!(
-            "[lifecycle] Failed to update lifecycle state on poe:done for '{}': {}",
-            project_id, e
-        );
-    }
-
-    // Emit a lifecycle:status event so the frontend updates immediately
-    let _ = app.emit(
-        "lifecycle:status",
-        serde_json::json!({
-            "projectId": project_id,
-            "agentId": agent_id,
-            "status": "awaiting_approval",
-            "summary": done.summary,
-        }),
-    );
-}
-
-/// bp6-ims.8/bp6-ims.10: Handle a task agent completing in Step 4 or Step 5.
-///
-/// - Removes the agent from active_task_agent_ids.
-/// - Adds the task to completed_task_ids.
-/// - Spawns newly-ready tasks.
-/// - If step 4 and all tasks done: spawns the PM review agent.
-/// - If step 5 and all tasks done: advances to step 6 (TODO bp6-ims.11).
-fn handle_step4_task_done(
-    app: &AppHandle,
-    agent_id: &str,
-    task_id: &str,
-    project_id: &str,
-    current_step: u32,
-    done: &PoeDone,
-    project_state: &tauri::State<'_, ProjectState>,
-    agent_state: &tauri::State<'_, AgentState>,
-) {
-    use crate::dag::LifecycleStateRow;
-    use std::path::PathBuf;
+    // Determine promise name from the agent handle's workflow_type
+    // Fallback: use step-3-done for step 3 agents, task-{id}-done for task agents
+    let resolved_promise = promise_name.unwrap_or_else(|| "step-3-done".to_string());
 
     eprintln!(
-        "[lifecycle] Step {} task agent={} completed task='{}' for project='{}'",
-        current_step, agent_id, task_id, project_id
+        "[lifecycle] Resolving Restate promise '{}' for project='{}' agent={}",
+        resolved_promise, project_id, agent_id
     );
 
-    // Update tracking: remove from active, add to completed
-    let update_result: Result<(), String> = project_state.with_active(|store, _| {
-        let current = store.get_lifecycle_state(project_id)?;
+    let project_id_str = project_id.to_string();
+    let agent_id_str = agent_id.to_string();
+    let summary = done.summary.clone();
+    let app_clone = app.clone();
 
-        let mut active_map: HashMap<String, String> = current
-            .active_task_agent_ids
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
-        let mut completed: Vec<String> = current
-            .completed_task_ids
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
-
-        active_map.remove(agent_id);
-        if !completed.contains(&task_id.to_string()) {
-            completed.push(task_id.to_string());
-        }
-
-        let all_task_ids: Vec<String> = current
-            .stage_task_ids
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_default();
-
-        eprintln!(
-            "[lifecycle] Step {} progress for '{}': {}/{} tasks completed, {} active",
-            current_step, project_id, completed.len(), all_task_ids.len(), active_map.len()
+    tauri::async_runtime::spawn(async move {
+        let client = reqwest::Client::new();
+        let url = format!(
+            "{}/ProjectLifecycleWorkflow/{}/resolve_promise",
+            crate::lifecycle::RESTATE_INGRESS_URL,
+            project_id_str
         );
-
-        let updated = LifecycleStateRow {
-            completed_task_ids: serde_json::to_string(&completed).ok(),
-            active_task_agent_ids: serde_json::to_string(&active_map).ok(),
-            ..current
+        let payload = crate::lifecycle::ResolvePromisePayload {
+            promise_name: resolved_promise.clone(),
+            value: "done".to_string(),
         };
-        store.upsert_lifecycle_state(&updated)
+        match client.post(&url).json(&payload).send().await {
+            Ok(_) => eprintln!(
+                "[lifecycle] Resolved promise '{}' for project='{}'",
+                resolved_promise, project_id_str
+            ),
+            Err(e) => eprintln!(
+                "[lifecycle] Failed to resolve promise '{}' for project='{}': {}",
+                resolved_promise, project_id_str, e
+            ),
+        }
+
+        // Emit lifecycle:status so the frontend refreshes
+        let _ = app_clone.emit(
+            "lifecycle:status",
+            serde_json::json!({
+                "projectId": project_id_str,
+                "agentId": agent_id_str,
+                "status": "awaiting_approval",
+                "summary": summary,
+            }),
+        );
     });
-
-    if let Err(e) = update_result {
-        eprintln!("[lifecycle] Step {} task done: failed to update state for '{}': {}", current_step, project_id, e);
-        return;
-    }
-
-    let _ = app.emit(
-        "lifecycle:status",
-        serde_json::json!({
-            "projectId": project_id,
-            "agentId": agent_id,
-            "status": "running",
-            "taskCompleted": task_id,
-            "summary": done.summary,
-        }),
-    );
-
-    // Re-read state to determine next action
-    let state_snapshot: Result<(Vec<String>, Vec<String>, HashMap<String, String>), String> =
-        project_state.with_active(|store, _| {
-            let current = store.get_lifecycle_state(project_id)?;
-            let all = current.stage_task_ids.as_deref()
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_default();
-            let done_ids = current.completed_task_ids.as_deref()
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_default();
-            let active = current.active_task_agent_ids.as_deref()
-                .and_then(|s| serde_json::from_str(s).ok())
-                .unwrap_or_default();
-            Ok((all, done_ids, active))
-        });
-
-    let (all_task_ids, completed, mut active_map) = match state_snapshot {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[lifecycle] Step {} state re-read failed for '{}': {}", current_step, project_id, e);
-            return;
-        }
-    };
-
-    // Find newly-ready tasks not already running or done
-    let in_progress_or_done: Vec<String> = active_map.values().chain(completed.iter()).cloned().collect();
-    let newly_ready_result: Result<Vec<crate::dag::DagNode>, String> = project_state.with_active(|store, _| {
-        let candidates = store.get_ready_tasks(&all_task_ids, &completed)?;
-        Ok(candidates.into_iter().filter(|t| !in_progress_or_done.contains(&t.id)).collect())
-    });
-
-    let newly_ready = match newly_ready_result {
-        Ok(tasks) => tasks,
-        Err(e) => {
-            eprintln!("[lifecycle] Step 4 get_ready_tasks failed for '{}': {}", project_id, e);
-            return;
-        }
-    };
-
-    // Spawn newly-ready task agents
-    if !newly_ready.is_empty() {
-        let project_dir = project_state.active_dir_str();
-        let artefact_context = project_state.with_active(|store, pid| store.get_artefacts_for_step(pid, current_step))
-            .map(|a| crate::dag::DagStore::build_artefact_context(&a))
-            .unwrap_or_default();
-
-        for task in &newly_ready {
-            let task_title = task.data["title"].as_str().unwrap_or("Untitled Task");
-            let task_description = task.data["description"].as_str().unwrap_or("");
-            let skill_id = task.data["skill_id"].as_str().unwrap_or("poe-implementation");
-
-            let project_dir_buf = project_dir.as_deref().map(PathBuf::from);
-            let skill_prompt = crate::skills::build_skills_prompt(
-                &[skill_id.to_string()],
-                app,
-                project_dir_buf.as_deref(),
-            );
-
-            let prompt = if artefact_context.is_empty() {
-                format!(
-                    "{}\n\n---\n## Task\n\n**{}**\n\n{}\n\nProject ID: {}\n\nExecute this task.",
-                    skill_prompt, task_title, task_description, project_id
-                )
-            } else {
-                format!(
-                    "{}\n\n---\n## Prior Artefacts\n\n{}\n\n---\n## Task\n\n**{}**\n\n{}\n\nProject ID: {}\n\nUsing the prior artefacts as context, execute this task.",
-                    skill_prompt, artefact_context, task_title, task_description, project_id
-                )
-            };
-
-            match spawn_agent_internal(
-                SpawnAgentParams {
-                    cmd: "claude".to_string(),
-                    args: vec![prompt],
-                    env: None,
-                    agent_id: None,
-                    workflow_id: Some(project_id.to_string()),
-                    node_id: None,
-                    workflow_type: Some(format!("lifecycle-step-{}-task-{}", current_step, task.id)),
-                    session_id: None,
-                    resume: false,
-                    cwd: project_dir.clone(),
-                },
-                app,
-                agent_state,
-            ) {
-                Ok(spawned) => {
-                    eprintln!(
-                        "[lifecycle] Spawned newly-ready task agent={} for task='{}' project='{}'",
-                        spawned.agent_id, task.id, project_id
-                    );
-                    active_map.insert(spawned.agent_id, task.id.clone());
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[lifecycle] Failed to spawn newly-ready task agent for task='{}' project='{}': {}",
-                        task.id, project_id, e
-                    );
-                }
-            }
-        }
-
-        // Persist updated active map
-        let updated_active = serde_json::to_string(&active_map).unwrap_or_else(|_| "{}".to_string());
-        let _ = project_state.with_active(|store, _| {
-            let current = store.get_lifecycle_state(project_id)?;
-            let updated = LifecycleStateRow {
-                active_task_agent_ids: Some(updated_active.clone()),
-                ..current
-            };
-            store.upsert_lifecycle_state(&updated)
-        });
-        return; // More tasks running — wait for them to complete
-    }
-
-    // Fan-in: all tasks complete
-    if active_map.is_empty() && !all_task_ids.is_empty() && completed.len() >= all_task_ids.len() {
-        if current_step == 4 {
-            // Step 4: spawn PM review
-            eprintln!(
-                "[lifecycle] All {} tasks complete for '{}' (step 4) — initiating PM review",
-                all_task_ids.len(), project_id
-            );
-
-            let stage_num = project_state
-                .with_active(|store, _| {
-                    let current = store.get_lifecycle_state(project_id)?;
-                    Ok(current.stage_number.unwrap_or(1))
-                })
-                .unwrap_or(1);
-
-            // Record stage metrics for this completed execution stage
-            let _ = project_state.with_active(|store, pid| {
-                store.record_metric(pid, stage_num, 4, "tasks_total", all_task_ids.len() as f64)?;
-                store.record_metric(pid, stage_num, 4, "tasks_completed", completed.len() as f64)?;
-                store.record_metric(pid, stage_num, 4, "stage_number", stage_num as f64)?;
-                Ok(())
-            });
-
-            let pm_prompt = format!(
-                "Produce the Phase {} PM Review Report. Review all completed tasks, their outputs, and artefacts. Produce docs/phase-{}-review.md.",
-                stage_num, stage_num
-            );
-
-            let project_dir = project_state.active_dir_str();
-
-            match crate::lifecycle::spawn_step_agent_with_prompt(
-                project_id,
-                "product-manager",
-                &pm_prompt,
-                project_dir.as_deref(),
-                project_state,
-                agent_state,
-                app,
-            ) {
-                Ok(pm_agent_id) => {
-                    eprintln!(
-                        "[lifecycle] Spawned PM review agent={} for project='{}' stage={}",
-                        pm_agent_id, project_id, stage_num
-                    );
-                    let _ = project_state.with_active(|store, _| {
-                        let current = store.get_lifecycle_state(project_id)?;
-                        let updated = LifecycleStateRow {
-                            substep: Some("pm-review".to_string()),
-                            active_agent_id: Some(pm_agent_id.clone()),
-                            status: "running".to_string(),
-                            stage_number: Some(stage_num + 1),
-                            ..current
-                        };
-                        store.upsert_lifecycle_state(&updated)
-                    });
-                    let _ = app.emit(
-                        "lifecycle:status",
-                        serde_json::json!({
-                            "projectId": project_id,
-                            "agentId": pm_agent_id,
-                            "status": "running",
-                            "substep": "pm-review",
-                        }),
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[lifecycle] Failed to spawn PM review agent for '{}': {}",
-                        project_id, e
-                    );
-                }
-            }
-        } else {
-            // Step 5: all rework tasks complete → advance to step 6, spawn validity-analyst
-            eprintln!(
-                "[lifecycle] All {} rework tasks complete for '{}' (step 5) — advancing to step 6",
-                all_task_ids.len(), project_id
-            );
-            let step6_state_result = project_state.with_active(|store, _| {
-                let current = store.get_lifecycle_state(project_id)?;
-                let updated = LifecycleStateRow {
-                    step: 6,
-                    substep: Some("validity".to_string()),
-                    status: "running".to_string(),
-                    pending_approval_id: None,
-                    active_agent_id: None,
-                    active_task_agent_ids: None,
-                    rework_items: None,
-                    ..current
-                };
-                store.upsert_lifecycle_state(&updated)?;
-                Ok(updated)
-            });
-            if let Ok(step6_state) = step6_state_result {
-                let stage_num = step6_state.stage_number.unwrap_or(1);
-                let project_dir = project_state.active_dir_str();
-                let validity_prompt = format!(
-                    "Perform the validity check for Stage {}. Review the CONOPS and all guardrail documents against what was built this stage. Produce phase-{}-validity.md.",
-                    stage_num, stage_num
-                );
-                match crate::lifecycle::spawn_step_agent_with_prompt(
-                    project_id,
-                    "validity-analyst",
-                    &validity_prompt,
-                    project_dir.as_deref(),
-                    project_state,
-                    agent_state,
-                    app,
-                ) {
-                    Ok(validity_agent_id) => {
-                        eprintln!(
-                            "[lifecycle] Spawned validity-analyst agent={} for project='{}' stage={}",
-                            validity_agent_id, project_id, stage_num
-                        );
-                        let _ = project_state.with_active(|store, _| {
-                            let current = store.get_lifecycle_state(project_id)?;
-                            let updated = LifecycleStateRow {
-                                active_agent_id: Some(validity_agent_id.clone()),
-                                ..current
-                            };
-                            store.upsert_lifecycle_state(&updated)
-                        });
-                        let _ = app.emit(
-                            "lifecycle:status",
-                            serde_json::json!({
-                                "projectId": project_id,
-                                "agentId": validity_agent_id,
-                                "status": "running",
-                                "step": 6,
-                                "substep": "validity",
-                            }),
-                        );
-                    }
-                    Err(e) => {
-                        eprintln!("[lifecycle] Failed to spawn validity-analyst for '{}': {}", project_id, e);
-                        let _ = app.emit(
-                            "lifecycle:status",
-                            serde_json::json!({
-                                "projectId": project_id,
-                                "status": "running",
-                                "step": 6,
-                                "substep": "validity",
-                            }),
-                        );
-                    }
-                }
-            }
-        }
-    }
 }
+
+// bp6-1vf: handle_step4_task_done is removed — Restate workflow owns task tracking.
+// Task completion is handled in handle_lifecycle_poe_done via promise resolution.
 
 /// Fan-in gate: check all children of `parent_id` and complete/fail the parent
 /// if all children are in a terminal state.

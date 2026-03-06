@@ -209,34 +209,6 @@ pub struct WorkflowRecord {
     pub session_id: Option<String>,
 }
 
-// ── Lifecycle state ────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LifecycleStateRow {
-    pub project_id: String,
-    pub step: u32,
-    pub substep: Option<String>,
-    pub status: String,
-    pub pending_approval_id: Option<String>,
-    /// The agent_id of the currently running lifecycle step agent (if any).
-    pub active_agent_id: Option<String>,
-    /// JSON array of Task node IDs produced by the Step 3 PM agent.
-    /// Populated when step=3 poe:done fires; consumed by Step 4 execution fan-out.
-    pub stage_task_ids: Option<String>,
-    /// JSON array of task node IDs that have been completed by their task agents.
-    /// Populated incrementally as task agents emit poe:done in Step 4.
-    pub completed_task_ids: Option<String>,
-    /// JSON map of {agent_id: task_id} for currently running task agents in Step 4.
-    /// Used to route poe:done back to the correct task_id and detect fan-in.
-    pub active_task_agent_ids: Option<String>,
-    /// Which execution stage/phase we are on (default 1). Incremented before PM review.
-    pub stage_number: Option<i64>,
-    /// Freeform rework description submitted by the human after a Step 4 PM review.
-    /// Populated by submit_rework_items; consumed by the Step 5 PM rework-planning agent.
-    pub rework_items: Option<String>,
-}
-
 // ── Stage metric record ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -314,27 +286,14 @@ const MIGRATIONS: &[&str] = &[
     r#"SELECT 1;"#,
     // v5: claude session ID — removed in bp6-ims.1
     r#"SELECT 1;"#,
-    // v6: lifecycle state machine per project (bp6-ims.2)
-    r#"
-    CREATE TABLE IF NOT EXISTS lifecycle_state (
-        project_id          TEXT PRIMARY KEY,
-        step                INTEGER NOT NULL DEFAULT 0,
-        substep             TEXT,
-        status              TEXT NOT NULL DEFAULT 'idle',
-        pending_approval_id TEXT,
-        updated_at          TEXT NOT NULL
-    );
-    "#,
-    // v7: track active lifecycle step agent (bp6-ims.5)
-    r#"ALTER TABLE lifecycle_state ADD COLUMN active_agent_id TEXT;"#,
-    // v8: store Task node IDs collected after Step 3 PM agent completes (bp6-ims.7)
-    r#"ALTER TABLE lifecycle_state ADD COLUMN stage_task_ids TEXT;"#,
-    // v9: Step 4 execution tracking — completed tasks, active task agents, stage number (bp6-ims.8)
-    r#"
-    ALTER TABLE lifecycle_state ADD COLUMN completed_task_ids TEXT;
-    ALTER TABLE lifecycle_state ADD COLUMN active_task_agent_ids TEXT;
-    ALTER TABLE lifecycle_state ADD COLUMN stage_number INTEGER DEFAULT 1;
-    "#,
+    // v6: lifecycle_state — removed in bp6-1vf (Restate durable workflow owns this now)
+    r#"SELECT 1;"#,
+    // v7: lifecycle_state active_agent_id — removed in bp6-1vf
+    r#"SELECT 1;"#,
+    // v8: lifecycle_state stage_task_ids — removed in bp6-1vf
+    r#"SELECT 1;"#,
+    // v9: lifecycle_state execution tracking — removed in bp6-1vf
+    r#"SELECT 1;"#,
     // v10: advisor session state — project advisor PTY session persistence (bp6-coj.1)
     r#"
     CREATE TABLE IF NOT EXISTS advisor_state (
@@ -343,8 +302,8 @@ const MIGRATIONS: &[&str] = &[
         agent_id   TEXT
     );
     "#,
-    // v11: rework items — freeform rework description from human after Step 4 PM review (bp6-ims.10)
-    r#"ALTER TABLE lifecycle_state ADD COLUMN rework_items TEXT;"#,
+    // v11: lifecycle_state rework_items — removed in bp6-1vf
+    r#"SELECT 1;"#,
     // v12: stage metrics — per-stage execution metrics (bp6-ims.11)
     r#"
     CREATE TABLE IF NOT EXISTS stage_metrics (
@@ -1248,85 +1207,6 @@ impl DagStore {
             .collect();
 
         Ok(nodes)
-    }
-
-    // ── Lifecycle state CRUD ───────────────────────────────────────────────────
-
-    /// Upsert the lifecycle state for a project.
-    pub fn upsert_lifecycle_state(&self, state: &LifecycleStateRow) -> Result<(), String> {
-        let now = Utc::now().to_rfc3339();
-        self.conn
-            .execute(
-                "INSERT INTO lifecycle_state (project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number, rework_items, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-                 ON CONFLICT(project_id) DO UPDATE SET
-                     step = excluded.step,
-                     substep = excluded.substep,
-                     status = excluded.status,
-                     pending_approval_id = excluded.pending_approval_id,
-                     active_agent_id = excluded.active_agent_id,
-                     stage_task_ids = excluded.stage_task_ids,
-                     completed_task_ids = excluded.completed_task_ids,
-                     active_task_agent_ids = excluded.active_task_agent_ids,
-                     stage_number = excluded.stage_number,
-                     rework_items = excluded.rework_items,
-                     updated_at = excluded.updated_at",
-                params![
-                    state.project_id,
-                    state.step as i64,
-                    state.substep,
-                    state.status,
-                    state.pending_approval_id,
-                    state.active_agent_id,
-                    state.stage_task_ids,
-                    state.completed_task_ids,
-                    state.active_task_agent_ids,
-                    state.stage_number,
-                    state.rework_items,
-                    now
-                ],
-            )
-            .map_err(|e| format!("Failed to upsert lifecycle_state: {}", e))?;
-        Ok(())
-    }
-
-    /// Get the lifecycle state for a project; returns a default idle row if not found.
-    pub fn get_lifecycle_state(&self, project_id: &str) -> Result<LifecycleStateRow, String> {
-        match self.conn.query_row(
-            "SELECT project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number, rework_items FROM lifecycle_state WHERE project_id = ?1",
-            params![project_id],
-            |row| {
-                Ok(LifecycleStateRow {
-                    project_id: row.get(0)?,
-                    step: row.get::<_, i64>(1)? as u32,
-                    substep: row.get(2)?,
-                    status: row.get(3)?,
-                    pending_approval_id: row.get(4)?,
-                    active_agent_id: row.get(5)?,
-                    stage_task_ids: row.get(6)?,
-                    completed_task_ids: row.get(7)?,
-                    active_task_agent_ids: row.get(8)?,
-                    stage_number: row.get(9)?,
-                    rework_items: row.get(10)?,
-                })
-            },
-        ) {
-            Ok(row) => Ok(row),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(LifecycleStateRow {
-                project_id: project_id.to_string(),
-                step: 0,
-                substep: None,
-                status: "idle".to_string(),
-                pending_approval_id: None,
-                active_agent_id: None,
-                stage_task_ids: None,
-                completed_task_ids: None,
-                active_task_agent_ids: None,
-                stage_number: Some(1),
-                rework_items: None,
-            }),
-            Err(e) => Err(format!("Failed to get lifecycle_state for {}: {}", project_id, e)),
-        }
     }
 
     /// Get all edges where `to_id = node_id` (i.e., dependencies OF this node).

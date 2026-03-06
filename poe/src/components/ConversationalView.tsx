@@ -471,7 +471,7 @@ export function ConversationalView({
     // Nothing to do here — the lifecycleStatus.status will update via DAG events.
   };
 
-  const { messages, streaming, pendingArtifact, apiKeyError, sendMessage, clearPendingArtifact } =
+  const { messages, streaming, pendingArtifact, sendMessage, clearPendingArtifact } =
     useConversation(projectId, step, skillId, handleDecision, handleDone);
 
   // Find latest KnowledgeArtifact node for this project (from DAG)
@@ -499,27 +499,6 @@ export function ConversationalView({
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <StatusBanner lifecycleStatus={lifecycleStatus} onStartLifecycle={onStartLifecycle} />
-
-      {/* API key error banner */}
-      {apiKeyError && (
-        <div
-          style={{
-            background: "var(--status-error-bg, #2d0a0a)",
-            borderBottom: "1px solid var(--status-error, #e05252)",
-            padding: "8px 16px",
-            fontSize: 12,
-            color: "var(--status-error, #e05252)",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <span style={{ fontWeight: 600 }}>API key missing</span>
-          <span style={{ color: "var(--text-secondary)" }}>
-            — Set ANTHROPIC_API_KEY environment variable and restart the app.
-          </span>
-        </div>
-      )}
 
       {/* Approval banner when awaiting but no artifact card */}
       {showApprovalBanner && (

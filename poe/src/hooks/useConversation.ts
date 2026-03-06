@@ -1,18 +1,20 @@
 /**
- * bp6-41g: useConversation
+ * bp6-ar2: useConversation — CLI-based conversational lifecycle turns
  *
- * Drives conversational lifecycle steps (1, 2, 3, 6) via the Claude API SDK,
- * replacing the PTY agent:stdout subscription with clean streaming text.
+ * Replaces the @anthropic-ai/sdk implementation with the same pattern used by
+ * the Project Advisor: each turn spawns `claude -p --output-format stream-json`
+ * via start_conversation_turn (first turn) or continue_conversation_turn
+ * (subsequent turns).  Session continuity is maintained via --session-id /
+ * --resume exactly as in advisor.rs.
  *
- * Tool calls handled:
- *   emit_artifact  → create_lifecycle_artifact Tauri command + pendingArtifact state
- *   emit_decision  → create_queue_item Tauri command + onDecision callback
- *   done           → onDone callback (step is complete; user still presses Approve)
+ * The frontend subscribes to agent:stdout events, parses the stream-json NDJSON,
+ * and handles poe: JSON events embedded in assistant text blocks.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import Anthropic from "@anthropic-ai/sdk";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { AgentStdoutLine } from "../types";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -40,63 +42,60 @@ export interface DecisionEvent {
   priority: number;
 }
 
-interface ConversationContext {
-  skillContent: string;
-  artefactContext: string;
-}
-
 export interface UseConversationReturn {
   messages: ConversationMessage[];
   streaming: boolean;
   pendingArtifact: ArtifactEvent | null;
-  apiKeyError: string | null;
   sendMessage: (userInput: string) => Promise<void>;
   clearPendingArtifact: () => void;
 }
 
-// ── Tool definitions ──────────────────────────────────────────────────────────
+// ── stream-json line parser (mirrors AdvisorView.tsx parseStreamLine) ──────────
 
-const TOOLS: Anthropic.Tool[] = [
-  {
-    name: "emit_artifact",
-    description: "Produce a document artefact for the current lifecycle step",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        filename: { type: "string", description: "Filename, e.g. conops.md" },
-        title: { type: "string", description: "Human-readable title" },
-        content: { type: "string", description: "Full markdown content" },
-        step: { type: "number", description: "Lifecycle step number" },
-      },
-      required: ["filename", "title", "content", "step"],
-    },
-  },
-  {
-    name: "emit_decision",
-    description: "Surface a question to the human that needs a decision",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        question: { type: "string" },
-        options: { type: "array", items: { type: "object" } },
-        priority: { type: "number" },
-      },
-      required: ["question", "options"],
-    },
-  },
-  {
-    name: "done",
-    description:
-      "Signal that this step is complete and ready for human review",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        summary: { type: "string" },
-      },
-      required: ["summary"],
-    },
-  },
-];
+type ParsedStreamEvent =
+  | { type: "text"; text: string }
+  | { type: "session_id"; sessionId: string }
+  | { type: "done" }
+  | { type: "ignored" };
+
+function parseStreamLine(raw: string): ParsedStreamEvent[] {
+  const line = raw.trim();
+  if (!line.startsWith("{")) return [];
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return [];
+  }
+
+  switch (parsed.type) {
+    case "system": {
+      // {"type":"system","subtype":"init","session_id":"..."}
+      const sid = parsed.session_id;
+      if (typeof sid === "string" && sid) {
+        return [{ type: "session_id", sessionId: sid }];
+      }
+      return [];
+    }
+    case "assistant": {
+      const content =
+        (parsed.message as { content?: unknown[] } | undefined)?.content ?? [];
+      if (!Array.isArray(content)) return [];
+      return content.flatMap((block): ParsedStreamEvent[] => {
+        const b = block as Record<string, unknown>;
+        if (b.type === "text") {
+          return [{ type: "text", text: String(b.text ?? "") }];
+        }
+        return [];
+      });
+    }
+    case "result": {
+      return [{ type: "done" }];
+    }
+    default:
+      return [];
+  }
+}
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
@@ -109,194 +108,200 @@ export function useConversation(
 ): UseConversationReturn {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [pendingArtifact, setPendingArtifact] = useState<ArtifactEvent | null>(null);
-  const [apiKeyError, setApiKeyError] = useState<string | null>(null);
+  const [pendingArtifact, setPendingArtifact] =
+    useState<ArtifactEvent | null>(null);
 
-  const apiKeyRef = useRef<string | null>(null);
-  const contextRef = useRef<ConversationContext | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const currentAgentIdRef = useRef<string | null>(null);
 
-  // On mount (or when step/skillId changes), load API key and conversation context
+  // Reset when project/step/skill changes
   useEffect(() => {
-    let cancelled = false;
-
-    async function init() {
-      // Get API key
-      try {
-        const key = await invoke<string>("get_anthropic_api_key");
-        if (!cancelled) {
-          apiKeyRef.current = key;
-          setApiKeyError(null);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setApiKeyError(String(err));
-        }
-        return;
-      }
-
-      // Get conversation context (skill + artefacts)
-      try {
-        const ctx = await invoke<ConversationContext>("get_conversation_context", {
-          projectId,
-          step,
-          skillId,
-        });
-        if (!cancelled) {
-          contextRef.current = ctx;
-        }
-      } catch (err) {
-        // Non-fatal: context may be empty for first step
-        if (!cancelled) {
-          contextRef.current = { skillContent: "", artefactContext: "" };
-        }
-        console.warn("[useConversation] get_conversation_context failed:", err);
-      }
-    }
-
-    // Reset state when key inputs change
     setMessages([]);
     setPendingArtifact(null);
+    sessionIdRef.current = null;
+    currentAgentIdRef.current = null;
+  }, [projectId, step, skillId]);
 
-    void init();
+  // Subscribe to agent:stdout events for the current turn
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let doneTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function markDone() {
+      if (doneTimer) clearTimeout(doneTimer);
+      setStreaming(false);
+    }
+
+    listen<AgentStdoutLine>("agent:stdout", (event) => {
+      if (event.payload.workflowId !== currentAgentIdRef.current) return;
+
+      const events = parseStreamLine(event.payload.line);
+      if (events.length === 0) return;
+
+      // Fallback done-timer: if no "done" event arrives within 5s of last output
+      if (doneTimer) clearTimeout(doneTimer);
+      doneTimer = setTimeout(markDone, 5000);
+
+      for (const ev of events) {
+        if (ev.type === "session_id") {
+          // Capture session_id from the init system event
+          if (!sessionIdRef.current) {
+            sessionIdRef.current = ev.sessionId;
+          }
+        } else if (ev.type === "text") {
+          // Each text block may contain multiple lines; scan for poe: JSON events
+          const lines = ev.text.split("\n");
+          for (const textLine of lines) {
+            const trimmed = textLine.trim();
+            if (trimmed.startsWith('{"type":"poe:')) {
+              try {
+                const poeEvent = JSON.parse(trimmed) as Record<
+                  string,
+                  unknown
+                >;
+                handlePoeEvent(poeEvent);
+              } catch {
+                // Malformed poe: line — treat as regular text
+                appendAssistantText(trimmed);
+              }
+            } else if (trimmed) {
+              appendAssistantText(trimmed);
+            }
+          }
+        } else if (ev.type === "done") {
+          markDone();
+        }
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
 
     return () => {
-      cancelled = true;
+      unlisten?.();
+      if (doneTimer) clearTimeout(doneTimer);
     };
-  }, [projectId, step, skillId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // effect is stable; currentAgentIdRef checked inside listener
+
+  const appendAssistantText = useCallback((text: string) => {
+    setMessages((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === "assistant") {
+        return [
+          ...prev.slice(0, -1),
+          { ...last, content: last.content + "\n" + text },
+        ];
+      }
+      return [...prev, { role: "assistant" as const, content: text }];
+    });
+  }, []);
+
+  const handlePoeEvent = useCallback(
+    (event: Record<string, unknown>) => {
+      const type = event.type as string;
+
+      if (type === "poe:artifact") {
+        const ae = event as {
+          filename: string;
+          title: string;
+          content: string;
+          step: number;
+        };
+        const artifact: ArtifactEvent = {
+          filename: ae.filename,
+          title: ae.title,
+          content: ae.content,
+          step: ae.step,
+        };
+        setPendingArtifact(artifact);
+        invoke("create_lifecycle_artifact", {
+          params: {
+            projectId,
+            filename: artifact.filename,
+            title: artifact.title,
+            content: artifact.content,
+            step: artifact.step,
+          },
+        }).catch((err) =>
+          console.error("[useConversation] create_lifecycle_artifact:", err),
+        );
+      } else if (type === "poe:decision") {
+        const de = event as {
+          question: string;
+          options: DecisionOption[];
+          priority?: number;
+        };
+        const decisionEvent: DecisionEvent = {
+          question: de.question,
+          options: de.options ?? [],
+          priority: de.priority ?? 2,
+        };
+        invoke("create_queue_item", {
+          agentId: `lifecycle-step-${step}`,
+          workflowId: null,
+          awakeableId: null,
+          question: decisionEvent.question,
+          options: decisionEvent.options,
+          contextSnapshot: { step, projectId },
+          priority: decisionEvent.priority,
+        }).catch((err) =>
+          console.error("[useConversation] create_queue_item:", err),
+        );
+        onDecision(decisionEvent);
+      } else if (type === "poe:done") {
+        onDone();
+      }
+    },
+    [projectId, step, onDecision, onDone],
+  );
 
   const sendMessage = useCallback(
     async (userInput: string) => {
-      if (!apiKeyRef.current) {
-        setApiKeyError("ANTHROPIC_API_KEY environment variable not set");
-        return;
-      }
-
-      const userMsg: ConversationMessage = { role: "user", content: userInput };
-      const nextMessages = [...messages, userMsg];
-      setMessages(nextMessages);
+      setMessages((prev) => [
+        ...prev,
+        { role: "user" as const, content: userInput },
+      ]);
       setStreaming(true);
 
       try {
-        const client = new Anthropic({
-          apiKey: apiKeyRef.current,
-          dangerouslyAllowBrowser: true,
-        });
-
-        const ctx = contextRef.current;
-        const systemParts: string[] = [];
-        if (ctx?.skillContent) systemParts.push(ctx.skillContent);
-        if (ctx?.artefactContext) {
-          systemParts.push("\n\n## Prior artefacts from earlier steps\n\n" + ctx.artefactContext);
-        }
-        const system = systemParts.join("\n\n");
-
-        // Build messages array for Anthropic SDK (exclude trailing streaming assistant msg)
-        const apiMessages: Anthropic.MessageParam[] = nextMessages.map((m) => ({
-          role: m.role === "assistant" ? "assistant" : "user",
-          content: m.content,
-        }));
-
-        // Accumulate the current assistant response
-        let assistantText = "";
-
-        const stream = client.messages.stream({
-          model: "claude-opus-4-6",
-          max_tokens: 8192,
-          system: system || undefined,
-          messages: apiMessages,
-          tools: TOOLS,
-        });
-
-        // Stream text deltas
-        stream.on("text", (delta) => {
-          assistantText += delta;
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            if (last?.role === "assistant") {
-              return [
-                ...prev.slice(0, -1),
-                { role: "assistant" as const, content: assistantText },
-              ];
-            }
-            return [...prev, { role: "assistant" as const, content: assistantText }];
-          });
-        });
-
-        // Wait for the full response
-        const finalMessage = await stream.finalMessage();
-
-        // Process tool use blocks
-        for (const block of finalMessage.content) {
-          if (block.type !== "tool_use") continue;
-
-          const input = block.input as Record<string, unknown>;
-
-          if (block.name === "emit_artifact") {
-            const artifact: ArtifactEvent = {
-              filename: String(input.filename ?? "artifact.md"),
-              title: String(input.title ?? "Untitled"),
-              content: String(input.content ?? ""),
-              step: Number(input.step ?? step),
-            };
-
-            try {
-              await invoke<string>("create_lifecycle_artifact", {
+        if (!sessionIdRef.current) {
+          // First message — start a new session
+          const result = await invoke<{ agentId: string; sessionId: string }>(
+            "start_conversation_turn",
+            {
+              params: {
                 projectId,
-                filename: artifact.filename,
-                title: artifact.title,
-                content: artifact.content,
-                step: artifact.step,
-              });
-              setPendingArtifact(artifact);
-            } catch (err) {
-              console.error("[useConversation] create_lifecycle_artifact failed:", err);
-            }
-          } else if (block.name === "emit_decision") {
-            const decisionInput = input as {
-              question: string;
-              options: DecisionOption[];
-              priority?: number;
-            };
-            const decisionEvent: DecisionEvent = {
-              question: decisionInput.question,
-              options: decisionInput.options ?? [],
-              priority: decisionInput.priority ?? 2,
-            };
-
-            try {
-              await invoke("create_queue_item", {
-                agentId: `lifecycle-step-${step}`,
-                workflowId: null,
-                awakeableId: null,
-                question: decisionEvent.question,
-                options: decisionEvent.options,
-                contextSnapshot: { step, projectId },
-                priority: decisionEvent.priority,
-              });
-            } catch (err) {
-              console.error("[useConversation] create_queue_item failed:", err);
-            }
-
-            onDecision(decisionEvent);
-          } else if (block.name === "done") {
-            // Agent signals completion; user still presses Approve explicitly
-            onDone();
-          }
+                step,
+                substep: null,
+                skillId,
+                initialMessage: userInput,
+              },
+            },
+          );
+          currentAgentIdRef.current = result.agentId;
+          sessionIdRef.current = result.sessionId;
+        } else {
+          // Continuation — resume existing session
+          const result = await invoke<{ agentId: string; sessionId: string }>(
+            "continue_conversation_turn",
+            {
+              params: {
+                sessionId: sessionIdRef.current,
+                message: userInput,
+                projectId,
+              },
+            },
+          );
+          currentAgentIdRef.current = result.agentId;
         }
       } catch (err) {
-        console.error("[useConversation] streaming error:", err);
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant" as const,
-            content: `Error communicating with Claude API: ${String(err)}`,
-          },
-        ]);
-      } finally {
         setStreaming(false);
+        appendAssistantText(
+          `Error communicating with Claude: ${String(err)}`,
+        );
       }
     },
-    [messages, projectId, step, onDecision, onDone],
+    [projectId, step, skillId, appendAssistantText],
   );
 
   const clearPendingArtifact = useCallback(() => {
@@ -307,7 +312,6 @@ export function useConversation(
     messages,
     streaming,
     pendingArtifact,
-    apiKeyError,
     sendMessage,
     clearPendingArtifact,
   };
