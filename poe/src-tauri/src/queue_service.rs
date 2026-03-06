@@ -287,6 +287,8 @@ pub fn spawn_queue_service(app: AppHandle) {
             .expect("Failed to create Tokio runtime for queue_service");
         rt.block_on(async move {
         let router = Router::new()
+            // Restate calls {uri}/discover for service discovery
+            .route("/discover", get(handle_discover))
             .route("/poe-queue/discover", get(handle_discover))
             .route(
                 "/poe-queue/:project_id/create_item",
@@ -316,8 +318,13 @@ pub fn spawn_queue_service(app: AppHandle) {
             QUEUE_SERVICE_PORT
         );
 
-        // Register with Restate in the background — non-fatal
-        tokio::spawn(register_with_restate(QUEUE_SERVICE_PORT));
+        // Register with Restate in the background — give it a moment to be ready
+        let reg_port = QUEUE_SERVICE_PORT;
+        tokio::spawn(async move {
+            // Brief delay so Restate has time to finish starting
+            sleep(Duration::from_secs(3)).await;
+            register_with_restate(reg_port).await;
+        });
 
         if let Err(e) = axum::serve(listener, router).await {
             eprintln!("[queue_service] Server error: {}", e);
