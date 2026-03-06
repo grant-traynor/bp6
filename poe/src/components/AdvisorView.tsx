@@ -1,47 +1,272 @@
+/**
+ * bp6-coj + bp6-8nr: Project Advisor panel
+ *
+ * Renders responses from the advisor agent. Each query spawns a one-shot
+ * claude -p --output-format stream-json process; we parse the NDJSON stream
+ * to extract text content, tool activity, and diffs cleanly.
+ */
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useAtomValue } from "jotai";
-import { MessageSquare, RefreshCw } from "lucide-react";
+import {
+  MessageSquare, RefreshCw, ChevronDown, ChevronRight,
+  FileText, Search, Terminal, FolderOpen, Edit3,
+} from "lucide-react";
 import { projectAtom } from "../store/dag";
 import type { AgentStdoutLine } from "../types";
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-  ts: string;
-}
+// ── Tauri types ───────────────────────────────────────────────────────────────
 
-interface AdvisorStartResult {
+interface AdvisorResult {
   agentId: string;
   sessionId: string;
 }
 
 interface AdvisorStateResult {
   sessionId: string | null;
-  agentId: string | null;
   isActive: boolean;
 }
 
-function timeSince(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (isNaN(ms)) return "";
-  const m = Math.floor(ms / 60000);
-  if (m < 1) return "just started";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m ago`;
-  return `${Math.floor(h / 24)}d ago`;
+// ── Message model ─────────────────────────────────────────────────────────────
+
+interface ToolActivity {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  output?: string;
+  isError?: boolean;
 }
 
-// ── MessageList ──────────────────────────────────────────────────────────────
+interface AssistantMessage {
+  role: "assistant";
+  text: string;
+  tools: ToolActivity[];
+  ts: string;
+}
+
+interface UserMessage {
+  role: "user";
+  text: string;
+  ts: string;
+}
+
+type Message = UserMessage | AssistantMessage;
+
+// ── stream-json parsing ───────────────────────────────────────────────────────
+
+type StreamEvent =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_result"; toolUseId: string; output: string; isError: boolean }
+  | { type: "done" }
+  | { type: "ignored" };
+
+/**
+ * Parse a single NDJSON line from --output-format stream-json into zero or
+ * more structured events. Returns [] for lines we don't care about.
+ */
+function parseStreamLine(raw: string): StreamEvent[] {
+  const line = raw.trim();
+  if (!line.startsWith("{")) return [];
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return [];
+  }
+
+  switch (parsed.type) {
+    case "assistant": {
+      const content = (parsed.message as { content?: unknown[] } | undefined)?.content ?? [];
+      if (!Array.isArray(content)) return [];
+      return content.flatMap((block): StreamEvent[] => {
+        const b = block as Record<string, unknown>;
+        if (b.type === "text") return [{ type: "text", text: String(b.text ?? "") }];
+        if (b.type === "tool_use") {
+          return [{
+            type: "tool_use",
+            id: String(b.id ?? ""),
+            name: String(b.name ?? ""),
+            input: (b.input ?? {}) as Record<string, unknown>,
+          }];
+        }
+        return [];
+      });
+    }
+    case "user": {
+      // Tool results arrive as "user" turn content
+      const content = (parsed.message as { content?: unknown[] } | undefined)?.content ?? [];
+      if (!Array.isArray(content)) return [];
+      return content.flatMap((block): StreamEvent[] => {
+        const b = block as Record<string, unknown>;
+        if (b.type === "tool_result") {
+          const raw2 = b.content;
+          const output = typeof raw2 === "string" ? raw2 : JSON.stringify(raw2, null, 2);
+          return [{
+            type: "tool_result",
+            toolUseId: String(b.tool_use_id ?? ""),
+            output,
+            isError: Boolean(b.is_error),
+          }];
+        }
+        return [];
+      });
+    }
+    case "result":
+      return [{ type: "done" }];
+    default:
+      return [];
+  }
+}
+
+// ── Rich text rendering ───────────────────────────────────────────────────────
+
+type TextPart =
+  | { kind: "text"; content: string }
+  | { kind: "code"; lang: string; content: string };
+
+function splitCodeBlocks(text: string): TextPart[] {
+  const parts: TextPart[] = [];
+  const re = /```(\w*)\n?([\s\S]*?)```/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push({ kind: "text", content: text.slice(last, m.index) });
+    parts.push({ kind: "code", lang: m[1] || "", content: m[2] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ kind: "text", content: text.slice(last) });
+  return parts;
+}
+
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  // Treat as diff if lang=diff, or if content has unified diff markers
+  const isDiff = lang === "diff" || (!lang && /^@@/m.test(code));
+  return (
+    <pre
+      className="mono"
+      style={{
+        background: "#0D1117", border: "1px solid var(--border)", borderRadius: 6,
+        padding: "8px 12px", fontSize: 11, lineHeight: 1.6,
+        overflowX: "auto", margin: "6px 0", whiteSpace: "pre",
+      }}
+    >
+      {isDiff
+        ? code.split("\n").map((line, i) => (
+            <span key={i} style={{
+              display: "block",
+              color: line.startsWith("+") && !line.startsWith("+++") ? "#3FB950"
+                : line.startsWith("-") && !line.startsWith("---") ? "#F85149"
+                : line.startsWith("@@") ? "#79C0FF"
+                : "#8B949E",
+            }}>
+              {line}
+            </span>
+          ))
+        : <span style={{ color: "#E6EDF3" }}>{code}</span>
+      }
+    </pre>
+  );
+}
+
+function RichText({ text }: { text: string }) {
+  return (
+    <>
+      {splitCodeBlocks(text).map((p, i) =>
+        p.kind === "text"
+          ? <span key={i} style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{p.content}</span>
+          : <CodeBlock key={i} lang={p.lang} code={p.content} />
+      )}
+    </>
+  );
+}
+
+// ── Tool activity row ─────────────────────────────────────────────────────────
+
+const TOOL_ICONS: Record<string, React.ReactNode> = {
+  Read:  <FileText size={11} />,
+  Grep:  <Search size={11} />,
+  Glob:  <FolderOpen size={11} />,
+  Bash:  <Terminal size={11} />,
+  Edit:  <Edit3 size={11} />,
+  Write: <Edit3 size={11} />,
+};
+
+function toolSummary(name: string, input: Record<string, unknown>): string {
+  switch (name) {
+    case "Read":
+    case "Write":
+    case "Edit":   return String(input.file_path ?? input.path ?? "");
+    case "Grep":   return `${String(input.pattern ?? "")} in ${String(input.path ?? ".")}`;
+    case "Glob":   return String(input.pattern ?? "");
+    case "Bash":   return String(input.command ?? "").slice(0, 80);
+    default:       return JSON.stringify(input).slice(0, 80);
+  }
+}
+
+function ToolRow({ tool }: { tool: ToolActivity }) {
+  const [open, setOpen] = useState(false);
+  const icon = TOOL_ICONS[tool.name] ?? <Terminal size={11} />;
+  const summary = toolSummary(tool.name, tool.input);
+  const pending = tool.output === undefined;
+
+  return (
+    <div style={{
+      borderRadius: 6, border: "1px solid var(--border)",
+      background: "var(--content-secondary-bg)", overflow: "hidden", margin: "3px 0",
+    }}>
+      <button
+        onClick={() => !pending && setOpen((v) => !v)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 6,
+          padding: "5px 8px", background: "transparent", border: "none",
+          cursor: pending ? "default" : "pointer",
+          color: tool.isError ? "var(--status-failed)" : "var(--text-secondary)",
+          fontSize: 11, fontFamily: "inherit", textAlign: "left",
+        }}
+      >
+        <span style={{ color: "var(--text-tertiary)", flexShrink: 0 }}>{icon}</span>
+        <span style={{ fontWeight: 500, flexShrink: 0 }}>{tool.name}</span>
+        <span className="mono" style={{
+          color: "var(--text-tertiary)", overflow: "hidden",
+          textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
+        }}>
+          {summary}
+        </span>
+        {pending && (
+          <span className="mono" style={{ fontSize: 10, color: "var(--text-placeholder)", flexShrink: 0 }}>
+            running…
+          </span>
+        )}
+        {!pending && tool.output && (
+          <span style={{ color: "var(--text-placeholder)", flexShrink: 0 }}>
+            {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+          </span>
+        )}
+      </button>
+      {open && tool.output && (
+        <div className="mono" style={{
+          borderTop: "1px solid var(--border)", padding: "6px 8px",
+          fontSize: 10, lineHeight: 1.6, color: "var(--text-secondary)",
+          whiteSpace: "pre-wrap", wordBreak: "break-all",
+          maxHeight: 200, overflowY: "auto", background: "#0D1117",
+        }}>
+          {tool.output}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Message list ──────────────────────────────────────────────────────────────
 
 function MessageList({ messages, isResponding }: { messages: Message[]; isResponding: boolean }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isResponding]);
+  }, [messages.length, isResponding]);
 
   if (messages.length === 0) {
     return (
@@ -50,16 +275,16 @@ function MessageList({ messages, isResponding }: { messages: Message[]; isRespon
         <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, textAlign: "center" }}>
           Ask anything about your project
         </p>
-        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6, width: "100%", maxWidth: 320 }}>
-          {["What is currently blocked?", "Summarise what was built in the last stage", "Which agents have been running the longest?"].map((q) => (
-            <p
-              key={q}
-              className="mono"
-              style={{
-                fontSize: 11, color: "var(--text-tertiary)", margin: 0, textAlign: "center",
-                border: "1px dashed var(--border)", borderRadius: 6, padding: "6px 10px",
-              }}
-            >
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6, width: "100%", maxWidth: 340 }}>
+          {[
+            "What is currently blocked?",
+            "Summarise what was built in the last stage",
+            "Which agents have been running the longest?",
+          ].map((q) => (
+            <p key={q} className="mono" style={{
+              fontSize: 11, color: "var(--text-tertiary)", margin: 0, textAlign: "center",
+              border: "1px dashed var(--border)", borderRadius: 6, padding: "6px 10px",
+            }}>
               Try: &ldquo;{q}&rdquo;
             </p>
           ))}
@@ -69,124 +294,107 @@ function MessageList({ messages, isResponding }: { messages: Message[]; isRespon
   }
 
   return (
-    <div className="flex-1 overflow-auto" style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-      {messages.map((msg, i) => (
-        <div
-          key={i}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: msg.role === "user" ? "flex-end" : "flex-start",
-          }}
-        >
-          <div
-            style={{
-              maxWidth: "85%",
-              padding: "8px 12px",
-              borderRadius: msg.role === "user" ? "12px 12px 2px 12px" : "12px 12px 12px 2px",
-              background: msg.role === "user" ? "var(--accent)" : "var(--content-secondary-bg)",
-              border: msg.role === "assistant" ? "1px solid var(--border)" : "none",
-              fontSize: 12,
-              lineHeight: 1.6,
-              color: msg.role === "user" ? "#fff" : "var(--text-primary)",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
-            {msg.content}
-          </div>
-        </div>
-      ))}
-      {isResponding && (
-        <div style={{ display: "flex", alignItems: "flex-start" }}>
-          <div
-            style={{
-              padding: "8px 12px",
-              borderRadius: "12px 12px 12px 2px",
-              background: "var(--content-secondary-bg)",
-              border: "1px solid var(--border)",
-            }}
-          >
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              {[0, 150, 300].map((delay) => (
-                <span
-                  key={delay}
-                  style={{
-                    width: 5, height: 5, borderRadius: "50%",
-                    background: "var(--text-tertiary)",
-                    animation: "pulse 1.2s ease-in-out infinite",
-                    animationDelay: `${delay}ms`,
-                  }}
-                />
-              ))}
+    <div className="flex-1 overflow-auto" style={{
+      padding: "12px 16px", display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      {messages.map((msg, i) =>
+        msg.role === "user" ? (
+          <div key={i} style={{ display: "flex", justifyContent: "flex-end" }}>
+            <div style={{
+              maxWidth: "80%", padding: "8px 12px",
+              borderRadius: "12px 12px 2px 12px",
+              background: "var(--accent)", color: "#fff",
+              fontSize: 12, lineHeight: 1.6,
+              whiteSpace: "pre-wrap", wordBreak: "break-word",
+            }}>
+              {msg.text}
             </div>
+          </div>
+        ) : (
+          <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", maxWidth: "92%" }}>
+            {msg.tools.length > 0 && (
+              <div style={{ width: "100%", marginBottom: 4 }}>
+                {msg.tools.map((t) => <ToolRow key={t.id} tool={t} />)}
+              </div>
+            )}
+            {msg.text && (
+              <div style={{
+                padding: "8px 12px",
+                borderRadius: msg.tools.length > 0 ? "2px 12px 12px 12px" : "12px 12px 12px 2px",
+                background: "var(--content-secondary-bg)",
+                border: "1px solid var(--border)",
+                fontSize: 12, lineHeight: 1.6, color: "var(--text-primary)",
+                maxWidth: "100%",
+              }}>
+                <RichText text={msg.text} />
+              </div>
+            )}
+          </div>
+        )
+      )}
+
+      {isResponding && (
+        <div style={{ display: "flex" }}>
+          <div style={{
+            padding: "10px 14px",
+            borderRadius: "12px 12px 12px 2px",
+            background: "var(--content-secondary-bg)",
+            border: "1px solid var(--border)",
+            display: "flex", gap: 4, alignItems: "center",
+          }}>
+            {[0, 150, 300].map((d) => (
+              <span key={d} style={{
+                width: 5, height: 5, borderRadius: "50%",
+                background: "var(--text-tertiary)",
+                animation: "pulse 1.2s ease-in-out infinite",
+                animationDelay: `${d}ms`,
+              }} />
+            ))}
           </div>
         </div>
       )}
+
       <div ref={bottomRef} />
     </div>
   );
 }
 
-// ── InputBar ─────────────────────────────────────────────────────────────────
+// ── Input bar ─────────────────────────────────────────────────────────────────
 
-function InputBar({
-  onSend,
-  disabled,
-}: {
-  onSend: (text: string) => void;
-  disabled: boolean;
-}) {
+function InputBar({ onSend, disabled }: { onSend: (text: string) => void; disabled: boolean }) {
   const [text, setText] = useState("");
 
-  function handleSubmit() {
-    const trimmed = text.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed);
+  function submit() {
+    const t = text.trim();
+    if (!t || disabled) return;
+    onSend(t);
     setText("");
   }
 
   return (
-    <div
-      style={{
-        borderTop: "1px solid var(--divider)",
-        padding: "10px 12px",
-        display: "flex",
-        gap: 8,
-        alignItems: "flex-end",
-      }}
-    >
+    <div style={{
+      borderTop: "1px solid var(--divider)", padding: "10px 12px",
+      display: "flex", gap: 8, alignItems: "flex-end",
+    }}>
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit();
-          }
-        }}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
         placeholder="Ask about your project…"
         disabled={disabled}
         rows={1}
         style={{
-          flex: 1,
-          resize: "none",
-          background: "var(--input-bg, var(--content-secondary-bg))",
+          flex: 1, resize: "none",
+          background: "var(--content-secondary-bg)",
           border: "1px solid var(--border)",
-          borderRadius: 8,
-          padding: "7px 10px",
-          fontSize: 12,
-          color: "var(--text-primary)",
-          fontFamily: "inherit",
-          outline: "none",
-          lineHeight: 1.5,
-          minHeight: 34,
-          maxHeight: 120,
+          borderRadius: 8, padding: "7px 10px",
+          fontSize: 12, color: "var(--text-primary)", fontFamily: "inherit",
+          outline: "none", lineHeight: 1.5, minHeight: 34, maxHeight: 120,
           opacity: disabled ? 0.5 : 1,
         }}
       />
       <button
-        onClick={handleSubmit}
+        onClick={submit}
         disabled={disabled || !text.trim()}
         className="mac-btn"
         style={{ padding: "7px 14px", fontSize: 12, flexShrink: 0 }}
@@ -197,15 +405,23 @@ function InputBar({
   );
 }
 
-// ── SessionControls ───────────────────────────────────────────────────────────
+// ── Session controls ──────────────────────────────────────────────────────────
+
+function timeSince(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (isNaN(ms)) return "";
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "just started";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m ago` : `${Math.floor(h / 24)}d ago`;
+}
 
 function SessionControls({
-  sessionStartedAt,
-  messageCount,
-  onReset,
+  sessionStartedAt, turnCount, onReset,
 }: {
   sessionStartedAt: string | null;
-  messageCount: number;
+  turnCount: number;
   onReset: () => void;
 }) {
   const [, setTick] = useState(0);
@@ -215,18 +431,13 @@ function SessionControls({
   }, []);
 
   return (
-    <div
-      className="mac-toolbar flex items-center justify-between"
-      style={{ padding: "0 12px", height: 36, minHeight: 36 }}
-    >
+    <div className="mac-toolbar flex items-center justify-between" style={{ padding: "0 12px", height: 36, minHeight: 36 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <MessageSquare size={13} style={{ color: "var(--text-tertiary)" }} />
-        <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 600 }}>
-          Project Advisor
-        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)" }}>Project Advisor</span>
         {sessionStartedAt && (
           <span className="mono" style={{ fontSize: 10, color: "var(--text-placeholder)" }}>
-            {messageCount} {messageCount === 1 ? "turn" : "turns"} · {timeSince(sessionStartedAt)}
+            {turnCount} {turnCount === 1 ? "turn" : "turns"} · {timeSince(sessionStartedAt)}
           </span>
         )}
       </div>
@@ -234,7 +445,6 @@ function SessionControls({
         onClick={onReset}
         className="mac-btn mac-btn-ghost"
         style={{ padding: "3px 8px", fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}
-        title="New Session"
       >
         <RefreshCw size={11} />
         New Session
@@ -248,128 +458,116 @@ function SessionControls({
 export function AdvisorView() {
   const project = useAtomValue(projectAtom);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [advisorAgentId, setAdvisorAgentId] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [currentAgentId, setCurrentAgentId] = useState<string | null>(null);
   const [isResponding, setIsResponding] = useState(false);
   const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
-  const responseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // On mount, check for existing session
+  // Check for existing session on mount
   useEffect(() => {
     if (!project) return;
     invoke<AdvisorStateResult>("get_advisor_state", { projectDir: project.projectDir })
-      .then((state) => {
-        if (state.agentId && state.isActive) {
-          setAdvisorAgentId(state.agentId);
-        }
-        if (state.sessionId) setSessionId(state.sessionId);
-      })
       .catch(console.error);
   }, [project?.projectDir]);
 
-  // Subscribe to agent:stdout events for streaming
+  // Subscribe to agent:stdout for the current turn's agent
   useEffect(() => {
-    if (!advisorAgentId) return;
-    let unlistenFn: (() => void) | null = null;
+    if (!currentAgentId) return;
+    let unlisten: (() => void) | null = null;
+    let doneTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function markDone() {
+      if (doneTimer) clearTimeout(doneTimer);
+      setIsResponding(false);
+    }
 
     listen<AgentStdoutLine>("agent:stdout", (event) => {
-      if (event.payload.workflowId !== advisorAgentId) return;
+      if (event.payload.workflowId !== currentAgentId) return;
 
-      const line = event.payload.line;
+      const events = parseStreamLine(event.payload.line);
+      if (events.length === 0) return;
 
-      // Filter out poe: control lines
-      if (line.startsWith("poe:")) {
-        if (line.startsWith("poe:done")) {
-          setIsResponding(false);
-          if (responseTimerRef.current) clearTimeout(responseTimerRef.current);
-        }
-        return;
-      }
+      // Fallback done-timer: if no "done" event arrives within 5s of last output
+      if (doneTimer) clearTimeout(doneTimer);
+      doneTimer = setTimeout(markDone, 5000);
 
-      setIsResponding(true);
-
-      // Append to last assistant message or create new one
       setMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.role === "assistant") {
-          return [
-            ...prev.slice(0, -1),
-            { ...last, content: last.content + (last.content ? "\n" : "") + line },
-          ];
-        }
-        return [
-          ...prev,
-          { role: "assistant", content: line, ts: new Date().toISOString() },
-        ];
-      });
+        let msgs = [...prev];
 
-      // Reset done-detection timer
-      if (responseTimerRef.current) clearTimeout(responseTimerRef.current);
-      responseTimerRef.current = setTimeout(() => {
-        setIsResponding(false);
-      }, 3000);
-    }).then((fn) => { unlistenFn = fn; });
+        function lastAssistant(): AssistantMessage {
+          const last = msgs[msgs.length - 1];
+          if (last?.role === "assistant") return last as AssistantMessage;
+          const msg: AssistantMessage = { role: "assistant", text: "", tools: [], ts: new Date().toISOString() };
+          msgs = [...msgs, msg];
+          return msg;
+        }
+
+        for (const ev of events) {
+          if (ev.type === "text") {
+            const msg = lastAssistant();
+            msgs = [...msgs.slice(0, -1), { ...msg, text: msg.text + ev.text }];
+          } else if (ev.type === "tool_use") {
+            const msg = lastAssistant();
+            const tool: ToolActivity = { id: ev.id, name: ev.name, input: ev.input };
+            msgs = [...msgs.slice(0, -1), { ...msg, tools: [...msg.tools, tool] }];
+          } else if (ev.type === "tool_result") {
+            msgs = msgs.map((m) => {
+              if (m.role !== "assistant") return m;
+              const am = m as AssistantMessage;
+              return {
+                ...am,
+                tools: am.tools.map((t) =>
+                  t.id === ev.toolUseId ? { ...t, output: ev.output, isError: ev.isError } : t
+                ),
+              };
+            });
+          } else if (ev.type === "done") {
+            markDone();
+          }
+        }
+
+        return msgs;
+      });
+    }).then((fn) => { unlisten = fn; });
 
     return () => {
-      unlistenFn?.();
-      if (responseTimerRef.current) clearTimeout(responseTimerRef.current);
+      unlisten?.();
+      if (doneTimer) clearTimeout(doneTimer);
     };
-  }, [advisorAgentId]);
+  }, [currentAgentId]);
 
   const handleSend = useCallback(async (text: string) => {
     if (!project || isResponding) return;
-
-    const userMsg: Message = { role: "user", content: text, ts: new Date().toISOString() };
-    setMessages((prev) => [...prev, userMsg]);
-    if (!sessionStartedAt) setSessionStartedAt(userMsg.ts);
+    const ts = new Date().toISOString();
+    setMessages((prev) => [...prev, { role: "user", text, ts }]);
+    if (!sessionStartedAt) setSessionStartedAt(ts);
     setIsResponding(true);
-
     try {
-      if (!advisorAgentId) {
-        // First message — spawn the advisor
-        const result = await invoke<AdvisorStartResult>("start_advisor_query", {
-          projectDir: project.projectDir,
-          query: text,
-        });
-        setAdvisorAgentId(result.agentId);
-        setSessionId(result.sessionId);
-      } else {
-        // Follow-up message
-        await invoke<void>("send_advisor_message", {
-          agentId: advisorAgentId,
-          message: text,
-          projectDir: project.projectDir,
-        });
-      }
+      const result = await invoke<AdvisorResult>("start_advisor_query", {
+        projectDir: project.projectDir,
+        query: text,
+      });
+      setCurrentAgentId(result.agentId);
     } catch (err) {
-      console.error("Advisor error:", err);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `Error: ${err}`, ts: new Date().toISOString() },
-      ]);
+      setMessages((prev) => [...prev, {
+        role: "assistant", text: `Error: ${String(err)}`, tools: [], ts: new Date().toISOString(),
+      }]);
       setIsResponding(false);
     }
-  }, [project, advisorAgentId, isResponding, sessionStartedAt]);
+  }, [project, isResponding, sessionStartedAt]);
 
   const handleReset = useCallback(async () => {
     if (!project) return;
     if (!confirm("Start a new advisor session? The current conversation history will be cleared.")) return;
-
     try {
       await invoke<void>("reset_advisor_session", { projectDir: project.projectDir });
     } catch (err) {
       console.error("Reset error:", err);
     }
-
     setMessages([]);
-    setAdvisorAgentId(null);
-    setSessionId(null);
+    setCurrentAgentId(null);
     setSessionStartedAt(null);
     setIsResponding(false);
   }, [project]);
-
-  // Suppress unused variable warning — sessionId is stored for potential future use
-  void sessionId;
 
   if (!project) {
     return (
@@ -383,7 +581,7 @@ export function AdvisorView() {
     <div className="flex-1 flex flex-col overflow-hidden">
       <SessionControls
         sessionStartedAt={sessionStartedAt}
-        messageCount={messages.filter((m) => m.role === "user").length}
+        turnCount={messages.filter((m) => m.role === "user").length}
         onReset={handleReset}
       />
       <MessageList messages={messages} isResponding={isResponding} />
