@@ -10,8 +10,8 @@ use tauri::Manager;
 use agents::{kill_agent, spawn_agent, stop_agent_graceful, write_to_agent, AgentState};
 use project::{
     close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
-    get_provenance, get_snapshot, list_queue_items, open_project, probe_node, redirect_workflow,
-    resolve_queue_item, stop_workflow, update_node, ProjectState,
+    get_provenance, get_snapshot, list_queue_items, load_app_state, open_project, probe_node,
+    redirect_workflow, resolve_queue_item, save_app_state, stop_workflow, update_node, ProjectState,
 };
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
@@ -103,6 +103,8 @@ pub fn run() {
             create_workflow,
             list_workflows,
             cancel_workflow,
+            load_app_state,
+            save_app_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");
