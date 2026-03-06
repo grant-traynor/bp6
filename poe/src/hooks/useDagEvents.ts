@@ -8,14 +8,16 @@ import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useSetAtom } from "jotai";
 import { invoke } from "@tauri-apps/api/core";
-import { nodesAtom, edgesAtom, projectAtom, queueItemsAtom } from "../store/dag";
-import type { DagNode, DagEdge, DagSnapshot, ProjectInfo, QueueItem } from "../types";
+import { nodesAtom, edgesAtom, projectAtom, queueItemsAtom, workflowsAtom, agentStdoutAtom } from "../store/dag";
+import type { DagNode, DagEdge, DagSnapshot, ProjectInfo, QueueItem, WorkflowInfo, AgentStdoutLine } from "../types";
 
 export function useDagEvents() {
   const setNodes = useSetAtom(nodesAtom);
   const setEdges = useSetAtom(edgesAtom);
   const setProject = useSetAtom(projectAtom);
   const setQueueItems = useSetAtom(queueItemsAtom);
+  const setWorkflows = useSetAtom(workflowsAtom);
+  const setAgentStdout = useSetAtom(agentStdoutAtom);
 
   useEffect(() => {
     const unlisten: Array<() => void> = [];
@@ -99,10 +101,29 @@ export function useDagEvents() {
       });
     }).then((u) => unlisten.push(u));
 
+    // ── workflow:status (bp6-80q.2) ────────────────────────────────────────────
+    listen<WorkflowInfo>("workflow:status", (event) => {
+      setWorkflows((prev) => {
+        const next = new Map(prev);
+        next.set(event.payload.workflowId, event.payload);
+        return next;
+      });
+    }).then((u) => unlisten.push(u));
+
+    // ── agent:stdout (bp6-80q.2) ───────────────────────────────────────────────
+    listen<AgentStdoutLine>("agent:stdout", (event) => {
+      setAgentStdout((prev) => {
+        const next = new Map(prev);
+        const lines = [...(prev.get(event.payload.workflowId) ?? []), event.payload];
+        next.set(event.payload.workflowId, lines.slice(-500)); // keep last 500 lines
+        return next;
+      });
+    }).then((u) => unlisten.push(u));
+
     return () => {
       unlisten.forEach((fn) => fn());
     };
-  }, [setNodes, setEdges, setProject, setQueueItems]);
+  }, [setNodes, setEdges, setProject, setQueueItems, setWorkflows, setAgentStdout]);
 }
 
 /** Convenience: subscribe only to project:opened to capture ProjectInfo */

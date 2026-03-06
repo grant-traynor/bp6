@@ -133,6 +133,17 @@ pub struct QueueItem {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProbeData {
+    pub node: DagNode,
+    pub incoming_edges: Vec<DagEdge>,
+    pub outgoing_edges: Vec<DagEdge>,
+    pub decisions: Vec<DagNode>,
+    pub artifacts: Vec<DagNode>,
+    pub connected_nodes: Vec<DagNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DagNode {
     pub id: String,
     pub node_type: String,
@@ -514,6 +525,159 @@ impl DagStore {
             nodes: self.list_nodes(project_id)?,
             edges: self.list_edges(project_id)?,
         })
+    }
+
+    /// Probe: returns full context for a single node — its edges and linked nodes.
+    pub fn probe_node(&self, node_id: &str) -> Result<ProbeData, String> {
+        let node = self.get_node(node_id)?;
+
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, from_id, to_id, type, data, created_at
+                 FROM edges WHERE from_id = ?1 OR to_id = ?1",
+            )
+            .map_err(|e| format!("probe_node prepare edges: {}", e))?;
+
+        let all_edges: Vec<DagEdge> = stmt
+            .query_map(params![node_id], |row| {
+                let data_str: String = row.get(4)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    data_str,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| format!("probe_node query edges: {}", e))?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, from_id, to_id, edge_type, data_str, created_at)| {
+                serde_json::from_str(&data_str).ok().map(|data| DagEdge {
+                    id,
+                    from_id,
+                    to_id,
+                    edge_type,
+                    data,
+                    created_at,
+                })
+            })
+            .collect();
+
+        let incoming_edges: Vec<DagEdge> =
+            all_edges.iter().filter(|e| e.to_id == node_id).cloned().collect();
+        let outgoing_edges: Vec<DagEdge> =
+            all_edges.iter().filter(|e| e.from_id == node_id).cloned().collect();
+
+        // Fetch all nodes connected by any edge
+        let connected_ids: std::collections::HashSet<&str> = all_edges
+            .iter()
+            .flat_map(|e| [e.from_id.as_str(), e.to_id.as_str()])
+            .filter(|&id| id != node_id)
+            .collect();
+
+        let mut connected_nodes = Vec::new();
+        for id in &connected_ids {
+            if let Ok(n) = self.get_node(id) {
+                connected_nodes.push(n);
+            }
+        }
+
+        let decisions: Vec<DagNode> = connected_nodes
+            .iter()
+            .filter(|n| {
+                n.node_type == "Decision"
+                    && incoming_edges.iter().any(|e| e.from_id == n.id && e.edge_type == "approved-by")
+            })
+            .cloned()
+            .collect();
+
+        let artifacts: Vec<DagNode> = connected_nodes
+            .iter()
+            .filter(|n| {
+                n.node_type == "AgentOutput"
+                    && outgoing_edges.iter().any(|e| e.to_id == n.id && e.edge_type == "generated-by")
+            })
+            .cloned()
+            .collect();
+
+        Ok(ProbeData {
+            node,
+            incoming_edges,
+            outgoing_edges,
+            decisions,
+            artifacts,
+            connected_nodes,
+        })
+    }
+
+    /// Provenance: returns the subgraph within `depth` hops of `node_id`.
+    pub fn get_provenance(
+        &self,
+        node_id: &str,
+        project_id: &str,
+        depth: u32,
+    ) -> Result<DagSnapshot, String> {
+        let nodes_sql = "
+            WITH RECURSIVE prov(nid, d) AS (
+                SELECT ?1, 0
+                UNION
+                SELECT CASE WHEN e.from_id = p.nid THEN e.to_id ELSE e.from_id END, p.d + 1
+                FROM edges e
+                JOIN prov p ON (e.from_id = p.nid OR e.to_id = p.nid)
+                WHERE p.d < ?2
+            )
+            SELECT DISTINCT n.id, n.type, n.project_id, n.data, n.created_at, n.updated_at
+            FROM nodes n
+            JOIN prov p ON n.id = p.nid
+        ";
+
+        let depth_val = depth as i64;
+        let mut stmt = self
+            .conn
+            .prepare(nodes_sql)
+            .map_err(|e| format!("provenance nodes prepare: {}", e))?;
+
+        let nodes: Vec<DagNode> = stmt
+            .query_map(params![node_id, depth_val], |row| {
+                let data_str: String = row.get(3)?;
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    data_str,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                ))
+            })
+            .map_err(|e| format!("provenance nodes query: {}", e))?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, node_type, project_id, data_str, created_at, updated_at)| {
+                serde_json::from_str(&data_str).ok().map(|data| DagNode {
+                    id,
+                    node_type,
+                    project_id,
+                    data,
+                    created_at,
+                    updated_at,
+                })
+            })
+            .collect();
+
+        // Filter all project edges to those within the subgraph
+        let node_id_set: std::collections::HashSet<&str> =
+            nodes.iter().map(|n| n.id.as_str()).collect();
+        let all_edges = self.list_edges(project_id)?;
+        let edges = all_edges
+            .into_iter()
+            .filter(|e| {
+                node_id_set.contains(e.from_id.as_str())
+                    && node_id_set.contains(e.to_id.as_str())
+            })
+            .collect();
+
+        Ok(DagSnapshot { nodes, edges })
     }
 
     // ── Queue item CRUD ────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NodeType, QueueItem, QueueItemOption};
+use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NodeType, ProbeData, QueueItem, QueueItemOption};
 
 // ── Managed project state ──────────────────────────────────────────────────────
 
@@ -419,4 +419,142 @@ pub async fn resolve_queue_item(
     eprintln!("[PTY stub] Resolution for agent '{}': option '{}'", item.agent_id, chosen.id);
 
     Ok(())
+}
+
+// ── Mission Control commands (bp6-80q) ─────────────────────────────────────────
+
+/// Probe a node: returns the node, its edges, and directly linked nodes.
+/// Used by the probe/inspect panel (bp6-80q.3).
+#[tauri::command]
+pub async fn probe_node(
+    node_id: String,
+    state: State<'_, ProjectState>,
+) -> Result<ProbeData, String> {
+    let lock = state.store.lock().unwrap();
+    let store = lock.as_ref().ok_or("No project open")?;
+    store.probe_node(&node_id)
+}
+
+/// Returns the subgraph within `depth` hops of `node_id`.
+/// Used by the provenance traversal view (bp6-80q.5).
+#[tauri::command]
+pub async fn get_provenance(
+    node_id: String,
+    depth: u32,
+    state: State<'_, ProjectState>,
+) -> Result<DagSnapshot, String> {
+    let lock = state.store.lock().unwrap();
+    let store = lock.as_ref().ok_or("No project open")?;
+    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
+    store.get_provenance(&node_id, &project_id, depth)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StopWorkflowParams {
+    pub workflow_id: String,
+    pub node_id: String,
+    pub reason: Option<String>,
+}
+
+/// Stop a running workflow: cancel Restate invocation, mark node cancelled, create Decision record.
+/// PTY SIGTERM is stubbed until bp6-3d1 (Phase 3 Workflow Engine) is implemented.
+#[tauri::command]
+pub async fn stop_workflow(
+    params: StopWorkflowParams,
+    app: AppHandle,
+    state: State<'_, ProjectState>,
+) -> Result<DagNode, String> {
+    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
+
+    // ── Cancel Restate invocation ──────────────────────────────────────────────
+    let cancel_url = format!(
+        "http://127.0.0.1:{}/invocations/{}/cancel",
+        crate::restate::RESTATE_ADMIN_PORT,
+        params.workflow_id
+    );
+    let client = reqwest::Client::new();
+    // Best-effort — don't fail if Restate isn't running or invocation already done
+    let _ = client.post(&cancel_url).send().await;
+
+    // ── Update node status to cancelled ───────────────────────────────────────
+    let updated_node = {
+        let lock = state.store.lock().unwrap();
+        let store = lock.as_ref().ok_or("No project open")?;
+        let node = store.get_node(&params.node_id)?;
+        let mut data = node.data.clone();
+        data["status"] = serde_json::json!("cancelled");
+        store.update_node(&params.node_id, data)?
+    };
+
+    // ── Create Decision node recording the stop ────────────────────────────────
+    let decision_node = {
+        let lock = state.store.lock().unwrap();
+        let store = lock.as_ref().ok_or("No project open")?;
+        store.upsert_node(
+            &NodeType::Decision,
+            &project_id,
+            serde_json::json!({
+                "action": "stop",
+                "workflowId": params.workflow_id,
+                "targetNodeId": params.node_id,
+                "reason": params.reason.unwrap_or_default(),
+                "status": "stop-recorded",
+            }),
+        )?
+    };
+
+    app.emit("dag:node:upserted", NodeUpsertedEvent { node: updated_node.clone() })
+        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
+    app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node })
+        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
+
+    // TODO(bp6-3d1): SIGTERM the PTY process for this workflow
+    eprintln!("[PTY stub] Stop workflow '{}'", params.workflow_id);
+
+    Ok(updated_node)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedirectWorkflowParams {
+    pub workflow_id: String,
+    pub node_id: String,
+    pub instruction: String,
+}
+
+/// Redirect a running workflow: record a Redirect Decision node, inject instruction via PTY.
+/// PTY stdin injection is stubbed until bp6-3d1 (Phase 3 Workflow Engine) is implemented.
+#[tauri::command]
+pub async fn redirect_workflow(
+    params: RedirectWorkflowParams,
+    app: AppHandle,
+    state: State<'_, ProjectState>,
+) -> Result<DagNode, String> {
+    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
+
+    // ── Write Redirect Decision node to DAG ───────────────────────────────────
+    let decision_node = {
+        let lock = state.store.lock().unwrap();
+        let store = lock.as_ref().ok_or("No project open")?;
+        store.upsert_node(
+            &NodeType::Decision,
+            &project_id,
+            serde_json::json!({
+                "action": "redirect",
+                "workflowId": params.workflow_id,
+                "targetNodeId": params.node_id,
+                "instruction": params.instruction,
+                "status": "redirect-recorded",
+            }),
+        )?
+    };
+
+    app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node.clone() })
+        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
+
+    // TODO(bp6-3d1): Inject instruction to agent stdin via PTY
+    eprintln!("[PTY stub] Redirect workflow '{}': {}", params.workflow_id, params.instruction);
+
+    Ok(decision_node)
 }

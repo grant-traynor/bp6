@@ -85,12 +85,9 @@ pub fn spawn_restate(data_dir: &std::path::Path) -> Result<Child, String> {
 
     let child = Command::new(&binary)
         .args([
-            "--bind-address",
-            &format!("0.0.0.0:{}", RESTATE_SERVICES_PORT),
-            "--admin-bind-address",
-            &format!("0.0.0.0:{}", RESTATE_ADMIN_PORT),
             "--base-dir",
             base_dir.to_str().unwrap_or("."),
+            "--no-logo",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -99,6 +96,11 @@ pub fn spawn_restate(data_dir: &std::path::Path) -> Result<Child, String> {
 
     eprintln!("🚀 Restate server spawned (pid {})", child.id());
     Ok(child)
+}
+
+/// Returns true if Restate is already accepting connections on the admin port.
+pub fn is_restate_healthy() -> bool {
+    ureq_get_health().unwrap_or(false)
 }
 
 /// Poll /health until ready or timeout.

@@ -1,13 +1,18 @@
+pub mod agents;
 pub mod dag;
 pub mod project;
+pub mod queue_service;
 pub mod restate;
 
 use tauri::Manager;
 
+use agents::{kill_agent, spawn_agent, write_to_agent, AgentState};
 use project::{
     close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
-    get_snapshot, list_queue_items, open_project, resolve_queue_item, update_node, ProjectState,
+    get_provenance, get_snapshot, list_queue_items, open_project, probe_node, redirect_workflow,
+    resolve_queue_item, stop_workflow, update_node, ProjectState,
 };
+use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -17,6 +22,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(ProjectState::new())
         .manage(RestateState::new())
+        .manage(AgentState::new())
         .setup(|app| {
             // Resolve app data directory for Restate state
             let data_dir = app
@@ -48,6 +54,9 @@ pub fn run() {
                     }
                 }
             }
+
+            // Spawn POE queue service (Restate virtual object HTTP server on port 9082)
+            spawn_queue_service(app.handle().clone());
 
             Ok(())
         })
@@ -81,6 +90,13 @@ pub fn run() {
             create_queue_item,
             list_queue_items,
             resolve_queue_item,
+            probe_node,
+            get_provenance,
+            stop_workflow,
+            redirect_workflow,
+            spawn_agent,
+            kill_agent,
+            write_to_agent,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");

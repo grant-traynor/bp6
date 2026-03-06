@@ -49,6 +49,34 @@ export interface ProjectInfo {
   name: string;
 }
 
+// ── Mission control types (bp6-80q) ────────────────────────────────────────────
+
+export interface ProbeData {
+  node: DagNode;
+  incomingEdges: DagEdge[];
+  outgoingEdges: DagEdge[];
+  decisions: DagNode[];
+  artifacts: DagNode[];
+  connectedNodes: DagNode[];
+}
+
+export type WorkflowStatus = "running" | "paused" | "blocked" | "completed" | "cancelled" | "failed";
+
+export interface WorkflowInfo {
+  workflowId: string;
+  nodeId: string;
+  agentId: string;
+  status: WorkflowStatus;
+  currentStep?: string;
+  startedAt: string;
+}
+
+export interface AgentStdoutLine {
+  workflowId: string;
+  line: string;
+  ts: string;
+}
+
 // ── Queue types ─────────────────────────────────────────────────────────────────
 
 export interface QueueItemOption {
