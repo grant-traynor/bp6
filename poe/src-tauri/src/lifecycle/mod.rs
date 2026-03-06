@@ -24,7 +24,9 @@ use crate::project::ProjectState;
 use crate::skills::build_skills_prompt;
 
 pub const LIFECYCLE_SERVICE_PORT: u16 = 9083;
-pub const RESTATE_INGRESS_URL: &str = "http://localhost:9080";
+pub fn restate_ingress_url() -> String {
+    format!("http://localhost:{}", crate::restate::RESTATE_SERVICES_PORT)
+}
 
 /// Maps lifecycle step to skill ID. Substeps use "step.substep" format.
 pub const STEP_SPECIALIST_MAP: &[(&str, &str)] = &[
@@ -109,9 +111,12 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
         let initial_stage = input.0.stage_number;
         let app = self.app_handle.clone();
 
+        eprintln!("[lifecycle:run] started project={} stage={}", project_id, initial_stage);
+
         // ── Step 1: Concept Development (API-driven) ──────────────────────────
         ctx.set("step", 1u32);
-        ctx.set("substep", Option::<String>::None);
+        eprintln!("[lifecycle:run] step=1 set");
+        ctx.clear("substep");
         ctx.set("status", "running".to_string());
         ctx.set("stage_number", initial_stage);
 
@@ -127,7 +132,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
         let step2_substeps = ["1", "2", "3", "4", "review"];
         for substep in &step2_substeps {
             ctx.set("step", 2u32);
-            ctx.set("substep", Some(substep.to_string()));
+            ctx.set("substep", substep.to_string());
             ctx.set("status", "running".to_string());
             emit_status_event(&app, &project_id, 2, Some(substep), "running");
 
@@ -147,7 +152,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
 
             // ── Step 3: Stage Planning (PTY: product-manager) ─────────────────
             ctx.set("step", 3u32);
-            ctx.set("substep", Option::<String>::None);
+            ctx.clear("substep");
             ctx.set("status", "running".to_string());
             emit_status_event(&app, &project_id, 3, None, "running");
 
@@ -187,7 +192,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
                 .name(&format!("spawn-pm-agent-stage-{}", stage_number))
                 .await?;
 
-            ctx.set("active_agent_id", Some(pm_agent_id.clone()));
+            ctx.set("active_agent_id", pm_agent_id.clone());
             ctx.set("status", "awaiting_approval".to_string());
             emit_status_event(&app, &project_id, 3, None, "awaiting_approval");
 
@@ -211,7 +216,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
             let task_ids_json = serde_json::to_string(&task_ids).unwrap_or_default();
             ctx.set("stage_task_ids", task_ids_json.clone());
             ctx.set("stage_task_count", task_ids.len() as u32);
-            ctx.set("active_agent_id", Option::<String>::None);
+            ctx.clear("active_agent_id");
 
             // Approval gate: user approves step 3 plan before fan-out
             ctx.set("status", "awaiting_approval".to_string());
@@ -222,7 +227,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
 
             // ── Step 4: Autonomous Execution (fan-out) ────────────────────────
             ctx.set("step", 4u32);
-            ctx.set("substep", Option::<String>::None);
+            ctx.clear("substep");
             ctx.set("status", "running".to_string());
             emit_status_event(&app, &project_id, 4, None, "running");
 
@@ -255,7 +260,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
             }
 
             // All tasks done — wait for PM review approval (deploy/rework)
-            ctx.set("substep", Some("pm-review".to_string()));
+            ctx.set("substep", "pm-review".to_string());
             ctx.set("status", "awaiting_approval".to_string());
             emit_status_event(&app, &project_id, 4, Some("pm-review"), "awaiting_approval");
 
@@ -270,7 +275,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
             if decision_str == "rework" {
                 // ── Step 5: Rework ────────────────────────────────────────────
                 ctx.set("step", 5u32);
-                ctx.set("substep", Option::<String>::None);
+                ctx.clear("substep");
                 ctx.set("status", "awaiting_rework".to_string());
                 emit_status_event(&app, &project_id, 5, None, "awaiting_rework");
 
@@ -280,7 +285,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
 
                 if !rework_items.trim().is_empty() {
                     ctx.set("rework_items", rework_items.clone());
-                    ctx.set("substep", Some("rework-planning".to_string()));
+                    ctx.set("substep", "rework-planning".to_string());
                     ctx.set("status", "running".to_string());
                     emit_status_event(&app, &project_id, 5, Some("rework-planning"), "running");
 
@@ -331,8 +336,8 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
 
                     let rework_task_ids_json = serde_json::to_string(&rework_task_ids).unwrap_or_default();
                     ctx.set("stage_task_ids", rework_task_ids_json);
-                    ctx.set("active_agent_id", Option::<String>::None);
-                    ctx.set("substep", Some("execution".to_string()));
+                    ctx.clear("active_agent_id");
+                    ctx.set("substep", "execution".to_string());
                     ctx.set("status", "running".to_string());
                     emit_status_event(&app, &project_id, 5, Some("execution"), "running");
 
@@ -369,9 +374,9 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
 
             // ── Step 6: Replanning & QA (API-driven) ──────────────────────────
             ctx.set("step", 6u32);
-            ctx.set("substep", Some("validity".to_string()));
+            ctx.set("substep", "validity".to_string());
             ctx.set("status", "running".to_string());
-            ctx.set("active_agent_id", Option::<String>::None);
+            ctx.clear("active_agent_id");
             emit_status_event(&app, &project_id, 6, Some("validity"), "running");
 
             ctx.set("status", "awaiting_approval".to_string());
@@ -380,7 +385,7 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
             let _validity_approval: Json<serde_json::Value> =
                 ctx.promise::<Json<serde_json::Value>>("step-6-validity-approval").await?;
 
-            ctx.set("substep", Some("rca".to_string()));
+            ctx.set("substep", "rca".to_string());
             ctx.set("status", "running".to_string());
             emit_status_event(&app, &project_id, 6, Some("rca"), "running");
 
@@ -403,11 +408,11 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
 
             // Reset per-stage tracking
             ctx.set("step", 3u32);
-            ctx.set("substep", Option::<String>::None);
+            ctx.clear("substep");
             ctx.set("status", "running".to_string());
             ctx.set("stage_task_ids", String::new());
             ctx.set("stage_task_count", 0u32);
-            ctx.set("active_agent_id", Option::<String>::None);
+            ctx.clear("active_agent_id");
         }
 
         ctx.set("step", 6u32);
@@ -424,8 +429,8 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
         ctx: SharedWorkflowContext<'_>,
         decision: Json<serde_json::Value>,
     ) -> Result<(), HandlerError> {
-        let step: u32 = ctx.get("step").await?.unwrap_or(0);
-        let substep: Option<String> = ctx.get("substep").await?;
+        let step: u32 = ctx.get("step").await.ok().flatten().unwrap_or(0);
+        let substep: Option<String> = ctx.get("substep").await.ok().flatten();
 
         // Map current step/substep to the correct promise name
         let promise_name = match (step, substep.as_deref()) {
@@ -465,15 +470,19 @@ impl ProjectLifecycleWorkflow for ProjectLifecycleWorkflowImpl {
         &self,
         ctx: SharedWorkflowContext<'_>,
     ) -> Result<Json<LifecycleStatus>, HandlerError> {
-        let step: u32 = ctx.get("step").await?.unwrap_or(0);
-        let substep: Option<String> = ctx.get("substep").await?;
+        // Use .ok().flatten() to treat absent-or-undeserializable state as None
+        // rather than propagating a HandlerError (which causes a 500 retry loop).
+        let step: u32 = ctx.get("step").await.ok().flatten().unwrap_or(0);
+        let substep: Option<String> = ctx.get("substep").await.ok().flatten();
         let status: String = ctx
             .get("status")
-            .await?
+            .await
+            .ok()
+            .flatten()
             .unwrap_or_else(|| "idle".to_string());
-        let stage_number: Option<u32> = ctx.get("stage_number").await?;
-        let stage_task_count: Option<u32> = ctx.get("stage_task_count").await?;
-        let active_agent_id: Option<String> = ctx.get("active_agent_id").await?;
+        let stage_number: Option<u32> = ctx.get("stage_number").await.ok().flatten();
+        let stage_task_count: Option<u32> = ctx.get("stage_task_count").await.ok().flatten();
+        let active_agent_id: Option<String> = ctx.get("active_agent_id").await.ok().flatten();
         let project_id = ctx.key().to_string();
 
         Ok(Json(LifecycleStatus {
@@ -498,28 +507,32 @@ pub async fn get_lifecycle_status(project_id: String) -> Result<LifecycleStatus,
     let client = reqwest::Client::new();
     let url = format!(
         "{}/ProjectLifecycleWorkflow/{}/get_status",
-        RESTATE_INGRESS_URL, project_id
+        restate_ingress_url(), project_id
     );
     match client.get(&url).send().await {
         Ok(resp) => {
             let text = resp.text().await.map_err(|e| e.to_string())?;
-            serde_json::from_str::<LifecycleStatus>(&text).map_err(|_| {
-                // Workflow not yet started — return idle
+            serde_json::from_str::<LifecycleStatus>(&text).map_err(|e| {
+                eprintln!("[lifecycle] get_status parse error: {} — raw: {}", e, &text[..text.len().min(200)]);
                 text.clone()
             })
         }
-        Err(_) => Ok(LifecycleStatus {
-            step: 0,
-            substep: None,
-            status: "idle".to_string(),
-            pending_approval_id: None,
-            project_id: project_id.clone(),
-            active_agent_id: None,
-            stage_task_count: None,
-            stage_number: None,
-        }),
+        Err(e) => {
+            eprintln!("[lifecycle] get_status network error: {}", e);
+            Ok(LifecycleStatus {
+                step: 0,
+                substep: None,
+                status: "idle".to_string(),
+                pending_approval_id: None,
+                project_id: project_id.clone(),
+                active_agent_id: None,
+                stage_task_count: None,
+                stage_number: None,
+            })
+        }
     }
-    .or_else(|_| {
+    .or_else(|raw: String| {
+        eprintln!("[lifecycle] get_status non-JSON body: {}", &raw[..raw.len().min(200)]);
         Ok::<LifecycleStatus, String>(LifecycleStatus {
             step: 0,
             substep: None,
@@ -540,18 +553,25 @@ pub async fn start_lifecycle(project_id: String) -> Result<LifecycleStatus, Stri
     let client = reqwest::Client::new();
     let url = format!(
         "{}/ProjectLifecycleWorkflow/{}/run",
-        RESTATE_INGRESS_URL, project_id
+        restate_ingress_url(), project_id
     );
     let body = serde_json::json!({
         "projectId": project_id,
         "stageNumber": 1
     });
-    client
+    eprintln!("[lifecycle] start_lifecycle POST {} body={}", url, body);
+    let resp = client
         .post(&url)
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("Failed to start lifecycle: {}", e))?;
+        .map_err(|e| {
+            eprintln!("[lifecycle] start_lifecycle network error: {}", e);
+            format!("Failed to start lifecycle: {}", e)
+        })?;
+    let status_code = resp.status();
+    let resp_text = resp.text().await.unwrap_or_default();
+    eprintln!("[lifecycle] start_lifecycle response {} — {}", status_code, &resp_text[..resp_text.len().min(300)]);
 
     Ok(LifecycleStatus {
         step: 1,
@@ -576,7 +596,7 @@ pub async fn approve_lifecycle_step(
     let client = reqwest::Client::new();
     let url = format!(
         "{}/ProjectLifecycleWorkflow/{}/approve_step",
-        RESTATE_INGRESS_URL, project_id
+        restate_ingress_url(), project_id
     );
     client
         .post(&url)
@@ -599,7 +619,7 @@ pub async fn submit_rework_items(
     let client = reqwest::Client::new();
     let url = format!(
         "{}/ProjectLifecycleWorkflow/{}/resolve_promise",
-        RESTATE_INGRESS_URL, project_id
+        restate_ingress_url(), project_id
     );
     let payload = ResolvePromisePayload {
         promise_name: "step-5-rework-items".to_string(),
@@ -731,6 +751,7 @@ pub async fn spawn_execution_workflow(
                 session_id: None,
                 resume: false,
                 cwd: project_dir.clone(),
+                use_pty: true,
             },
             app_handle,
             agent_state,
@@ -803,6 +824,7 @@ pub fn spawn_step_agent(
             session_id: None,
             resume: false,
             cwd: project_dir.map(|s| s.to_string()),
+            use_pty: true,
         },
         app,
         agent_state,
@@ -848,6 +870,7 @@ pub fn spawn_step_agent_with_prompt(
             session_id: None,
             resume: false,
             cwd: project_dir.map(|s| s.to_string()),
+            use_pty: true,
         },
         app,
         agent_state,

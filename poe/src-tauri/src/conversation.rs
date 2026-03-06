@@ -89,6 +89,7 @@ fn spawn_conversation_turn(
             session_id: None, // handled manually in args
             resume: false,
             cwd: Some(project_dir.to_string()),
+            use_pty: false, // stream-json output: use pipe, not PTY
         },
         app,
         agent_state,
@@ -137,12 +138,12 @@ pub fn start_conversation_turn(
     }
     if !artefact_context.is_empty() {
         prompt_parts.push(format!(
-            "---\n## Prior Artefacts\n\n{}\n\n---\nProject ID: {}\nLifecycle Step: {}",
+            "## Prior Artefacts\n\n{}\n\nProject ID: {}\nLifecycle Step: {}",
             artefact_context, params.project_id, step_key
         ));
     } else {
         prompt_parts.push(format!(
-            "---\nProject ID: {}\nLifecycle Step: {}",
+            "Project ID: {}\nLifecycle Step: {}",
             params.project_id, step_key
         ));
     }

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { projectAtom, selectedNodeIdAtom, openProjectsAtom } from "./store/dag";
 import { useDagEvents } from "./hooks/useDagEvents";
 import { useTheme } from "./hooks/useTheme";
@@ -262,6 +263,14 @@ function ThemeToggle() {
 
 const CONVERSATIONAL_STEPS = new Set([1, 2, 3, 6]);
 
+// Partial shape emitted by emit_status_event on the Rust side.
+interface LifecycleStatusEvent {
+  projectId: string;
+  step: number;
+  substep: string | null;
+  status: LifecycleStatus["status"];
+}
+
 function useLifecycleStatus(projectId: string | null) {
   const [lifecycleStatus, setLifecycleStatus] = useState<LifecycleStatus | null>(null);
 
@@ -273,20 +282,35 @@ function useLifecycleStatus(projectId: string | null) {
 
     let cancelled = false;
 
-    async function poll() {
-      try {
-        const status = await invoke<LifecycleStatus>("get_lifecycle_status", { projectId });
-        if (!cancelled) setLifecycleStatus(status);
-      } catch {
-        // Backend may not have lifecycle support yet — silently ignore
-      }
-    }
+    // One initial fetch to populate the full status object.
+    invoke<LifecycleStatus>("get_lifecycle_status", { projectId })
+      .then((s) => { if (!cancelled) setLifecycleStatus(s); })
+      .catch(() => {});
 
-    void poll();
-    const id = setInterval(() => void poll(), 2000);
+    // From here, state transitions are pushed via lifecycle:status events emitted
+    // by the Rust run handler at every step/status change — no polling needed.
+    const unlistenPromise = listen<LifecycleStatusEvent>("lifecycle:status", (event) => {
+      if (event.payload.projectId !== projectId) return;
+      setLifecycleStatus((prev) => {
+        if (!prev) {
+          // No previous state yet — trigger a full fetch to fill in all fields.
+          invoke<LifecycleStatus>("get_lifecycle_status", { projectId })
+            .then((s) => { if (!cancelled) setLifecycleStatus(s); })
+            .catch(() => {});
+          return prev;
+        }
+        return {
+          ...prev,
+          step: event.payload.step,
+          substep: event.payload.substep,
+          status: event.payload.status,
+        };
+      });
+    });
+
     return () => {
       cancelled = true;
-      clearInterval(id);
+      unlistenPromise.then((fn) => fn()).catch(() => {});
     };
   }, [projectId]);
 

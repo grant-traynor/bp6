@@ -1,14 +1,13 @@
 /**
  * bp6-ar2: useConversation — CLI-based conversational lifecycle turns
  *
- * Replaces the @anthropic-ai/sdk implementation with the same pattern used by
- * the Project Advisor: each turn spawns `claude -p --output-format stream-json`
- * via start_conversation_turn (first turn) or continue_conversation_turn
- * (subsequent turns).  Session continuity is maintained via --session-id /
+ * Each turn spawns `claude -p --output-format stream-json` via
+ * start_conversation_turn (first turn) or continue_conversation_turn
+ * (subsequent turns). Session continuity is maintained via --session-id /
  * --resume exactly as in advisor.rs.
  *
  * The frontend subscribes to agent:stdout events, parses the stream-json NDJSON,
- * and handles poe: JSON events embedded in assistant text blocks.
+ * and handles poe:artifact events embedded in assistant text blocks.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -30,18 +29,6 @@ export interface ArtifactEvent {
   step: number;
 }
 
-export interface DecisionOption {
-  id: string;
-  label: string;
-  description: string;
-}
-
-export interface DecisionEvent {
-  question: string;
-  options: DecisionOption[];
-  priority: number;
-}
-
 export interface UseConversationReturn {
   messages: ConversationMessage[];
   streaming: boolean;
@@ -50,7 +37,7 @@ export interface UseConversationReturn {
   clearPendingArtifact: () => void;
 }
 
-// ── stream-json line parser (mirrors AdvisorView.tsx parseStreamLine) ──────────
+// ── stream-json line parser ────────────────────────────────────────────────────
 
 type ParsedStreamEvent =
   | { type: "text"; text: string }
@@ -70,7 +57,6 @@ function parseStreamLine(raw: string): ParsedStreamEvent[] {
 
   switch (parsed.type) {
     case "system": {
-      // {"type":"system","subtype":"init","session_id":"..."}
       const sid = parsed.session_id;
       if (typeof sid === "string" && sid) {
         return [{ type: "session_id", sessionId: sid }];
@@ -103,8 +89,6 @@ export function useConversation(
   projectId: string,
   step: number,
   skillId: string,
-  onDecision: (event: DecisionEvent) => void,
-  onDone: () => void,
 ): UseConversationReturn {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -138,35 +122,32 @@ export function useConversation(
       const events = parseStreamLine(event.payload.line);
       if (events.length === 0) return;
 
-      // Fallback done-timer: if no "done" event arrives within 5s of last output
       if (doneTimer) clearTimeout(doneTimer);
       doneTimer = setTimeout(markDone, 5000);
 
       for (const ev of events) {
         if (ev.type === "session_id") {
-          // Capture session_id from the init system event
           if (!sessionIdRef.current) {
             sessionIdRef.current = ev.sessionId;
           }
         } else if (ev.type === "text") {
-          // Each text block may contain multiple lines; scan for poe: JSON events
-          const lines = ev.text.split("\n");
-          for (const textLine of lines) {
+          // Scan each line of the text block. Lines starting with poe:artifact
+          // JSON are handled separately; all other non-empty lines are displayed.
+          const displayLines: string[] = [];
+          for (const textLine of ev.text.split("\n")) {
             const trimmed = textLine.trim();
-            if (trimmed.startsWith('{"type":"poe:')) {
+            if (trimmed.startsWith('{"type":"poe:artifact"')) {
               try {
-                const poeEvent = JSON.parse(trimmed) as Record<
-                  string,
-                  unknown
-                >;
-                handlePoeEvent(poeEvent);
+                handleArtifact(JSON.parse(trimmed) as Record<string, unknown>);
               } catch {
-                // Malformed poe: line — treat as regular text
-                appendAssistantText(trimmed);
+                displayLines.push(trimmed);
               }
-            } else if (trimmed) {
-              appendAssistantText(trimmed);
+            } else if (trimmed && !trimmed.startsWith("```")) {
+              displayLines.push(trimmed);
             }
+          }
+          if (displayLines.length > 0) {
+            appendAssistantText(displayLines.join("\n"));
           }
         } else if (ev.type === "done") {
           markDone();
@@ -181,7 +162,7 @@ export function useConversation(
       if (doneTimer) clearTimeout(doneTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // effect is stable; currentAgentIdRef checked inside listener
+  }, []); // stable; currentAgentIdRef checked inside listener
 
   const appendAssistantText = useCallback((text: string) => {
     setMessages((prev) => {
@@ -196,63 +177,34 @@ export function useConversation(
     });
   }, []);
 
-  const handlePoeEvent = useCallback(
+  const handleArtifact = useCallback(
     (event: Record<string, unknown>) => {
-      const type = event.type as string;
-
-      if (type === "poe:artifact") {
-        const ae = event as {
-          filename: string;
-          title: string;
-          content: string;
-          step: number;
-        };
-        const artifact: ArtifactEvent = {
-          filename: ae.filename,
-          title: ae.title,
-          content: ae.content,
-          step: ae.step,
-        };
-        setPendingArtifact(artifact);
-        invoke("create_lifecycle_artifact", {
-          params: {
-            projectId,
-            filename: artifact.filename,
-            title: artifact.title,
-            content: artifact.content,
-            step: artifact.step,
-          },
-        }).catch((err) =>
-          console.error("[useConversation] create_lifecycle_artifact:", err),
-        );
-      } else if (type === "poe:decision") {
-        const de = event as {
-          question: string;
-          options: DecisionOption[];
-          priority?: number;
-        };
-        const decisionEvent: DecisionEvent = {
-          question: de.question,
-          options: de.options ?? [],
-          priority: de.priority ?? 2,
-        };
-        invoke("create_queue_item", {
-          agentId: `lifecycle-step-${step}`,
-          workflowId: null,
-          awakeableId: null,
-          question: decisionEvent.question,
-          options: decisionEvent.options,
-          contextSnapshot: { step, projectId },
-          priority: decisionEvent.priority,
-        }).catch((err) =>
-          console.error("[useConversation] create_queue_item:", err),
-        );
-        onDecision(decisionEvent);
-      } else if (type === "poe:done") {
-        onDone();
-      }
+      const ae = event as {
+        filename: string;
+        title: string;
+        content: string;
+        step: number;
+      };
+      const artifact: ArtifactEvent = {
+        filename: ae.filename,
+        title: ae.title,
+        content: ae.content,
+        step: ae.step,
+      };
+      setPendingArtifact(artifact);
+      invoke("create_lifecycle_artifact", {
+        params: {
+          projectId,
+          filename: artifact.filename,
+          title: artifact.title,
+          content: artifact.content,
+          step: artifact.step,
+        },
+      }).catch((err) =>
+        console.error("[useConversation] create_lifecycle_artifact:", err),
+      );
     },
-    [projectId, step, onDecision, onDone],
+    [projectId],
   );
 
   const sendMessage = useCallback(
@@ -265,7 +217,6 @@ export function useConversation(
 
       try {
         if (!sessionIdRef.current) {
-          // First message — start a new session
           const result = await invoke<{ agentId: string; sessionId: string }>(
             "start_conversation_turn",
             {
@@ -281,7 +232,6 @@ export function useConversation(
           currentAgentIdRef.current = result.agentId;
           sessionIdRef.current = result.sessionId;
         } else {
-          // Continuation — resume existing session
           const result = await invoke<{ agentId: string; sessionId: string }>(
             "continue_conversation_turn",
             {

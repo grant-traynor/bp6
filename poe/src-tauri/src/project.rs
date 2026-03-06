@@ -519,6 +519,7 @@ fn resume_workflow(
             session_id: Some(session_id),
             resume: true,
             cwd: Some(active_dir.to_string()),
+            use_pty: true,
         },
         app,
         agent_state,

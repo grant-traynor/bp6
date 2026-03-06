@@ -14,7 +14,6 @@ import {
   useConversation,
   type ConversationMessage,
   type ArtifactEvent,
-  type DecisionEvent,
 } from "../hooks/useConversation";
 
 // ── Step label map ────────────────────────────────────────────────────────────
@@ -462,17 +461,8 @@ export function ConversationalView({
 
   const skillId = resolveSkillId(lifecycleStatus);
 
-  const handleDecision = (_event: DecisionEvent) => {
-    // Decision items surface in the queue panel; no local UI action needed here.
-  };
-
-  const handleDone = () => {
-    // The agent has finished talking. The user still presses Approve explicitly.
-    // Nothing to do here — the lifecycleStatus.status will update via DAG events.
-  };
-
   const { messages, streaming, pendingArtifact, sendMessage, clearPendingArtifact } =
-    useConversation(projectId, step, skillId, handleDecision, handleDone);
+    useConversation(projectId, step, skillId);
 
   // Find latest KnowledgeArtifact node for this project (from DAG)
   const artifactNode: DagNode | undefined = Array.from(nodes.values())

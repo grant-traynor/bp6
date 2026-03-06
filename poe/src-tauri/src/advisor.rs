@@ -132,6 +132,7 @@ fn write_mcp_config(project_id: &str, port: u16) -> Result<std::path::PathBuf, S
     let config = serde_json::json!({
         "mcpServers": {
             "poe": {
+                "type": "sse",
                 "url": format!("http://127.0.0.1:{}/sse", port)
             }
         }
@@ -203,6 +204,7 @@ fn spawn_advisor_turn(
             session_id: None, // handled manually in args
             resume: false,
             cwd: Some(project_dir.to_string()),
+            use_pty: false, // stream-json output: use pipe, not PTY
         },
         app,
         agent_state,

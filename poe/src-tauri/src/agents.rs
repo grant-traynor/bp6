@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -292,7 +293,14 @@ pub struct SpawnAgentParams {
     /// is saved per-project rather than defaulting to the app's cwd.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// When false, spawn with piped stdout instead of a PTY.
+    /// Use false for stream-json conversational agents; true (default) for
+    /// interactive PTY sessions (Claude Code CLI execution agents).
+    #[serde(default = "default_use_pty")]
+    pub use_pty: bool,
 }
+
+fn default_use_pty() -> bool { true }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -327,6 +335,10 @@ pub fn spawn_agent_internal(
     app: &AppHandle,
     agent_state: &AgentState,
 ) -> Result<SpawnedAgent, String> {
+    if !params.use_pty {
+        return spawn_pipe_agent(params, app, agent_state);
+    }
+
     let agent_id = params
         .agent_id
         .unwrap_or_else(|| Uuid::new_v4().to_string());
@@ -337,7 +349,10 @@ pub fn spawn_agent_internal(
     let pair = pty_system
         .openpty(PtySize {
             rows: 24,
-            cols: 200,
+            // Wide enough to prevent line-wrapping for stream-json output.
+            // Stream-json lines can be 10k+ chars (full artifact content).
+            // u16::MAX (65535) prevents wrapping for all practical responses.
+            cols: u16::MAX,
             pixel_width: 0,
             pixel_height: 0,
         })
@@ -806,6 +821,291 @@ pub fn spawn_agent_internal(
     Ok(SpawnedAgent { agent_id })
 }
 
+/// Spawn an agent using piped stdout instead of a PTY.
+///
+/// Used for `claude -p --output-format stream-json` conversational agents.
+/// Pipe output is clean NDJSON — no ANSI escape codes, no line-wrapping corruption.
+fn spawn_pipe_agent(
+    params: SpawnAgentParams,
+    app: &AppHandle,
+    agent_state: &AgentState,
+) -> Result<SpawnedAgent, String> {
+    let agent_id = params
+        .agent_id
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+    let started_at = chrono::Utc::now().to_rfc3339();
+
+    // Build effective args (same logic as PTY path).
+    let effective_args: Vec<String> = if params.resume {
+        let sid = params.session_id.as_deref().unwrap_or("");
+        vec![
+            "--resume".to_string(),
+            sid.to_string(),
+            "--output-format".to_string(),
+            "stream-json".to_string(),
+        ]
+    } else if let Some(ref sid) = params.session_id {
+        let mut args = vec!["--session-id".to_string(), sid.clone()];
+        args.extend(params.args.iter().cloned());
+        args
+    } else {
+        params.args.clone()
+    };
+
+    // Pipe agents cannot respond to interactive prompts (stdin is null).
+    // Add --dangerously-skip-permissions so Claude never waits for trust/tool approval.
+    let mut effective_args = effective_args;
+    if !effective_args.contains(&"--dangerously-skip-permissions".to_string()) {
+        effective_args.push("--dangerously-skip-permissions".to_string());
+    }
+
+    let mut cmd = std::process::Command::new(&params.cmd);
+    cmd.args(&effective_args);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped()); // capture stderr so errors appear in our logs
+    cmd.stdin(Stdio::null());
+
+    if let Some(ref cwd) = params.cwd {
+        cmd.current_dir(cwd);
+    }
+    // Inherit parent environment so PATH, HOME, etc. are available.
+    if let Some(env_map) = params.env {
+        for (k, v) in env_map {
+            cmd.env(k, v);
+        }
+    }
+
+    eprintln!(
+        "[agents:pipe] Spawning '{}' with args {:?} (workflow={:?})",
+        params.cmd, effective_args, params.workflow_id
+    );
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn pipe agent '{}': {}", params.cmd, e))?;
+
+    let pid = child.id();
+    eprintln!("[agents:pipe] Spawned pid={} agent_id={}", pid, agent_id);
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to take stdout from pipe agent".to_string())?;
+
+    // Log stderr in a background thread so Claude errors surface in app logs.
+    if let Some(stderr) = child.stderr.take() {
+        let agent_id_err = agent_id.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                if !line.trim().is_empty() {
+                    eprintln!("[agents:pipe:err {}] {}", agent_id_err, line);
+                }
+            }
+        });
+    }
+
+    let last_output_at = Arc::new(Mutex::new(std::time::Instant::now()));
+    let silence_alerted = Arc::new(Mutex::new(false));
+
+    let workflow_id_bg = params.workflow_id.clone();
+    let node_id_bg = params.node_id.clone();
+    let workflow_type_bg = params.workflow_type.clone();
+    let started_at_bg = started_at.clone();
+
+    {
+        let agent_id_bg = agent_id.clone();
+        let app_for_thread = app.clone();
+        let last_output_at_bg = Arc::clone(&last_output_at);
+        let silence_alerted_bg = Arc::clone(&silence_alerted);
+
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            let mut done_received = false;
+            let mut in_code_fence = false;
+
+            for line_result in reader.lines() {
+                let line = match line_result {
+                    Ok(l) => l,
+                    Err(_) => break,
+                };
+
+                // Pipe output has no ANSI codes — just trim whitespace.
+                let trimmed = line.trim().to_string();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                if let Ok(mut ts) = last_output_at_bg.lock() {
+                    *ts = std::time::Instant::now();
+                }
+                if let Ok(mut alerted) = silence_alerted_bg.lock() {
+                    *alerted = false;
+                }
+
+                eprintln!(
+                    "[agents:pipe {}] {}",
+                    agent_id_bg,
+                    &trimmed[..trimmed.len().min(200)]
+                );
+
+                if trimmed.starts_with("```") {
+                    in_code_fence = !in_code_fence;
+                }
+
+                if let Some(wf_id) = &workflow_id_bg {
+                    let _ = app_for_thread.emit(
+                        "agent:stdout",
+                        AgentStdoutEvent {
+                            workflow_id: wf_id.clone(),
+                            line: trimmed.clone(),
+                            ts: chrono::Utc::now().to_rfc3339(),
+                        },
+                    );
+                }
+
+                if trimmed.starts_with("```") {
+                    continue;
+                }
+
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&trimmed) {
+                    match val.get("type").and_then(|t| t.as_str()) {
+                        Some("poe:decision") => {
+                            if let Ok(decision) = serde_json::from_value::<PoeDecision>(val) {
+                                handle_poe_decision(
+                                    &app_for_thread,
+                                    &agent_id_bg,
+                                    &workflow_id_bg,
+                                    decision,
+                                );
+                                continue;
+                            }
+                        }
+                        Some("poe:step") => {
+                            if let (Ok(step), Some(wf_id), Some(nid)) = (
+                                serde_json::from_value::<PoeStep>(val),
+                                &workflow_id_bg,
+                                &node_id_bg,
+                            ) {
+                                handle_poe_step(
+                                    &app_for_thread,
+                                    &agent_id_bg,
+                                    wf_id,
+                                    nid,
+                                    &started_at_bg,
+                                    step,
+                                );
+                                continue;
+                            }
+                        }
+                        Some("poe:artifact") => {
+                            if let Ok(ka) =
+                                serde_json::from_value::<PoeKnowledgeArtifact>(val.clone())
+                            {
+                                handle_poe_knowledge_artifact(&app_for_thread, ka);
+                                continue;
+                            }
+                            if let (Ok(artifact), Some(nid)) = (
+                                serde_json::from_value::<PoeArtifact>(val),
+                                &node_id_bg,
+                            ) {
+                                handle_poe_artifact(&app_for_thread, nid, artifact);
+                                continue;
+                            }
+                        }
+                        Some("poe:done") => {
+                            if let Ok(done_msg) = serde_json::from_value::<PoeDone>(val) {
+                                done_received = true;
+                                match (&workflow_id_bg, &node_id_bg) {
+                                    (Some(wf_id), Some(nid)) => {
+                                        handle_poe_done(
+                                            &app_for_thread,
+                                            &agent_id_bg,
+                                            wf_id,
+                                            nid,
+                                            &started_at_bg,
+                                            &workflow_type_bg,
+                                            done_msg,
+                                        );
+                                    }
+                                    (Some(wf_id), None) => {
+                                        handle_lifecycle_poe_done(
+                                            &app_for_thread,
+                                            &agent_id_bg,
+                                            wf_id,
+                                            done_msg,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                let _ = app_for_thread.emit(
+                    "agent:output",
+                    AgentOutputEvent {
+                        agent_id: agent_id_bg.clone(),
+                        line: trimmed,
+                    },
+                );
+            }
+
+            // Reap child process.
+            let mut child = child;
+            let _ = child.wait();
+
+            let _ = app_for_thread.emit(
+                "agent:exited",
+                AgentExitedEvent {
+                    agent_id: agent_id_bg.clone(),
+                },
+            );
+
+            eprintln!(
+                "[agents:pipe] EOF for agent_id={} done_received={}",
+                agent_id_bg, done_received
+            );
+
+            let _ = app_for_thread
+                .state::<AgentState>()
+                .handles
+                .lock()
+                .ok()
+                .map(|mut m| m.remove(&agent_id_bg));
+        });
+    }
+
+    // Pipe agents don't need stdin — use a no-op writer.
+    let writer: Box<dyn Write + Send> = Box::new(std::io::sink());
+    let writer = Arc::new(Mutex::new(writer));
+
+    let handle = AgentHandle {
+        writer,
+        pid: Some(pid),
+        workflow_id: params.workflow_id,
+        node_id: params.node_id,
+        workflow_type: params.workflow_type,
+        started_at,
+        last_output_at: Arc::clone(&last_output_at),
+        silence_alerted: Arc::clone(&silence_alerted),
+    };
+
+    {
+        let mut map = agent_state
+            .handles
+            .lock()
+            .map_err(|e| format!("Failed to lock AgentState: {}", e))?;
+        map.insert(agent_id.clone(), handle);
+    }
+
+    Ok(SpawnedAgent { agent_id })
+}
+
 /// Spawn an agent process inside a PTY (Tauri command — delegates to spawn_agent_internal).
 #[tauri::command]
 pub fn spawn_agent(
@@ -1236,7 +1536,7 @@ fn handle_lifecycle_poe_done(
         let client = reqwest::Client::new();
         let url = format!(
             "{}/ProjectLifecycleWorkflow/{}/resolve_promise",
-            crate::lifecycle::RESTATE_INGRESS_URL,
+            crate::lifecycle::restate_ingress_url(),
             project_id_str
         );
         let payload = crate::lifecycle::ResolvePromisePayload {
