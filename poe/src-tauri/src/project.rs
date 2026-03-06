@@ -695,6 +695,13 @@ pub async fn resolve_queue_item(
             // Non-fatal — agent may have already exited (e.g. claude -p one-shot mode)
             eprintln!("[project] PTY write for decision resolution (non-fatal): {}", e);
         }
+
+        // On resume, the trust-folder prompt appears after the decision context has been
+        // processed. Send a trailing \r so it lands in the stdin buffer at the right time.
+        let _ = agent_state.write_to_workflow_agent(
+            item.workflow_id.as_deref().unwrap_or(""),
+            "\r",
+        );
     }
 
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node })

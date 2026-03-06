@@ -409,6 +409,7 @@ pub fn spawn_agent_internal(
         let app_for_thread = app.clone();
         let last_output_at_bg = Arc::clone(&last_output_at);
         let silence_alerted_bg = Arc::clone(&silence_alerted);
+        let writer_bg = Arc::clone(&writer);
         std::thread::spawn(move || {
             let reader = BufReader::new(master_reader);
             let mut done_received = false;
@@ -436,6 +437,18 @@ pub fn spawn_agent_internal(
 
                 eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
 
+                // Auto-confirm the Claude Code workspace-trust prompt.
+                // The TUI is in raw mode: Enter is \r (0x0D), not \n.
+                // "Enter to confirm" is the last line; "Yes, I trust this folder"
+                // catches the option line in case the footer arrives separately.
+                if trimmed.contains("Enter to confirm") || trimmed.contains("Yes, I trust this folder") {
+                    eprintln!("[agents:pty {}] auto-confirming trust-folder prompt", agent_id_bg);
+                    if let Ok(mut w) = writer_bg.lock() {
+                        let _ = w.write_all(b"\r");
+                        let _ = w.flush();
+                    }
+                    continue;
+                }
 
                 // Track code fence state — toggle on any ``` line.
                 if trimmed.starts_with("```") {
