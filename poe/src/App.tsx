@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import {
   Inbox, GitBranch, Bot, Settings2, Sun, Moon, Monitor,
-  ChevronDown, FolderOpen, X, Star, MessageSquare,
+  ChevronDown, FolderOpen, X, Star, MessageSquare, BookOpen, BarChart2,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -19,16 +19,22 @@ import { RestateView } from "./components/RestateView";
 import { AdvisorView } from "./components/AdvisorView";
 import { ProbePanel } from "./components/ProbePanel";
 import { ProvenanceView } from "./components/ProvenanceView";
-import type { ProjectInfo } from "./types";
+import { ConversationalView } from "./components/ConversationalView";
+import { ArtifactsView } from "./components/ArtifactsView";
+import { MetricsView } from "./components/MetricsView";
+import type { ProjectInfo, LifecycleStatus } from "./types";
 
-type Tab = "queue" | "dag" | "agents" | "restate" | "advisor";
+type Tab = "conversation" | "queue" | "dag" | "agents" | "restate" | "advisor" | "artefacts" | "metrics";
 
 const NAV_ITEMS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: "queue",   label: "Queue",   icon: <Inbox size={15} /> },
-  { id: "dag",     label: "DAG",     icon: <GitBranch size={15} /> },
-  { id: "agents",  label: "Agents",  icon: <Bot size={15} /> },
-  { id: "restate", label: "Restate", icon: <Settings2 size={15} /> },
-  { id: "advisor", label: "Advisor", icon: <MessageSquare size={15} /> },
+  { id: "conversation", label: "Chat",      icon: <MessageSquare size={15} /> },
+  { id: "queue",        label: "Queue",     icon: <Inbox size={15} /> },
+  { id: "dag",          label: "DAG",       icon: <GitBranch size={15} /> },
+  { id: "agents",       label: "Agents",    icon: <Bot size={15} /> },
+  { id: "restate",      label: "Restate",   icon: <Settings2 size={15} /> },
+  { id: "advisor",      label: "Advisor",   icon: <MessageSquare size={15} /> },
+  { id: "artefacts",    label: "Artefacts", icon: <BookOpen size={15} /> },
+  { id: "metrics",      label: "Metrics",   icon: <BarChart2 size={15} /> },
 ];
 
 function ProjectSwitcher() {
@@ -254,14 +260,60 @@ function ThemeToggle() {
   );
 }
 
+const CONVERSATIONAL_STEPS = new Set([1, 2, 3, 6]);
+
+function useLifecycleStatus(projectId: string | null) {
+  const [lifecycleStatus, setLifecycleStatus] = useState<LifecycleStatus | null>(null);
+
+  useEffect(() => {
+    if (!projectId) {
+      setLifecycleStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const status = await invoke<LifecycleStatus>("get_lifecycle_status", { projectId });
+        if (!cancelled) setLifecycleStatus(status);
+      } catch {
+        // Backend may not have lifecycle support yet — silently ignore
+      }
+    }
+
+    void poll();
+    const id = setInterval(() => void poll(), 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [projectId]);
+
+  return lifecycleStatus;
+}
+
 export default function App() {
   const project = useAtomValue(projectAtom);
-  const [activeTab, setActiveTab] = useState<Tab>("queue");
+  const [activeTab, setActiveTab] = useState<Tab>("conversation");
   const [selectedNodeId] = useAtom(selectedNodeIdAtom);
   const [showProvenance, setShowProvenance] = useState(false);
+  const lifecycleStatus = useLifecycleStatus(project?.projectId ?? null);
 
   useDagEvents();
   useTheme(); // Apply theme on mount
+
+  const isConversationalStep =
+    lifecycleStatus !== null && CONVERSATIONAL_STEPS.has(lifecycleStatus.step);
+
+  async function handleStartLifecycle() {
+    if (!project) return;
+    try {
+      await invoke("start_lifecycle", { projectId: project.projectId });
+    } catch (err) {
+      console.error("start_lifecycle error:", err);
+    }
+  }
 
   if (!project) return <EmptyState />;
 
@@ -302,11 +354,40 @@ export default function App() {
         <div className="flex-1 flex overflow-hidden">
           {/* Main content */}
           <div className="flex-1 flex flex-col overflow-hidden mac-content">
-            {activeTab === "queue"   && <QueueView />}
-            {activeTab === "dag"     && <GanttView />}
-            {activeTab === "agents"  && <AgentActivityView />}
-            {activeTab === "restate" && <RestateView />}
-            {activeTab === "advisor" && <AdvisorView />}
+            {activeTab === "conversation" && (
+              lifecycleStatus ? (
+                <ConversationalView
+                  projectId={project.projectId}
+                  lifecycleStatus={lifecycleStatus}
+                  onStartLifecycle={handleStartLifecycle}
+                />
+              ) : !isConversationalStep ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <div style={{ border: "1px dashed var(--border-strong)", borderRadius: 10, padding: "48px 32px", textAlign: "center" }}>
+                    <p style={{ fontSize: 13, color: "var(--text-tertiary)", margin: 0 }}>Lifecycle not started.</p>
+                    <p style={{ fontSize: 11, color: "var(--text-placeholder)", marginTop: 4 }}>Start a lifecycle to begin the conversational workflow.</p>
+                    <button
+                      onClick={handleStartLifecycle}
+                      className="mac-btn mac-btn-primary"
+                      style={{ marginTop: 16, padding: "6px 20px", fontSize: 12 }}
+                    >
+                      Start Lifecycle
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center">
+                  <p className="mono" style={{ fontSize: 12, color: "var(--text-tertiary)" }}>Loading lifecycle status…</p>
+                </div>
+              )
+            )}
+            {activeTab === "queue"      && <QueueView />}
+            {activeTab === "dag"        && <GanttView />}
+            {activeTab === "agents"     && <AgentActivityView />}
+            {activeTab === "restate"    && <RestateView />}
+            {activeTab === "advisor"    && <AdvisorView />}
+            {activeTab === "artefacts"  && <ArtifactsView />}
+            {activeTab === "metrics"    && <MetricsView />}
           </div>
 
           {/* Inspector / Probe panel */}

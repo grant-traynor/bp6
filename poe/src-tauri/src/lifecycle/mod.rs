@@ -141,6 +141,7 @@ pub async fn start_lifecycle(
         completed_task_ids: None,
         active_task_agent_ids: None,
         stage_number: Some(1),
+        rework_items: None,
     };
     state.with_active(|store, _| store.upsert_lifecycle_state(&new_state))?;
 
@@ -179,6 +180,7 @@ pub async fn start_lifecycle(
         completed_task_ids: None,
         active_task_agent_ids: None,
         stage_number: Some(1),
+        rework_items: None,
     };
     state.with_active(|store, _| store.upsert_lifecycle_state(&updated_state))?;
 
@@ -273,6 +275,7 @@ pub async fn approve_lifecycle_step(
                 completed_task_ids: None,
                 active_task_agent_ids: None,
                 stage_number: Some(1),
+                rework_items: None,
             };
             state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
 
@@ -327,6 +330,7 @@ pub async fn approve_lifecycle_step(
                 completed_task_ids: None,
                 active_task_agent_ids: None,
                 stage_number: Some(1),
+                rework_items: None,
             };
             state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
 
@@ -387,6 +391,7 @@ pub async fn approve_lifecycle_step(
             completed_task_ids: Some("[]".to_string()),
             active_task_agent_ids: Some("{}".to_string()),
             stage_number: Some(1),
+            rework_items: None,
         };
         state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
 
@@ -426,31 +431,177 @@ pub async fn approve_lifecycle_step(
                 completed_task_ids: None,
                 active_task_agent_ids: None,
                 stage_number: current.stage_number,
+                rework_items: None,
             };
             state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
-            // TODO bp6-ims.11: implement ReplanningWorkflow (spawn validity-analyst)
-            eprintln!("[lifecycle] TODO bp6-ims.11: spawn validity-analyst for step 6");
+
+            // bp6-ims.11: spawn validity-analyst for step 6
+            let stage_num = current.stage_number.unwrap_or(1);
+            let validity_prompt = format!(
+                "Perform the validity check for Stage {}. Review the CONOPS and all guardrail documents against what was built this stage. Produce phase-{}-validity.md.",
+                stage_num, stage_num
+            );
+            let project_dir = state.active_dir_str();
+            match spawn_step_agent_with_prompt(
+                &project_id,
+                "validity-analyst",
+                &validity_prompt,
+                project_dir.as_deref(),
+                &state,
+                &agent_state,
+                &app,
+            ) {
+                Ok(validity_agent_id) => {
+                    eprintln!(
+                        "[lifecycle] Spawned validity-analyst agent={} for project='{}' stage={}",
+                        validity_agent_id, project_id, stage_num
+                    );
+                    let updated = LifecycleStateRow {
+                        active_agent_id: Some(validity_agent_id),
+                        ..next_state.clone()
+                    };
+                    state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
+                    return Ok(LifecycleStatus::from(updated));
+                }
+                Err(e) => {
+                    eprintln!("[lifecycle] Failed to spawn validity-analyst for '{}': {}", project_id, e);
+                }
+            }
             return Ok(LifecycleStatus::from(next_state));
         } else {
-            // rework
-            eprintln!("[lifecycle] '{}' step 4 approved (rework) — advancing to step 5", project_id);
+            // rework → step 5: waiting for human to submit rework items via submit_rework_items
+            eprintln!("[lifecycle] '{}' step 4 approved (rework) — advancing to step 5 (awaiting_rework)", project_id);
             let next_state = LifecycleStateRow {
                 project_id: project_id.clone(),
                 step: 5,
                 substep: None,
-                status: "running".to_string(),
+                status: "awaiting_rework".to_string(),
                 pending_approval_id: None,
                 active_agent_id: None,
                 stage_task_ids: current.stage_task_ids.clone(),
-                completed_task_ids: None,
+                completed_task_ids: current.completed_task_ids.clone(),
                 active_task_agent_ids: None,
                 stage_number: current.stage_number,
+                rework_items: None,
             };
             state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
-            // TODO bp6-ims.10: implement ReworkWorkflow
-            eprintln!("[lifecycle] TODO bp6-ims.10: spawn rework agents for step 5");
+            // No agent spawned yet — human must call submit_rework_items first
             return Ok(LifecycleStatus::from(next_state));
         }
+    }
+
+    // Step 5 approval: "skip" → step 6
+    if step == 5 && decision == "skip" {
+        return handle_step5_skip(&project_id, current, &state, &agent_state, &app);
+    }
+
+    // Step 6: validity substep approved → spawn rca-analyst
+    if step == 6 && current.substep.as_deref() == Some("validity") {
+        eprintln!(
+            "[lifecycle] '{}' approved step 6.validity — spawning rca-analyst",
+            project_id
+        );
+        let stage_num = current.stage_number.unwrap_or(1);
+        let rca_prompt = format!(
+            "Perform root cause analysis for Stage {}. Analyse execution logs, failures, and interventions. Produce phase-{}-rca.md. Then update project-local skill files for any agents that showed systemic issues.",
+            stage_num, stage_num
+        );
+        let rca_state = LifecycleStateRow {
+            project_id: project_id.clone(),
+            step: 6,
+            substep: Some("rca".to_string()),
+            status: "running".to_string(),
+            pending_approval_id: None,
+            active_agent_id: None,
+            stage_task_ids: current.stage_task_ids.clone(),
+            completed_task_ids: current.completed_task_ids.clone(),
+            active_task_agent_ids: None,
+            stage_number: current.stage_number,
+            rework_items: None,
+        };
+        state.with_active(|store, _| store.upsert_lifecycle_state(&rca_state))?;
+        let project_dir = state.active_dir_str();
+        match spawn_step_agent_with_prompt(
+            &project_id,
+            "rca-analyst",
+            &rca_prompt,
+            project_dir.as_deref(),
+            &state,
+            &agent_state,
+            &app,
+        ) {
+            Ok(rca_agent_id) => {
+                eprintln!(
+                    "[lifecycle] Spawned rca-analyst agent={} for project='{}' stage={}",
+                    rca_agent_id, project_id, stage_num
+                );
+                let updated = LifecycleStateRow {
+                    active_agent_id: Some(rca_agent_id),
+                    ..rca_state.clone()
+                };
+                state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
+                return Ok(LifecycleStatus::from(updated));
+            }
+            Err(e) => {
+                eprintln!("[lifecycle] Failed to spawn rca-analyst for '{}': {}", project_id, e);
+            }
+        }
+        return Ok(LifecycleStatus::from(rca_state));
+    }
+
+    // Step 6: rca substep approved → increment stage, loop back to Step 3
+    if step == 6 && current.substep.as_deref() == Some("rca") {
+        eprintln!(
+            "[lifecycle] '{}' approved step 6.rca — incrementing stage and looping to step 3",
+            project_id
+        );
+        let next_stage = current.stage_number.unwrap_or(1) + 1;
+        let loop_state = LifecycleStateRow {
+            project_id: project_id.clone(),
+            step: 3,
+            substep: None,
+            status: "running".to_string(),
+            pending_approval_id: None,
+            active_agent_id: None,
+            stage_task_ids: None,
+            completed_task_ids: None,
+            active_task_agent_ids: None,
+            stage_number: Some(next_stage),
+            rework_items: None,
+        };
+        state.with_active(|store, _| store.upsert_lifecycle_state(&loop_state))?;
+        // Spawn product-manager agent for next stage plan
+        let pm_prompt = format!(
+            "Plan Stage {} of the project. Review prior stages and artefacts, then decompose the next stage into a set of tasks for execution.",
+            next_stage
+        );
+        let project_dir = state.active_dir_str();
+        match spawn_step_agent_with_prompt(
+            &project_id,
+            "product-manager",
+            &pm_prompt,
+            project_dir.as_deref(),
+            &state,
+            &agent_state,
+            &app,
+        ) {
+            Ok(pm_agent_id) => {
+                eprintln!(
+                    "[lifecycle] Spawned product-manager agent={} for project='{}' stage={}",
+                    pm_agent_id, project_id, next_stage
+                );
+                let updated = LifecycleStateRow {
+                    active_agent_id: Some(pm_agent_id),
+                    ..loop_state.clone()
+                };
+                state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
+                return Ok(LifecycleStatus::from(updated));
+            }
+            Err(e) => {
+                eprintln!("[lifecycle] Failed to spawn product-manager for stage {} of '{}': {}", next_stage, project_id, e);
+            }
+        }
+        return Ok(LifecycleStatus::from(loop_state));
     }
 
     let next_step = step + 1;
@@ -468,6 +619,7 @@ pub async fn approve_lifecycle_step(
             completed_task_ids: current.completed_task_ids.clone(),
             active_task_agent_ids: None,
             stage_number: current.stage_number,
+            rework_items: None,
         }
     } else {
         eprintln!(
@@ -488,6 +640,7 @@ pub async fn approve_lifecycle_step(
             completed_task_ids: None,
             active_task_agent_ids: None,
             stage_number: Some(1),
+            rework_items: None,
         }
     };
 
@@ -539,6 +692,158 @@ pub async fn approve_lifecycle_step(
     Ok(LifecycleStatus::from(final_state))
 }
 
+/// Submit rework items from the human after a Step 4 PM review decision of "rework".
+///
+/// Transitions the lifecycle from step=5, status="awaiting_rework" to
+/// step=5, substep="rework-planning", status="running" and spawns a
+/// product-manager agent to create a minimal rework task plan.
+///
+/// If `rework_items` is empty, skips directly to step 6 (same as approve with "skip").
+#[tauri::command]
+pub fn submit_rework_items(
+    project_id: String,
+    rework_items: String,
+    project_state: State<'_, ProjectState>,
+    agent_state: State<'_, AgentState>,
+    app_handle: AppHandle,
+) -> Result<LifecycleStatus, String> {
+    let current = project_state.with_active(|store, _| store.get_lifecycle_state(&project_id))?;
+
+    if current.step != 5 {
+        return Err(format!(
+            "submit_rework_items: project '{}' is at step {}, expected step 5",
+            project_id, current.step
+        ));
+    }
+    if current.status != "awaiting_rework" && current.status != "running" {
+        return Err(format!(
+            "submit_rework_items: project '{}' is in status '{}', expected 'awaiting_rework'",
+            project_id, current.status
+        ));
+    }
+
+    // Empty rework_items → skip to step 6
+    if rework_items.trim().is_empty() {
+        eprintln!(
+            "[lifecycle] submit_rework_items: empty items for '{}' — skipping to step 6",
+            project_id
+        );
+        return handle_step5_skip(&project_id, current, &project_state, &agent_state, &app_handle);
+    }
+
+    // Store rework_items and transition to substep="rework-planning"
+    let planning_state = LifecycleStateRow {
+        step: 5,
+        substep: Some("rework-planning".to_string()),
+        status: "running".to_string(),
+        pending_approval_id: None,
+        active_agent_id: None,
+        rework_items: Some(rework_items.clone()),
+        ..current.clone()
+    };
+    project_state.with_active(|store, _| store.upsert_lifecycle_state(&planning_state))?;
+
+    // Build PM rework-planning prompt
+    let pm_prompt = format!(
+        "Review these rework items and create a minimal task plan to address them.\n\n## Rework Items\n\n{}\n\nCreate only the tasks necessary to address the rework items. Do not re-do work already completed satisfactorily.",
+        rework_items
+    );
+
+    let project_dir = project_state.active_dir_str();
+    match spawn_step_agent_with_prompt(
+        &project_id,
+        "product-manager",
+        &pm_prompt,
+        project_dir.as_deref(),
+        &project_state,
+        &agent_state,
+        &app_handle,
+    ) {
+        Ok(pm_agent_id) => {
+            eprintln!(
+                "[lifecycle] submit_rework_items: spawned PM rework-planning agent={} for project='{}'",
+                pm_agent_id, project_id
+            );
+            let updated = LifecycleStateRow {
+                active_agent_id: Some(pm_agent_id),
+                ..planning_state
+            };
+            project_state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
+            Ok(LifecycleStatus::from(updated))
+        }
+        Err(e) => {
+            eprintln!(
+                "[lifecycle] submit_rework_items: failed to spawn PM agent for '{}': {}",
+                project_id, e
+            );
+            Ok(LifecycleStatus::from(planning_state))
+        }
+    }
+}
+
+/// Approve step 5 with "skip" decision — skips rework and jumps to step 6.
+/// Can be called when step=5, any status.
+fn handle_step5_skip(
+    project_id: &str,
+    current: LifecycleStateRow,
+    state: &ProjectState,
+    agent_state: &crate::agents::AgentState,
+    app: &AppHandle,
+) -> Result<LifecycleStatus, String> {
+    eprintln!(
+        "[lifecycle] '{}' step 5 skip — advancing to step 6",
+        project_id
+    );
+    let stage_num = current.stage_number.unwrap_or(1);
+    let next_state = LifecycleStateRow {
+        project_id: project_id.to_string(),
+        step: 6,
+        substep: Some("validity".to_string()),
+        status: "running".to_string(),
+        pending_approval_id: None,
+        active_agent_id: None,
+        stage_task_ids: current.stage_task_ids.clone(),
+        completed_task_ids: None,
+        active_task_agent_ids: None,
+        stage_number: current.stage_number,
+        rework_items: None,
+    };
+    state.with_active(|store, _| store.upsert_lifecycle_state(&next_state))?;
+
+    // bp6-ims.11: spawn validity-analyst
+    let validity_prompt = format!(
+        "Perform the validity check for Stage {}. Review the CONOPS and all guardrail documents against what was built this stage. Produce phase-{}-validity.md.",
+        stage_num, stage_num
+    );
+    let project_dir = state.active_dir_str();
+    match spawn_step_agent_with_prompt(
+        project_id,
+        "validity-analyst",
+        &validity_prompt,
+        project_dir.as_deref(),
+        state,
+        agent_state,
+        app,
+    ) {
+        Ok(validity_agent_id) => {
+            eprintln!(
+                "[lifecycle] (step5-skip) Spawned validity-analyst agent={} for project='{}' stage={}",
+                validity_agent_id, project_id, stage_num
+            );
+            let updated = LifecycleStateRow {
+                active_agent_id: Some(validity_agent_id),
+                ..next_state.clone()
+            };
+            state.with_active(|store, _| store.upsert_lifecycle_state(&updated))?;
+            return Ok(LifecycleStatus::from(updated));
+        }
+        Err(e) => {
+            eprintln!("[lifecycle] Failed to spawn validity-analyst for '{}': {}", project_id, e);
+        }
+    }
+    Ok(LifecycleStatus::from(next_state))
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /// Step 4 execution fan-out (bp6-ims.8).
@@ -546,7 +851,7 @@ pub async fn approve_lifecycle_step(
 /// Parses `task_ids_json` into a list of task node IDs, resolves which ones
 /// are immediately ready (no unmet dependencies), and spawns a PTY task agent
 /// for each. Updates `active_task_agent_ids` in lifecycle state.
-async fn spawn_execution_workflow(
+pub async fn spawn_execution_workflow(
     project_id: &str,
     task_ids_json: Option<&str>,
     project_state: &ProjectState,

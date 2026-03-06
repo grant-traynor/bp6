@@ -13,11 +13,11 @@ use advisor::{start_advisor_query, send_advisor_message, reset_advisor_session, 
 use agents::{kill_agent, spawn_agent, stop_agent_graceful, write_to_agent, AgentState};
 use project::{
     close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
-    get_artefacts_for_step, get_provenance, get_snapshot, list_open_projects, list_queue_items,
-    load_app_state, open_project, probe_node, redirect_workflow, resolve_queue_item,
-    save_app_state, stop_workflow, switch_project, update_node, ProjectState,
+    get_artefacts_for_step, get_provenance, get_snapshot, get_stage_metrics, list_open_projects,
+    list_queue_items, load_app_state, open_project, probe_node, promote_skill, redirect_workflow,
+    resolve_queue_item, save_app_state, stop_workflow, switch_project, update_node, ProjectState,
 };
-use lifecycle::{approve_lifecycle_step, get_lifecycle_status, spawn_lifecycle_service, start_lifecycle};
+use lifecycle::{approve_lifecycle_step, get_lifecycle_status, spawn_lifecycle_service, start_lifecycle, submit_rework_items};
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
 use skills::{get_skill_content, list_skills};
@@ -111,6 +111,7 @@ pub fn run() {
             get_lifecycle_status,
             start_lifecycle,
             approve_lifecycle_step,
+            submit_rework_items,
             list_skills,
             get_skill_content,
             switch_project,
@@ -122,6 +123,8 @@ pub fn run() {
             send_advisor_message,
             reset_advisor_session,
             get_advisor_state,
+            get_stage_metrics,
+            promote_skill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");

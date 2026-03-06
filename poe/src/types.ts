@@ -130,3 +130,25 @@ export interface QueueItem {
   resolvedAt?: string;
   resolution?: Record<string, unknown>;
 }
+
+// ── Lifecycle types (bp6-ims.9) ─────────────────────────────────────────────
+
+export interface LifecycleStatus {
+  step: number;
+  substep: string | null;
+  status: "idle" | "running" | "awaiting_approval" | "complete";
+  pendingApprovalId: string | null;
+  projectId: string;
+  activeAgentId: string | null;
+  stageTaskCount: number | null;
+}
+
+export interface ArtifactRecord {
+  id: string;
+  projectId: string;
+  step: number;
+  substep: string | null;
+  title: string;
+  content: string;
+  createdAt: string;
+}

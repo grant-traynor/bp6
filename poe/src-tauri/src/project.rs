@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NodeType, ProbeData, QueueItem, QueueItemOption};
+use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, MetricRecord, NewQueueItem, NodeType, ProbeData, QueueItem, QueueItemOption};
 use crate::agents::{spawn_agent_internal, SpawnAgentParams};
 
 // ── Open project entry ─────────────────────────────────────────────────────────
@@ -907,4 +907,73 @@ pub async fn redirect_workflow(
     }
 
     Ok(decision_node)
+}
+
+// ── KnowledgeArtifact commands (bp6-ims.3) ─────────────────────────────────────
+
+/// Returns all KnowledgeArtifact nodes produced before `step` (exclusive),
+/// ordered by step ascending.
+#[tauri::command]
+pub fn get_artefacts_for_step(
+    step: u32,
+    state: State<'_, ProjectState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let projects = state.projects.lock().unwrap();
+    let proj = projects.get(&active_dir).ok_or("No project open")?;
+    let nodes = proj.store.get_artefacts_for_step(&proj.project_id, step)?;
+    let values = nodes
+        .into_iter()
+        .map(|n| serde_json::to_value(n).unwrap_or(serde_json::Value::Null))
+        .collect();
+    Ok(values)
+}
+
+/// bp6-ims.11: Return per-stage metrics for the given project + stage number.
+#[tauri::command]
+pub fn get_stage_metrics(
+    project_id: String,
+    stage_number: i64,
+    state: State<'_, ProjectState>,
+) -> Result<Vec<MetricRecord>, String> {
+    state.with_active(|store, _| store.get_metrics_for_stage(&project_id, stage_number))
+}
+
+/// bp6-ims.11: Copy a project-local skill file to the user-level skill directory.
+///
+/// Source: `<project_dir>/.poe/skills/<skill_id>.md`
+/// Dest:   `~/.poe/skills/<skill_id>.md`
+#[tauri::command]
+pub fn promote_skill(
+    skill_id: String,
+    state: State<'_, ProjectState>,
+) -> Result<(), String> {
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let source = std::path::Path::new(&active_dir)
+        .join(".poe")
+        .join("skills")
+        .join(format!("{}.md", skill_id));
+
+    if !source.exists() {
+        return Err(format!(
+            "Project-local skill file not found: {}",
+            source.display()
+        ));
+    }
+
+    let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+    let dest_dir = home.join(".poe").join("skills");
+    std::fs::create_dir_all(&dest_dir)
+        .map_err(|e| format!("Failed to create ~/.poe/skills/: {}", e))?;
+
+    let dest = dest_dir.join(format!("{}.md", skill_id));
+    std::fs::copy(&source, &dest)
+        .map_err(|e| format!("Failed to copy skill {} to {}: {}", skill_id, dest.display(), e))?;
+
+    eprintln!(
+        "[project] promote_skill: {} → {}",
+        source.display(),
+        dest.display()
+    );
+    Ok(())
 }

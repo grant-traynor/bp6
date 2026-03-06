@@ -232,6 +232,23 @@ pub struct LifecycleStateRow {
     pub active_task_agent_ids: Option<String>,
     /// Which execution stage/phase we are on (default 1). Incremented before PM review.
     pub stage_number: Option<i64>,
+    /// Freeform rework description submitted by the human after a Step 4 PM review.
+    /// Populated by submit_rework_items; consumed by the Step 5 PM rework-planning agent.
+    pub rework_items: Option<String>,
+}
+
+// ── Stage metric record ────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricRecord {
+    pub id: String,
+    pub project_id: String,
+    pub stage_number: i64,
+    pub step: u32,
+    pub metric_key: String,
+    pub metric_value: f64,
+    pub recorded_at: String,
 }
 
 // ── Schema migrations ──────────────────────────────────────────────────────────
@@ -324,6 +341,20 @@ const MIGRATIONS: &[&str] = &[
         project_id TEXT PRIMARY KEY,
         session_id TEXT,
         agent_id   TEXT
+    );
+    "#,
+    // v11: rework items — freeform rework description from human after Step 4 PM review (bp6-ims.10)
+    r#"ALTER TABLE lifecycle_state ADD COLUMN rework_items TEXT;"#,
+    // v12: stage metrics — per-stage execution metrics (bp6-ims.11)
+    r#"
+    CREATE TABLE IF NOT EXISTS stage_metrics (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        stage_number INTEGER NOT NULL,
+        step INTEGER NOT NULL,
+        metric_key TEXT NOT NULL,
+        metric_value REAL NOT NULL,
+        recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     "#,
 ];
@@ -1226,8 +1257,8 @@ impl DagStore {
         let now = Utc::now().to_rfc3339();
         self.conn
             .execute(
-                "INSERT INTO lifecycle_state (project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                "INSERT INTO lifecycle_state (project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number, rework_items, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                  ON CONFLICT(project_id) DO UPDATE SET
                      step = excluded.step,
                      substep = excluded.substep,
@@ -1238,6 +1269,7 @@ impl DagStore {
                      completed_task_ids = excluded.completed_task_ids,
                      active_task_agent_ids = excluded.active_task_agent_ids,
                      stage_number = excluded.stage_number,
+                     rework_items = excluded.rework_items,
                      updated_at = excluded.updated_at",
                 params![
                     state.project_id,
@@ -1250,6 +1282,7 @@ impl DagStore {
                     state.completed_task_ids,
                     state.active_task_agent_ids,
                     state.stage_number,
+                    state.rework_items,
                     now
                 ],
             )
@@ -1260,7 +1293,7 @@ impl DagStore {
     /// Get the lifecycle state for a project; returns a default idle row if not found.
     pub fn get_lifecycle_state(&self, project_id: &str) -> Result<LifecycleStateRow, String> {
         match self.conn.query_row(
-            "SELECT project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number FROM lifecycle_state WHERE project_id = ?1",
+            "SELECT project_id, step, substep, status, pending_approval_id, active_agent_id, stage_task_ids, completed_task_ids, active_task_agent_ids, stage_number, rework_items FROM lifecycle_state WHERE project_id = ?1",
             params![project_id],
             |row| {
                 Ok(LifecycleStateRow {
@@ -1274,6 +1307,7 @@ impl DagStore {
                     completed_task_ids: row.get(7)?,
                     active_task_agent_ids: row.get(8)?,
                     stage_number: row.get(9)?,
+                    rework_items: row.get(10)?,
                 })
             },
         ) {
@@ -1289,6 +1323,7 @@ impl DagStore {
                 completed_task_ids: None,
                 active_task_agent_ids: None,
                 stage_number: Some(1),
+                rework_items: None,
             }),
             Err(e) => Err(format!("Failed to get lifecycle_state for {}: {}", project_id, e)),
         }
@@ -1437,6 +1472,64 @@ impl DagStore {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok((None, None)),
             Err(e) => Err(format!("Failed to get advisor state: {}", e)),
         }
+    }
+
+    // ── Stage metrics (bp6-ims.11) ─────────────────────────────────────────────
+
+    /// Record a single metric value for a project stage.
+    pub fn record_metric(
+        &self,
+        project_id: &str,
+        stage_number: i64,
+        step: u32,
+        metric_key: &str,
+        metric_value: f64,
+    ) -> Result<(), String> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO stage_metrics (id, project_id, stage_number, step, metric_key, metric_value, recorded_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![id, project_id, stage_number, step as i64, metric_key, metric_value, now],
+            )
+            .map_err(|e| format!("Failed to record metric: {}", e))?;
+        Ok(())
+    }
+
+    /// Return all metric records for a project + stage_number.
+    pub fn get_metrics_for_stage(
+        &self,
+        project_id: &str,
+        stage_number: i64,
+    ) -> Result<Vec<MetricRecord>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, project_id, stage_number, step, metric_key, metric_value, recorded_at
+                 FROM stage_metrics
+                 WHERE project_id = ?1 AND stage_number = ?2
+                 ORDER BY recorded_at ASC",
+            )
+            .map_err(|e| format!("Failed to prepare get_metrics_for_stage: {}", e))?;
+
+        let rows = stmt
+            .query_map(params![project_id, stage_number], |row| {
+                Ok(MetricRecord {
+                    id: row.get(0)?,
+                    project_id: row.get(1)?,
+                    stage_number: row.get(2)?,
+                    step: row.get::<_, i64>(3)? as u32,
+                    metric_key: row.get(4)?,
+                    metric_value: row.get(5)?,
+                    recorded_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| format!("Failed to query stage_metrics: {}", e))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        Ok(rows)
     }
 
     pub fn set_advisor_state(&self, project_id: &str, session_id: Option<&str>, agent_id: Option<&str>) -> Result<(), String> {
