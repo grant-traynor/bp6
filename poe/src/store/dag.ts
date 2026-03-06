@@ -5,6 +5,9 @@ import type { DagNode, DagEdge, ProjectInfo, ProbeData, QueueItem, WorkflowInfo,
 
 export const projectAtom = atom<ProjectInfo | null>(null);
 
+// All concurrently-open projects (keyed by projectDir)
+export const openProjectsAtom = atom<Map<string, ProjectInfo>>(new Map());
+
 export const nodesAtom = atom<Map<string, DagNode>>(new Map());
 
 export const edgesAtom = atom<Map<string, DagEdge>>(new Map());

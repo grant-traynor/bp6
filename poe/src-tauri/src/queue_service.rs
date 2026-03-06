@@ -129,22 +129,20 @@ async fn handle_create_item(
 
     // Step 2: Persist to SQLite via ProjectState
     let ps = app.state::<ProjectState>();
-    let item = {
-        let lock = ps.store.lock().map_err(|e| internal_error(e.to_string()))?;
-        let store = lock.as_ref().ok_or_else(|| bad_request("No project open"))?;
-        store
-            .create_queue_item(NewQueueItem {
-                project_id,
-                agent_id: body.agent_id,
-                workflow_id: body.workflow_id,
+    let item = ps
+        .with_active(|store, _| {
+            store.create_queue_item(NewQueueItem {
+                project_id: project_id.clone(),
+                agent_id: body.agent_id.clone(),
+                workflow_id: body.workflow_id.clone(),
                 awakeable_id: awakeable_id.clone(),
-                question: body.question,
-                options: body.options,
-                context_snapshot: body.context_snapshot.unwrap_or(json!({})),
+                question: body.question.clone(),
+                options: body.options.clone(),
+                context_snapshot: body.context_snapshot.clone().unwrap_or(json!({})),
                 priority: body.priority.unwrap_or(2),
             })
-            .map_err(|e| internal_error(e))?
-    };
+        })
+        .map_err(|e| bad_request(e))?;
 
     // Step 3: Emit Tauri event
     app.emit("queue:item:added", QueueItemAddedEvent { item: item.clone() })
@@ -159,34 +157,25 @@ async fn handle_create_item(
 
 /// POST /poe-queue/:project_id/resolve_item
 async fn handle_resolve_item(
-    Path(_project_id): Path<String>,
+    Path(_): Path<String>,
     State(app): State<Arc<AppHandle>>,
     Json(body): Json<ResolveItemRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let ps = app.state::<ProjectState>();
 
     // Step 1: Fetch the item from SQLite
-    let item = {
-        let lock = ps.store.lock().map_err(|e| internal_error(e.to_string()))?;
-        let store = lock.as_ref().ok_or_else(|| bad_request("No project open"))?;
-        store
-            .get_queue_item(&body.item_id)
-            .map_err(|e| internal_error(e))?
-    };
+    let item = ps
+        .with_active(|store, _| store.get_queue_item(&body.item_id))
+        .map_err(|e| bad_request(e))?;
 
     // Step 2: Complete the Restate awakeable if present
-    if let Some(ref awk_id) = item.awakeable_id {
+    if let Some(awk_id) = item.awakeable_id.as_deref() {
         try_resolve_awakeable(awk_id, &body.resolution).await;
     }
 
     // Step 3: Mark resolved in SQLite
-    {
-        let lock = ps.store.lock().map_err(|e| internal_error(e.to_string()))?;
-        let store = lock.as_ref().ok_or_else(|| bad_request("No project open"))?;
-        store
-            .resolve_queue_item_in_db(&body.item_id, body.resolution)
-            .map_err(|e| internal_error(e))?;
-    }
+    ps.with_active(|store, _| store.resolve_queue_item_in_db(&body.item_id, body.resolution.clone()))
+        .map_err(|e| internal_error(e))?;
 
     // Step 4: Emit Tauri event
     app.emit(
@@ -202,15 +191,13 @@ async fn handle_resolve_item(
 
 /// GET /poe-queue/:project_id/pending
 async fn handle_list_pending(
-    Path(project_id): Path<String>,
+    Path(_): Path<String>,
     State(app): State<Arc<AppHandle>>,
 ) -> Result<Json<Value>, ApiError> {
     let ps = app.state::<ProjectState>();
-    let lock = ps.store.lock().map_err(|e| internal_error(e.to_string()))?;
-    let store = lock.as_ref().ok_or_else(|| bad_request("No project open"))?;
-    let items = store
-        .list_queue_items(&project_id)
-        .map_err(|e| internal_error(e))?;
+    let items = ps
+        .with_active(|store, proj_id| store.list_queue_items(proj_id))
+        .map_err(|e| bad_request(e))?;
     Ok(Json(json!(items)))
 }
 

@@ -2,11 +2,11 @@ import { useState, useRef, useEffect } from "react";
 import { useAtom, useAtomValue } from "jotai";
 import {
   Inbox, GitBranch, Bot, Settings2, Sun, Moon, Monitor,
-  ChevronDown, FolderOpen,
+  ChevronDown, FolderOpen, X, Star,
 } from "lucide-react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { projectAtom, selectedNodeIdAtom } from "./store/dag";
+import { projectAtom, selectedNodeIdAtom, openProjectsAtom } from "./store/dag";
 import { useDagEvents } from "./hooks/useDagEvents";
 import { useTheme } from "./hooks/useTheme";
 import { useRecentProjects } from "./hooks/useRecentProjects";
@@ -30,8 +30,9 @@ const NAV_ITEMS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ];
 
 function ProjectSwitcher() {
-  const [project, setProject] = useAtom(projectAtom);
-  const { favourites, recentNonFav, recordOpen } = useRecentProjects();
+  const project = useAtomValue(projectAtom);
+  const openProjects = useAtomValue(openProjectsAtom);
+  const { favourites, recentNonFav, recordOpen, toggleFavourite } = useRecentProjects();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -44,15 +45,22 @@ function ProjectSwitcher() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  async function switchTo(dir: string) {
+  async function openProject(dir: string) {
     setOpen(false);
     try {
-      if (project) await invoke("close_project");
       const info = await invoke<ProjectInfo>("open_project", { dir });
       void recordOpen(info.projectDir, info.name);
-      setProject(info);
     } catch (err) {
-      console.error("Failed to switch project:", err);
+      console.error("Failed to open project:", err);
+    }
+  }
+
+  async function closeProject(dir: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    try {
+      await invoke("close_project", { dir });
+    } catch (err) {
+      console.error("Failed to close project:", err);
     }
   }
 
@@ -60,10 +68,15 @@ function ProjectSwitcher() {
     setOpen(false);
     const selected = await openDialog({ directory: true, multiple: false, title: "Open Project Directory" });
     if (!selected || typeof selected !== "string") return;
-    await switchTo(selected);
+    await openProject(selected);
   }
 
-  const allRecents = [...favourites, ...recentNonFav];
+  const openDirs = new Set(openProjects.keys());
+  const openList = Array.from(openProjects.values());
+  // Recents not already open
+  const closedFavs = favourites.filter((p) => !openDirs.has(p.path));
+  const closedRecents = recentNonFav.filter((p) => !openDirs.has(p.path));
+  const hasAnyRecent = closedFavs.length > 0 || closedRecents.length > 0;
 
   return (
     <div className="relative" ref={ref} style={{ width: "100%" }}>
@@ -84,45 +97,124 @@ function ProjectSwitcher() {
       </button>
 
       {open && (
-        <div
-          className="mac-card absolute z-50 overflow-hidden"
-          style={{ top: "100%", left: 8, right: 8, borderRadius: 10 }}
-        >
-          {allRecents.length > 0 && (
+        <div className="mac-card absolute z-50 overflow-hidden" style={{ top: "100%", left: 8, right: 8, borderRadius: 10 }}>
+
+          {/* Open projects */}
+          {openList.length > 0 && (
             <>
-              {allRecents.map((p) => {
-                const isActive = p.path === project?.projectDir;
+              <p className="mac-section-header" style={{ paddingTop: 8 }}>Open</p>
+              {openList.map((p) => {
+                const isActive = p.projectDir === project?.projectDir;
                 return (
-                  <button
-                    key={p.path}
-                    onClick={() => switchTo(p.path)}
+                  <div
+                    key={p.projectDir}
+                    onClick={() => openProject(p.projectDir)}
                     style={{
-                      width: "100%", display: "flex", alignItems: "center", gap: 8,
-                      padding: "7px 12px", background: "transparent", border: "none",
-                      cursor: "pointer", textAlign: "left",
+                      display: "flex", alignItems: "center", gap: 8,
+                      padding: "6px 12px", cursor: "pointer",
                     }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sidebar-hover-bg)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
                     <span style={{
                       width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
-                      background: isActive ? "var(--accent)" : "transparent",
-                      border: isActive ? "none" : "1px solid var(--border-strong)",
+                      background: isActive ? "var(--accent)" : "var(--border-strong)",
                     }} />
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <p style={{ fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? "var(--accent)" : "var(--text-primary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.name}
                       </p>
-                      <p className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {p.path}
-                      </p>
                     </div>
-                  </button>
+                    <button
+                      onClick={(e) => closeProject(p.projectDir, e)}
+                      className="mac-btn mac-btn-ghost"
+                      style={{ padding: "1px 4px", flexShrink: 0 }}
+                      title="Close project"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
                 );
               })}
-              <div className="mac-divider" />
+              {hasAnyRecent && <div className="mac-divider" />}
             </>
           )}
+
+          {/* Pinned (closed) */}
+          {closedFavs.length > 0 && (
+            <>
+              <p className="mac-section-header" style={{ paddingTop: openList.length ? 4 : 8 }}>Pinned</p>
+              {closedFavs.map((p) => (
+                <div
+                  key={p.path}
+                  onClick={() => openProject(p.path)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "6px 12px", cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sidebar-hover-bg)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  <Star size={10} fill="currentColor" style={{ color: "var(--status-paused)", flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ fontSize: 12, color: "var(--text-primary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.name}
+                    </p>
+                    <p className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.path}
+                    </p>
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleFavourite(p.path); }}
+                    className="mac-btn mac-btn-ghost"
+                    style={{ padding: "1px 4px", flexShrink: 0 }}
+                    title="Unpin"
+                  >
+                    <Star size={10} fill="currentColor" style={{ color: "var(--status-paused)" }} />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Recent (closed, non-favourite) */}
+          {closedRecents.length > 0 && (
+            <>
+              <p className="mac-section-header" style={{ paddingTop: closedFavs.length ? 4 : (openList.length ? 4 : 8) }}>Recent</p>
+              {closedRecents.map((p) => (
+                <div
+                  key={p.path}
+                  onClick={() => openProject(p.path)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    padding: "6px 12px", cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sidebar-hover-bg)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  <span style={{ width: 10, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ fontSize: 12, color: "var(--text-primary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.name}
+                    </p>
+                    <p className="mono" style={{ fontSize: 10, color: "var(--text-tertiary)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {p.path}
+                    </p>
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleFavourite(p.path); }}
+                    className="mac-btn mac-btn-ghost"
+                    style={{ padding: "1px 4px", flexShrink: 0 }}
+                    title="Pin"
+                  >
+                    <Star size={10} style={{ color: "var(--text-placeholder)" }} />
+                  </button>
+                </div>
+              ))}
+            </>
+          )}
+
+          <div className="mac-divider" />
           <button
             onClick={handleBrowse}
             style={{

@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtomValue } from "jotai";
 import { X } from "lucide-react";
 import { projectAtom, nodesListAtom, edgesListAtom } from "../store/dag";
 
 export function ProjectHeader() {
-  const [project, setProject] = useAtom(projectAtom);
+  const project = useAtomValue(projectAtom);
   const nodes = useAtomValue(nodesListAtom);
   const edges = useAtomValue(edgesListAtom);
 
@@ -12,8 +12,8 @@ export function ProjectHeader() {
 
   async function handleClose() {
     try {
-      await invoke("close_project");
-      setProject(null);
+      await invoke("close_project", { dir: null });
+      // projectAtom cleared by project:closed event handler
     } catch (err) {
       console.error("Failed to close project:", err);
     }

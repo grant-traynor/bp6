@@ -528,58 +528,30 @@ fn handle_poe_decision(
 ) {
     let project_state = app.state::<ProjectState>();
 
-    let project_id: String = {
-        match project_state.project_id.lock() {
-            Ok(guard) => match guard.as_ref() {
-                Some(id) => id.clone(),
-                None => {
-                    eprintln!("[agents] No project open — dropping poe:decision");
-                    return;
-                }
-            },
-            Err(e) => {
-                eprintln!("[agents] Failed to lock project_id: {}", e);
-                return;
-            }
-        }
-    };
-
     let context_snapshot = decision.context.unwrap_or(serde_json::json!({}));
     let priority = decision.priority.unwrap_or(2);
 
-    let item_result = {
-        match project_state.store.lock() {
-            Ok(guard) => match guard.as_ref() {
-                Some(store) => store.create_queue_item(NewQueueItem {
-                    project_id,
-                    agent_id: agent_id.to_string(),
-                    workflow_id: workflow_id.clone(),
-                    awakeable_id: None,
-                    question: decision.question,
-                    options: decision.options,
-                    context_snapshot,
-                    priority,
-                }),
-                None => {
-                    eprintln!("[agents] Store not open — dropping poe:decision");
-                    return;
-                }
-            },
-            Err(e) => {
-                eprintln!("[agents] Failed to lock store: {}", e);
-                return;
-            }
+    let item_result: Result<crate::dag::QueueItem, String> = project_state.with_active(|store, project_id| {
+        store.create_queue_item(NewQueueItem {
+            project_id: project_id.to_string(),
+            agent_id: agent_id.to_string(),
+            workflow_id: workflow_id.clone(),
+            awakeable_id: None,
+            question: decision.question.clone(),
+            options: decision.options.clone(),
+            context_snapshot: context_snapshot.clone(),
+            priority,
+        })
+    });
+    let item_result = match item_result {
+        Ok(item) => item,
+        Err(e) => {
+            eprintln!("[agents] No project open — dropping poe:decision: {}", e);
+            return;
         }
     };
 
-    match item_result {
-        Ok(item) => {
-            let _ = app.emit("queue:item:added", QueueItemAddedEvent { item });
-        }
-        Err(e) => {
-            eprintln!("[agents] Failed to create queue item: {}", e);
-        }
-    }
+    let _ = app.emit("queue:item:added", QueueItemAddedEvent { item: item_result });
 }
 
 /// Phase 3: update workflow current_step in SQLite and emit workflow:status.
@@ -602,18 +574,10 @@ fn handle_poe_step(
     }
 
     let project_state = app.state::<ProjectState>();
-    let current_step = {
-        match project_state.store.lock() {
-            Ok(guard) => match guard.as_ref() {
-                Some(store) => store
-                    .update_workflow_step(workflow_id, &step_label)
-                    .ok()
-                    .and_then(|r| r.current_step),
-                None => None,
-            },
-            Err(_) => None,
-        }
-    };
+    let current_step = project_state
+        .with_active(|store, _| store.update_workflow_step(workflow_id, &step_label))
+        .ok()
+        .and_then(|r| r.current_step);
 
     let _ = app.emit(
         "workflow:status",
@@ -635,44 +599,31 @@ fn handle_poe_artifact(app: &AppHandle, work_node_id: &str, artifact: PoeArtifac
         work_node_id: &str,
         artifact: PoeArtifact,
     ) -> Result<(), String> {
-        let project_state = app.state::<ProjectState>();
-
-        let project_id = project_state
-            .project_id
-            .lock()
-            .map_err(|e| e.to_string())?
-            .clone()
-            .ok_or("No project open")?;
-
         let target_node_id = artifact
             .node_id
             .as_deref()
             .unwrap_or(work_node_id)
             .to_string();
 
-        let guard = project_state
-            .store
-            .lock()
-            .map_err(|e| e.to_string())?;
-        let store = guard.as_ref().ok_or("Store not open")?;
-
-        let artifact_node = store.upsert_node(
-            &NodeType::AgentOutput,
-            &project_id,
-            serde_json::json!({
-                "kind": artifact.kind,
-                "content": artifact.content,
-                "sourceNodeId": target_node_id,
-            }),
-        )?;
-
-        // work_node --generated-by--> artifact_node
-        store.add_edge(
-            &target_node_id,
-            &artifact_node.id,
-            &EdgeType::GeneratedBy,
-            serde_json::json!({}),
-        )?;
+        let project_state = app.state::<ProjectState>();
+        let artifact_node = project_state.with_active(|store, project_id| {
+            let node = store.upsert_node(
+                &NodeType::AgentOutput,
+                project_id,
+                serde_json::json!({
+                    "kind": artifact.kind,
+                    "content": artifact.content,
+                    "sourceNodeId": target_node_id,
+                }),
+            )?;
+            store.add_edge(
+                &target_node_id,
+                &node.id,
+                &EdgeType::GeneratedBy,
+                serde_json::json!({}),
+            )?;
+            Ok(node)
+        })?;
 
         let _ = app.emit("dag:node:upserted", NodeUpsertedEvent { node: artifact_node });
         Ok(())
@@ -705,16 +656,14 @@ fn handle_poe_done(
         summary: &str,
     ) -> Result<(), String> {
         let project_state = app.state::<ProjectState>();
-        let guard = project_state.store.lock().map_err(|e| e.to_string())?;
-        let store = guard.as_ref().ok_or("Store not open")?;
-
-        store.update_workflow_status(workflow_id, "completed", None, None)?;
-
-        let node = store.get_node(node_id)?;
-        let mut data = node.data.clone();
-        data["status"] = serde_json::json!("completed");
-        data["workflowSummary"] = serde_json::json!(summary);
-        let updated_node = store.update_node(node_id, data)?;
+        let updated_node = project_state.with_active(|store, _| {
+            store.update_workflow_status(workflow_id, "completed", None, None)?;
+            let node = store.get_node(node_id)?;
+            let mut data = node.data.clone();
+            data["status"] = serde_json::json!("completed");
+            data["workflowSummary"] = serde_json::json!(summary);
+            store.update_node(node_id, data)
+        })?;
 
         let _ = app.emit("dag:node:upserted", NodeUpsertedEvent { node: updated_node });
         Ok(())
@@ -747,32 +696,22 @@ fn handle_agent_crash(
 ) {
     let project_state = app.state::<ProjectState>();
 
-    let failed = {
-        match project_state.store.lock() {
-            Ok(guard) => match guard.as_ref() {
-                Some(store) => {
-                    if let Ok(wf) = store.get_workflow(workflow_id) {
-                        if wf.status == "running" || wf.status == "pending" {
-                            store
-                                .update_workflow_status(
-                                    workflow_id,
-                                    "failed",
-                                    None,
-                                    Some("Agent process exited unexpectedly"),
-                                )
-                                .is_ok()
-                        } else {
-                            false // Already completed/cancelled
-                        }
-                    } else {
-                        false
-                    }
-                }
-                None => false,
-            },
-            Err(_) => false,
-        }
-    };
+    let failed = project_state
+        .with_active(|store, _| {
+            let wf = store.get_workflow(workflow_id)?;
+            if wf.status == "running" || wf.status == "pending" {
+                store.update_workflow_status(
+                    workflow_id,
+                    "failed",
+                    None,
+                    Some("Agent process exited unexpectedly"),
+                )?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })
+        .unwrap_or(false);
 
     if failed {
         let _ = app.emit(

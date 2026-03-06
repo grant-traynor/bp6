@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -6,25 +7,69 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::dag::{DagEdge, DagNode, DagSnapshot, DagStore, EdgeType, NewQueueItem, NodeType, ProbeData, QueueItem, QueueItemOption};
 
+// ── Open project entry ─────────────────────────────────────────────────────────
+
+pub struct OpenProject {
+    pub store: DagStore,
+    pub project_id: String,
+    pub name: String,
+}
+
 // ── Managed project state ──────────────────────────────────────────────────────
 
+/// Holds all concurrently-open projects, keyed by their project directory string.
+/// `active_dir` points to the one currently displayed in the UI.
 pub struct ProjectState {
-    pub store: Mutex<Option<DagStore>>,
-    pub project_id: Mutex<Option<String>>,
-    pub project_dir: Mutex<Option<PathBuf>>,
+    pub projects: Mutex<HashMap<String, OpenProject>>,
+    pub active_dir: Mutex<Option<String>>,
 }
 
 impl ProjectState {
     pub fn new() -> Self {
         ProjectState {
-            store: Mutex::new(None),
-            project_id: Mutex::new(None),
-            project_dir: Mutex::new(None),
+            projects: Mutex::new(HashMap::new()),
+            active_dir: Mutex::new(None),
         }
+    }
+
+    pub fn active_dir_str(&self) -> Option<String> {
+        self.active_dir.lock().unwrap().clone()
+    }
+
+    /// Execute a closure with the active project's store and project_id.
+    /// The projects lock is held only for the duration of the closure.
+    pub fn with_active<T, F>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&DagStore, &str) -> Result<T, String>,
+    {
+        let active_dir = self.active_dir_str().ok_or("No project open")?;
+        let projects = self.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        f(&proj.store, &proj.project_id)
     }
 }
 
 // ── Tauri event payloads ───────────────────────────────────────────────────────
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectOpenedEvent {
+    pub info: ProjectInfo,
+    pub snapshot: DagSnapshot,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSwitchedEvent {
+    pub info: ProjectInfo,
+    pub snapshot: DagSnapshot,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectClosedEvent {
+    pub project_dir: String,
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,10 +115,10 @@ pub struct ProjectInfo {
     pub name: String,
 }
 
-// ── Commands ───────────────────────────────────────────────────────────────────
+// ── Project commands ───────────────────────────────────────────────────────────
 
-/// Open a project directory. Creates or opens .poe/dag.db, runs migrations,
-/// loads the project node, and emits the initial snapshot.
+/// Open a project directory. If already open, switches to it (emits project:switched).
+/// Otherwise opens the DB, emits project:opened.
 #[tauri::command]
 pub async fn open_project(
     dir: String,
@@ -81,68 +126,155 @@ pub async fn open_project(
     state: State<'_, ProjectState>,
 ) -> Result<ProjectInfo, String> {
     let project_dir = PathBuf::from(&dir);
-
     if !project_dir.exists() {
         return Err(format!("Directory does not exist: {}", dir));
     }
 
+    // Already open? Just switch.
+    {
+        let projects = state.projects.lock().unwrap();
+        if let Some(proj) = projects.get(&dir) {
+            let info = ProjectInfo {
+                project_id: proj.project_id.clone(),
+                project_dir: dir.clone(),
+                name: proj.name.clone(),
+            };
+            let snapshot = proj.store.snapshot(&proj.project_id)?;
+            drop(projects);
+            *state.active_dir.lock().unwrap() = Some(dir);
+            app.emit("project:switched", ProjectSwitchedEvent { info: info.clone(), snapshot })
+                .map_err(|e| format!("Failed to emit project:switched: {}", e))?;
+            return Ok(info);
+        }
+    }
+
+    // New project: open DB.
     let db_path = project_dir.join(".poe").join("dag.db");
     let store = DagStore::open(&db_path)?;
 
-    // Derive project name from directory name
     let name = project_dir
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("Unnamed")
         .to_string();
 
-    // Ensure the root Project node exists
     let project_id = {
         let existing = store.list_nodes("__root__")?;
         if let Some(proj_node) = existing.iter().find(|n| n.node_type == "Project") {
             proj_node.id.clone()
         } else {
-            let node = store.upsert_node(
+            store.upsert_node(
                 &NodeType::Project,
                 "__root__",
                 serde_json::json!({ "name": name, "dir": dir }),
-            )?;
-            node.id
+            )?.id
         }
     };
 
-    // Load the initial snapshot and emit it
     let snapshot = store.snapshot(&project_id)?;
+    let info = ProjectInfo {
+        project_id: project_id.clone(),
+        project_dir: dir.clone(),
+        name: name.clone(),
+    };
 
-    *state.store.lock().unwrap() = Some(store);
-    *state.project_id.lock().unwrap() = Some(project_id.clone());
-    *state.project_dir.lock().unwrap() = Some(project_dir.clone());
+    {
+        let mut projects = state.projects.lock().unwrap();
+        projects.insert(dir.clone(), OpenProject { store, project_id, name });
+    }
+    *state.active_dir.lock().unwrap() = Some(dir);
 
-    // Emit snapshot to frontend
-    app.emit("project:opened", &snapshot)
+    app.emit("project:opened", ProjectOpenedEvent { info: info.clone(), snapshot })
         .map_err(|e| format!("Failed to emit project:opened: {}", e))?;
 
-    Ok(ProjectInfo {
-        project_id,
-        project_dir: dir,
-        name,
-    })
+    Ok(info)
 }
 
-/// Close the current project. Flushes writes, drops SQLite connection, clears state.
+/// Switch the active view to an already-open project.
+#[tauri::command]
+pub async fn switch_project(
+    dir: String,
+    app: AppHandle,
+    state: State<'_, ProjectState>,
+) -> Result<ProjectInfo, String> {
+    let (info, snapshot) = {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&dir)
+            .ok_or_else(|| format!("Project '{}' is not open", dir))?;
+        let info = ProjectInfo {
+            project_id: proj.project_id.clone(),
+            project_dir: dir.clone(),
+            name: proj.name.clone(),
+        };
+        let snapshot = proj.store.snapshot(&proj.project_id)?;
+        (info, snapshot)
+    };
+    *state.active_dir.lock().unwrap() = Some(dir);
+    app.emit("project:switched", ProjectSwitchedEvent { info: info.clone(), snapshot })
+        .map_err(|e| format!("Failed to emit project:switched: {}", e))?;
+    Ok(info)
+}
+
+/// Close a project. If `dir` is None, closes the active project.
+/// If the closed project was active, automatically switches to the next open one
+/// (emits project:switched) or clears state if none remain.
 #[tauri::command]
 pub async fn close_project(
+    dir: Option<String>,
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<(), String> {
-    *state.store.lock().unwrap() = None;
-    *state.project_id.lock().unwrap() = None;
-    *state.project_dir.lock().unwrap() = None;
+    let close_dir = match dir {
+        Some(d) => d,
+        None => state.active_dir_str().ok_or("No project open")?,
+    };
 
-    app.emit("project:closed", ())
+    let was_active = state.active_dir.lock().unwrap().as_deref() == Some(close_dir.as_str());
+
+    {
+        let mut projects = state.projects.lock().unwrap();
+        projects.remove(&close_dir);
+    }
+
+    app.emit("project:closed", ProjectClosedEvent { project_dir: close_dir })
         .map_err(|e| format!("Failed to emit project:closed: {}", e))?;
 
+    if was_active {
+        let next = state.projects.lock().unwrap().keys().next().cloned();
+        if let Some(next_dir) = next {
+            let (info, snapshot) = {
+                let projects = state.projects.lock().unwrap();
+                let proj = projects.get(&next_dir).ok_or("Next project not found")?;
+                let info = ProjectInfo {
+                    project_id: proj.project_id.clone(),
+                    project_dir: next_dir.clone(),
+                    name: proj.name.clone(),
+                };
+                (info, proj.store.snapshot(&proj.project_id)?)
+            };
+            *state.active_dir.lock().unwrap() = Some(next_dir);
+            app.emit("project:switched", ProjectSwitchedEvent { info, snapshot })
+                .map_err(|e| format!("Failed to emit project:switched: {}", e))?;
+        } else {
+            *state.active_dir.lock().unwrap() = None;
+        }
+    }
+
     Ok(())
+}
+
+/// Returns ProjectInfo for all currently open projects.
+#[tauri::command]
+pub fn list_open_projects(state: State<'_, ProjectState>) -> Vec<ProjectInfo> {
+    let projects = state.projects.lock().unwrap();
+    projects
+        .iter()
+        .map(|(dir, proj)| ProjectInfo {
+            project_id: proj.project_id.clone(),
+            project_dir: dir.clone(),
+            name: proj.name.clone(),
+        })
+        .collect()
 }
 
 // ── Node commands ──────────────────────────────────────────────────────────────
@@ -160,17 +292,15 @@ pub async fn create_node(
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<DagNode, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
-
-    let node_type = NodeType::from_str(&params.node_type)?;
-    let node = store.upsert_node(&node_type, &project_id, params.data)?;
-
-    // Reactive bridge: emit delta
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let node = {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        let node_type = NodeType::from_str(&params.node_type)?;
+        proj.store.upsert_node(&node_type, &proj.project_id, params.data)?
+    };
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: node.clone() })
-        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     Ok(node)
 }
 
@@ -187,14 +317,14 @@ pub async fn update_node(
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<DagNode, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-
-    let node = store.update_node(&params.id, params.data)?;
-
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let node = {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.update_node(&params.id, params.data)?
+    };
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: node.clone() })
-        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     Ok(node)
 }
 
@@ -204,23 +334,23 @@ pub async fn delete_node(
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<(), String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-
-    store.delete_node(&id)?;
-
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.delete_node(&id)?;
+    }
     app.emit("dag:node:deleted", NodeDeletedEvent { id })
-        .map_err(|e| format!("Failed to emit dag:node:deleted: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn get_snapshot(state: State<'_, ProjectState>) -> Result<DagSnapshot, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
-    store.snapshot(&project_id)
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let projects = state.projects.lock().unwrap();
+    let proj = projects.get(&active_dir).ok_or("No project open")?;
+    proj.store.snapshot(&proj.project_id)
 }
 
 // ── Edge commands ──────────────────────────────────────────────────────────────
@@ -240,20 +370,20 @@ pub async fn create_edge(
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<DagEdge, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-
-    let edge_type = EdgeType::from_str(&params.edge_type)?;
-    let edge = store.add_edge(
-        &params.from_id,
-        &params.to_id,
-        &edge_type,
-        params.data.unwrap_or(serde_json::json!({})),
-    )?;
-
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let edge = {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        let edge_type = EdgeType::from_str(&params.edge_type)?;
+        proj.store.add_edge(
+            &params.from_id,
+            &params.to_id,
+            &edge_type,
+            params.data.unwrap_or(serde_json::json!({})),
+        )?
+    };
     app.emit("dag:edge:upserted", EdgeUpsertedEvent { edge: edge.clone() })
-        .map_err(|e| format!("Failed to emit dag:edge:upserted: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     Ok(edge)
 }
 
@@ -263,14 +393,14 @@ pub async fn delete_edge(
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<(), String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-
-    store.delete_edge(&id)?;
-
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.delete_edge(&id)?;
+    }
     app.emit("dag:edge:deleted", EdgeDeletedEvent { id })
-        .map_err(|e| format!("Failed to emit dag:edge:deleted: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     Ok(())
 }
 
@@ -294,33 +424,32 @@ pub async fn create_queue_item(
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<QueueItem, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
-
-    let item = store.create_queue_item(NewQueueItem {
-        project_id,
-        agent_id: params.agent_id,
-        workflow_id: params.workflow_id,
-        awakeable_id: params.awakeable_id,
-        question: params.question,
-        options: params.options,
-        context_snapshot: params.context_snapshot.unwrap_or(serde_json::json!({})),
-        priority: params.priority.unwrap_or(2),
-    })?;
-
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let item = {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.create_queue_item(NewQueueItem {
+            project_id: proj.project_id.clone(),
+            agent_id: params.agent_id,
+            workflow_id: params.workflow_id,
+            awakeable_id: params.awakeable_id,
+            question: params.question,
+            options: params.options,
+            context_snapshot: params.context_snapshot.unwrap_or(serde_json::json!({})),
+            priority: params.priority.unwrap_or(2),
+        })?
+    };
     app.emit("queue:item:added", QueueItemAddedEvent { item: item.clone() })
-        .map_err(|e| format!("Failed to emit queue:item:added: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     Ok(item)
 }
 
 #[tauri::command]
 pub async fn list_queue_items(state: State<'_, ProjectState>) -> Result<Vec<QueueItem>, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
-    store.list_queue_items(&project_id)
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let projects = state.projects.lock().unwrap();
+    let proj = projects.get(&active_dir).ok_or("No project open")?;
+    proj.store.list_queue_items(&proj.project_id)
 }
 
 #[derive(Deserialize)]
@@ -330,32 +459,25 @@ pub struct ResolveQueueItemParams {
     pub chosen_option_id: String,
 }
 
-/// End-to-end resolution flow (bp6-2a5.5):
-/// 1. Create Decision DAG node linked to the queue item
-/// 2. Call Restate to complete the awakeable (if present)
-/// 3. Update queue_item status to resolved in SQLite
-/// 4. Emit dag:node:upserted + queue:item:resolved events
-/// 5. TODO(bp6-2a5.1): Send chosen option to agent stdin via PTY
 #[tauri::command]
 pub async fn resolve_queue_item(
     params: ResolveQueueItemParams,
     app: AppHandle,
     state: State<'_, ProjectState>,
 ) -> Result<(), String> {
-    // Read item + project_id under lock, then release before async HTTP call
-    let (item, project_id) = {
-        let lock = state.store.lock().unwrap();
-        let store = lock.as_ref().ok_or("No project open")?;
-        let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
-        let item = store.get_queue_item(&params.item_id)?;
-        (item, project_id)
+    let (item, project_id, active_dir) = {
+        let active_dir = state.active_dir_str().ok_or("No project open")?;
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        let item = proj.store.get_queue_item(&params.item_id)?;
+        (item, proj.project_id.clone(), active_dir)
     };
 
     let chosen = item
         .options
         .iter()
         .find(|o| o.id == params.chosen_option_id)
-        .ok_or_else(|| format!("Option '{}' not found in queue item '{}'", params.chosen_option_id, item.id))?
+        .ok_or_else(|| format!("Option '{}' not found", params.chosen_option_id))?
         .clone();
 
     let resolution = serde_json::json!({
@@ -364,11 +486,10 @@ pub async fn resolve_queue_item(
         "chosenOptionLabel": chosen.label,
     });
 
-    // ── Step 1: Create Decision DAG node ──────────────────────────────────────
     let decision_node = {
-        let lock = state.store.lock().unwrap();
-        let store = lock.as_ref().ok_or("No project open")?;
-        store.upsert_node(
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.upsert_node(
             &NodeType::Decision,
             &project_id,
             serde_json::json!({
@@ -381,43 +502,34 @@ pub async fn resolve_queue_item(
         )?
     };
 
-    // ── Step 2: Call Restate to complete awakeable ────────────────────────────
     if let Some(ref awakeable_id) = item.awakeable_id {
         let url = format!(
             "http://127.0.0.1:{}/restate/awakeables/{}/resolve",
             crate::restate::RESTATE_SERVICES_PORT,
             awakeable_id
         );
-        let client = reqwest::Client::new();
-        client
+        reqwest::Client::new()
             .post(&url)
             .json(&resolution)
             .send()
             .await
-            .map_err(|e| format!("Failed to call Restate resolveItem: {}", e))?
+            .map_err(|e| format!("Failed to call Restate: {}", e))?
             .error_for_status()
-            .map_err(|e| format!("Restate resolveItem returned error: {}", e))?;
+            .map_err(|e| format!("Restate error: {}", e))?;
     }
 
-    // ── Step 3: Mark resolved in SQLite ───────────────────────────────────────
     {
-        let lock = state.store.lock().unwrap();
-        let store = lock.as_ref().ok_or("No project open")?;
-        store.resolve_queue_item_in_db(&item.id, resolution)?;
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.resolve_queue_item_in_db(&item.id, resolution)?;
     }
 
-    // ── Step 4: Emit events ───────────────────────────────────────────────────
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node })
-        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     app.emit("queue:item:resolved", QueueItemResolvedEvent { item_id: item.id.clone() })
-        .map_err(|e| format!("Failed to emit queue:item:resolved: {}", e))?;
+        .map_err(|e| format!("Failed to emit: {}", e))?;
 
-    // ── Step 5: PTY stdin (bp6-2a5.1) ────────────────────────────────────────
-    // TODO(bp6-2a5.1): Write resolution JSON to agent stdin via PTY when
-    // agent process management is implemented.
     eprintln!("[PTY stub] Resolution for agent '{}': option '{}'", item.agent_id, chosen.id);
-
     Ok(())
 }
 
@@ -470,30 +582,27 @@ pub fn save_app_state(state: AppStateData) -> Result<(), String> {
 
 // ── Mission Control commands (bp6-80q) ─────────────────────────────────────────
 
-/// Probe a node: returns the node, its edges, and directly linked nodes.
-/// Used by the probe/inspect panel (bp6-80q.3).
 #[tauri::command]
 pub async fn probe_node(
     node_id: String,
     state: State<'_, ProjectState>,
 ) -> Result<ProbeData, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-    store.probe_node(&node_id)
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let projects = state.projects.lock().unwrap();
+    let proj = projects.get(&active_dir).ok_or("No project open")?;
+    proj.store.probe_node(&node_id)
 }
 
-/// Returns the subgraph within `depth` hops of `node_id`.
-/// Used by the provenance traversal view (bp6-80q.5).
 #[tauri::command]
 pub async fn get_provenance(
     node_id: String,
     depth: u32,
     state: State<'_, ProjectState>,
 ) -> Result<DagSnapshot, String> {
-    let lock = state.store.lock().unwrap();
-    let store = lock.as_ref().ok_or("No project open")?;
-    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
-    store.get_provenance(&node_id, &project_id, depth)
+    let active_dir = state.active_dir_str().ok_or("No project open")?;
+    let projects = state.projects.lock().unwrap();
+    let proj = projects.get(&active_dir).ok_or("No project open")?;
+    proj.store.get_provenance(&node_id, &proj.project_id, depth)
 }
 
 #[derive(Deserialize)]
@@ -504,7 +613,6 @@ pub struct StopWorkflowParams {
     pub reason: Option<String>,
 }
 
-/// Stop a running workflow: SIGTERM the PTY agent, mark node cancelled, create Decision record.
 #[tauri::command]
 pub async fn stop_workflow(
     params: StopWorkflowParams,
@@ -512,44 +620,45 @@ pub async fn stop_workflow(
     state: State<'_, ProjectState>,
     agent_state: State<'_, crate::agents::AgentState>,
 ) -> Result<DagNode, String> {
-    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
-
-    // ── SIGTERM the PTY agent (Phase 3) ───────────────────────────────────────
-    agent_state.stop_workflow_agent_graceful(&params.workflow_id);
-
-    // ── Cancel Restate invocation (best-effort) ────────────────────────────────
-    let cancel_url = format!(
-        "http://127.0.0.1:{}/invocations/{}/cancel",
-        crate::restate::RESTATE_ADMIN_PORT,
-        params.workflow_id
-    );
-    let client = reqwest::Client::new();
-    let _ = client.post(&cancel_url).send().await;
-
-    // ── Update node status to cancelled ───────────────────────────────────────
-    let updated_node = {
-        let lock = state.store.lock().unwrap();
-        let store = lock.as_ref().ok_or("No project open")?;
-        let node = store.get_node(&params.node_id)?;
-        let mut data = node.data.clone();
-        data["status"] = serde_json::json!("cancelled");
-        store.update_node(&params.node_id, data)?
+    let (active_dir, project_id) = {
+        let active_dir = state.active_dir_str().ok_or("No project open")?;
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        (active_dir, proj.project_id.clone())
     };
 
-    // ── Mark workflow record cancelled ─────────────────────────────────────────
+    agent_state.stop_workflow_agent_graceful(&params.workflow_id);
+
+    let _ = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/invocations/{}/cancel",
+            crate::restate::RESTATE_ADMIN_PORT,
+            params.workflow_id
+        ))
+        .send()
+        .await;
+
+    let updated_node = {
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        let node = proj.store.get_node(&params.node_id)?;
+        let mut data = node.data.clone();
+        data["status"] = serde_json::json!("cancelled");
+        proj.store.update_node(&params.node_id, data)?
+    };
+
     {
-        let lock = state.store.lock().unwrap();
-        if let Some(store) = lock.as_ref() {
+        let projects = state.projects.lock().unwrap();
+        if let Some(proj) = projects.get(&active_dir) {
             let reason = params.reason.as_deref().unwrap_or("Stopped by user");
-            let _ = store.update_workflow_status(&params.workflow_id, "cancelled", None, Some(reason));
+            let _ = proj.store.update_workflow_status(&params.workflow_id, "cancelled", None, Some(reason));
         }
     }
 
-    // ── Create Decision node recording the stop ────────────────────────────────
     let decision_node = {
-        let lock = state.store.lock().unwrap();
-        let store = lock.as_ref().ok_or("No project open")?;
-        store.upsert_node(
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.upsert_node(
             &NodeType::Decision,
             &project_id,
             serde_json::json!({
@@ -563,10 +672,9 @@ pub async fn stop_workflow(
     };
 
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: updated_node.clone() })
-        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node })
-        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
-
+        .map_err(|e| format!("Failed to emit: {}", e))?;
     Ok(updated_node)
 }
 
@@ -578,7 +686,6 @@ pub struct RedirectWorkflowParams {
     pub instruction: String,
 }
 
-/// Redirect a running workflow: record a Redirect Decision node, inject instruction via PTY stdin.
 #[tauri::command]
 pub async fn redirect_workflow(
     params: RedirectWorkflowParams,
@@ -586,13 +693,17 @@ pub async fn redirect_workflow(
     state: State<'_, ProjectState>,
     agent_state: State<'_, crate::agents::AgentState>,
 ) -> Result<DagNode, String> {
-    let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
+    let (active_dir, project_id) = {
+        let active_dir = state.active_dir_str().ok_or("No project open")?;
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        (active_dir, proj.project_id.clone())
+    };
 
-    // ── Write Redirect Decision node to DAG ───────────────────────────────────
     let decision_node = {
-        let lock = state.store.lock().unwrap();
-        let store = lock.as_ref().ok_or("No project open")?;
-        store.upsert_node(
+        let projects = state.projects.lock().unwrap();
+        let proj = projects.get(&active_dir).ok_or("No project open")?;
+        proj.store.upsert_node(
             &NodeType::Decision,
             &project_id,
             serde_json::json!({
@@ -606,15 +717,13 @@ pub async fn redirect_workflow(
     };
 
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node.clone() })
-        .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
+        .map_err(|e| format!("Failed to emit: {}", e))?;
 
-    // ── Inject redirect instruction into agent stdin via PTY (Phase 3) ────────
-    let redirect_msg = format!(
-        "\n[REDIRECT]: {}\n",
-        params.instruction
-    );
-    if let Err(e) = agent_state.write_to_workflow_agent(&params.workflow_id, &redirect_msg) {
-        eprintln!("[project] redirect_workflow PTY write failed (non-fatal): {}", e);
+    if let Err(e) = agent_state.write_to_workflow_agent(
+        &params.workflow_id,
+        &format!("\n[REDIRECT]: {}\n", params.instruction),
+    ) {
+        eprintln!("[project] redirect PTY write failed (non-fatal): {}", e);
     }
 
     Ok(decision_node)
