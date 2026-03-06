@@ -222,6 +222,7 @@ fn spawn_advisor_turn(
         full_prompt,
         "--output-format".to_string(),
         "stream-json".to_string(),
+        "--verbose".to_string(),
     ];
     if is_resume {
         args.push("--resume".to_string());
