@@ -208,9 +208,13 @@ fn spawn_advisor_turn(
         agent_state,
     )?;
 
-    // Clean up temp MCP config file (best effort)
+    // Clean up temp MCP config after a short delay — the PTY spawn is non-blocking,
+    // so Claude CLI hasn't read the file yet when spawn_agent_internal returns.
     if let Some(path) = mcp_config_path {
-        let _ = std::fs::remove_file(path);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            let _ = std::fs::remove_file(path);
+        });
     }
 
     Ok(agent_id)
