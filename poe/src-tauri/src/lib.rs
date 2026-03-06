@@ -2,10 +2,15 @@ pub mod advisor;
 pub mod agents;
 pub mod dag;
 pub mod lifecycle;
+pub mod mcp_server;
 pub mod project;
 pub mod queue_service;
 pub mod restate;
 pub mod skills;
+
+pub struct McpServerState {
+    pub port: u16,
+}
 
 use tauri::Manager;
 
@@ -31,6 +36,7 @@ pub fn run() {
         .manage(ProjectState::new())
         .manage(RestateState::new())
         .manage(AgentState::new())
+        .manage(McpServerState { port: 9084 })
         .setup(|app| {
             // Resolve app data directory for Restate state
             let data_dir = app
