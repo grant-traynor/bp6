@@ -385,6 +385,16 @@ pub fn spawn_agent_internal(
 
     let writer = Arc::new(Mutex::new(master_writer));
 
+    // Pre-buffer a CR (Enter in raw PTY mode) so the Claude Code workspace-trust
+    // prompt is auto-confirmed without waiting for output.  The character sits in
+    // the TTY input queue and is consumed the instant the process reads stdin.
+    // For non-interactive / print-mode (claude -p …) invocations this is harmless
+    // because claude never reads from stdin in that mode.
+    if let Ok(mut w) = writer.lock() {
+        let _ = w.write_all(b"\r");
+        let _ = w.flush();
+    }
+
     // Watchdog liveness tracking — shared between PTY reader thread and watchdog task.
     let last_output_at = Arc::new(Mutex::new(std::time::Instant::now()));
     let silence_alerted = Arc::new(Mutex::new(false));
@@ -399,9 +409,6 @@ pub fn spawn_agent_internal(
         let app_for_thread = app.clone();
         let last_output_at_bg = Arc::clone(&last_output_at);
         let silence_alerted_bg = Arc::clone(&silence_alerted);
-        // Clone writer into reader thread so we can auto-respond to interactive prompts.
-        let writer_bg = Arc::clone(&writer);
-
         std::thread::spawn(move || {
             let reader = BufReader::new(master_reader);
             let mut done_received = false;
@@ -429,17 +436,6 @@ pub fn spawn_agent_internal(
 
                 eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
 
-                // ── Auto-respond to known Claude Code interactive prompts ──────────────
-                // The trust-folder prompt shows "Enter to confirm" on its last line with
-                // option ❯1 (Yes, I trust this folder) already selected. Send \n to confirm.
-                if trimmed.contains("Enter to confirm") {
-                    eprintln!("[agents:pty {}] auto-confirming trust-folder prompt", agent_id_bg);
-                    if let Ok(mut w) = writer_bg.lock() {
-                        let _ = w.write_all(b"\n");
-                        let _ = w.flush();
-                    }
-                    continue;
-                }
 
                 // Track code fence state — toggle on any ``` line.
                 if trimmed.starts_with("```") {
