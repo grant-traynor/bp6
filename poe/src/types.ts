@@ -71,6 +71,22 @@ export interface WorkflowInfo {
   startedAt: string;
 }
 
+/// Phase 3: SQLite workflow record (matches WorkflowRecord in dag/mod.rs)
+export interface WorkflowRecord {
+  id: string;
+  projectId: string;
+  nodeId: string;
+  agentId?: string;
+  workflowType: string;
+  status: WorkflowStatus;
+  currentStep?: string;
+  config: Record<string, unknown>;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  error?: string;
+}
+
 export interface AgentStdoutLine {
   workflowId: string;
   line: string;

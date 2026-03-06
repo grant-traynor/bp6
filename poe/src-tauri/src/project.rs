@@ -421,6 +421,53 @@ pub async fn resolve_queue_item(
     Ok(())
 }
 
+// ── Global app state (~/.poe/app-state.json) ──────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentProjectRecord {
+    pub path: String,
+    pub name: String,
+    pub last_opened_at: String,
+    pub is_favourite: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AppStateData {
+    pub recent_projects: Vec<RecentProjectRecord>,
+}
+
+fn app_state_path() -> Result<PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Cannot resolve home directory")?;
+    Ok(home.join(".poe").join("app-state.json"))
+}
+
+#[tauri::command]
+pub fn load_app_state() -> Result<AppStateData, String> {
+    let path = app_state_path()?;
+    if !path.exists() {
+        return Ok(AppStateData::default());
+    }
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read app state: {}", e))?;
+    serde_json::from_str(&raw)
+        .map_err(|e| format!("Failed to parse app state: {}", e))
+}
+
+#[tauri::command]
+pub fn save_app_state(state: AppStateData) -> Result<(), String> {
+    let path = app_state_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create ~/.poe: {}", e))?;
+    }
+    let json = serde_json::to_string_pretty(&state)
+        .map_err(|e| format!("Failed to serialise app state: {}", e))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write app state: {}", e))
+}
+
 // ── Mission Control commands (bp6-80q) ─────────────────────────────────────────
 
 /// Probe a node: returns the node, its edges, and directly linked nodes.
@@ -457,24 +504,26 @@ pub struct StopWorkflowParams {
     pub reason: Option<String>,
 }
 
-/// Stop a running workflow: cancel Restate invocation, mark node cancelled, create Decision record.
-/// PTY SIGTERM is stubbed until bp6-3d1 (Phase 3 Workflow Engine) is implemented.
+/// Stop a running workflow: SIGTERM the PTY agent, mark node cancelled, create Decision record.
 #[tauri::command]
 pub async fn stop_workflow(
     params: StopWorkflowParams,
     app: AppHandle,
     state: State<'_, ProjectState>,
+    agent_state: State<'_, crate::agents::AgentState>,
 ) -> Result<DagNode, String> {
     let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
 
-    // ── Cancel Restate invocation ──────────────────────────────────────────────
+    // ── SIGTERM the PTY agent (Phase 3) ───────────────────────────────────────
+    agent_state.stop_workflow_agent_graceful(&params.workflow_id);
+
+    // ── Cancel Restate invocation (best-effort) ────────────────────────────────
     let cancel_url = format!(
         "http://127.0.0.1:{}/invocations/{}/cancel",
         crate::restate::RESTATE_ADMIN_PORT,
         params.workflow_id
     );
     let client = reqwest::Client::new();
-    // Best-effort — don't fail if Restate isn't running or invocation already done
     let _ = client.post(&cancel_url).send().await;
 
     // ── Update node status to cancelled ───────────────────────────────────────
@@ -486,6 +535,15 @@ pub async fn stop_workflow(
         data["status"] = serde_json::json!("cancelled");
         store.update_node(&params.node_id, data)?
     };
+
+    // ── Mark workflow record cancelled ─────────────────────────────────────────
+    {
+        let lock = state.store.lock().unwrap();
+        if let Some(store) = lock.as_ref() {
+            let reason = params.reason.as_deref().unwrap_or("Stopped by user");
+            let _ = store.update_workflow_status(&params.workflow_id, "cancelled", None, Some(reason));
+        }
+    }
 
     // ── Create Decision node recording the stop ────────────────────────────────
     let decision_node = {
@@ -509,9 +567,6 @@ pub async fn stop_workflow(
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node })
         .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
 
-    // TODO(bp6-3d1): SIGTERM the PTY process for this workflow
-    eprintln!("[PTY stub] Stop workflow '{}'", params.workflow_id);
-
     Ok(updated_node)
 }
 
@@ -523,13 +578,13 @@ pub struct RedirectWorkflowParams {
     pub instruction: String,
 }
 
-/// Redirect a running workflow: record a Redirect Decision node, inject instruction via PTY.
-/// PTY stdin injection is stubbed until bp6-3d1 (Phase 3 Workflow Engine) is implemented.
+/// Redirect a running workflow: record a Redirect Decision node, inject instruction via PTY stdin.
 #[tauri::command]
 pub async fn redirect_workflow(
     params: RedirectWorkflowParams,
     app: AppHandle,
     state: State<'_, ProjectState>,
+    agent_state: State<'_, crate::agents::AgentState>,
 ) -> Result<DagNode, String> {
     let project_id = state.project_id.lock().unwrap().clone().ok_or("No project open")?;
 
@@ -553,8 +608,14 @@ pub async fn redirect_workflow(
     app.emit("dag:node:upserted", NodeUpsertedEvent { node: decision_node.clone() })
         .map_err(|e| format!("Failed to emit dag:node:upserted: {}", e))?;
 
-    // TODO(bp6-3d1): Inject instruction to agent stdin via PTY
-    eprintln!("[PTY stub] Redirect workflow '{}': {}", params.workflow_id, params.instruction);
+    // ── Inject redirect instruction into agent stdin via PTY (Phase 3) ────────
+    let redirect_msg = format!(
+        "\n[REDIRECT]: {}\n",
+        params.instruction
+    );
+    if let Err(e) = agent_state.write_to_workflow_agent(&params.workflow_id, &redirect_msg) {
+        eprintln!("[project] redirect_workflow PTY write failed (non-fatal): {}", e);
+    }
 
     Ok(decision_node)
 }

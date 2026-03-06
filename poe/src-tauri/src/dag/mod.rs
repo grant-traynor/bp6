@@ -171,6 +171,34 @@ pub struct DagSnapshot {
     pub edges: Vec<DagEdge>,
 }
 
+// ── Workflow types ─────────────────────────────────────────────────────────────
+
+/// Input for creating a new workflow record.
+pub struct NewWorkflow {
+    pub project_id: String,
+    pub node_id: String,
+    pub agent_id: Option<String>,
+    pub workflow_type: String,
+    pub config: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRecord {
+    pub id: String,
+    pub project_id: String,
+    pub node_id: String,
+    pub agent_id: Option<String>,
+    pub workflow_type: String,
+    pub status: String,
+    pub current_step: Option<String>,
+    pub config: serde_json::Value,
+    pub started_at: String,
+    pub updated_at: String,
+    pub completed_at: Option<String>,
+    pub error: Option<String>,
+}
+
 // ── Schema migrations ──────────────────────────────────────────────────────────
 
 const MIGRATIONS: &[&str] = &[
@@ -226,6 +254,27 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX IF NOT EXISTS idx_queue_items_project ON queue_items(project_id);
     CREATE INDEX IF NOT EXISTS idx_queue_items_status  ON queue_items(status);
+    "#,
+    // v3: workflows
+    r#"
+    CREATE TABLE IF NOT EXISTS workflows (
+        id            TEXT PRIMARY KEY,
+        project_id    TEXT NOT NULL,
+        node_id       TEXT NOT NULL,
+        agent_id      TEXT,
+        workflow_type TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'pending',
+        current_step  TEXT,
+        config        TEXT NOT NULL DEFAULT '{}',
+        started_at    TEXT NOT NULL,
+        updated_at    TEXT NOT NULL,
+        completed_at  TEXT,
+        error         TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);
+    CREATE INDEX IF NOT EXISTS idx_workflows_node    ON workflows(node_id);
+    CREATE INDEX IF NOT EXISTS idx_workflows_status  ON workflows(status);
     "#,
 ];
 
@@ -777,6 +826,147 @@ impl DagStore {
             .collect();
 
         Ok(items)
+    }
+
+    // ── Workflow CRUD ──────────────────────────────────────────────────────────
+
+    pub fn create_workflow_record(&self, input: NewWorkflow) -> Result<WorkflowRecord, String> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let config_str = serde_json::to_string(&input.config)
+            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+
+        self.conn
+            .execute(
+                "INSERT INTO workflows (id, project_id, node_id, agent_id, workflow_type, status, config, started_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7, ?7)",
+                params![id, input.project_id, input.node_id, input.agent_id, input.workflow_type, config_str, now],
+            )
+            .map_err(|e| format!("Failed to insert workflow: {}", e))?;
+
+        Ok(WorkflowRecord {
+            id,
+            project_id: input.project_id,
+            node_id: input.node_id,
+            agent_id: input.agent_id,
+            workflow_type: input.workflow_type,
+            status: "pending".to_string(),
+            current_step: None,
+            config: input.config,
+            started_at: now.clone(),
+            updated_at: now,
+            completed_at: None,
+            error: None,
+        })
+    }
+
+    pub fn get_workflow(&self, id: &str) -> Result<WorkflowRecord, String> {
+        self.conn
+            .query_row(
+                "SELECT id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error
+                 FROM workflows WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, Option<String>>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                    ))
+                },
+            )
+            .map_err(|e| format!("Failed to get workflow {}: {}", id, e))
+            .and_then(|(id, project_id, node_id, agent_id, workflow_type, status, current_step, config_str, started_at, updated_at, completed_at, error)| {
+                let config = serde_json::from_str(&config_str)
+                    .map_err(|e| format!("Failed to parse workflow config: {}", e))?;
+                Ok(WorkflowRecord { id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error })
+            })
+    }
+
+    pub fn list_workflows(&self, project_id: &str) -> Result<Vec<WorkflowRecord>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error
+                 FROM workflows WHERE project_id = ?1 ORDER BY started_at DESC",
+            )
+            .map_err(|e| format!("Failed to prepare workflows query: {}", e))?;
+
+        let records = stmt
+            .query_map(params![project_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                ))
+            })
+            .map_err(|e| format!("Failed to query workflows: {}", e))?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, project_id, node_id, agent_id, workflow_type, status, current_step, config_str, started_at, updated_at, completed_at, error)| {
+                serde_json::from_str(&config_str).ok().map(|config| WorkflowRecord {
+                    id, project_id, node_id, agent_id, workflow_type, status, current_step, config, started_at, updated_at, completed_at, error,
+                })
+            })
+            .collect();
+
+        Ok(records)
+    }
+
+    pub fn update_workflow_status(
+        &self,
+        id: &str,
+        status: &str,
+        agent_id: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<WorkflowRecord, String> {
+        let now = Utc::now().to_rfc3339();
+        let completed_at = if status == "completed" || status == "failed" || status == "cancelled" {
+            Some(now.clone())
+        } else {
+            None
+        };
+
+        self.conn
+            .execute(
+                "UPDATE workflows SET status = ?1, agent_id = COALESCE(?2, agent_id), updated_at = ?3, completed_at = COALESCE(?4, completed_at), error = COALESCE(?5, error) WHERE id = ?6",
+                params![status, agent_id, now, completed_at, error, id],
+            )
+            .map_err(|e| format!("Failed to update workflow status: {}", e))?;
+
+        self.get_workflow(id)
+    }
+
+    pub fn update_workflow_step(
+        &self,
+        id: &str,
+        current_step: &str,
+    ) -> Result<WorkflowRecord, String> {
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "UPDATE workflows SET current_step = ?1, updated_at = ?2 WHERE id = ?3",
+                params![current_step, now, id],
+            )
+            .map_err(|e| format!("Failed to update workflow step: {}", e))?;
+
+        self.get_workflow(id)
     }
 
     pub fn resolve_queue_item_in_db(

@@ -3,10 +3,11 @@ pub mod dag;
 pub mod project;
 pub mod queue_service;
 pub mod restate;
+pub mod workflow;
 
 use tauri::Manager;
 
-use agents::{kill_agent, spawn_agent, write_to_agent, AgentState};
+use agents::{kill_agent, spawn_agent, stop_agent_graceful, write_to_agent, AgentState};
 use project::{
     close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
     get_provenance, get_snapshot, list_queue_items, open_project, probe_node, redirect_workflow,
@@ -14,6 +15,7 @@ use project::{
 };
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
+use workflow::{cancel_workflow, create_workflow, list_workflows};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -96,7 +98,11 @@ pub fn run() {
             redirect_workflow,
             spawn_agent,
             kill_agent,
+            stop_agent_graceful,
             write_to_agent,
+            create_workflow,
+            list_workflows,
+            cancel_workflow,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");
