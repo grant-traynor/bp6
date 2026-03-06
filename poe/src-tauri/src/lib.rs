@@ -9,7 +9,7 @@ pub mod skills;
 
 use tauri::Manager;
 
-use advisor::{start_advisor_query, send_advisor_message, reset_advisor_session, get_advisor_state};
+use advisor::{confirm_advisor_session, start_advisor_query, send_advisor_message, reset_advisor_session, get_advisor_state};
 use agents::{kill_agent, spawn_agent, stop_agent_graceful, write_to_agent, AgentState};
 use project::{
     close_project, create_edge, create_node, create_queue_item, delete_edge, delete_node,
@@ -123,6 +123,7 @@ pub fn run() {
             send_advisor_message,
             reset_advisor_session,
             get_advisor_state,
+            confirm_advisor_session,
             get_stage_metrics,
             promote_skill,
         ])

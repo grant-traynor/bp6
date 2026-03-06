@@ -217,12 +217,16 @@ fn spawn_advisor_turn(
     let agent_id = Uuid::new_v4().to_string();
 
     // Build: claude -p "<prompt>" --output-format stream-json [--resume | --session-id] <sid>
+    // Restrict to read-only tools only — the advisor answers from injected context and must
+    // not shell out (which would let it reach beads, git, etc. for unsanctioned data gathering).
     let mut args = vec![
         "-p".to_string(),
         full_prompt,
         "--output-format".to_string(),
         "stream-json".to_string(),
         "--verbose".to_string(),
+        "--allowedTools".to_string(),
+        "Read,Glob,Grep".to_string(),
     ];
     if is_resume {
         args.push("--resume".to_string());
@@ -305,13 +309,10 @@ async fn run_advisor_query(
         &agent_state,
     )?;
 
-    // Persist session_id. Agent_id is ephemeral (new per turn) — not stored.
-    {
-        let projects = project_state.projects.lock().unwrap();
-        if let Some(proj) = projects.get(&project_dir) {
-            proj.store.set_advisor_state(&project_id, Some(&session_id), None)?;
-        }
-    }
+    // For resume turns the session_id is already confirmed in the DB.
+    // For fresh turns we do NOT store it yet — the frontend confirms it via
+    // confirm_advisor_session once the result event proves the session exists.
+    // This prevents stale IDs from failed runs being treated as valid sessions.
 
     Ok(AdvisorStartResult { agent_id, session_id })
 }
@@ -361,6 +362,29 @@ pub fn reset_advisor_session(
     let projects = project_state.projects.lock().unwrap();
     if let Some(proj) = projects.get(&project_dir) {
         proj.store.set_advisor_state(&project_id, None, None)?;
+    }
+    Ok(())
+}
+
+/// Confirm that an advisor session was successfully created.
+/// Called by the frontend after receiving a successful `result` event from Claude.
+/// Only then do we persist the session_id, avoiding stale IDs from failed runs.
+#[tauri::command]
+pub fn confirm_advisor_session(
+    project_dir: String,
+    session_id: String,
+    project_state: State<'_, ProjectState>,
+) -> Result<(), String> {
+    let project_id = {
+        let projects = project_state.projects.lock().unwrap();
+        projects
+            .get(&project_dir)
+            .map(|p| p.project_id.clone())
+            .ok_or("Project not open")?
+    };
+    let projects = project_state.projects.lock().unwrap();
+    if let Some(proj) = projects.get(&project_dir) {
+        proj.store.set_advisor_state(&project_id, Some(&session_id), None)?;
     }
     Ok(())
 }

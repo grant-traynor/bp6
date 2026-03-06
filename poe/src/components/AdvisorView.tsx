@@ -59,7 +59,8 @@ type StreamEvent =
   | { type: "text"; text: string }
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; toolUseId: string; output: string; isError: boolean }
-  | { type: "done" }
+  | { type: "done"; sessionId: string }
+  | { type: "session_error"; message: string; isNoSession: boolean }
   | { type: "ignored" };
 
 /**
@@ -113,8 +114,17 @@ function parseStreamLine(raw: string): StreamEvent[] {
         return [];
       });
     }
-    case "result":
-      return [{ type: "done" }];
+    case "result": {
+      const isErr = Boolean(parsed.is_error);
+      const sessionId = String(parsed.session_id ?? "");
+      if (isErr) {
+        const errors = Array.isArray(parsed.errors) ? parsed.errors as string[] : [];
+        const message = errors.join("; ");
+        const isNoSession = message.includes("No conversation found");
+        return [{ type: "session_error", message, isNoSession }];
+      }
+      return [{ type: "done", sessionId }];
+    }
     default:
       return [];
   }
@@ -462,6 +472,10 @@ export function AdvisorView() {
   const [isResponding, setIsResponding] = useState(false);
   const [sessionStartedAt, setSessionStartedAt] = useState<string | null>(null);
 
+  // Refs so event listeners always see fresh values without re-subscribing
+  const projectDirRef = useRef<string | null>(null);
+  useEffect(() => { projectDirRef.current = project?.projectDir ?? null; }, [project?.projectDir]);
+
   // Check for existing session on mount
   useEffect(() => {
     if (!project) return;
@@ -521,6 +535,34 @@ export function AdvisorView() {
               };
             });
           } else if (ev.type === "done") {
+            // Confirm session only now that we know Claude accepted it
+            const dir = projectDirRef.current;
+            if (dir && ev.sessionId) {
+              invoke("confirm_advisor_session", {
+                projectDir: dir,
+                sessionId: ev.sessionId,
+              }).catch(console.error);
+            }
+            markDone();
+          } else if (ev.type === "session_error") {
+            const dir = projectDirRef.current;
+            if (ev.isNoSession && dir) {
+              // Stale session ID — clear it so next turn starts fresh
+              invoke("reset_advisor_session", { projectDir: dir }).catch(console.error);
+              msgs = [...msgs, {
+                role: "assistant" as const,
+                text: "_(Session expired — conversation reset. Please send your message again.)_",
+                tools: [],
+                ts: new Date().toISOString(),
+              }];
+            } else {
+              msgs = [...msgs, {
+                role: "assistant" as const,
+                text: `Error: ${ev.message}`,
+                tools: [],
+                ts: new Date().toISOString(),
+              }];
+            }
             markDone();
           }
         }
