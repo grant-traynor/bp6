@@ -40,7 +40,5 @@
     },
     "externalBin": []
   },
-  "plugins": {
-    "dialog": {}
-  }
+  "plugins": {}
 }

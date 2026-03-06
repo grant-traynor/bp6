@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 pub const RESTATE_ADMIN_PORT: u16 = 9070;
 pub const RESTATE_SERVICES_PORT: u16 = 9080;
 
-const HEALTH_URL: &str = "http://127.0.0.1:9070/health";
 const HEALTH_TIMEOUT_SECS: u64 = 15;
 const HEALTH_POLL_MS: u64 = 200;
 
