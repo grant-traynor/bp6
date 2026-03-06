@@ -6,6 +6,11 @@
 //   - poe:artifact   → create AgentOutput DAG node (Phase 3)
 //   - poe:done       → mark workflow completed (Phase 3)
 // Exposes graceful stop (SIGTERM → SIGKILL after 3s).
+//
+// bp6-7fi.1: Agent heartbeat & liveness monitoring.
+//   Watchdog checks every AGENT_WATCHDOG_INTERVAL_SECS seconds; if an agent
+//   produces no output for AGENT_SILENCE_TIMEOUT_SECS it emits workflow:status
+//   (status=blocked) and creates a queue item for human intervention.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -20,6 +25,14 @@ use uuid::Uuid;
 use crate::dag::{EdgeType, NewQueueItem, NodeType, QueueItemOption};
 use crate::project::{NodeUpsertedEvent, ProjectState, QueueItemAddedEvent};
 use crate::restate::RESTATE_SERVICES_PORT;
+
+// ── Watchdog constants ─────────────────────────────────────────────────────────
+
+/// How long an agent may be silent before the watchdog raises an alert.
+const AGENT_SILENCE_TIMEOUT_SECS: u64 = 120;
+
+/// How often the watchdog polls all active agents.
+const AGENT_WATCHDOG_INTERVAL_SECS: u64 = 30;
 
 // ── AgentHandle ────────────────────────────────────────────────────────────────
 
@@ -36,6 +49,10 @@ pub struct AgentHandle {
     pub workflow_type: Option<String>,
     /// ISO-8601 start time, used for workflow:status events.
     pub started_at: String,
+    /// Last time a PTY output byte was received (for silence watchdog).
+    pub last_output_at: Arc<Mutex<std::time::Instant>>,
+    /// True once the watchdog has emitted a silence alert; reset on new output.
+    pub silence_alerted: Arc<Mutex<bool>>,
 }
 
 impl AgentHandle {
@@ -189,6 +206,17 @@ pub struct WorkflowStatusEvent {
     pub started_at: String,
 }
 
+/// Emitted when the watchdog detects an agent has been silent too long.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentSilenceEvent {
+    workflow_id: String,
+    agent_id: String,
+    status: String,
+    reason: String,
+    silent_for_secs: u64,
+}
+
 // ── Tauri command input/output types ──────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -294,6 +322,10 @@ pub fn spawn_agent_internal(
 
     let writer = Arc::new(Mutex::new(master_writer));
 
+    // Watchdog liveness tracking — shared between PTY reader thread and watchdog task.
+    let last_output_at = Arc::new(Mutex::new(std::time::Instant::now()));
+    let silence_alerted = Arc::new(Mutex::new(false));
+
     let workflow_id_bg = params.workflow_id.clone();
     let node_id_bg = params.node_id.clone();
     let workflow_type_bg = params.workflow_type.clone();
@@ -302,6 +334,8 @@ pub fn spawn_agent_internal(
     {
         let agent_id_bg = agent_id.clone();
         let app_for_thread = app.clone();
+        let last_output_at_bg = Arc::clone(&last_output_at);
+        let silence_alerted_bg = Arc::clone(&silence_alerted);
 
         std::thread::spawn(move || {
             let reader = BufReader::new(master_reader);
@@ -317,6 +351,15 @@ pub fn spawn_agent_internal(
                 if trimmed.is_empty() {
                     continue;
                 }
+
+                // Update heartbeat timestamp and clear any pending silence alert.
+                if let Ok(mut ts) = last_output_at_bg.lock() {
+                    *ts = std::time::Instant::now();
+                }
+                if let Ok(mut alerted) = silence_alerted_bg.lock() {
+                    *alerted = false;
+                }
+
                 eprintln!("[agents:pty {}] {}", agent_id_bg, trimmed);
 
                 if let Some(wf_id) = &workflow_id_bg {
@@ -438,6 +481,8 @@ pub fn spawn_agent_internal(
         node_id: params.node_id,
         workflow_type: params.workflow_type,
         started_at,
+        last_output_at: Arc::clone(&last_output_at),
+        silence_alerted: Arc::clone(&silence_alerted),
     };
 
     {
@@ -446,6 +491,161 @@ pub fn spawn_agent_internal(
             .lock()
             .map_err(|e| format!("Failed to lock AgentState: {}", e))?;
         map.insert(agent_id.clone(), handle);
+    }
+
+    // ── Spawn watchdog task ────────────────────────────────────────────────────
+    // Runs on the Tauri tokio runtime. Polls every AGENT_WATCHDOG_INTERVAL_SECS
+    // and emits a silence alert if the agent has been quiet too long.
+    //
+    // Liveness detection: the watchdog holds an Arc<Mutex<bool>> (`liveness`)
+    // that is also held by the AgentHandle (in the map) and the PTY reader
+    // thread. When the agent EOF's the PTY thread exits and the handle is
+    // removed — at that point strong_count drops to 1 (only the watchdog),
+    // which is the exit signal.
+    {
+        let agent_id_wd = agent_id.clone();
+        let app_wd = app.clone();
+        // The watchdog's liveness beacon: same Arc as AgentHandle.silence_alerted
+        // and silence_alerted_bg in the PTY thread.
+        let liveness = Arc::clone(&silence_alerted);
+        let last_output_wd = Arc::clone(&last_output_at);
+        let workflow_id_wd = agent_state
+            .handles
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&agent_id).and_then(|h| h.workflow_id.clone()));
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(
+                Duration::from_secs(AGENT_WATCHDOG_INTERVAL_SECS),
+            );
+            // Skip the immediate first tick (fires at t=0).
+            interval.tick().await;
+
+            loop {
+                interval.tick().await;
+
+                // If the AgentHandle has been dropped (strong count == 1, only
+                // this task holds a ref), the agent has exited — stop watching.
+                if Arc::strong_count(&liveness) <= 1 {
+                    eprintln!(
+                        "[watchdog] agent_id={} no longer registered, exiting",
+                        agent_id_wd
+                    );
+                    break;
+                }
+
+                let elapsed_secs = {
+                    match last_output_wd.lock() {
+                        Ok(ts) => ts.elapsed().as_secs(),
+                        Err(_) => continue,
+                    }
+                };
+
+                if elapsed_secs < AGENT_SILENCE_TIMEOUT_SECS {
+                    continue;
+                }
+
+                // Check and set alerted flag atomically.
+                let already_alerted = match liveness.lock() {
+                    Ok(mut flag) => {
+                        if *flag {
+                            true
+                        } else {
+                            *flag = true;
+                            false
+                        }
+                    }
+                    Err(_) => continue,
+                };
+
+                if already_alerted {
+                    continue;
+                }
+
+                let wf_id = match &workflow_id_wd {
+                    Some(id) => id.clone(),
+                    None => {
+                        eprintln!(
+                            "[watchdog] agent_id={} silent {}s but no workflow_id — skipping alert",
+                            agent_id_wd, elapsed_secs
+                        );
+                        continue;
+                    }
+                };
+
+                eprintln!(
+                    "[watchdog] agent_id={} workflow_id={} silent for {}s — raising alert",
+                    agent_id_wd, wf_id, elapsed_secs
+                );
+
+                // Emit workflow:status blocked event.
+                let _ = app_wd.emit(
+                    "workflow:status",
+                    AgentSilenceEvent {
+                        workflow_id: wf_id.clone(),
+                        agent_id: agent_id_wd.clone(),
+                        status: "blocked".to_string(),
+                        reason: "agent_silent".to_string(),
+                        silent_for_secs: elapsed_secs,
+                    },
+                );
+
+                // Create a queue item so a human can decide what to do.
+                let project_state = app_wd.state::<ProjectState>();
+                let question = format!(
+                    "Agent has been silent for {} seconds. What should we do?",
+                    elapsed_secs
+                );
+                let options = vec![
+                    QueueItemOption {
+                        id: "wait".to_string(),
+                        label: "Wait".to_string(),
+                        description: Some("Give the agent more time to respond.".to_string()),
+                    },
+                    QueueItemOption {
+                        id: "redirect".to_string(),
+                        label: "Redirect".to_string(),
+                        description: Some(
+                            "Send a nudge message to the agent's stdin.".to_string(),
+                        ),
+                    },
+                    QueueItemOption {
+                        id: "kill".to_string(),
+                        label: "Kill".to_string(),
+                        description: Some("Terminate the agent process.".to_string()),
+                    },
+                ];
+                let item_result: Result<crate::dag::QueueItem, String> =
+                    project_state.with_active(|store, project_id| {
+                        store.create_queue_item(NewQueueItem {
+                            project_id: project_id.to_string(),
+                            agent_id: agent_id_wd.clone(),
+                            workflow_id: Some(wf_id.clone()),
+                            awakeable_id: None,
+                            question,
+                            options,
+                            context_snapshot: serde_json::json!({
+                                "reason": "agent_silent",
+                                "silentForSecs": elapsed_secs,
+                            }),
+                            priority: 1,
+                        })
+                    });
+                match item_result {
+                    Ok(item) => {
+                        let _ = app_wd
+                            .emit("queue:item:added", QueueItemAddedEvent { item });
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[watchdog] Failed to create silence queue item: {}",
+                            e
+                        );
+                    }
+                }
+            }
+        });
     }
 
     Ok(SpawnedAgent { agent_id })
