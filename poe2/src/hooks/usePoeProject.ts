@@ -29,6 +29,7 @@ export function usePoeProject(projectId: string | null): {
   queueItems: QueueItem[];
   feedItems: FeedItem[];
   setQueueItems: React.Dispatch<React.SetStateAction<QueueItem[]>>;
+  addNode: (node: Node) => void;
 } {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
@@ -202,5 +203,5 @@ export function usePoeProject(projectId: string | null): {
     };
   }, [projectId, updateNode]);
 
-  return { nodes, queueItems, feedItems, setQueueItems };
+  return { nodes, queueItems, feedItems, setQueueItems, addNode: updateNode };
 }

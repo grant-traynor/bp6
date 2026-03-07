@@ -63,7 +63,7 @@ function ConopsLauncher({ projectId, onLaunched }: { projectId: string; onLaunch
 export default function App() {
   const [openProjects, setOpenProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { nodes, queueItems, feedItems, setQueueItems } = usePoeProject(selectedId);
+  const { nodes, queueItems, feedItems, setQueueItems, addNode } = usePoeProject(selectedId);
 
   useEffect(() => {
     invoke<Project[]>('list_projects')
@@ -133,7 +133,7 @@ export default function App() {
             {nodes.length === 0 ? (
               <ConopsLauncher
                 projectId={selectedId}
-                onLaunched={() => { /* orchestrator picks it up; feed will populate */ }}
+                onLaunched={addNode}
               />
             ) : (
               <div className="flex-1 overflow-hidden">
