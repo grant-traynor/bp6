@@ -1,7 +1,7 @@
 # POE — Protocol Specification
 
 **Status**: Draft
-**Last updated**: 2026-03-07
+**Last updated**: 2026-03-08
 
 **Artifact classification**: This document serves as both:
 - `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), and the frontend update mechanism (§4).
@@ -104,7 +104,11 @@ CREATE TABLE knowledge (
 
 ## 2. poe: Event Wire Format
 
-Agents write structured events to **stdout**. The event ingester scans each stdout line. A line is a poe: event if and only if it parses as valid JSON and contains a `"poe"` key. All other lines are PTY output — captured to a per-task log file, not processed.
+Agents write structured events to **stdout embedded within the stream-json transport**. In autonomous mode, Claude emits newline-delimited JSON objects; poe: events appear as text within `assistant` message content. The ingester accumulates text from assistant events into a buffer, splits on newlines, and passes complete lines to the poe: parser.
+
+A line extracted from the assistant text is a poe: event if and only if it parses as valid JSON and contains a `"poe"` key. All other extracted lines are agent commentary and are discarded (not stored, not processed).
+
+The event wire format is transport-independent. The JSON payloads below are identical whether the agent runs autonomously (stream-json) or interactively. The transport envelope changes; the event schema does not.
 
 ### Format
 
@@ -380,71 +384,164 @@ Polling introduces latency that makes the activity feed feel dead. poe:brief and
 
 ## 5. Agent Spawn Model
 
-This section is the authoritative reference for how Claude agents are spawned. Every implementer touching `agent_lifecycle` must read this. Inconsistency here breaks `poe:decision` resolution, session resume, and mid-task context injection.
+This section is the authoritative reference for how Claude agents are spawned. Every implementer touching `agent_lifecycle` must read this. Inconsistency here breaks session resume, decision continuation, and human handover.
 
-### Correct invocation
+---
 
-```
-claude --dangerously-skip-permissions
-```
+### Primary transport — stream-json (autonomous, programmatic)
 
-**No `-p` flag. No prompt argument on the command line.**
-
-The T+S+K input bundle is written to the agent's **stdin pipe** immediately after spawn. Claude reads it as its opening context and begins work.
+Every orchestrated agent runs via:
 
 ```
-spawn: claude --dangerously-skip-permissions
-  → write T+S+K bundle to stdin pipe
-  → keep stdin pipe open
-  → read stdout for poe: events
-  → on poe:done: mark task complete, kill process
+claude --output-format stream-json --verbose -p --dangerously-skip-permissions
 ```
 
-### Why not `-p`
-
-`-p` passes the prompt as a CLI argument and Claude exits after the first response. This breaks:
-
-1. **`poe:decision` resolution** — the human resolves, the orchestrator writes `---\nHuman: {resolution}\n` to stdin. With `-p`, Claude has already exited. The resolution is lost.
-2. **`poe:review` injection** — same problem. The reviewer's output arrives after Claude has exited.
-3. **Large bundles** — CLI arguments have a ~2MB system limit. A full artifact corpus in K can exceed this.
-4. **Session resume** — `--resume` with `-p` is undefined behaviour.
-
-### Completion signal
-
-`poe:done` received on stdout is the **sole authority** for task completion.
-
-Claude exits non-zero in interactive mode on some error conditions, and the exit code is unreliable. Do not use it. The watchdog reads node status from SQLite after the PTY reader hits EOF:
+Stdin receives the T+S+K input bundle; stdin is closed (EOF) immediately after writing. Claude processes the bundle, emits a stream of JSON objects to stdout, and exits cleanly.
 
 ```
-PTY EOF (Claude exited)
-  → check nodes.status for this task
-  → Complete  → success, notify orchestrator
-  → Running   → poe:done was never emitted; re-queue task to Pending
-  → anything else → failure path
+spawn: claude --output-format stream-json --verbose -p --dangerously-skip-permissions
+  → write T+S+K bundle to stdin, then close stdin (EOF)
+  → read stdout: newline-delimited JSON objects
+  → extract session_id from {"type":"system","subtype":"init","session_id":"..."}
+  → accumulate text from assistant events into text_buf
+  → split text_buf on '\n' → parse_poe_event on each complete line
+  → flush remaining text_buf after {"type":"result",...} (process exit)
 ```
+
+**Why `-p` now — reversal from the prior model:**
+
+The prior model used interactive PTY mode (no `-p`) so that stdin could stay open for mid-task decision delivery. This produced three intractable problems in practice:
+
+1. ANSI escape codes were inserted between characters by the Claude TUI, making output impossible to parse reliably.
+2. Long poe: JSON lines were fragmented by PTY line-discipline — 300-character artifact payloads arrived split across multiple lines.
+3. The TUI-ready heuristic (detecting `⏵` U+23F5 in PTY output) was fragile and caused deadlocks on slow machines.
+
+The stream-json transport eliminates all three. `poe:decision` and `poe:review` continuation uses `--resume` (see below) — not an open stdin pipe.
+
+---
 
 ### Session ID capture
 
-After spawn, read Claude's startup banner from stdout to extract the session ID. Store it in `nodes.session_id`. On app restart, pass it to `--resume` to attempt continuation of interrupted tasks.
+Session ID is extracted from the **first** JSON event on stdout:
 
-### Mid-task input delivery
-
-Decision resolutions and review results are written to the agent's open stdin pipe:
-
-```
-\n---\nHuman: {resolution text}\n
+```json
+{"type":"system","subtype":"init","session_id":"<uuid>",...}
 ```
 
-The pipe stays open from spawn until `poe:done` is received and the process is killed. Never close stdin before the agent emits `poe:done`.
+Store it in `nodes.session_id` immediately. This ID is used for:
+
+- App restart recovery (`--resume <session_id>` to continue interrupted tasks)
+- Human xterm.js handover (see below)
+- Decision resolution continuations
+- Review result injection
+
+**No banner text scanning.** There is no PTY startup banner in stream-json mode.
+
+---
+
+### poe: event extraction
+
+poe: events are embedded in assistant text content. The ingester uses a text buffer to accumulate text across potentially split `content_block_delta` chunks:
+
+```
+{"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+  → extract text → push to text_buf
+  → while '\n' in text_buf: extract line → parse_poe_event
+{"type":"content_block_delta","delta":{"type":"text_delta","text":"..."}}
+  → same extraction path
+{"type":"result",...}
+  → flush text_buf tail (last event may have no trailing newline)
+```
+
+`parse_poe_event` requires no ANSI stripping — stream-json output contains no escape codes.
+
+---
+
+### Completion signal
+
+`{"type":"result","subtype":"success",...}` on stdout signals process exit. The process exits cleanly — no SIGTERM or SIGKILL required for normal completion.
+
+`poe:done` in the assistant text is the **task completion signal** — the same semantic authority as before, now unambiguous because there are no ANSI codes or line fragmentation to corrupt it.
+
+If the process exits and `poe:done` was never received:
+
+```
+process exits (result event received)
+  → check nodes.status
+  → Complete  → success (poe:done was received and processed), notify orchestrator
+  → Running   → poe:done was never emitted; re-queue task to Pending
+```
+
+---
+
+### Decision resolution via --resume
+
+When an agent emits `poe:decision` and then `poe:done` (indicating it is awaiting a human decision before it can continue):
+
+```
+1. Orchestrator records decision in SQLite, marks task status = waiting
+2. Human resolves via queue panel (or engages Advisor first)
+3. Orchestrator spawns a new stream-json session:
+     claude --output-format stream-json --verbose -p --dangerously-skip-permissions --resume <session_id>
+4. Bundle written to stdin:
+     ---
+     Human: {resolution text}
+5. Agent reads full session history + new message, continues work
+6. Agent emits further poe: events + final poe:done
+```
+
+`--resume` with `--output-format stream-json` is a proven combination (validated by `stdio_json_harness.rs` Q4 test).
+
+---
+
+### Review injection via --resume
+
+When a reviewer agent completes, its result is delivered to the requesting agent via a new resumed session:
+
+```
+1. Orchestrator spawns requesting agent:
+     claude --output-format stream-json --verbose -p --dangerously-skip-permissions --resume <requester_session_id>
+2. Bundle written to stdin:
+     ---
+     ReviewResult id={id} skill={skill} verdict={APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED}
+     {findings text}
+     ---
+3. Agent reads session history + review result, continues
+```
+
+Verdict values and the ReviewResult format are specified in §2.
+
+---
+
+### Human handover — PTY + xterm.js
+
+When a human wants to directly interact with an agent's session (check-in, unblock, or explore), the handover flow is:
+
+```
+1. Look up session_id from nodes.session_id in SQLite
+2. Spawn: claude --resume <session_id> --dangerously-skip-permissions (via PTY)
+3. Bridge PTY output (raw bytes) → WebSocket → xterm.js in frontend
+4. Bridge xterm.js keyboard input → WebSocket → PTY stdin
+5. Handle resize: WS message {type:"resize", cols, rows} → PTY master.resize(PtySize)
+6. On browser tab close: Ctrl-C → drop PTY master → SIGTERM → poll 5s → SIGKILL
+```
+
+xterm.js renders ANSI codes natively — **no stripping required on this path**. Raw bytes flow directly from PTY to browser. This is the `session_handoff_harness.rs` pattern.
+
+The PTY handover is for human use only. The orchestrator does not parse PTY output on this path.
+
+---
 
 ### Skill design constraint
 
-Because agents run in a single interactive session with no human at the keyboard, **skills must be designed for autonomous single-pass execution**:
+Because orchestrated agents run with no human at the keyboard, **skills must be designed for autonomous single-pass execution**:
 
-- Do not prompt the user with questions and wait for typed answers — there is no keyboard.
-- Raise genuine blockers via `poe:decision`. Continue working on everything that doesn't depend on the answer.
-- Emit `poe:done` as the final event. The process is killed after this.
-- A skill that is designed for iterative conversation (ask → answer → ask → answer) will produce skeleton output when run autonomously. Rewrite it to reason through the task from the injected context alone.
+- Do not prompt the user with questions and wait for typed answers — there is no keyboard on the programmatic path.
+- Raise genuine blockers via `poe:decision`, then emit `poe:done`. The orchestrator handles continuation via `--resume`.
+- Emit `poe:done` as the final event. The process exits after the result event.
+- A skill designed for iterative conversation will produce skeleton output when run autonomously. Rewrite it to reason through the task from the injected context alone.
+
+See §3 for the **mode protocol injection** pattern, which allows skills to be invoked in both autonomous and interactive modes without requiring separate skill files.
 
 ---
 
@@ -510,6 +607,10 @@ Add to `Cargo.toml`: `reqwest` with `features = ["json", "stream"]`.
 
 ### Terminal (7ct.5)
 
+Two distinct terminal surfaces — they are not the same feature:
+
+**1. Project terminal (tmux)** — persistent background shell for the project directory. Used for code review, manual investigation, and running commands. Not for launching agents.
+
 ```
 tmux_create(project_id: String) → ()          // creates session poe-{project_id}
 tmux_attach(project_id: String) → PtyHandle   // returns pty fd for xterm
@@ -519,6 +620,15 @@ tmux_kill(project_id: String) → ()
 ```
 
 Shell out to system `tmux`. Detect live session before creating.
+
+**2. Agent session handover (xterm.js + WebSocket bridge)** — direct PTY connection to a specific agent's Claude session via `--resume`. Used when a human wants to check in on or interact with a running or completed agent session. See §5 for the full handover protocol.
+
+```
+agent_handover_open(node_id: String) → ()     // look up session_id, spawn PTY bridge, open xterm panel
+agent_handover_close(node_id: String) → ()    // Ctrl-C → drop master → SIGTERM → SIGKILL
+```
+
+The two surfaces coexist. The project terminal is project-scoped (one per project); agent handover is node-scoped (one per agent session).
 
 Add to `package.json`: `@xterm/xterm`, `@xterm/addon-fit`, `@xyflow/react`.
 

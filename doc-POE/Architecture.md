@@ -1,7 +1,7 @@
-# POE — Pairti Orchestration Engine: Architecture
+# POE — Pairti Orchestration Engine: Architect
 
 **Status**: Draft
-**Last updated**: 2026-03-07
+**Last updated**: 2026-03-08
 
 ---
 
@@ -287,7 +287,7 @@ Every `tasks` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_
 
 ## Agent Event Protocol
 
-Agents communicate with POE via structured JSON lines written to stdout — one event per line, each a JSON object with a `"poe"` key identifying the event type. This is the sole structured communication channel — not PTY scraping. See `doc-POE/Protocol.md §2` for the full wire format.
+Agents communicate with POE via structured JSON events embedded in the `--output-format stream-json` transport — not PTY scraping. The orchestrator spawns agents with `claude --output-format stream-json -p --dangerously-skip-permissions`, writes the T+S+K bundle to stdin, and reads newline-delimited JSON from stdout. poe: events are extracted from assistant text content via a line-accumulation buffer. See `doc-POE/Protocol.md §2` and `§5` for the full wire format and spawn model.
 
 | Event | Purpose |
 |---|---|
@@ -297,11 +297,11 @@ Agents communicate with POE via structured JSON lines written to stdout — one 
 | `poe:task` | Create a WBS node (used by planning specialist to populate the task graph). |
 | `poe:edge` | Create a dependency edge between two nodes. |
 | `poe:knowledge` | Write an entry to the knowledge register. |
-| `poe:decision` | Raise a question for the human decision queue. Includes options if the agent has identified them. |
-| `poe:review` | Request a peer review from another specialist agent. Blocks the requesting agent until the reviewer completes. |
-| `poe:done` | Signal task completion. |
+| `poe:decision` | Raise a question for the human decision queue. Agent then emits `poe:done`; orchestrator resumes via `--resume` with the human's resolution. |
+| `poe:review` | Request a peer review from another specialist agent. Agent emits `poe:done` (awaiting review); orchestrator spawns reviewer, then resumes requesting agent via `--resume` with the review result. |
+| `poe:done` | Signal task completion (or checkpoint when awaiting decision/review). |
 
-PTY output remains available as a drill-down for any specific agent but is not the primary signal. The structured event stream is what drives the UI.
+Human access to the raw agent conversation is via **xterm.js session handover** — `claude --resume <session_id>` in a PTY, bridged to the browser via WebSocket. ANSI codes are rendered by xterm.js natively; no parsing occurs on this path. The structured event stream drives the UI; the xterm handover is a drill-down for human-in-the-loop interaction.
 
 ### Agent-to-Agent Review Cycle
 
@@ -446,12 +446,17 @@ Before spawning an agent, the orchestrator assembles the context it needs:
 
 ### Event Ingester
 
-The event ingester is the bridge between agent stdout and the DAG. It runs as part of the agent watchdog, processing every line of output:
+The event ingester is the bridge between the agent's JSON stream and the DAG. It runs as part of the agent watchdog, processing the stream-json output:
 
 ```
-Line received from agent stdout
-  → not valid JSON, or no "poe" key  → pass to PTY buffer (raw view only)
-  → valid JSON with "poe" key        → parse → write to SQLite → trigger orchestrator → emit Tauri event
+JSON object received from agent stdout
+  → type = "system", subtype = "init"  → extract and store session_id in nodes.session_id
+  → type = "assistant" or "content_block_delta"
+       → extract text → push to text_buf
+       → for each complete line in text_buf:
+           → no "poe" key  → discard (agent commentary)
+           → "poe" key     → parse → write to SQLite → trigger orchestrator → emit Tauri event
+  → type = "result"        → flush text_buf tail → agent session complete
 ```
 
 The orchestrator is notified via a Tokio `mpsc` channel (`DagChanged` signal). Anything that mutates DAG structure or task status triggers it; everything else records and notifies the frontend only.
@@ -472,7 +477,7 @@ On app restart:
 7. Trigger orchestrator loop → re-evaluates all ready tasks
 ```
 
-Agent session IDs are stored in the `tasks.session_id` column at spawn time specifically to enable resume. Resume is attempted first; clean restart is the fallback.
+Agent session IDs are captured from the `{"type":"system","subtype":"init","session_id":"..."}` JSON event at spawn time and stored in `nodes.session_id`. Resume is attempted first; clean restart is the fallback.
 
 ### Concurrency
 
@@ -574,20 +579,27 @@ Missing specialists to author for v2:
 ```
 Tauri App (Rust + React)
   ├── SQLite (poe.db)          — WBS graph, artifacts index, knowledge register, event log
-  ├── AgentState               — active agent processes, watchdog, stdout readers
+  ├── AgentState               — active agent processes (stream-json), watchdog, stdout readers
   ├── ProjectState             — open projects, active project
-  ├── EventIngester            — reads agent stdout, parses poe: events, writes to SQLite, emits Tauri events
+  ├── EventIngester            — reads stream-json stdout, extracts poe: events, writes to SQLite, emits Tauri events
   └── Frontend (React)
         ├── ActivityFeed       — live agent event stream
         ├── DecisionQueue      — human decision queue
         ├── WBSView            — project / phase / epic / feature / task hierarchy
         ├── ArtifactsView      — artifact corpus browser
-        └── KnowledgeView      — knowledge register browser
+        ├── KnowledgeView      — knowledge register browser
+        └── AgentHandover      — xterm.js PTY panel (--resume, human-in-the-loop)
 
-Agent (Claude Code subprocess)
+Autonomous Agent (claude --output-format stream-json -p)
   — reads stdin bundle (T + S + K — see Protocol.md §3)
-  — emits poe: events to stdout ({"poe": "<type>", ...})
-  — PTY available for raw inspection
+  — emits poe: events embedded in assistant text ({"poe": "<type>", ...})
+  — process exits after {"type":"result",...}
+  — session_id stored at spawn from {"type":"system","subtype":"init",...}
+
+Interactive Agent (claude --resume <session_id>, PTY)
+  — human handover only — not parsed by orchestrator
+  — raw bytes → WebSocket → xterm.js in browser
+  — used for check-in, decision-assist, direct exploration
 ```
 
 ---

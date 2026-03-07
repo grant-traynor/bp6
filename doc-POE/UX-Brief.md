@@ -1,7 +1,7 @@
 # POE — UX Design Brief
 
 **Status**: Draft
-**Last updated**: 2026-03-07
+**Last updated**: 2026-03-08
 
 ---
 
@@ -103,7 +103,7 @@ Each entry shows:
 - Event type: brief / step / artifact produced / decision raised / done
 - Timestamp
 
-Clicking an entry drills into the agent's PTY session for raw output if needed. Time filters carried forward from bp6: last hour, last 6 hours, since phase start.
+Clicking an entry opens the **agent session handover** — an xterm.js panel that resumes the agent's Claude session (`claude --resume <session_id>`) in a PTY, bridged to the browser via WebSocket. The human can read the raw conversation, ask follow-up questions, or assist an agent that raised a decision. Closing the panel does not terminate the agent's session — the session_id persists in SQLite. Time filters carried forward from bp6: last hour, last 6 hours, since phase start.
 
 The activity feed is the glass box. It answers: *is everything running as expected?*
 
@@ -198,9 +198,75 @@ This is the safety valve for when agents get the structure wrong.
 
 ## Project Terminal (Tmux)
 
-Each project has a persistent background terminal session — the bp6 tmux pattern carried forward. Auto-resumed on app restart, auto-switched when the active project changes. Available as a panel or full-screen from the project toolbar.
+Each project has a persistent background shell session — the bp6 tmux pattern carried forward. Auto-resumed on app restart, auto-switched when the active project changes. Available as a panel or full-screen from the project toolbar.
 
-The terminal is for code review and manual investigation — not for launching agents. The orchestrator handles agent launching.
+The project terminal is for code review, running commands, and manual investigation — not for launching agents. The orchestrator handles agent launching.
+
+**Distinct from agent session handover**: the project terminal is a general-purpose shell (tmux). The agent session handover (accessible from any activity feed entry) is a `claude --resume` PTY connected specifically to one agent's Claude session. They are two separate surfaces. Do not conflate them in the implementation.
+
+---
+
+## Plan Composer
+
+> **Gap addressed**: The CONOPS states "A project plan is a human-composed DAG of stage instances." The UX-Brief previously described the Phase × Scope Matrix for viewing an existing plan, but not how a human composes one.
+
+When a project is created (or when the human advances to plan a new phase), the Plan Composer replaces the Phase × Scope Matrix in Pane 2.
+
+```
+┌─ Plan Composer ───────────────────────────────────────────┐
+│                                                            │
+│  Stage Library          Plan Canvas (drag to add)         │
+│  ─────────────          ────────────────────────          │
+│  [ CONOPS         ]  →  [ CONOPS ] ──→ [ Guardrails ]    │
+│  [ Guardrails     ]                        ↓              │
+│  [ Increment Plan ]              [ Increment Planning ]   │
+│  [ Execution      ]                        ↓              │
+│  [ Plan Review    ]              [ Plan Review ]          │
+│  [ Validity Anal. ]                        ↓              │
+│  [ Retrospective  ]              [ Execution ]            │
+│  [ Onboarding     ]                                       │
+│                                  [ Validate Stage Plan ]  │
+│                                  [ Start Project ]        │
+└────────────────────────────────────────────────────────────┘
+```
+
+- Stage library shows all available stage types with their declared input/output artifact connectors.
+- Canvas supports drag-and-drop composition; stages snap together when their artifact connectors are compatible.
+- The validator checks that all declared input connectors are satisfied by upstream stage outputs before allowing execution to start.
+- "Start Project" finalises the plan and creates the phase records in SQLite. The orchestrator begins with the first phase.
+
+This is the primary entry point for all new projects. The Onboarding stage type handles the case where the human is joining an existing project mid-flight.
+
+---
+
+## Artifact Viewer
+
+> **Gap addressed**: The CONOPS describes artifacts as "the connectors between stages" and "structured documents that define the product." The UX-Brief previously did not describe a UI for reading artifacts.
+
+Accessible from:
+- The Phase × Scope Matrix — artifact icon on any completed phase
+- The Stage Gate UI — "Review outputs" button before advancing
+- The Advisor Chatbot — when an artifact is referenced in a conversation
+
+The viewer shows the artifact's content rendered from its markdown source, with metadata: type, producing task, phase, timestamp. Side-by-side comparison is available for versioned artifacts (e.g. revised `conops.md` vs. original).
+
+The artifact panel is a read-only viewer. Artifacts are produced by agents — they are not directly edited by the human. If the human wants to change an artifact, they either revise the task that produced it (Stage Gate: Revise) or create a new task.
+
+---
+
+## Knowledge Register Panel
+
+> **Gap addressed**: Architecture.md describes the knowledge register as "surfaced in the UI as a browsable, searchable panel." This was absent from the UX-Brief.
+
+Accessible from the project toolbar (persistent icon, never in a tab for active projects).
+
+The panel shows all knowledge entries for the current project:
+- Key / value pairs in a table
+- Filter by phase, author (agent or human), search by keyword
+- Click an entry to see the full value and any entries it supersedes
+- Entries are read-only in the panel — humans do not directly edit the register. Agents write via `poe:knowledge`. The human's role is to read, search, and promote.
+
+**Promote to user-level**: entries can be flagged for promotion — this signals the Retrospective stage to export the entry to `~/.poe/knowledge/` so it applies across all projects. Promotion is logged and reversible.
 
 ---
 
@@ -208,7 +274,35 @@ The terminal is for code review and manual investigation — not for launching a
 
 When a phase reaches a human gate (end of Planning, end of Execution, Retrospective review), the project card in Pane 1 shows a clear gate indicator. The Phase × Scope Matrix dims the next phase until the gate is cleared. The gate action appears prominently in the project header — not buried in a menu.
 
-Gate actions are simple: Advance / Revise / Re-run. The human makes the call; the orchestrator responds.
+Gate actions: **Advance / Revise / Re-run**. The human makes the call; the orchestrator responds.
+
+**Before acting on a gate, the human reviews the stage outputs.** The gate panel shows:
+- All artifacts produced by the completed stage, with direct links to the Artifact Viewer
+- A summary of the inner loop state (how many plan review iterations ran, whether any review blocked)
+- Open decisions resolved during this stage
+- Agent activity summary (briefs and step counts)
+
+The human is expected to read the artifacts before advancing. The gate should not be a rubber stamp — it is the quality checkpoint the CONOPS describes.
+
+**Retrospective gate** — additional affordance: the Retrospective stage produces updated skill files and knowledge entries. The gate panel for a Retrospective shows a diff of skill changes for human review and one-click approval. Approved skill changes are written to `{project}/.poe/skills/`. The human can promote to `~/.poe/skills/` from the same panel.
+
+---
+
+## Agent Interrupt
+
+> **Gap addressed**: The CONOPS describes the human being able to "pull the cord if something is going wrong." The UX-Brief previously described task cancellation (for individual tasks) but no emergency stop.
+
+Three levels of interrupt, available from the project header:
+
+| Action | Effect |
+|---|---|
+| **Cancel task** | Cancel one running task. Agent receives SIGTERM. Task re-queues to Pending. Available from task detail panel. |
+| **Pause stage** | SIGTERM all running agents in the current stage. Tasks re-queue to Pending. Stage enters Paused state. Human can resume or revise. |
+| **Abort project** | SIGTERM all running agents across the project. All Running tasks → Pending. Project enters Paused state. Human reviews before restarting. |
+
+Interrupt actions are confirmed with a brief modal. The confirmation shows the count of agents that will be stopped. Abort is never silent.
+
+On resume after interrupt: the orchestrator attempts `--resume` for all previously-running tasks using their stored session IDs. If resume fails (session expired), tasks restart fresh from Pending.
 
 ---
 
@@ -219,5 +313,5 @@ Gate actions are simple: Advance / Revise / Re-run. The human makes the call; th
 3. **The matrix is the map.** Phase × Scope gives orientation in seconds. Drill down for detail.
 4. **Observation is the default mode.** The human watches; the agents work. Intervention is the exception.
 5. **The Advisor is always at hand.** Not a separate screen — present in the queue panel, available for any question.
-6. **PTY is a drill-down, not the surface.** Raw terminal output is one click away but never the primary view.
+6. **Agent session handover is a drill-down, not the surface.** Clicking into an agent's xterm.js session is one click away from any activity feed entry, but it is never the primary view. The structured event stream (poe: events) is what drives the UI.
 7. **Manual override is always possible.** The DAG can be edited directly. The orchestrator responds immediately.

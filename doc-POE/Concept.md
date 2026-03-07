@@ -2,7 +2,7 @@
 
 
 **Status**: Draft
-**Last updated**: 2026-03-07
+**Last updated**: 2026-03-08
 
 > **Proof of concept**: The design session that produced this document and its companions (Architecture.md, UX-Brief.md) ran the exact lifecycle POE is designed to orchestrate — as a conversation. Concept → Guardrails → Architecture → UX Brief, collaboratively, with a human seeding the idea and an AI asking the questions. The output is the brief for the implementation. If POE can produce output of equal or better quality when it orchestrates this process through specialist agents, the concept is proven.
 
@@ -127,7 +127,7 @@ Agents run autonomously. The human is not blocking their progress. Instead, the 
 - Structured progress events emitted by the agent as it works
 - Which tasks are complete, in progress, or waiting
 
-The activity feed is built on **structured events** emitted by agents, not raw terminal output. PTY output is available as a drill-down for any specific agent but is not the primary signal.
+The activity feed is built on **structured events** emitted by agents via the stream-json transport, not raw terminal output. When deeper inspection is needed, the human can open an xterm.js terminal that resumes the agent's session directly — but this is a drill-down, not the primary signal.
 
 ### Decision Queue
 
@@ -179,7 +179,7 @@ The inner loop may iterate — Review → Revise → Review again — until the 
 
 ## Agent Protocol
 
-Agents communicate with POE via structured JSON events written to stdout — one event per line, each a JSON object with a `"poe"` key identifying the event type. This is the structured layer that drives the activity feed, artifact tracking, task management, and the decision queue. See `doc-POE/Protocol.md §2` for the full wire format.
+Agents communicate with POE via structured JSON events embedded in the `--output-format stream-json` transport. Agents are invoked with `claude --output-format stream-json -p --dangerously-skip-permissions`; the T+S+K bundle is written to stdin (then closed), and the orchestrator reads poe: events from the JSON output stream. This structured layer drives the activity feed, artifact tracking, task management, and the decision queue. See `doc-POE/Protocol.md §2` and `§5` for the full wire format and spawn model.
 
 The protocol is fundamentally **CRUD against the project database**. The DAG is not a static plan — it evolves as execution reveals new information, scope is refined, and dependencies are discovered or invalidated. Agents have full mutation rights over the graph.
 
