@@ -285,9 +285,11 @@ pub async fn spawn_agent(
         writer
             .write_all(req.input_bundle.as_bytes())
             .context("Failed to write input bundle to agent stdin")?;
+        // PTY raw mode: Enter = \r (carriage return), not \n. \n creates a newline
+        // inside the input box; \r submits the message to Claude.
         writer
-            .write_all(b"\n")
-            .context("Failed to write newline after input bundle")?;
+            .write_all(b"\r")
+            .context("Failed to write submit keystroke to agent stdin")?;
         writer.flush().context("Failed to flush input bundle")?;
     }
     eprintln!("[agent_lifecycle] agent={} bundle flushed to stdin", agent_id);
