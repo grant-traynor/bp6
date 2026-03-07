@@ -322,6 +322,78 @@ Polling introduces latency that makes the activity feed feel dead. poe:brief and
 
 ---
 
+## 5. Phase 3 Tauri Command Surface
+
+New Tauri commands required for Phase 3. All work in `poe2/src-tauri/src/`. Commands shared across beads are noted.
+
+### Phase / Plan Composer (7ct.1, 7ct.3)
+
+```
+list_phases(project_id: String) → Vec<Phase>
+create_phase(project_id: String, name: String, stage_type: String, position: i32) → Phase
+```
+
+**Stage type catalogue** — static constant in Rust + TypeScript (not a SQLite table):
+```
+conops | guardrails | increment_planning | execution | pm_review
+rework | validity_analysis | retrospective | onboarding
+```
+Each stage type has a static list of consumed and produced artifact types. The plan composer validates connections against this catalogue at the UI layer.
+
+**Schema change**: add `stage_type TEXT` column to `phases` table.
+
+### Matrix / DAG (7ct.1)
+
+```
+list_edges(project_id: String) → Vec<Edge>
+update_node_sort_order(node_id: String, sort_order: i32) → ()
+```
+
+**Schema change**: add `sort_order INTEGER` column to `nodes` table.
+
+### WBS Ancestry + Artifact Content (7ct.2, 7ct.4, 7ct.6)
+
+```
+get_node_ancestry(node_id: String) → Vec<Node>      // walks parent_id chain to root
+read_artifact_content(artifact_id: String) → String  // reads file from {project}/docs/{path}
+```
+
+### Knowledge (7ct.6)
+
+```
+update_knowledge(id: String, content: String) → ()
+```
+
+### Queue Advisor / Node Chat (7ct.4)
+
+Claude API calls go through a **Rust-side proxy** — API key in Tauri config, never exposed to frontend. Streaming via Tauri `Channel`.
+
+```
+advisor_chat_start(project_id: String, context: AdvisorContext) → Channel<AdvisorChunk>
+advisor_chat_send(session_id: String, message: String) → ()
+advisor_chat_stop(session_id: String) → ()
+```
+
+`AdvisorContext` carries: `mode` (queue | node), `decision_id?`, `node_id?`. Rust assembles artifact corpus + knowledge register + relevant task context from SQLite before opening the Claude stream.
+
+Add to `Cargo.toml`: `reqwest` with `features = ["json", "stream"]`.
+
+### Terminal (7ct.5)
+
+```
+tmux_create(project_id: String) → ()          // creates session poe-{project_id}
+tmux_attach(project_id: String) → PtyHandle   // returns pty fd for xterm
+tmux_resize(project_id: String, cols: u16, rows: u16) → ()
+tmux_send_keys(project_id: String, keys: String) → ()
+tmux_kill(project_id: String) → ()
+```
+
+Shell out to system `tmux`. Detect live session before creating.
+
+Add to `package.json`: `@xterm/xterm`, `@xterm/addon-fit`, `@xyflow/react`.
+
+---
+
 ## Minor gaps addressed
 
 **Stage runner trigger (.3)**: The orchestrator is event-driven via a Tokio `mpsc` channel (`DagChanged` signal). The event ingester sends a signal on every event that mutates DAG structure or task status (`poe:task`, `poe:task:update`, `poe:task:cancel`, `poe:edge`, `poe:edge:remove`, `poe:done`, plus human gate advances and decision resolutions). On each signal, the orchestrator queries SQLite for tasks where `status = 'pending'` and all `depends_on` tasks have `status = 'done'`, and the running count is below the concurrency limit. Eligible tasks are spawned. No explicit Tauri command triggers execution — the loop fires on DAG changes automatically.
