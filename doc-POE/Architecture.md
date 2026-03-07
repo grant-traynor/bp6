@@ -205,18 +205,30 @@ Artifacts flow forward through the lifecycle. Each stage receives all artifacts 
 
 ### Standard Artifacts
 
-| Artifact | Produced by | Scope |
+**Project-level** — produced once, injected into every subsequent stage's input bundle:
+
+| Artifact | Produced by | Purpose |
 |---|---|---|
-| `conops.md` | CONOPS stage | Project |
-| `architecture-constraints.md` | Guardrails stage | Project |
-| `design-system.md` | Guardrails stage | Project |
-| `user-analysis.md` | Guardrails stage | Project |
-| `must-nots.md` | Guardrails stage | Project |
-| `guardrails-review.md` | Guardrails stage (EM review) | Project |
-| `phase-N-plan.md` | Planning stage | Phase |
-| `phase-N-review.md` | Execution stage (PM review) | Phase |
-| `phase-N-validity.md` | Retrospective stage | Phase |
-| `phase-N-rca.md` | Retrospective stage | Phase |
+| `conops.md` | CONOPS stage | Product concept, users, goals, operational context |
+| `architecture-constraints.md` | Guardrails stage | Architecture decisions, patterns, must-use technologies |
+| `interface-control.md` | Guardrails stage | External interface definitions — wire protocols, event formats, API contracts, inter-subsystem boundaries |
+| `data-model.md` | Guardrails stage | Internal data structures — DB schema, type definitions, entity relationships |
+| `design-system.md` | Guardrails stage | UI design tokens, component patterns, visual language |
+| `user-analysis.md` | Guardrails stage | Personas, user journeys, feature priority matrix |
+| `must-nots.md` | Guardrails stage | Hard constraints — security, compliance, things the system must never do |
+| `guardrails-review.md` | Guardrails stage (Senior Engineer review) | Cross-cutting review of all guardrails artifacts for conflicts and gaps |
+
+**Phase-level** — produced per phase:
+
+| Artifact | Produced by | Purpose |
+|---|---|---|
+| `phase-N-plan.md` | Increment Planning stage | Epic/feature/task decomposition for this phase |
+| `phase-N-plan-review.md` | Plan Review stage (inner loop Check) | Specialist findings on the plan before execution |
+| `phase-N-data-model-delta.md` | Increment Planning stage (if schema changes) | Additions to the data model for this phase |
+| `phase-N-validity.md` | Validity Analysis stage | Gap between C' and C! for this phase |
+| `phase-N-rca.md` | Retrospective stage | Root cause analysis and corrective actions |
+
+> **Note**: `interface-control.md` and `data-model.md` close the gap that existed in POE v1 — implementation agents had no authoritative spec for internal structure or interface contracts injected into their context, leading to protocol conflicts discovered only during coding. These documents are injected into every implementation task's input bundle via the standard K assembly.
 
 ### Storage
 
@@ -541,7 +553,19 @@ The `project-advisor` skill is a solid foundation for the Queue Advisor but need
 
 The bp6 persona template (`bp6/templates/personas/_TEMPLATE_EIAMOE.md`) defines the E-I-A-M-O-E framework (Entry / Inputs / Activities / Measurements / Outputs / Exit). The framework structure and mode selection concepts remain valid for authoring POE v2 skills. The beads-specific tooling (`bd` commands, C-E-P via `bd show`) is replaced by the `poe:` event protocol and orchestrator-injected input bundles — but the structural framework is worth keeping as an authoring guide.
 
-**Recommended approach**: once `bp6-e1n.6` (Skill System) lands, run a skill authoring task that ports `operational-analyst` and `product-manager` to POE v2 format and writes the missing specialists (`architecture-analyst`, `must-not-analyst`, `rca-analyst`, `validity-analyst`) from scratch using the updated EIAMOE framework as a guide. This is well-scoped work for a specialist agent.
+**Recommended approach**: once `bp6-e1n.6` (Skill System) lands, run a skill authoring task that ports `operational-analyst` and `product-manager` to POE v2 format and writes the missing specialists from scratch using the updated EIAMOE framework as a guide. This is well-scoped work for a specialist agent.
+
+Missing specialists to author for v2:
+
+| Skill | Stage | Role |
+|---|---|---|
+| `senior-engineer` | Guardrails (review), Plan Review (inner loop Check), ad-hoc via `poe:review` | Resolves protocol conflicts, reviews plans for technical correctness, answers implementation questions from other agents. Primary target for `poe:review` from implementation agents. |
+| `interface-analyst` | Guardrails | Authors `interface-control.md` — defines wire formats, event protocols, API contracts, inter-subsystem boundaries |
+| `data-model-analyst` | Guardrails | Authors `data-model.md` — defines DB schema, type definitions, entity relationships |
+| `architecture-analyst` | Guardrails | Authors `architecture-constraints.md` |
+| `must-not-analyst` | Guardrails | Authors `must-nots.md` |
+| `validity-analyst` | Validity Analysis (outer loop Check) | Authors `phase-N-validity.md` |
+| `rca-analyst` | Retrospective (outer loop Act) | Authors `phase-N-rca.md`, updates skills and knowledge register |
 
 ---
 

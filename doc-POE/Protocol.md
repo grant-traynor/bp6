@@ -3,6 +3,12 @@
 **Status**: Draft
 **Last updated**: 2026-03-07
 
+**Artifact classification**: This document serves as both:
+- `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), and the frontend update mechanism (§4).
+- `data-model.md` — the authoritative Database Design Document. Defines the SQLite schema for all internal data structures (§1).
+
+These are standard artifact types in the POE corpus (see Architecture.md §Artifact Corpus). They are injected into every implementation task's input bundle. When in doubt about a wire format, field name, or schema question — this document is the answer.
+
 This document specifies the four I/O contracts that Phase 2 is built around. Everything else in the system is implementation detail; divergence here causes cross-component rework.
 
 ---

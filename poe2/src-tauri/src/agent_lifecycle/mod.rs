@@ -141,6 +141,9 @@ pub async fn spawn_agent(
                     // Feed to event ingester
                     event_ingester::ingest_line(
                         &line,
+                        &project_id,
+                        &task_id,
+                        &agent_id_clone,
                         &registry_clone,
                         &dag_tx_clone,
                         &app_clone,

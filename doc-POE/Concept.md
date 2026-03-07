@@ -149,7 +149,7 @@ Each phase runs two nested PDCA loops. Stage types map to these loops as follows
 |---|---|---|---|
 | Project Onboarding | Join or resume a project; synthesise existing artifacts into a shared understanding | Operational Analyst | `onboarding-summary.md` |
 | CONOPS | Define the product concept, users, goals, and operational context | Operational Analyst | `conops.md` |
-| Guardrails | Define architecture, design system, user model, and must-nots | Architecture, Design, User, Must-Not Analysts + EM review | `architecture-constraints.md`, `design-system.md`, `user-analysis.md`, `must-nots.md`, `guardrails-review.md` |
+| Guardrails | Define architecture, interface contracts, data model, design system, user model, and must-nots | Architecture, Interface, Data Model, Design, User, Must-Not Analysts + Senior Engineer review | `architecture-constraints.md`, `interface-control.md`, `data-model.md`, `design-system.md`, `user-analysis.md`, `must-nots.md`, `guardrails-review.md` |
 
 **Inner loop — Plan quality (closes before execution begins):**
 
