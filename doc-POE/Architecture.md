@@ -233,7 +233,7 @@ Every `tasks` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_
 
 ## Agent Event Protocol
 
-Agents communicate with POE via structured JSON lines written to stdout, prefixed `poe:`. This is the sole structured communication channel — not PTY scraping.
+Agents communicate with POE via structured JSON lines written to stdout — one event per line, each a JSON object with a `"poe"` key identifying the event type. This is the sole structured communication channel — not PTY scraping. See `doc-POE/Protocol.md §2` for the full wire format.
 
 | Event | Purpose |
 |---|---|
@@ -268,13 +268,10 @@ Agent A (e.g. Architect) emits poe:review
 **poe:review payload:**
 
 ```json
-{
-  "event": "poe:review",
-  "skill": "tauri-engineer",
-  "question": "Are these 4 features ready for implementation? Flag any gaps.",
-  "context": "optional additional framing"
-}
+{"poe": "review", "reviewer_skill": "tauri-engineer", "content": "Are these 4 features ready for implementation? Flag any gaps."}
 ```
+
+See `doc-POE/Protocol.md §2` for the full wire format for all events.
 
 The human observes the entire exchange via the activity feed. Queue items only arrive if both agents hit genuine ambiguity neither can resolve — which is the correct escalation point.
 
@@ -285,13 +282,7 @@ The human observes the entire exchange via the activity feed. Queue items only a
 The `poe:brief` event is emitted by every agent at the start of execution, before any work begins. It externalises the agent's interpretation of its task so the human can verify intent asynchronously. The agent proceeds immediately after emitting the brief — it does not wait for human acknowledgement.
 
 ```json
-{
-  "event": "poe:brief",
-  "task_id": "task-abc",
-  "interpretation": "I understand this task as: ...",
-  "plan": "I will: 1. ... 2. ... 3. ...",
-  "assumptions": ["...", "..."]
-}
+{"poe": "brief", "content": "I understand this task as: ... I will: 1. ... 2. ..."}
 ```
 
 ---
@@ -404,26 +395,14 @@ Before spawning an agent, the orchestrator assembles the context it needs:
 The event ingester is the bridge between agent stdout and the DAG. It runs as part of the agent watchdog, processing every line of output:
 
 ```
-Line received from agent PTY
-  → not prefixed poe:  → pass to PTY buffer (raw view only)
-  → prefixed poe:      → parse JSON → write to SQLite → trigger orchestrator → emit Tauri event
+Line received from agent stdout
+  → not valid JSON, or no "poe" key  → pass to PTY buffer (raw view only)
+  → valid JSON with "poe" key        → parse → write to SQLite → trigger orchestrator → emit Tauri event
 ```
 
-| Event | SQLite write | Triggers orchestrator |
-|---|---|---|
-| `poe:brief` | Insert into events log | No |
-| `poe:step` | Insert into events log | No |
-| `poe:task` | Insert node | Yes |
-| `poe:task:update` | Update node | Yes |
-| `poe:task:cancel` | Set status = cancelled | Yes |
-| `poe:edge` | Insert edge | Yes |
-| `poe:edge:remove` | Delete edge | Yes |
-| `poe:artifact` | Insert/update artifact record + write to `docs/` | No |
-| `poe:knowledge` | Insert knowledge entry | No |
-| `poe:decision` | Insert queue item | No |
-| `poe:done` | Set status = complete | Yes |
-
 The orchestrator is notified via a Tokio `mpsc` channel (`DagChanged` signal). Anything that mutates DAG structure or task status triggers it; everything else records and notifies the frontend only.
+
+See `doc-POE/Protocol.md §2` for the full ingester responsibility table (SQLite writes, orchestrator triggers, and Tauri events emitted per event type).
 
 ### Recovery
 
@@ -439,7 +418,7 @@ On app restart:
 7. Trigger orchestrator loop → re-evaluates all ready tasks
 ```
 
-Agent session IDs are stored in the agents table at spawn time specifically to enable resume. Resume is attempted first; clean restart is the fallback.
+Agent session IDs are stored in the `tasks.session_id` column at spawn time specifically to enable resume. Resume is attempted first; clean restart is the fallback.
 
 ### Concurrency
 
@@ -528,11 +507,10 @@ The bp6 persona template (`bp6/templates/personas/_TEMPLATE_EIAMOE.md`) defines 
 
 ```
 Tauri App (Rust + React)
-  ├── SQLite (dag.db)          — WBS graph, artifacts index, knowledge register, event log
-  ├── AgentState               — active PTY processes, watchdog
+  ├── SQLite (poe.db)          — WBS graph, artifacts index, knowledge register, event log
+  ├── AgentState               — active agent processes, watchdog, stdout readers
   ├── ProjectState             — open projects, active project
-  ├── FileWatcher              — watches {project}/.poe/events/ for agent event files
-  ├── EventIngester            — parses poe: events, writes to SQLite, emits Tauri events
+  ├── EventIngester            — reads agent stdout, parses poe: events, writes to SQLite, emits Tauri events
   └── Frontend (React)
         ├── ActivityFeed       — live agent event stream
         ├── DecisionQueue      — human decision queue
@@ -541,8 +519,8 @@ Tauri App (Rust + React)
         └── KnowledgeView      — knowledge register browser
 
 Agent (Claude Code subprocess)
-  — reads task brief + artifact context + knowledge register snapshot
-  — emits poe: events to stdout
+  — reads stdin bundle (T + S + K — see Protocol.md §3)
+  — emits poe: events to stdout ({"poe": "<type>", ...})
   — PTY available for raw inspection
 ```
 
