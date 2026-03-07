@@ -16,12 +16,19 @@ Validates the full poe: event wire format from bundle injection through PTY to p
 ```bash
 cd poe2/src-tauri
 
-# Run with output visible (recommended — shows raw PTY lines and parsed events)
-cargo test --test protocol_harness -- --nocapture
-
-# Run quietly (only shows failures)
+# Run the test (output always written to target/protocol-harness.log)
 cargo test --test protocol_harness
+
+# Monitor output live while the test runs
+tail -f target/protocol-harness.log
+
+# Run and see output inline (log file is also written)
+cargo test --test protocol_harness -- --nocapture
 ```
+
+All diagnostic output — raw PTY lines, parse results, assertion outcomes — is written to
+`target/protocol-harness.log` unconditionally, regardless of `--nocapture` or test outcome.
+The log path is printed in every assertion failure message.
 
 ### Prerequisites
 

@@ -3,10 +3,62 @@
 //! Spawns a real Claude process via PTY, injects a deterministic test skill bundle,
 //! and validates that all poe: event types are correctly transmitted and parsed.
 //!
+//! All output is written to `target/protocol-harness.log` regardless of test outcome
+//! or whether --nocapture is used. Monitor with: `tail -f target/protocol-harness.log`
+//!
 //! See tests/README.md for how to run and how to interpret output.
 
 use poe2_lib::{agent_lifecycle, event_ingester};
+use std::io::Write;
 use tempfile::TempDir;
+
+// ── Harness logger ────────────────────────────────────────────────────────────
+//
+// Writes to target/protocol-harness.log AND stderr simultaneously.
+// The file is always readable regardless of --nocapture or test outcome.
+// Monitor live with: tail -f target/protocol-harness.log
+
+struct HarnessLog {
+    file: std::fs::File,
+    path: std::path::PathBuf,
+}
+
+impl HarnessLog {
+    fn create() -> Self {
+        // target/ is relative to the crate root, which is the working directory
+        // when cargo test runs.
+        std::fs::create_dir_all("target").ok();
+        let path = std::path::PathBuf::from("target/protocol-harness.log");
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap_or_else(|e| panic!("failed to open {}: {}", path.display(), e));
+        let mut log = Self { file, path };
+        log.line(&format!(
+            "=== protocol_harness started at {} ===",
+            chrono::Utc::now().to_rfc3339()
+        ));
+        log
+    }
+
+    /// Write a line to the log file and stderr.
+    fn line(&mut self, msg: &str) {
+        let _ = writeln!(self.file, "{}", msg);
+        let _ = self.file.flush();
+        eprintln!("{}", msg);
+    }
+
+    /// Write a blank line separator.
+    fn sep(&mut self) {
+        self.line("");
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
 
 // ── Long content constant ─────────────────────────────────────────────────────
 //
@@ -103,8 +155,11 @@ fn build_bundle(skill: &str) -> String {
 /// Run with: cargo test --test protocol_harness -- --nocapture
 #[test]
 fn protocol_end_to_end() {
+    let mut log = HarnessLog::create();
+    log.line(&format!("log: {}", log.path().display()));
+
     if !claude_on_path() {
-        eprintln!("claude not found on PATH — skipping protocol_end_to_end");
+        log.line("SKIP: claude not found on PATH — skipping protocol_end_to_end");
         return;
     }
 
@@ -112,77 +167,84 @@ fn protocol_end_to_end() {
     let skill = test_skill(LONG_CONTENT);
     let bundle = build_bundle(&skill);
 
-    eprintln!("\n=== BUNDLE ({} bytes) ===", bundle.len());
+    log.sep();
+    log.line(&format!("=== BUNDLE ({} bytes) ===", bundle.len()));
+    log.line(&bundle);
 
+    log.sep();
+    log.line("=== SPAWNING CLAUDE ===");
     let lines = agent_lifecycle::run_agent_capturing(&bundle, tmp.path())
         .expect("run_agent_capturing failed — is claude on PATH?");
 
-    // ── Log all raw PTY lines (always visible via --nocapture) ────────────────
-    eprintln!("\n=== RAW PTY OUTPUT ({} lines) ===", lines.len());
+    // ── Log all raw PTY lines ─────────────────────────────────────────────────
+    log.sep();
+    log.line(&format!("=== RAW PTY OUTPUT ({} lines) ===", lines.len()));
     for (i, line) in lines.iter().enumerate() {
-        eprintln!("[{:4}] {}", i, line);
+        log.line(&format!("[{:4}] {}", i, line));
     }
 
     // ── Parse events, log which lines were recognised ─────────────────────────
     let mut events: Vec<(String, serde_json::Value)> = Vec::new();
-    eprintln!("\n=== POE EVENT PARSE RESULTS ===");
+    log.sep();
+    log.line("=== POE EVENT PARSE RESULTS ===");
     for line in &lines {
         match event_ingester::parse_poe_event(line) {
             Some((event_type, json)) => {
-                eprintln!("  [poe:{event_type}] {json}");
+                log.line(&format!("  [poe:{event_type}] {json}"));
                 events.push((event_type, json));
             }
             None if line.trim().starts_with('{') => {
                 // A JSON-looking line that didn't parse — likely a PTY-wrap fragment.
                 let preview = &line[..line.len().min(120)];
-                eprintln!("  [PARSE FAIL — possible PTY wrap fragment] {preview}");
+                log.line(&format!("  [PARSE FAIL — possible PTY wrap fragment] {preview}"));
             }
             None => {} // raw PTY output (prompts, banners, etc.) — expected
         }
     }
-    eprintln!(
-        "\n{} poe: events parsed from {} raw PTY lines\n",
+    log.sep();
+    log.line(&format!(
+        "{} poe: events parsed from {} raw PTY lines",
         events.len(),
         lines.len()
-    );
+    ));
 
     // ── Assertions ────────────────────────────────────────────────────────────
+    log.sep();
+    log.line("=== ASSERTIONS ===");
 
-    assert!(!events.is_empty(), "No poe: events received — check raw PTY output above");
+    assert!(!events.is_empty(), "No poe: events received — see {}", log.path().display());
 
     // poe:brief must be the first event
+    log.line(&format!("  first event: poe:{}", events[0].0));
     assert_eq!(
         events[0].0, "brief",
-        "First poe: event must be poe:brief, got poe:{}",
-        events[0].0
+        "First poe: event must be poe:brief, got poe:{} — see {}",
+        events[0].0, log.path().display()
     );
 
     // poe:done must be the last event
     let last = events.last().unwrap();
+    log.line(&format!("  last event:  poe:{}", last.0));
     assert_eq!(
         last.0, "done",
-        "Last poe: event must be poe:done, got poe:{}",
-        last.0
+        "Last poe: event must be poe:done, got poe:{} — see {}",
+        last.0, log.path().display()
     );
 
     // All 11 event types must appear (poe:review excluded — requires live orchestrator)
     let type_list: Vec<&str> = events.iter().map(|(t, _)| t.as_str()).collect();
+    log.line(&format!("  event types seen: {:?}", type_list));
     for expected in &[
-        "brief",
-        "step",
-        "knowledge",
-        "artifact",
-        "task",
-        "task:update",
-        "task:cancel",
-        "edge",
-        "edge:remove",
-        "decision",
-        "done",
+        "brief", "step", "knowledge", "artifact",
+        "task", "task:update", "task:cancel",
+        "edge", "edge:remove", "decision", "done",
     ] {
+        let present = type_list.contains(expected);
+        log.line(&format!("  poe:{:<14} {}", expected, if present { "OK" } else { "MISSING" }));
         assert!(
-            type_list.contains(expected),
-            "Missing event type poe:{expected} — check raw PTY output and parse results above"
+            present,
+            "Missing event type poe:{expected} — see {}",
+            log.path().display()
         );
     }
 
@@ -192,26 +254,22 @@ fn protocol_end_to_end() {
         .filter(|(t, _)| t == "artifact")
         .map(|(_, v)| v)
         .collect();
+    log.line(&format!("  artifact count: {}", artifacts.len()));
     assert_eq!(
-        artifacts.len(),
-        2,
-        "Expected 2 poe:artifact events (test-short.txt and test-long.txt), got {}. \
-         If only 1 received, the long-artifact JSON line was likely fragmented by PTY \
-         column wrap (bp6-pdr.13).",
-        artifacts.len()
+        artifacts.len(), 2,
+        "Expected 2 poe:artifact events, got {} — if only 1, long-artifact JSON was \
+         likely fragmented by PTY column wrap (bp6-pdr.13). See {}",
+        artifacts.len(), log.path().display()
     );
 
     // Short artifact — name and non-empty content
     let short = artifacts
         .iter()
         .find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-short.txt"));
-    assert!(short.is_some(), "test-short.txt artifact not found in parsed events");
-    let short_content = short
-        .unwrap()
-        .get("content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    assert!(!short_content.is_empty(), "test-short.txt content field is empty");
+    assert!(short.is_some(), "test-short.txt artifact not found — see {}", log.path().display());
+    let short_content = short.unwrap().get("content").and_then(|v| v.as_str()).unwrap_or("");
+    log.line(&format!("  test-short.txt content length: {}", short_content.len()));
+    assert!(!short_content.is_empty(), "test-short.txt content is empty — see {}", log.path().display());
 
     // Long artifact — primary assertion for bp6-pdr.13 (PTY column-wrap bug)
     let long = artifacts
@@ -220,19 +278,21 @@ fn protocol_end_to_end() {
     assert!(
         long.is_some(),
         "test-long.txt artifact not found — PTY column-wrap bug (bp6-pdr.13) is present: \
-         the {}-char JSON line was split at col 220 and neither fragment parsed as JSON.",
-        82 + LONG_CONTENT.len() + 2 // structure prefix + content + closing "}
+         {}-char JSON line was split at col 220, neither fragment parsed. See {}",
+        82 + LONG_CONTENT.len() + 2,
+        log.path().display()
     );
-    let long_content = long
-        .unwrap()
-        .get("content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let long_content = long.unwrap().get("content").and_then(|v| v.as_str()).unwrap_or("");
+    log.line(&format!(
+        "  test-long.txt content length: {} (expected > 220, full: {})",
+        long_content.len(), LONG_CONTENT.len()
+    ));
     assert!(
         long_content.len() > 220,
-        "test-long.txt content is only {} chars (expected > 220) — content may have been \
-         truncated. Full expected length: {} chars.",
-        long_content.len(),
-        LONG_CONTENT.len()
+        "test-long.txt content is only {} chars (expected > 220) — see {}",
+        long_content.len(), log.path().display()
     );
+
+    log.sep();
+    log.line("=== ALL ASSERTIONS PASSED ===");
 }
