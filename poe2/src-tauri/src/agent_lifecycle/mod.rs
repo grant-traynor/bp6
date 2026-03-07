@@ -115,22 +115,12 @@ pub async fn spawn_agent(
 
     eprintln!("[agent_lifecycle] agent={} process spawned, writing bundle ({} bytes)", agent_id, req.input_bundle.len());
 
-    let mut writer = pair.master.take_writer().context("Failed to get PTY writer")?;
+    let writer = pair.master.take_writer().context("Failed to get PTY writer")?;
     let reader = pair.master.try_clone_reader().context("Failed to get PTY reader")?;
 
-    // Write T+S+K input bundle to stdin pipe immediately after spawn (Protocol.md §5)
-    writer
-        .write_all(req.input_bundle.as_bytes())
-        .context("Failed to write input bundle to agent stdin")?;
-    writer
-        .write_all(b"\n")
-        .context("Failed to write newline after input bundle")?;
-    writer.flush().context("Failed to flush input bundle")?;
-
-    eprintln!("[agent_lifecycle] agent={} bundle flushed to stdin", agent_id);
-
-    // Register in AgentMap so write_to_agent and interrupt_agent work,
-    // and so the writer is kept alive until the agent exits (dropping it early sends SIGHUP).
+    // Register in AgentMap before writing the bundle. The writer must be in AgentMap
+    // (and the watchdog must be reading) before we write — otherwise the PTY output
+    // buffer fills with Claude's startup banner and write_all deadlocks.
     let agent_map = app.state::<AgentMap>().inner().clone();
     {
         let active = Arc::new(ActiveAgent {
@@ -165,6 +155,8 @@ pub async fn spawn_agent(
     let agent_id_clone = agent_id.clone();
     let project_path = req.project_path.clone();
 
+    // Spawn the watchdog BEFORE writing the bundle. The watchdog drains PTY stdout;
+    // without it running first, write_all will block once the PTY buffer fills.
     std::thread::spawn(move || {
         eprintln!("[agent_lifecycle] agent={} watchdog thread started", agent_id_clone);
         let buf_reader = BufReader::new(reader);
@@ -283,6 +275,22 @@ pub async fn spawn_agent(
             node_id: task_id.clone(),
         });
     });
+
+    // Write T+S+K bundle AFTER the watchdog thread is running, so the reader is
+    // already draining PTY stdout before we fill PTY stdin. (Protocol.md §5)
+    {
+        let map = agent_map.lock().unwrap();
+        let active = map.get(&agent_id).ok_or_else(|| anyhow::anyhow!("Agent vanished from map immediately after insert"))?;
+        let mut writer = active.writer.lock().unwrap();
+        writer
+            .write_all(req.input_bundle.as_bytes())
+            .context("Failed to write input bundle to agent stdin")?;
+        writer
+            .write_all(b"\n")
+            .context("Failed to write newline after input bundle")?;
+        writer.flush().context("Failed to flush input bundle")?;
+    }
+    eprintln!("[agent_lifecycle] agent={} bundle flushed to stdin", agent_id);
 
     Ok(agent_id)
 }
