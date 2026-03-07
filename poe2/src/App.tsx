@@ -1,11 +1,64 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { Project } from './types';
+import type { Project, Node } from './types';
 import { usePoeProject } from './hooks/usePoeProject';
 import ActivityFeed from './components/ActivityFeed';
 import QueuePanel from './components/QueuePanel';
 import ProjectCard from './components/ProjectCard';
+
+// ── CONOPS launcher ───────────────────────────────────────────────────────────
+
+function ConopsLauncher({ projectId, onLaunched }: { projectId: string; onLaunched: (node: Node) => void }) {
+  const [brief, setBrief] = useState('');
+  const [running, setRunning] = useState(false);
+
+  async function handleSubmit() {
+    const trimmed = brief.trim();
+    if (!trimmed) return;
+    setRunning(true);
+    try {
+      const node = await invoke<Node>('create_node', {
+        input: {
+          projectId,
+          phaseId: null,
+          parentId: null,
+          nodeType: 'task',
+          title: 'Develop CONOPS',
+          description: trimmed,
+          skillId: 'operational-analyst',
+        },
+      });
+      onLaunched(node);
+    } catch (err) {
+      console.error('Failed to create CONOPS task:', err);
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
+      <div className="w-full max-w-xl flex flex-col gap-3">
+        <p className="text-xs text-neutral-500 uppercase tracking-widest">Run CONOPS</p>
+        <textarea
+          className="w-full h-40 bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-100 placeholder-neutral-600 resize-none focus:outline-none focus:border-neutral-500"
+          placeholder="Describe the project. What are we building? Who is it for? What problem does it solve?"
+          value={brief}
+          onChange={e => setBrief(e.target.value)}
+          disabled={running}
+          autoFocus
+        />
+        <button
+          onClick={() => void handleSubmit()}
+          disabled={running || !brief.trim()}
+          className="self-end px-4 py-2 bg-neutral-100 text-neutral-950 text-xs font-bold rounded hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {running ? 'Starting…' : 'Run CONOPS →'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [openProjects, setOpenProjects] = useState<Project[]>([]);
@@ -77,9 +130,16 @@ export default function App() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {selectedId ? (
           <>
-            <div className="flex-1 overflow-hidden">
-              <ActivityFeed items={feedItems} />
-            </div>
+            {nodes.length === 0 ? (
+              <ConopsLauncher
+                projectId={selectedId}
+                onLaunched={() => { /* orchestrator picks it up; feed will populate */ }}
+              />
+            ) : (
+              <div className="flex-1 overflow-hidden">
+                <ActivityFeed items={feedItems} />
+              </div>
+            )}
             <div className="h-[260px] shrink-0 border-t border-neutral-800">
               <QueuePanel
                 items={queueItems}
