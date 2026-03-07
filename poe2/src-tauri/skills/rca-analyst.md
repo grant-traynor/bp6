@@ -117,7 +117,7 @@ Emit these events in order:
 
 **3. Knowledge register entries** — emit one per corrective action that adds to K:
 ```
-{"poe": "knowledge", "key": "skill-update-senior-engineer", "content": "senior-engineer.md should clarify that APPROVED WITH CONDITIONS requires each condition to reference the specific artifact section it conflicts with, not just the finding. Vague conditions were not acted on during plan revision in Phase 1."}
+{"poe": "knowledge", "key": "skill-update-senior-engineer", "content": "senior-engineer.md should clarify that APPROVED_WITH_CONDITIONS requires each condition to reference the specific artifact section it conflicts with, not just the finding. Vague conditions were not acted on during plan revision in Phase 1."}
 {"poe": "knowledge", "key": "planning-guidance", "content": "Database migration tasks must always be created before backend implementation tasks that consume the new schema. The Phase 1 plan omitted this dependency, causing three blocked tasks mid-execution."}
 ```
 

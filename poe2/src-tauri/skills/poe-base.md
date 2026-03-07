@@ -99,7 +99,7 @@ Emit `poe:decision` when you encounter a genuine blocker requiring human judgmen
 | `must-nots` | `must-nots.md` | must-not-analyst |
 | `guardrails-review` | `guardrails-review.md` | senior-engineer |
 | `phase-plan` | `phase-N-plan.md` | product-manager |
-| `plan-review` | `phase-N-plan-review.md` | plan-reviewer |
+| `plan-review` | `phase-N-plan-review.md` | senior-engineer (plan-review mode) |
 | `validity` | `phase-N-validity.md` | validity-analyst |
 | `rca` | `phase-N-rca.md` | rca-analyst |
 | `review` | `review-<task-id>.md` | senior-engineer (ad-hoc) |
@@ -114,7 +114,49 @@ Every proactive specialist (all skills except `senior-engineer`) must follow thi
 4. `poe:decision` — when genuinely blocked. Continue unblocked work in parallel.
 5. `poe:done` — last event, always.
 
-The `senior-engineer` skill follows a reactive variant of this sequence — see `senior-engineer.md`.
+The `senior-engineer` skill operates in two modes — see `senior-engineer.md` and the section below.
+
+## Dual Activation Mode
+
+Some specialist skills support two activation modes, selected by the `**Type**` field in the T section of the stdin bundle:
+
+- **`task`** — standard task execution. Agent runs a lifecycle stage, produces artifact outputs, emits `poe:done`.
+- **`plan_review`** — plan review mode. Agent was spawned by the orchestrator in response to a `poe:review` event from the product-manager. Agent reviews the relevant subset of the plan for its domain and emits a structured verdict artifact.
+
+Skills that support plan-review mode: `senior-engineer`, `architecture-analyst`, `interface-analyst`, `data-model-analyst`.
+
+### Detecting plan-review mode
+
+At the start of execution, read the T section header:
+
+```
+**Type**: plan_review   → activate plan-review mode
+**Type**: task          → activate standard task execution mode
+```
+
+### Plan-review mode behaviour
+
+When `**Type**: plan_review`:
+
+1. Emit `poe:brief` summarising: "Reviewing plan subset for `<domain>` domain."
+2. Read the `## Review Request` section — this contains the review content and the requesting task.
+3. Review the plan for your domain (see domain-specific checklist in your skill file).
+4. Emit a single `poe:artifact` with `artifact_type: plan-review` containing your findings and verdict.
+5. Emit `poe:done`.
+
+**Do not** emit `poe:task`, `poe:edge`, or domain artifact types (`architecture-constraints`, etc.) in plan-review mode. Your only output is the review artifact.
+
+### Plan-review verdict format
+
+The verdict field in the artifact content must be one of these exact strings (machine-parsed by the orchestrator):
+
+```
+APPROVED
+APPROVED_WITH_CONDITIONS
+BLOCKED
+```
+
+Conditions and blockers must be specific: reference the task ID, the artifact section, and the required fix. The product-manager reads your verdict to decide whether to revise the plan or proceed to execution.
 
 ## Quality Gate
 
