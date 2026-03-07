@@ -253,9 +253,41 @@ Agents communicate with POE via structured JSON lines written to stdout, prefixe
 | `poe:edge` | Create a dependency edge between two nodes. |
 | `poe:knowledge` | Write an entry to the knowledge register. |
 | `poe:decision` | Raise a question for the human decision queue. Includes options if the agent has identified them. |
+| `poe:review` | Request a peer review from another specialist agent. Blocks the requesting agent until the reviewer completes. |
 | `poe:done` | Signal task completion. |
 
 PTY output remains available as a drill-down for any specific agent but is not the primary signal. The structured event stream is what drives the UI.
+
+### Agent-to-Agent Review Cycle
+
+Agents can request peer review from other specialist agents without human facilitation. This eliminates the need for a human to act as message relay between agents — the orchestrator routes the conversation.
+
+**The pattern:**
+
+```
+Agent A (e.g. Architect) emits poe:review
+  → Orchestrator creates a review task, assigns it to the named skill (e.g. tauri-engineer)
+  → Agent A status = blocked (waiting for review)
+  → Agent B (Tauri Engineer) receives full context: Agent A's brief + artifacts + the review question
+  → Agent B produces a review artifact (poe:artifact) and signals poe:done
+  → Orchestrator unblocks Agent A, injects Agent B's review into Agent A's context
+  → Agent A continues with the reviewer's assessment in hand
+```
+
+**poe:review payload:**
+
+```json
+{
+  "event": "poe:review",
+  "skill": "tauri-engineer",
+  "question": "Are these 4 features ready for implementation? Flag any gaps.",
+  "context": "optional additional framing"
+}
+```
+
+The human observes the entire exchange via the activity feed. Queue items only arrive if both agents hit genuine ambiguity neither can resolve — which is the correct escalation point.
+
+**What this replaces:** the human reading one agent's output, copying it to another agent's terminal, reading the response, and copying it back. The orchestrator does this. The human watches.
 
 ### poe:brief
 
