@@ -60,6 +60,10 @@ graph TB
 
    The inner loop closes the gap in **T** (task quality) before it can corrupt output. Human input (**H**) is invested here — in the plan review, not in mid-execution firefighting. A busy decision queue during execution is usually a signal that the inner loop was skipped or was insufficient.
 
+   **The loop may iterate.** A single review pass is the common case, but a plan with significant issues may require multiple cycles: Review → Revise → Review again. This is expected and correct — iteration is cheaper pre-execution than post. The planning specialist tracks unresolved findings and drives subsequent iterations autonomously via `poe:review`.
+
+   **Escalation to human.** If the loop cannot converge — reviewers keep finding blockers, or reviewers disagree on a fundamental design question — the planning specialist escalates via `poe:decision`. The human takes the call, breaks the deadlock, and the loop resumes. This is the correct escalation point: a human decision that is structural, not incidental. The queue should be sparse; if plan reviews frequently escalate, it is a signal that the CONOPS or Guardrails stage produced insufficient clarity.
+
    > **Living proof**: the design session that produced these documents ran this exact loop. Docs and beads were drafted (Plan), an implementation engineer agent reviewed them and identified 4 blocking gaps (Check), the docs were revised and Protocol.md was written (Act). Execution proceeded on a much stronger foundation. The copy-paste between agent sessions that this required is what `poe:review` eliminates — the orchestrator routes the review automatically; the human watches in the activity feed.
 
    ### The Outer Loop — Deliverable and Process Quality (post-execution)

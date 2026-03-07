@@ -157,9 +157,9 @@ Each phase runs two nested PDCA loops. Stage types map to these loops as follows
 |---|---|---|---|---|
 | Increment Planning | Plan | Select a meaningful next increment; decompose into epics, features, tasks; assign skills | Product Manager | `phase-N-plan.md` |
 | Plan Review | Check | Specialists review the plan *before execution*: flag gaps, wrong skill assignments, missing dependencies, ambiguous tasks. Runs via `poe:review` — no human relay required. | Architect, Engineer, PM (per plan type) | `phase-N-plan-review.md` |
-| Plan Revision | Act | Planning specialist updates the DAG based on review findings. May iterate (Review → Revise → Review again) until plan is approved. | Product Manager | Updated `phase-N-plan.md` |
+| Plan Revision | Act | Planning specialist updates the DAG based on review findings. | Product Manager | Updated `phase-N-plan.md` |
 
-The inner loop closes before execution. Once the plan passes review, execution begins.
+The inner loop may iterate — Review → Revise → Review again — until the plan is clean. If the loop cannot converge (reviewers disagree on a structural question, or blockers persist after N cycles) the planning specialist escalates via `poe:decision` and the human breaks the deadlock. Once approved, execution begins.
 
 **Execution (Do — runs on the approved plan):**
 
