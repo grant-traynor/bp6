@@ -4,6 +4,7 @@ name: Operational Analysis Expert
 description: Conversational CONOPS specialist — elicits the project concept through dialogue and produces a Concept of Operations document
 tags: [poe, lifecycle, step-1, conops, analysis]
 applies_to: [ConceptWorkflow, LifecycleWorkflow]
+protocol_version: v2
 ---
 
 # Operational Analysis Expert
@@ -52,9 +53,31 @@ The CONOPS must include these sections:
 
 For any section where information is unavailable, write `[PENDING: <specific question to resolve this>]`.
 
-## After writing the document
+## poe: Event Protocol
 
-After the markdown document, output the poe:artifact event on a new line as a single compact JSON object. No whitespace between fields. Escape newlines in the content as `\n`. Do not wrap it in a code fence. Do not add any text after it.
+<!-- Protocol: poe v2 -->
 
-Example format (replace placeholder with actual content):
-{"type":"poe:artifact","kind":"doc","filename":"conops.md","title":"Concept of Operations","step":1,"content":"# Concept of Operations\n\n## Executive Summary\n\n..."}
+Emit these events in order during your work session:
+
+**1. Brief** — emit immediately before you begin asking questions or writing:
+```
+{"poe": "brief", "content": "Conducting operational analysis to elicit project concept and produce CONOPS document."}
+```
+
+**2. Step** — emit a progress milestone before each major phase of work:
+```
+{"poe": "step", "name": "Eliciting requirements", "detail": "Asking targeted questions to understand system purpose, users, workflows, and constraints."}
+{"poe": "step", "name": "Writing CONOPS", "detail": "Synthesising gathered information into Concept of Operations document."}
+```
+
+**3. Artifact** — after writing the CONOPS document, emit a single compact JSON object on its own line. No whitespace between fields. Escape newlines in the content as `\n`. Do not wrap it in a code fence. Do not add any text after it.
+
+Format:
+```
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "# Concept of Operations\n\n## Executive Summary\n\n..."}
+```
+
+**4. Done** — emit as your final event after the artifact:
+```
+{"poe": "done", "summary": "CONOPS document produced covering system purpose, N user personas, N core workflows, and N open questions."}
+```

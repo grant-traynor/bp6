@@ -2,8 +2,11 @@ pub mod advisor;
 pub mod agents;
 pub mod conversation;
 pub mod dag;
+pub mod db;
+pub mod ingester;
 pub mod lifecycle;
 pub mod mcp_server;
+pub mod orchestrator;
 pub mod project;
 pub mod queue_service;
 pub mod restate;
@@ -29,6 +32,7 @@ use lifecycle::{approve_lifecycle_step, get_lifecycle_status, spawn_lifecycle_se
 use mcp_server::spawn_mcp_server;
 use queue_service::spawn_queue_service;
 use restate::{is_restate_healthy, spawn_restate, stop_restate, wait_for_restate_healthy, RestateState};
+use orchestrator::{resolve_decision, OrchestratorState};
 use skills::{get_skill_content, list_skills};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -39,6 +43,8 @@ pub fn run() {
         .manage(ProjectState::new())
         .manage(RestateState::new())
         .manage(AgentState::new())
+        .manage(db::DbState::new())
+        .manage(OrchestratorState::new())
         .setup(|app| {
             // Resolve app data directory for Restate state
             let data_dir = app
@@ -158,6 +164,8 @@ pub fn run() {
             create_lifecycle_artifact,
             start_conversation_turn,
             continue_conversation_turn,
+            db::get_project_state,
+            resolve_decision,
         ])
         .run(tauri::generate_context!())
         .expect("error while running POE application");
