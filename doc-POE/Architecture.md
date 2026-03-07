@@ -46,42 +46,45 @@ graph TB
 
    > **Design note**: The PDCA frame arrived late in the design session as an intuition, not as a starting point. It immediately validated the existing stage structure and became the primary conceptual anchor for the whole phase model. The two-loop refinement arrived even later — as a nagging intuition that a single loop felt incomplete. Once named, it resolved the ambiguity between Rework (inner Act) and Retrospective (outer Act), which had previously felt like overlapping concerns. They are not: they operate on different objects at different cadences.
 
-   ### The Inner Loop — Plan Quality
+   ### The Inner Loop — Plan Quality (pre-execution)
 
-   Operates within a phase. Checks and corrects the plan itself: whether work was well-decomposed, dependencies were correct, tasks were right-sized.
+   Closes *before execution begins*. Checks and corrects the plan: whether work is well-decomposed, dependencies are correct, tasks are right-sized, and the right specialists are assigned. A plan that survives this loop produces much better execution output — because T is closer to T!.
 
    ```
    Plan  →  Increment Planning: decompose into epics, features, tasks; define T; assign skills S
-   Do    →  Execution: f(C, T, S, K, H) → C'
-   Check →  PM Review: did the plan hold? were tasks right-sized? were dependencies correct?
-   Act   →  Rework: fix the plan deficiencies; re-execute affected tasks
+   Check →  Plan Review: specialists (architect, engineer, PM) review the plan via poe:review;
+             flag gaps, ambiguities, wrong skill assignments, missing dependencies
+   Act   →  Plan Revision: planning specialist updates the DAG based on findings; may iterate
+   Do    →  Execution begins on the approved plan
    ```
 
-   The inner Act corrects **T** (task decomposition quality) and incorporates **H** (human guidance on scope and priority). It does not touch skills or the knowledge register — those are outer loop concerns.
+   The inner loop closes the gap in **T** (task quality) before it can corrupt output. Human input (**H**) is invested here — in the plan review, not in mid-execution firefighting. A busy decision queue during execution is usually a signal that the inner loop was skipped or was insufficient.
 
-   ### The Outer Loop — Deliverable and Process Quality
+   > **Living proof**: the design session that produced these documents ran this exact loop. Docs and beads were drafted (Plan), an implementation engineer agent reviewed them and identified 4 blocking gaps (Check), the docs were revised and Protocol.md was written (Act). Execution proceeded on a much stronger foundation. The copy-paste between agent sessions that this required is what `poe:review` eliminates — the orchestrator routes the review automatically; the human watches in the activity feed.
 
-   Operates across phases. Checks and corrects what was built and how the agent team performed.
+   ### The Outer Loop — Deliverable and Process Quality (post-execution)
+
+   Closes after execution. Checks and corrects what was built and how the agent team performed.
 
    ```
-   Plan  →  CONOPS + Guardrails: define C! (what done looks like); establish S baseline
-   Do    →  The full phase (inner loop included)
-   Check →  Validity Analysis: does C' satisfy C!? where is the gap?
+   Do    →  Execution: f(C, T, S, K, H) → C'  (inner loop already closed; T is solid)
+   Check →  Validity Analysis: does C' satisfy C!? where is the gap between built and intended?
    Act   →  Retrospective: RCA on quality gaps → update S (skills), update K (knowledge register),
-             tighten guardrails if needed
+             tighten guardrails if needed; feed improvements into the next phase
    ```
 
-   The outer Act corrects **S** (skill quality) and **K** (knowledge gaps). It does not re-execute tasks — that is the inner loop's territory. It prepares the agent team to perform better in the next phase.
+   The outer Act corrects **S** (skill quality) and **K** (knowledge gaps). It does not re-execute tasks — that is Rework's territory when specific deliverable deficiencies are found. It prepares the agent team to perform better in the *next* phase.
 
    ### Why Both Loops Are Necessary
 
    | | Inner Loop | Outer Loop |
    |---|---|---|
-   | **Cadence** | Within a phase | Across phases |
-   | **Checks** | Plan quality — was the work correctly decomposed? | Deliverable quality — was the right thing built? |
-   | **Acts on** | Task structure, dependencies, scope | Skills, knowledge register, guardrails |
-   | **Corrects** | **T** and **H** | **S** and **K** |
-   | **Stage types** | PM Review → Rework | Validity Analysis → Retrospective |
+   | **When** | Pre-execution — plan is checked before Do begins | Post-execution — output is checked after Do completes |
+   | **Checks** | Plan quality — is the work correctly decomposed? | Deliverable quality — was the right thing built? |
+   | **Acts on** | Task structure, dependencies, skill assignments | Skills, knowledge register, guardrails |
+   | **Corrects** | **T** (task quality) + **H** (human investment upfront) | **S** (skills) + **K** (knowledge) |
+   | **Stage types** | Plan Review → Plan Revision → [Execute] | Validity Analysis → Retrospective |
+   | **Failure signal** | Busy decision queue during execution | Gap between C' and C! at validity check |
 
    A defect that the inner loop catches is a planning failure. A defect that only the outer loop catches is a skill or knowledge failure. This distinction drives where the correction goes — and makes the Retrospective's output (updated skills and knowledge) meaningful rather than generic "lessons learned."
 

@@ -151,21 +151,29 @@ Each phase runs two nested PDCA loops. Stage types map to these loops as follows
 | CONOPS | Define the product concept, users, goals, and operational context | Operational Analyst | `conops.md` |
 | Guardrails | Define architecture, design system, user model, and must-nots | Architecture, Design, User, Must-Not Analysts + EM review | `architecture-constraints.md`, `design-system.md`, `user-analysis.md`, `must-nots.md`, `guardrails-review.md` |
 
-**Inner loop — Plan quality (Plan → Do → Check → Act on the plan):**
+**Inner loop — Plan quality (closes before execution begins):**
 
 | Stage Type | PDCA | Purpose | Key Specialists | Primary Output |
 |---|---|---|---|---|
-| Increment Planning | Plan | Select a meaningful next increment; decompose into epics, features, tasks | Product Manager | `phase-N-plan.md` |
-| Execution | Do | Run a planned task set autonomously | Task specialists (per task type) | Code + artifacts |
-| PM Review | Check | Assess whether the plan held: tasks right-sized, dependencies correct, scope delivered | Product Manager | `phase-N-review.md` |
-| Rework | Act | Address plan deficiencies with a targeted task plan; re-execute affected tasks | Product Manager + task specialists | Updated artifacts (per task) |
+| Increment Planning | Plan | Select a meaningful next increment; decompose into epics, features, tasks; assign skills | Product Manager | `phase-N-plan.md` |
+| Plan Review | Check | Specialists review the plan *before execution*: flag gaps, wrong skill assignments, missing dependencies, ambiguous tasks. Runs via `poe:review` — no human relay required. | Architect, Engineer, PM (per plan type) | `phase-N-plan-review.md` |
+| Plan Revision | Act | Planning specialist updates the DAG based on review findings. May iterate (Review → Revise → Review again) until plan is approved. | Product Manager | Updated `phase-N-plan.md` |
 
-**Outer loop — Deliverable and process quality (Check → Act on what was built and how):**
+The inner loop closes before execution. Once the plan passes review, execution begins.
+
+**Execution (Do — runs on the approved plan):**
+
+| Stage Type | PDCA | Purpose | Key Specialists | Primary Output |
+|---|---|---|---|---|
+| Execution | Do | Run the approved task set autonomously | Task specialists (per task type) | Code + artifacts |
+
+**Outer loop — Deliverable and process quality (closes after execution):**
 
 | Stage Type | PDCA | Purpose | Key Specialists | Primary Output |
 |---|---|---|---|---|
 | Validity Analysis | Check | Validate what was built against the CONOPS; identify the gap between C' and C! | Validity Analyst | `phase-N-validity.md` |
-| Retrospective | Act | Root cause analysis on quality gaps; update skills, knowledge register, and guardrails | RCA Analyst | `phase-N-rca.md`, updated skills, updated knowledge |
+| Rework | Act (targeted) | Address specific deliverable deficiencies found in validity analysis; minimal targeted task plan | Product Manager + task specialists | Updated artifacts (per task) |
+| Retrospective | Act (systemic) | Root cause analysis on quality gaps; update skills, knowledge register, and guardrails to prevent recurrence | RCA Analyst | `phase-N-rca.md`, updated skills, updated knowledge |
 
 ---
 
