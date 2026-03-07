@@ -578,6 +578,15 @@ pub fn db_end_agent(conn: &Connection, agent_id: &str, status: &str) -> Result<(
     Ok(())
 }
 
+pub fn db_update_agent_session(conn: &Connection, agent_id: &str, session_id: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE agents SET session_id = ?1 WHERE id = ?2",
+        rusqlite::params![session_id, agent_id],
+    )
+    .context("Failed to update agent session_id")?;
+    Ok(())
+}
+
 pub fn db_list_agents_by_status(conn: &Connection, project_id: &str, status: &str) -> Result<Vec<AgentRecord>> {
     let mut stmt = conn.prepare(
         "SELECT id, project_id, skill_id, task_id, status, session_id, started_at, ended_at
@@ -642,17 +651,16 @@ pub fn db_advance_stage_gate(conn: &Connection, phase_id: &str) -> Result<Phase>
 }
 
 /// Find all pending tasks whose dependencies are all complete and whose phase is in execution mode.
+/// Tasks with no phase (e.g. CONOPS bootstrap tasks) are always eligible — they have no gate.
 pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<Node>> {
-    // Tasks where: status=pending, phase is in execution mode (not gate_held), and all depends_on deps are complete
     let mut stmt = conn.prepare(
         "SELECT n.id, n.project_id, n.phase_id, n.parent_id, n.node_type, n.title, n.description,
                 n.status, n.skill_id, n.assignee, n.created_at, n.updated_at
          FROM nodes n
-         JOIN phases p ON p.id = n.phase_id
+         LEFT JOIN phases p ON p.id = n.phase_id
          WHERE n.project_id = ?1
            AND n.status = 'pending'
-           AND p.lifecycle_stage = 'execution'
-           AND p.gate_held = 0
+           AND (n.phase_id IS NULL OR (p.lifecycle_stage = 'execution' AND p.gate_held = 0))
            AND n.node_type IN ('task', 'bug', 'chore', 'subtask')
            AND NOT EXISTS (
                SELECT 1 FROM edges e

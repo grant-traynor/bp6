@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;
 
 // ── Active agent state ────────────────────────────────────────────────────────
@@ -96,10 +96,8 @@ pub async fn spawn_agent(
         cmd.arg("--resume");
         cmd.arg(session_id);
     }
-    // Run non-interactively, accept all prompts
+    // Protocol.md §5: no -p, no CLI bundle arg. Bundle is written to stdin after spawn.
     cmd.arg("--dangerously-skip-permissions");
-    cmd.arg("-p");
-    cmd.arg(&req.input_bundle);
     cmd.cwd(&req.project_path);
 
     let mut child = pair
@@ -107,8 +105,30 @@ pub async fn spawn_agent(
         .spawn_command(cmd)
         .context("Failed to spawn claude process")?;
 
-    let _writer = pair.master.take_writer().context("Failed to get PTY writer")?;
+    let mut writer = pair.master.take_writer().context("Failed to get PTY writer")?;
     let reader = pair.master.try_clone_reader().context("Failed to get PTY reader")?;
+
+    // Write T+S+K input bundle to stdin pipe immediately after spawn (Protocol.md §5)
+    writer
+        .write_all(req.input_bundle.as_bytes())
+        .context("Failed to write input bundle to agent stdin")?;
+    writer
+        .write_all(b"\n")
+        .context("Failed to write newline after input bundle")?;
+    writer.flush().context("Failed to flush input bundle")?;
+
+    // Register in AgentMap so write_to_agent and interrupt_agent work,
+    // and so the writer is kept alive until the agent exits (dropping it early sends SIGHUP).
+    let agent_map = app.state::<AgentMap>().inner().clone();
+    {
+        let active = Arc::new(ActiveAgent {
+            agent_id: agent_id.clone(),
+            task_id: req.task_id.clone(),
+            project_id: req.project_id.clone(),
+            writer: Mutex::new(writer),
+        });
+        agent_map.lock().unwrap().insert(agent_id.clone(), active);
+    }
 
     // Emit agent started event
     {
@@ -135,9 +155,22 @@ pub async fn spawn_agent(
 
     std::thread::spawn(move || {
         let buf_reader = BufReader::new(reader);
+        let mut session_captured = false;
         for line in buf_reader.lines() {
             match line {
                 Ok(line) => {
+                    // Capture session ID from Claude's startup banner (Protocol.md §5)
+                    if !session_captured {
+                        if let Some(sid) = line.strip_prefix("Session ID: ") {
+                            let sid = sid.trim().to_owned();
+                            let reg = registry_clone.lock().unwrap();
+                            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                                let conn = db.conn.lock().unwrap();
+                                let _ = dag_store::db_update_agent_session(&conn, &agent_id_clone, &sid);
+                            }
+                            session_captured = true;
+                        }
+                    }
                     // Feed to event ingester
                     event_ingester::ingest_line(
                         &line,
@@ -169,28 +202,43 @@ pub async fn spawn_agent(
         }
 
         // Agent exited — wait for process
-        let exit_status = child.wait();
-        let success = exit_status.map(|s| s.success()).unwrap_or(false);
-        let final_status = if success { "complete" } else { "failed" };
+        let _exit_status = child.wait();
 
-        // Update DB
+        // Remove from AgentMap (also drops the writer, which is now safe since the process exited)
         {
+            let agent_map = app_clone.state::<AgentMap>().inner().clone();
+            agent_map.lock().unwrap().remove(&agent_id_clone);
+        }
+
+        // Determine success by node status — poe:done sets it to Complete regardless of exit code.
+        // Claude's exit code is unreliable; use SQLite node status as the authority (Protocol.md §5).
+        let task_complete = {
             let reg = registry_clone.lock().unwrap();
             if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
                 let conn = db.conn.lock().unwrap();
-                let _ = dag_store::db_end_agent(&conn, &agent_id_clone, final_status);
-                // If agent exited without emitting poe:done, mark task as failed
+                let _ = dag_store::db_end_agent(&conn, &agent_id_clone,
+                    if dag_store::db_get_node(&conn, &task_id)
+                        .map(|n| n.status == dag_store::NodeStatus::Complete)
+                        .unwrap_or(false) { "complete" } else { "failed" });
+                // Re-queue if still running (poe:done was never emitted)
                 if let Ok(node) = dag_store::db_get_node(&conn, &task_id) {
                     if node.status == dag_store::NodeStatus::Running {
                         let update = UpdateNodeInput {
-                            status: Some(dag_store::NodeStatus::Pending), // re-queue
+                            status: Some(dag_store::NodeStatus::Pending),
                             title: None, description: None, skill_id: None, assignee: None,
                         };
                         let _ = dag_store::db_update_node(&conn, &task_id, &update);
+                        false
+                    } else {
+                        node.status == dag_store::NodeStatus::Complete
                     }
+                } else {
+                    false
                 }
+            } else {
+                false
             }
-        }
+        };
 
         use tauri::Emitter;
         let _ = app_clone.emit(
@@ -199,7 +247,7 @@ pub async fn spawn_agent(
                 "agentId": agent_id_clone,
                 "taskId": task_id,
                 "projectId": project_id,
-                "success": success,
+                "success": task_complete,
             }),
         );
 
