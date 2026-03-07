@@ -516,6 +516,21 @@ Skills are the specialist definitions that agents execute under. Each skill is a
 
 After each phase, the Retrospective stage may update project-local skill files to capture lessons learned. The human can promote project-local improvements to the user level if they apply broadly. Skills improve across phases; the agent team becomes better at working on this specific project over time.
 
+### Bootstrap Strategy — Existing Skills
+
+POE v2 does not start from a blank skill library. Two skills from POE v1 (`poe/src-tauri/skills/`) are near-ready for direct port:
+
+| Skill | Readiness | Notes |
+|---|---|---|
+| `operational-analyst` | 90% | Already emits `poe:artifact`. Needs event payload field rename (`type` → `event`) and removal of old lifecycle step references. Maps to the CONOPS stage. |
+| `product-manager` | 85% | Already emits `poe:node` / `poe:edge` (rename to `poe:task` / `poe:edge`). Readiness check, phase decomposition, quality checklist, and `poe:decision` for scope choices are all correct. Maps to the Increment Planning stage. |
+
+The `project-advisor` skill is a solid foundation for the Queue Advisor but needs extension — it is currently read-only and passive; the Queue Advisor needs search, research, and sub-task capability.
+
+The bp6 persona template (`bp6/templates/personas/_TEMPLATE_EIAMOE.md`) defines the E-I-A-M-O-E framework (Entry / Inputs / Activities / Measurements / Outputs / Exit). The framework structure and mode selection concepts remain valid for authoring POE v2 skills. The beads-specific tooling (`bd` commands, C-E-P via `bd show`) is replaced by the `poe:` event protocol and orchestrator-injected input bundles — but the structural framework is worth keeping as an authoring guide.
+
+**Recommended approach**: once `bp6-e1n.6` (Skill System) lands, run a skill authoring task that ports `operational-analyst` and `product-manager` to POE v2 format and writes the missing specialists (`architecture-analyst`, `must-not-analyst`, `rca-analyst`, `validity-analyst`) from scratch using the updated EIAMOE framework as a guide. This is well-scoped work for a specialist agent.
+
 ---
 
 ## Process Architecture
