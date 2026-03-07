@@ -389,7 +389,12 @@ pub fn run_agent_capturing(
     // Capture pid now — used to send SIGTERM/SIGKILL after poe:done.
     let child_pid = child.process_id();
 
-    let mut writer = pair.master.take_writer().context("Failed to get PTY writer")?;
+    // Wrap writer in Arc<Mutex> so the reader thread can auto-respond to prompts
+    // (e.g. the Claude folder-trust dialog) without a separate signalling channel.
+    let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
+        pair.master.take_writer().context("Failed to get PTY writer")?,
+    ));
+    let writer_for_reader = writer.clone();
     let reader = pair.master.try_clone_reader().context("Failed to get PTY reader")?;
 
     // TUI-ready channel — fires when ⏵ (U+23F5) appears in PTY output.
@@ -415,6 +420,17 @@ pub fn run_agent_capturing(
                     // caller sees every PTY line as it arrives.
                     if let Some(ref obs) = on_line {
                         obs(line.clone());
+                    }
+                    // Auto-answer Claude's folder-trust dialog.
+                    // "Enter to confirm" appears after the trust prompt; at that point
+                    // the cursor is already on "Yes, I trust this folder", so \r confirms.
+                    // This dialog appears whenever Claude runs in a directory it hasn't
+                    // seen before (e.g. a fresh temp dir in tests).
+                    if line.contains("Enter to confirm") {
+                        if let Ok(mut w) = writer_for_reader.lock() {
+                            let _ = w.write_all(b"\r");
+                            let _ = w.flush();
+                        }
                     }
                     // Fire TUI-ready when the bypass-permissions status bar appears.
                     if let Ok(mut guard) = ready_tx_clone.lock() {
@@ -445,20 +461,26 @@ pub fn run_agent_capturing(
     let _ = ready_rx.recv_timeout(Duration::from_secs(30));
 
     // Write bundle + carriage return (PTY raw-mode submit keystroke).
-    writer.write_all(bundle.as_bytes()).context("Failed to write bundle to PTY")?;
-    writer.write_all(b"\r").context("Failed to write submit keystroke")?;
-    writer.flush().context("Failed to flush bundle")?;
+    {
+        let mut w = writer.lock().unwrap();
+        w.write_all(bundle.as_bytes()).context("Failed to write bundle to PTY")?;
+        w.write_all(b"\r").context("Failed to write submit keystroke")?;
+        w.flush().context("Failed to flush bundle")?;
+    }
 
     // Wait for poe:done — the agent has finished its work. 60 s timeout.
     let _ = done_rx.recv_timeout(Duration::from_secs(60));
 
     // Claude does not exit on its own. Signal it to terminate:
     //   1. Ctrl-C (interrupts the current Claude operation)
-    //   2. Close the write side of the PTY master (signals no more input)
+    //   2. Drop the writer Arc (fd closes when reader's clone also drops)
     //   3. SIGTERM via the captured pid (graceful exit)
     //   4. SIGKILL if it still hasn't exited after 10 s
-    let _ = writer.write_all(&[3u8]); // Ctrl-C
-    let _ = writer.flush();
+    {
+        let mut w = writer.lock().unwrap();
+        let _ = w.write_all(&[3u8]); // Ctrl-C
+        let _ = w.flush();
+    }
     drop(writer);
 
     if let Some(pid) = child_pid {
