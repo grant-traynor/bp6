@@ -53,7 +53,7 @@ Address the question directly first. Then check what is relevant:
 - **Schema compliance** — does it match the data model in `data-model.md`?
 - **Correctness** — is the technical approach sound? Are there edge cases that will cause failures at runtime?
 - **Gaps** — is anything missing that will require rework downstream?
-- **Verdict** — one of: `APPROVED`, `APPROVED WITH CONDITIONS`, or `BLOCKED`
+- **Verdict** — one of: `APPROVED`, `APPROVED_WITH_CONDITIONS`, or `BLOCKED`
 
 Conditions and blockers must be specific and actionable: "use `nodes` not `tasks`", not "check the schema".
 
@@ -76,7 +76,7 @@ Emit these events in order:
 
 **3. Artifact** — your review findings. One compact JSON object, one line, no whitespace between fields, newlines escaped as `\n`. Do not wrap in a code fence. Do not add text after it.
 ```
-{"poe": "artifact", "name": "review-<requesting-task-id>.md", "artifact_type": "review", "content": "# Technical Review\n\n## Question\n\n<review question verbatim>\n\n## Findings\n\n<specific, referenced, actionable analysis>\n\n## Verdict\n\n**APPROVED** | **APPROVED WITH CONDITIONS** | **BLOCKED**\n\n### Conditions / Blockers\n\n- <specific item 1>\n- <specific item 2>"}
+{"poe": "artifact", "name": "review-<requesting-task-id>.md", "artifact_type": "review", "content": "# Technical Review\n\n## Question\n\n<review question verbatim>\n\n## Findings\n\n<specific, referenced, actionable analysis>\n\n## Verdict\n\n**APPROVED** | **APPROVED_WITH_CONDITIONS** | **BLOCKED**\n\n### Conditions / Blockers\n\n- <specific item 1>\n- <specific item 2>"}
 ```
 
 **4. Decision** — only for genuine non-technical business decisions. Do not use this to avoid committing to a technical answer:
@@ -86,7 +86,7 @@ Emit these events in order:
 
 **5. Done** — final event, always last:
 ```
-{"poe": "done", "summary": "Review complete. Verdict: <APPROVED|APPROVED WITH CONDITIONS|BLOCKED>. <One sentence on key finding.>"}
+{"poe": "done", "summary": "Review complete. Verdict: <APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED>. <One sentence on key finding.>"}
 ```
 
 ## Quality Checklist
@@ -96,7 +96,7 @@ Before emitting `poe:done`, verify:
 - [ ] Review question addressed directly and specifically
 - [ ] Interface compliance checked against `interface-control.md` (if applicable)
 - [ ] Schema compliance checked against `data-model.md` (if applicable)
-- [ ] Verdict is explicit: APPROVED, APPROVED WITH CONDITIONS, or BLOCKED
+- [ ] Verdict is explicit: APPROVED, APPROVED_WITH_CONDITIONS, or BLOCKED
 - [ ] All blockers and conditions are specific and actionable
 - [ ] `poe:decision` used only for genuine non-technical escalation
 - [ ] `poe:done` is the final event

@@ -175,9 +175,9 @@ One event per line. No multi-line JSON.
 
 // Request a peer review. Orchestrator spawns reviewer_skill agent,
 // injects result via stdin when complete, unblocks this agent.
-// id is required when emitting multiple poe:review events so the agent
-// can correlate incoming verdicts to its pending requests.
-{"poe": "review", "reviewer_skill": "senior-engineer", "content": "...", "id": "optional-correlation-id"}
+// id is required when emitting multiple poe:review events — omit only
+// when emitting a single review (single-reviewer path).
+{"poe": "review", "reviewer_skill": "senior-engineer", "content": "...", "id": "r-eng"}
 
 // Multi-specialist plan review — product-manager emits one per domain:
 // {"poe": "review", "reviewer_skill": "senior-engineer",      "id": "r-eng",  "content": "..."}
@@ -188,6 +188,7 @@ One event per line. No multi-line JSON.
 // ReviewResult id=r-eng skill=senior-engineer verdict=APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED
 // {findings text}
 // ---
+// Verdict values: APPROVED | APPROVED_WITH_CONDITIONS | BLOCKED (underscore, no spaces)
 // Agent counts pending review ids and waits until all N results have arrived before proceeding.
 ```
 
@@ -284,6 +285,46 @@ Human: {resolution text}
 ```
 
 The agent reads this as a continuation of its context and resumes. The pipe stays open until `poe:done` is received.
+
+### Reviewer stdin bundle (ReviewRequest)
+
+When the orchestrator spawns a reviewer agent in response to a `poe:review` event, it builds a modified stdin bundle. The T section identifies this as a review task so the skill can activate its plan-review mode:
+
+```markdown
+# Task
+
+**ID**: {generated-reviewer-task-id}
+**Title**: Plan Review — {requesting-task-title}
+**Type**: plan_review
+**Skill**: {reviewer-skill}
+
+## Review Request
+
+**Requested by**: {requesting-task-id} ({requesting-task-title})
+**Review ID**: {id from poe:review event}
+
+{content from poe:review event — the plan summary or artifact under review}
+
+---
+
+# Skill
+
+{reviewer skill file}
+
+---
+
+# Artifacts
+
+{same artifact corpus as the requesting agent's bundle}
+
+---
+
+# Knowledge Register
+
+{same knowledge register}
+```
+
+Skills detect plan-review mode by the presence of `**Type**: plan_review` in the T section. All other bundle sections are identical to a standard task bundle.
 
 ### Skill priority chain
 
