@@ -10,23 +10,23 @@
 
 use poe2_lib::{agent_lifecycle, event_ingester};
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
 // ── Harness logger ────────────────────────────────────────────────────────────
 //
 // Writes to target/protocol-harness.log AND stderr simultaneously.
-// The file is always readable regardless of --nocapture or test outcome.
+// Cloneable so it can be shared into the PTY observer callback (different thread).
 // Monitor live with: tail -f target/protocol-harness.log
 
+#[derive(Clone)]
 struct HarnessLog {
-    file: std::fs::File,
+    file: Arc<Mutex<std::fs::File>>,
     path: std::path::PathBuf,
 }
 
 impl HarnessLog {
     fn create() -> Self {
-        // target/ is relative to the crate root, which is the working directory
-        // when cargo test runs.
         std::fs::create_dir_all("target").ok();
         let path = std::path::PathBuf::from("target/protocol-harness.log");
         let file = std::fs::OpenOptions::new()
@@ -35,7 +35,7 @@ impl HarnessLog {
             .truncate(true)
             .open(&path)
             .unwrap_or_else(|e| panic!("failed to open {}: {}", path.display(), e));
-        let mut log = Self { file, path };
+        let log = Self { file: Arc::new(Mutex::new(file)), path };
         log.line(&format!(
             "=== protocol_harness started at {} ===",
             chrono::Utc::now().to_rfc3339()
@@ -43,15 +43,15 @@ impl HarnessLog {
         log
     }
 
-    /// Write a line to the log file and stderr.
-    fn line(&mut self, msg: &str) {
-        let _ = writeln!(self.file, "{}", msg);
-        let _ = self.file.flush();
+    fn line(&self, msg: &str) {
+        if let Ok(mut f) = self.file.lock() {
+            let _ = writeln!(f, "{}", msg);
+            let _ = f.flush();
+        }
         eprintln!("{}", msg);
     }
 
-    /// Write a blank line separator.
-    fn sep(&mut self) {
+    fn sep(&self) {
         self.line("");
     }
 
@@ -155,7 +155,7 @@ fn build_bundle(skill: &str) -> String {
 /// Run with: cargo test --test protocol_harness -- --nocapture
 #[test]
 fn protocol_end_to_end() {
-    let mut log = HarnessLog::create();
+    let log = HarnessLog::create();
     log.line(&format!("log: {}", log.path().display()));
 
     if !claude_on_path() {
@@ -171,36 +171,51 @@ fn protocol_end_to_end() {
     log.line(&format!("=== BUNDLE ({} bytes) ===", bundle.len()));
     log.line(&bundle);
 
+    // ── Spawn Claude — observer writes every PTY line to the log in real-time ──
     log.sep();
     log.line("=== SPAWNING CLAUDE ===");
-    let lines = agent_lifecycle::run_agent_capturing(&bundle, tmp.path())
-        .expect("run_agent_capturing failed — is claude on PATH?");
 
-    // ── Log all raw PTY lines ─────────────────────────────────────────────────
-    log.sep();
-    log.line(&format!("=== RAW PTY OUTPUT ({} lines) ===", lines.len()));
-    for (i, line) in lines.iter().enumerate() {
-        log.line(&format!("[{:4}] {}", i, line));
-    }
+    // Line counter and event parser run inside the observer so results are
+    // visible in the log file as they arrive, not only after the run completes.
+    let observer_log = log.clone();
+    let observer_events: Arc<Mutex<Vec<(String, serde_json::Value)>>> =
+        Arc::new(Mutex::new(Vec::new()));
+    let observer_events_clone = observer_events.clone();
+    let line_index = Arc::new(Mutex::new(0usize));
+    let line_index_clone = line_index.clone();
 
-    // ── Parse events, log which lines were recognised ─────────────────────────
-    let mut events: Vec<(String, serde_json::Value)> = Vec::new();
-    log.sep();
-    log.line("=== POE EVENT PARSE RESULTS ===");
-    for line in &lines {
-        match event_ingester::parse_poe_event(line) {
-            Some((event_type, json)) => {
-                log.line(&format!("  [poe:{event_type}] {json}"));
-                events.push((event_type, json));
+    let observer = Box::new(move |line: String| {
+        let idx = {
+            let mut i = line_index_clone.lock().unwrap();
+            let v = *i;
+            *i += 1;
+            v
+        };
+        // Parse first — annotate the log line with its event type if recognised.
+        match event_ingester::parse_poe_event(&line) {
+            Some((ref event_type, ref json)) => {
+                observer_log.line(&format!("[{idx:4}] [poe:{event_type}] {json}"));
+                observer_events_clone
+                    .lock()
+                    .unwrap()
+                    .push((event_type.clone(), json.clone()));
             }
             None if line.trim().starts_with('{') => {
-                // A JSON-looking line that didn't parse — likely a PTY-wrap fragment.
                 let preview = &line[..line.len().min(120)];
-                log.line(&format!("  [PARSE FAIL — possible PTY wrap fragment] {preview}"));
+                observer_log.line(&format!("[{idx:4}] [PARSE FAIL — possible PTY wrap fragment] {preview}"));
             }
-            None => {} // raw PTY output (prompts, banners, etc.) — expected
+            None => {
+                observer_log.line(&format!("[{idx:4}] {line}"));
+            }
         }
-    }
+    });
+
+    let lines = agent_lifecycle::run_agent_capturing(&bundle, tmp.path(), Some(observer))
+        .expect("run_agent_capturing failed — is claude on PATH?");
+
+    let events: Vec<(String, serde_json::Value)> =
+        observer_events.lock().unwrap().clone();
+
     log.sep();
     log.line(&format!(
         "{} poe: events parsed from {} raw PTY lines",

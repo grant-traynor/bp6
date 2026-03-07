@@ -359,11 +359,18 @@ pub fn interrupt_agent_process(agent_map: &AgentMap, agent_id: &str) -> Result<(
 /// about TUI-ready signals, PTY geometry, or the `\r` submit keystroke. This is
 /// the same protocol path as `spawn_agent` but without Tauri AppHandle or SQLite.
 ///
+/// `on_line` is called from the reader thread for every PTY line as it arrives —
+/// use this for real-time logging. Pass `None` if not needed.
+///
 /// Returns all raw lines emitted by the process before it exits.
 ///
 /// CI-safe: returns `Err` if the `claude` binary is not found or spawning fails.
 /// Check with `std::process::Command::new("claude").arg("--version")` before calling.
-pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
+pub fn run_agent_capturing(
+    bundle: &str,
+    cwd: &Path,
+    on_line: Option<Box<dyn Fn(String) + Send + 'static>>,
+) -> Result<Vec<String>> {
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -404,6 +411,11 @@ pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
         for line in buf_reader.lines() {
             match line {
                 Ok(line) => {
+                    // Real-time observer — called before any other processing so the
+                    // caller sees every PTY line as it arrives.
+                    if let Some(ref obs) = on_line {
+                        obs(line.clone());
+                    }
                     // Fire TUI-ready when the bypass-permissions status bar appears.
                     if let Ok(mut guard) = ready_tx_clone.lock() {
                         if let Some(tx) = guard.take() {
@@ -437,8 +449,8 @@ pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
     writer.write_all(b"\r").context("Failed to write submit keystroke")?;
     writer.flush().context("Failed to flush bundle")?;
 
-    // Wait for poe:done — the agent has finished its work. 120 s for slow models.
-    let _ = done_rx.recv_timeout(Duration::from_secs(120));
+    // Wait for poe:done — the agent has finished its work. 60 s timeout.
+    let _ = done_rx.recv_timeout(Duration::from_secs(60));
 
     // Claude does not exit on its own. Signal it to terminate:
     //   1. Ctrl-C (interrupts the current Claude operation)
@@ -473,8 +485,14 @@ pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
     }
     let _ = child.wait(); // reap the zombie
 
-    // Join reader thread — it will have exited once the slave closed on child exit.
-    reader_thread.join().ok();
+    // Join reader thread with a 5 s timeout. If the slave fd wasn't fully closed
+    // by the kill sequence the reader may still be blocked; we don't want to hang.
+    let (join_tx, join_rx) = std::sync::mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        reader_thread.join().ok();
+        let _ = join_tx.send(());
+    });
+    let _ = join_rx.recv_timeout(Duration::from_secs(5));
 
     let result = lines.lock().unwrap().clone();
     Ok(result)
