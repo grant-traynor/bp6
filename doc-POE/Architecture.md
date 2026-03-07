@@ -214,29 +214,20 @@ Knowledge register entries live in the project database alongside the WBS graph.
 
 ## Data Model
 
-All project state is local-first, stored in `{project}/.poe/dag.db` (SQLite, WAL mode).
+All project state is local-first, stored in `{project}/.poe/poe.db` (SQLite, WAL mode).
 
-### Core Tables
+See `doc-POE/Protocol.md §1` for the complete CREATE TABLE schema. Key tables:
 
-```
-projects          — project metadata, CONOPS reference, active phase
-phases            — phase definitions, status, lifecycle stage
-nodes             — WBS nodes (Project / Phase / Epic / Feature / Task / Bug / Chore / Subtask)
-                    type, title, description, status, skill_id, assignee, phase_id, parent_id
-edges             — directed dependency edges between nodes (from_id, to_id, type)
-artifacts         — artifact index (type, filename, phase_number, produced_by_stage, created_at)
-knowledge         — knowledge register entries (key, value, source, created_at, supersedes_id)
-events            — structured agent event log (agent_id, event_type, payload, created_at)
-agents            — active and historical agent records (id, skill_id, task_id, status, started_at)
-queue_items       — human decision queue (question, options, agent_id, task_id, resolved_at)
-```
+- `tasks` — WBS nodes (title, description, type, skill, status, parent\_id, phase\_id, session\_id)
+- `edges` — directed dependency edges (from\_id, to\_id)
+- `event_log` — append-only structured agent event log (never updated or deleted)
+- `decisions` — human decision queue items (question, options, resolution)
+- `artifacts` — artifact index (name, type, path, producing\_task\_id)
+- `knowledge` — knowledge register entries (key, content, supersedes\_id)
+- `phases` — phase definitions, stage type, PDCA state
+- `projects` — project metadata
 
-### Key Relationships
-
-- Every WBS node has a `parent_id` (enabling full hierarchy traversal) and a `phase_id`.
-- Edges are typed: `depends_on` (execution ordering) or `relates_to` (informational).
-- Events reference the agent and the task they were emitted from.
-- Queue items reference the agent and task that raised the question.
+Every `tasks` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_id`. Decision queue items reference the task that raised the question. The event log is the audit trail — every poe: event lands here in full.
 
 ---
 
