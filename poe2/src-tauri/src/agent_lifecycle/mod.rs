@@ -422,11 +422,13 @@ pub fn run_agent_capturing(
                         obs(line.clone());
                     }
                     // Auto-answer Claude's folder-trust dialog.
-                    // "Enter to confirm" appears after the trust prompt; at that point
-                    // the cursor is already on "Yes, I trust this folder", so \r confirms.
-                    // This dialog appears whenever Claude runs in a directory it hasn't
-                    // seen before (e.g. a fresh temp dir in tests).
-                    if line.contains("Enter to confirm") {
+                    // The dialog renders with ANSI escape sequences between every word
+                    // (cursor-forward \x1b[1C codes, colour codes), so plain-text phrases
+                    // like "Enter to confirm" never appear as literal byte sequences.
+                    // "trust" and "folder" both appear as unbroken literals on the
+                    // selected menu-item line. The menu cursor (❯) is already on
+                    // "Yes, I trust this folder" — pressing \r confirms immediately.
+                    if line.contains("trust") && line.contains("folder") {
                         if let Ok(mut w) = writer_for_reader.lock() {
                             let _ = w.write_all(b"\r");
                             let _ = w.flush();
