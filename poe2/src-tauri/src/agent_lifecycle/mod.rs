@@ -100,10 +100,20 @@ pub async fn spawn_agent(
     cmd.arg("--dangerously-skip-permissions");
     cmd.cwd(&req.project_path);
 
+    eprintln!(
+        "[agent_lifecycle] spawning agent={} task={} cwd={} resume={:?}",
+        agent_id,
+        req.task_id,
+        req.project_path.display(),
+        req.resume_session_id,
+    );
+
     let mut child = pair
         .slave
         .spawn_command(cmd)
         .context("Failed to spawn claude process")?;
+
+    eprintln!("[agent_lifecycle] agent={} process spawned, writing bundle ({} bytes)", agent_id, req.input_bundle.len());
 
     let mut writer = pair.master.take_writer().context("Failed to get PTY writer")?;
     let reader = pair.master.try_clone_reader().context("Failed to get PTY reader")?;
@@ -116,6 +126,8 @@ pub async fn spawn_agent(
         .write_all(b"\n")
         .context("Failed to write newline after input bundle")?;
     writer.flush().context("Failed to flush input bundle")?;
+
+    eprintln!("[agent_lifecycle] agent={} bundle flushed to stdin", agent_id);
 
     // Register in AgentMap so write_to_agent and interrupt_agent work,
     // and so the writer is kept alive until the agent exits (dropping it early sends SIGHUP).
@@ -154,19 +166,25 @@ pub async fn spawn_agent(
     let project_path = req.project_path.clone();
 
     std::thread::spawn(move || {
+        eprintln!("[agent_lifecycle] agent={} watchdog thread started", agent_id_clone);
         let buf_reader = BufReader::new(reader);
         let mut session_captured = false;
         for line in buf_reader.lines() {
             match line {
                 Ok(line) => {
+                    eprintln!("[agent_lifecycle] agent={} PTY> {}", agent_id_clone, line);
+
                     // Capture session ID from Claude's startup banner (Protocol.md §5)
                     if !session_captured {
                         if let Some(sid) = line.strip_prefix("Session ID: ") {
                             let sid = sid.trim().to_owned();
+                            eprintln!("[agent_lifecycle] agent={} session_id captured: {}", agent_id_clone, sid);
                             let reg = registry_clone.lock().unwrap();
                             if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
                                 let conn = db.conn.lock().unwrap();
-                                let _ = dag_store::db_update_agent_session(&conn, &agent_id_clone, &sid);
+                                if let Err(e) = dag_store::db_update_agent_session(&conn, &agent_id_clone, &sid) {
+                                    eprintln!("[agent_lifecycle] agent={} failed to store session_id: {}", agent_id_clone, e);
+                                }
                             }
                             session_captured = true;
                         }
@@ -201,8 +219,14 @@ pub async fn spawn_agent(
             }
         }
 
+        eprintln!("[agent_lifecycle] agent={} PTY reader EOF — waiting for process exit", agent_id_clone);
+        if !session_captured {
+            eprintln!("[agent_lifecycle] agent={} WARNING: session_id never captured (no 'Session ID: ' line seen)", agent_id_clone);
+        }
+
         // Agent exited — wait for process
-        let _exit_status = child.wait();
+        let exit_status = child.wait();
+        eprintln!("[agent_lifecycle] agent={} process exited: {:?}", agent_id_clone, exit_status);
 
         // Remove from AgentMap (also drops the writer, which is now safe since the process exited)
         {
@@ -239,6 +263,8 @@ pub async fn spawn_agent(
                 false
             }
         };
+
+        eprintln!("[agent_lifecycle] agent={} task_complete={}", agent_id_clone, task_complete);
 
         use tauri::Emitter;
         let _ = app_clone.emit(
