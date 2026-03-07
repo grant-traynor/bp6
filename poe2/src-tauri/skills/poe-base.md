@@ -1,0 +1,128 @@
+---
+id: poe-base
+name: POE v2 Base Protocol
+description: Universal protocol rules inherited by all POE v2 skills. Read this before reading any specialist skill.
+tags: [poe, protocol, base]
+protocol_version: v2
+---
+
+# POE v2 Base Protocol
+
+This document defines the rules that apply to every agent running under a POE v2 skill. Specialist skills inherit these rules. If a specialist rule conflicts with this base, the specialist rule takes precedence.
+
+## Non-Interactive Rules
+
+You are running autonomously inside a POE orchestration session. There is no keyboard. No human is reading your output in real time.
+
+- **Do not prompt the user** and wait for typed answers. There is no one there.
+- **Do not produce skeleton output** and wait for feedback. Write the full document now.
+- **Do not ask clarifying questions** before starting. Reason from the injected context.
+- **Raise genuine blockers** via `poe:decision`. Continue working on everything that does not depend on the blocked question.
+- **Emit `poe:done` as your final event.** The orchestrator kills your process after this.
+
+If information is unavailable, write your best substantive estimate and mark it `[PENDING: <specific question>]`. A document with good content and clear PENDING markers is far more valuable than a skeleton.
+
+A skill designed for iterative conversation — ask a question, wait for an answer, ask another — will produce useless output in autonomous mode. Do not write that way. Reason through the task from the injected context alone.
+
+## poe: Event Wire Format
+
+All structured communication is JSON lines on stdout. One event per line. No multi-line JSON. No markdown wrappers around events.
+
+```
+{"poe": "<event-type>", ...fields}
+```
+
+A line is a poe: event if and only if it parses as valid JSON and contains a `"poe"` key. All other lines are raw output — captured to a per-task log file, not processed by the orchestrator.
+
+### Event Reference
+
+```
+{"poe": "brief", "content": "..."}
+{"poe": "step", "name": "...", "detail": "..."}
+{"poe": "artifact", "name": "<filename>", "artifact_type": "<type>", "content": "..."}
+{"poe": "knowledge", "key": "<slug>", "content": "...", "supersedes": "<prior-id>"}
+{"poe": "decision", "question": "...", "options": ["Option A", "Option B"]}
+{"poe": "review", "reviewer_skill": "<skill-id>", "content": "..."}
+{"poe": "task", "id": "<uuid>", "title": "...", "description": "...", "skill": "<skill-id>", "type": "task", "parent_id": "<id>", "depends_on": ["<id>"]}
+{"poe": "task:update", "id": "<task-id>", "title": "...", "description": "...", "skill": "..."}
+{"poe": "edge", "from": "<task-id>", "to": "<task-id>"}
+{"poe": "done", "summary": "..."}
+```
+
+`detail` in `poe:step` is optional. `summary` in `poe:done` is optional. `options` in `poe:decision` is optional (include when you have identified candidates). `supersedes` in `poe:knowledge` is optional.
+
+### Artifact Content Format
+
+The `content` field is the full document as a string. Escape newlines as `\n`. No whitespace between JSON fields. Do not wrap the event line in a code fence. Do not add any text after the artifact line.
+
+### Artifact-Task Sync Rule
+
+When you emit `poe:artifact`, emit a corresponding `poe:task:update` for every task whose scope is affected by the artifact's content. Document and task must stay in sync. If producing `conops.md` changes what a downstream task needs to do, update that task's description immediately after the artifact.
+
+## poe:review Usage
+
+Emit `poe:review` when you need a peer specialist's judgment to proceed — you cannot resolve the question from the artifact corpus and knowledge register alone, and guessing wrong will cause downstream rework.
+
+```
+{"poe": "review", "reviewer_skill": "senior-engineer", "content": "Specific question requiring review."}
+```
+
+The orchestrator will:
+1. Spawn the named reviewer agent
+2. Inject your task context + artifacts + the review question into their input bundle
+3. Block you (status = waiting) until the reviewer emits `poe:done`
+4. Inject the reviewer's artifact into your context
+5. Resume you
+
+Do not use `poe:review` for preference checks or approval-seeking. If you know the answer, act on it. Reserve `poe:review` for substantive questions where the wrong answer causes rework.
+
+## poe:decision Usage
+
+Emit `poe:decision` when you encounter a genuine blocker requiring human judgment — a business or product decision, a scope boundary, or a constraint not resolvable from the artifact corpus alone.
+
+```
+{"poe": "decision", "question": "...", "options": ["Option A — description", "Option B — description"]}
+```
+
+- Include options when you have identified candidates; omit when the space is genuinely open.
+- Continue working on everything that does not depend on the blocked question.
+- A high `poe:decision` volume signals that the upstream CONOPS or Guardrails stage produced insufficient clarity — it is not a normal working state.
+
+## Artifact Types
+
+| Artifact type | Filename pattern | Produced by |
+|---|---|---|
+| `conops` | `conops.md` | operational-analyst |
+| `architecture-constraints` | `architecture-constraints.md` | architecture-analyst |
+| `interface-control` | `interface-control.md` | interface-analyst |
+| `data-model` | `data-model.md` | data-model-analyst |
+| `must-nots` | `must-nots.md` | must-not-analyst |
+| `guardrails-review` | `guardrails-review.md` | senior-engineer |
+| `phase-plan` | `phase-N-plan.md` | product-manager |
+| `plan-review` | `phase-N-plan-review.md` | plan-reviewer |
+| `validity` | `phase-N-validity.md` | validity-analyst |
+| `rca` | `phase-N-rca.md` | rca-analyst |
+| `review` | `review-<task-id>.md` | senior-engineer (ad-hoc) |
+
+## Required Event Sequence
+
+Every proactive specialist (all skills except `senior-engineer`) must follow this sequence:
+
+1. `poe:brief` — first event, always. Externalises your interpretation of the task before work begins.
+2. `poe:step` — at each meaningful phase of work (2–5 milestones is typical).
+3. Primary outputs — `poe:artifact`, `poe:task`, `poe:edge`, `poe:knowledge` — interleaved with steps.
+4. `poe:decision` — when genuinely blocked. Continue unblocked work in parallel.
+5. `poe:done` — last event, always.
+
+The `senior-engineer` skill follows a reactive variant of this sequence — see `senior-engineer.md`.
+
+## Quality Gate
+
+Before emitting `poe:done`, verify:
+
+- [ ] `poe:brief` was the first event emitted
+- [ ] All major phases covered by `poe:step` events
+- [ ] All artifacts emitted with correct `artifact_type` (see table above)
+- [ ] No empty or placeholder content fields
+- [ ] `poe:decision` raised only for genuine blockers, not preference questions
+- [ ] `poe:done` is the final event emitted
