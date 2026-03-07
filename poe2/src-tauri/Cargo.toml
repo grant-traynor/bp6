@@ -1,0 +1,33 @@
+[package]
+name = "poe2"
+version = "0.1.0"
+description = "POE2 — Pairti Orchestration Engine v2"
+authors = ["Pairti"]
+edition = "2021"
+
+[lib]
+name = "poe2_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+dirs = "6"
+tokio = { version = "1", features = ["full"] }
+portable-pty = "0.8"
+once_cell = "1"
+thiserror = "2"
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"
