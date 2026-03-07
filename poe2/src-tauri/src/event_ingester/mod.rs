@@ -89,6 +89,19 @@ struct PoeReview {
 
 // ── Core ingestion ────────────────────────────────────────────────────────────
 
+/// Detect and classify a single PTY output line as a poe: event.
+///
+/// Returns `Some((event_type, json_value))` if the line is valid JSON containing
+/// a `"poe"` key. Returns `None` for raw PTY output or non-poe JSON.
+///
+/// This is a pure function with no Tauri or SQLite dependencies — safe to call
+/// from integration tests and binaries that do not have an AppHandle.
+pub fn parse_poe_event(line: &str) -> Option<(String, serde_json::Value)> {
+    let json = serde_json::from_str::<serde_json::Value>(line.trim()).ok()?;
+    let event_type = json.get("poe")?.as_str()?.to_owned();
+    Some((event_type, json))
+}
+
 /// Process a single line of PTY output from an agent.
 ///
 /// A line is a poe: event iff it parses as valid JSON and contains a `"poe"` key.
@@ -104,12 +117,10 @@ pub fn ingest_line(
     project_path: &Path,
 ) {
     let trimmed = line.trim();
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-        return; // not JSON — raw PTY output, caller handles it
+    let Some((poe_event, _)) = parse_poe_event(trimmed) else {
+        return; // not a poe: event — raw PTY output, caller handles it
     };
-    let Some(poe_event) = json.get("poe").and_then(|v| v.as_str()) else {
-        return; // valid JSON but no "poe" key — not a poe: event
-    };
+    let poe_event = poe_event.as_str();
 
     let result = match poe_event {
         "task" => handle_task(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),

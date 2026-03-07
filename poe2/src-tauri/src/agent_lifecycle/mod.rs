@@ -7,7 +7,8 @@ use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::sync::Mutex;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tokio::sync::{mpsc, oneshot};
@@ -348,4 +349,82 @@ pub fn interrupt_agent_process(agent_map: &AgentMap, agent_id: &str) -> Result<(
     writer.write_all(&[3u8]).context("Failed to send interrupt to agent")?; // ASCII ETX = Ctrl-C
     writer.flush().context("Failed to flush interrupt")?;
     Ok(())
+}
+
+// ── Protocol-level raw runner (used by integration tests) ─────────────────────
+
+/// Spawn a Claude process, write a bundle to its stdin, and collect all PTY output.
+///
+/// All PTY and TUI protocol machinery is encapsulated here — callers need not know
+/// about TUI-ready signals, PTY geometry, or the `\r` submit keystroke. This is
+/// the same protocol path as `spawn_agent` but without Tauri AppHandle or SQLite.
+///
+/// Returns all raw lines emitted by the process before it exits.
+///
+/// CI-safe: returns `Err` if the `claude` binary is not found or spawning fails.
+/// Check with `std::process::Command::new("claude").arg("--version")` before calling.
+pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
+    let pty_system = NativePtySystem::default();
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 50,
+            cols: 220,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .context("Failed to open PTY")?;
+
+    let mut cmd = CommandBuilder::new("claude");
+    cmd.arg("--dangerously-skip-permissions");
+    cmd.cwd(cwd);
+
+    let mut child = pair.slave.spawn_command(cmd).context("Failed to spawn claude")?;
+    let mut writer = pair.master.take_writer().context("Failed to get PTY writer")?;
+    let reader = pair.master.try_clone_reader().context("Failed to get PTY reader")?;
+
+    // TUI-ready channel — internal protocol detail encapsulated here.
+    // The watchdog fires this when Claude's input loop signals readiness (⏵ U+23F5).
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
+    let ready_tx = Arc::new(Mutex::new(Some(ready_tx)));
+    let ready_tx_clone = ready_tx.clone();
+
+    let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let lines_clone = lines.clone();
+
+    let reader_thread = std::thread::spawn(move || {
+        let buf_reader = BufReader::new(reader);
+        for line in buf_reader.lines() {
+            match line {
+                Ok(line) => {
+                    // Fire TUI-ready when the bypass-permissions status bar appears.
+                    if let Ok(mut guard) = ready_tx_clone.lock() {
+                        if let Some(tx) = guard.take() {
+                            if line.contains('\u{23F5}') {
+                                let _ = tx.send(());
+                            }
+                        }
+                    }
+                    lines_clone.lock().unwrap().push(line);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // Wait for Claude's input loop to be ready before writing.
+    // Timeout after 30 s and proceed anyway — same behaviour as spawn_agent.
+    let _ = ready_rx.recv_timeout(Duration::from_secs(30));
+
+    // Write bundle + carriage return (PTY raw-mode submit keystroke).
+    writer.write_all(bundle.as_bytes()).context("Failed to write bundle to PTY")?;
+    writer.write_all(b"\r").context("Failed to write submit keystroke")?;
+    writer.flush().context("Failed to flush bundle")?;
+
+    // Wait for the child to exit, then drain the remaining PTY output.
+    let _ = child.wait();
+    drop(writer);
+    reader_thread.join().ok();
+
+    let result = lines.lock().unwrap().clone();
+    Ok(result)
 }
