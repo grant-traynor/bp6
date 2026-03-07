@@ -219,6 +219,71 @@ One event per line. No multi-line JSON.
 
 The input bundle is a **structured markdown document** written to the agent's stdin pipe before execution begins. The agent reads it as its opening context. Sections are separated by `---` with level-1 headings. The format is chosen for readability by an LLM — no binary encoding, no custom delimiters.
 
+### Mode Protocol Injection
+
+Before assembling the bundle, the orchestrator determines the **execution mode** and prepends a standard mode protocol block at the very top. Skills are written to describe domain expertise only — mode protocol (how to behave, what to emit, whether to wait for input) is injected by the orchestrator at bundle assembly time.
+
+**Mode is never selected explicitly by the human in the UI.** It is implicit in the action:
+
+| Who initiates | Mode | Transport |
+|---|---|---|
+| Orchestrator schedules a ready task | `autonomous` | stream-json + -p |
+| Human opens a node-scoped conversation | `interactive` | stream-json, new session |
+| Human clicks agent handover in activity feed | PTY resume | PTY + xterm.js |
+| Queue Advisor chatbot | `interactive` | Rust-side API proxy |
+
+The skill's `modes:` frontmatter field declares which modes it supports. If a human tries to open a node-scoped conversation with a skill that only supports `autonomous`, the UI blocks it with an explanation rather than starting a broken session.
+
+**Autonomous mode block** (prepended for orchestrator-initiated tasks):
+
+```markdown
+## Execution Protocol
+
+You are running in autonomous mode — there is no human at the keyboard.
+
+- Begin by emitting `poe:brief` describing your understanding of the task.
+- Work from the context in this bundle. Do not ask questions.
+- Raise genuine blockers via `poe:decision`, then continue with your best judgement.
+- Emit `poe:done` as your final output. The process exits after this.
+```
+
+**Interactive mode block** (prepended for human-initiated conversations):
+
+```markdown
+## Execution Protocol
+
+You are in a conversation with a human developer.
+
+- This is a collaborative, multi-round session — ask questions and wait for answers.
+- Do not emit poe: events unless you have produced a concrete output
+  (poe:artifact when you write a document, poe:knowledge when you record a decision).
+- End the conversation naturally. Do not emit `poe:done` unless explicitly asked.
+```
+
+### Skill frontmatter — mode declaration
+
+Skills declare which modes they support in YAML frontmatter:
+
+```yaml
+---
+id: operational-analyst
+name: Operational Analyst
+description: Elicits and writes the project CONOPS.
+modes: [autonomous, interactive]   # supports both
+---
+```
+
+```yaml
+---
+id: product-manager
+name: Product Manager
+description: Plans phase work and creates the task DAG.
+modes: [autonomous]                # autonomous only — not conversational
+---
+```
+
+If `modes` is omitted, the orchestrator assumes `[autonomous]` only.
+
 ### Template
 
 ```markdown
@@ -339,6 +404,8 @@ The skill file for `{skill-id}` is resolved as follows (first match wins):
 3. App bundle `skills/{skill-id}.md`
 
 If no file is found, abort the task with an error — do not spawn the agent with no skill.
+
+The **mode protocol block** is prepended to the bundle before the `# Skill` section — not inserted into the skill file itself. The skill file is read-only from the orchestrator's perspective; it is never modified at runtime.
 
 ---
 

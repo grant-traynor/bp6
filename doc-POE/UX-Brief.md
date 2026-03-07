@@ -178,6 +178,12 @@ Any WBS node (epic, feature, task, bug) can have a specialist conversation opene
 
 This is the bp6 pattern carried forward. It handles detailed design discussions, bug investigation, and the cases where the human needs to think through something with an expert before the orchestrator runs it.
 
+**Mode is interactive.** The orchestrator prepends the interactive mode protocol block to the bundle. The conversation is multi-round — the human asks, the specialist responds.
+
+**Mode guard**: if the task's assigned skill declares `modes: [autonomous]` only, the "Open conversation" button is disabled with the tooltip: *"This skill runs autonomously. View its activity feed to see what it did."* The human can still open the agent session handover (PTY resume) to read the raw session, but cannot initiate a new interactive conversation with that skill.
+
+**Mode is implicit — no selector.** The human never chooses autonomous vs. interactive. Opening a conversation always means interactive. Scheduling via the orchestrator always means autonomous. The UX does not expose this distinction beyond the mode guard on incompatible skills.
+
 ---
 
 ## Manual DAG Editing
