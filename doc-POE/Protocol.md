@@ -15,6 +15,8 @@ This document specifies the four I/O contracts that Phase 2 is built around. Eve
 
 ## 1. SQLite Schema
 
+> **Note**: This section reflects the intended design schema. The actual poe2 implementation diverges in table and column names: `nodes` (not `tasks`), `events` (not `event_log`), `queue_items` (not `decisions`), and ISO text timestamps (not INTEGER). §5 is correct for the actual codebase. Do not use §1 as a migration guide against the live schema — treat it as the canonical design intent and refer to `poe2/src-tauri/src/dag_store/schema.rs` for the actual DDL.
+
 All durable state lives in `{project}/.poe/poe.db`. Phase 2 creates this schema on first run. Phase 1's `dag/mod.rs` NodeType/EdgeType enums are **not extended** — they are superseded by this schema and the v1 lifecycle module is retired.
 
 ```sql
@@ -330,8 +332,10 @@ New Tauri commands required for Phase 3. All work in `poe2/src-tauri/src/`. Comm
 
 ```
 list_phases(project_id: String) → Vec<Phase>
-create_phase(project_id: String, name: String, stage_type: String, position: i32) → Phase
+create_phase(project_id: String, name: String, stage_type: String, number: i64) → Phase
 ```
+
+`number` maps to the existing `phases.number INTEGER` column (UNIQUE per project — serves as ordered position). Do **not** add a `position` column.
 
 **Stage type catalogue** — static constant in Rust + TypeScript (not a SQLite table):
 ```
@@ -354,9 +358,11 @@ update_node_sort_order(node_id: String, sort_order: i32) → ()
 ### WBS Ancestry + Artifact Content (7ct.2, 7ct.4, 7ct.6)
 
 ```
-get_node_ancestry(node_id: String) → Vec<Node>      // walks parent_id chain to root
-read_artifact_content(artifact_id: String) → String  // reads file from {project}/docs/{path}
+get_node_ancestry(node_id: String) → Vec<Node>                          // walks parent_id chain to root
+read_artifact_content(artifact_id: String, project_id: String) → String // reads file from disk
 ```
+
+`read_artifact_content` path formula: look up `artifact.filename` from the artifacts table, look up `project.path` from the project registry by `project_id`, construct `{project.path}/docs/{artifact.filename}`. The `Artifact` struct has `filename: String`; there is no stored `path` field.
 
 ### Knowledge (7ct.6)
 
