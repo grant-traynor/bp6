@@ -127,6 +127,33 @@ Each queue item shows:
 
 The human can resolve directly (select an option or type a response), or engage the Advisor first.
 
+### Conversational Queue Items
+
+Some agents (specifically the operational-analyst during CONOPS elicitation) conduct a multi-round conversation via sequential `poe:decision` events. Each round builds on the previous answers — the human needs the full exchange in view to answer round 3 coherently.
+
+When a task has prior resolved decisions AND a current pending decision, the queue item renders in **conversation thread mode**:
+
+```
+┌─ CONOPS Elicitation — operational-analyst ──────────────┐
+│                                                          │
+│  ● Q1: What problem does this system solve?              │
+│    A: It's a tool for managing agentic workflows...      │
+│                                                          │
+│  ● Q2: Who are the primary users?                        │
+│    A: Software engineers coordinating multi-agent...     │
+│                                                          │
+│  ● Q3 (pending): What are the 3 most important           │
+│    workflows the system must support?                    │
+│                                                          │
+│  [ type your response...                              ]  │
+│                                              [ Send ↵ ]  │
+└──────────────────────────────────────────────────────────┘
+```
+
+Prior Q+A pairs are shown read-only above the current question. The current pending question is highlighted. The input is a free-text field (no option buttons — conversational questions rarely have enumerable options).
+
+Detection: if `decisions` table has > 0 resolved rows for this `task_id` AND 1 pending row, render in thread mode. Otherwise render as standard queue item.
+
 ### Queue Advisor Chatbot
 
 Persistent chat interface associated with the queue. The human can direct it to research before deciding:
