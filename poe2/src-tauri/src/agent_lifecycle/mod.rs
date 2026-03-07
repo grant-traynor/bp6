@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 // ── Active agent state ────────────────────────────────────────────────────────
 
@@ -155,6 +155,12 @@ pub async fn spawn_agent(
     let agent_id_clone = agent_id.clone();
     let project_path = req.project_path.clone();
 
+    // Channel: watchdog signals when Claude's TUI input loop is ready (⏵⏵ status bar
+    // visible), so we write the bundle only after Claude can process the submit keystroke.
+    let (tui_ready_tx, tui_ready_rx) = oneshot::channel::<()>();
+    let tui_ready_tx = Arc::new(Mutex::new(Some(tui_ready_tx)));
+    let tui_ready_tx_clone = tui_ready_tx.clone();
+
     // Spawn the watchdog BEFORE writing the bundle. The watchdog drains PTY stdout;
     // without it running first, write_all will block once the PTY buffer fills.
     std::thread::spawn(move || {
@@ -165,6 +171,18 @@ pub async fn spawn_agent(
             match line {
                 Ok(line) => {
                     eprintln!("[agent_lifecycle] agent={} PTY> {}", agent_id_clone, line);
+
+                    // Signal TUI ready when the input status bar appears.
+                    // "⏵⏵" appears in the bypass-permissions status line, which is only
+                    // rendered once Claude's input loop is fully initialised.
+                    if let Ok(mut guard) = tui_ready_tx_clone.lock() {
+                        if let Some(tx) = guard.take() {
+                            if line.contains('\u{23F5}') {  // ⏵ U+23F5
+                                eprintln!("[agent_lifecycle] agent={} TUI ready — writing bundle", agent_id_clone);
+                                let _ = tx.send(());
+                            }
+                        }
+                    }
 
                     // Capture session ID from Claude's startup banner (Protocol.md §5)
                     if !session_captured {
@@ -276,8 +294,15 @@ pub async fn spawn_agent(
         });
     });
 
-    // Write T+S+K bundle AFTER the watchdog thread is running, so the reader is
-    // already draining PTY stdout before we fill PTY stdin. (Protocol.md §5)
+    // Wait for TUI ready signal before writing bundle. The watchdog fires this when
+    // it sees Claude's input status bar — i.e., the input loop is live and will
+    // process the submit keystroke correctly. 15s timeout guards against hang.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        tui_ready_rx,
+    ).await;
+    eprintln!("[agent_lifecycle] agent={} TUI ready signal received, writing bundle", agent_id);
+
     {
         let map = agent_map.lock().unwrap();
         let active = map.get(&agent_id).ok_or_else(|| anyhow::anyhow!("Agent vanished from map immediately after insert"))?;
@@ -285,8 +310,7 @@ pub async fn spawn_agent(
         writer
             .write_all(req.input_bundle.as_bytes())
             .context("Failed to write input bundle to agent stdin")?;
-        // PTY raw mode: Enter = \r (carriage return), not \n. \n creates a newline
-        // inside the input box; \r submits the message to Claude.
+        // PTY raw mode: \r (carriage return) is the Enter/submit keystroke.
         writer
             .write_all(b"\r")
             .context("Failed to write submit keystroke to agent stdin")?;
