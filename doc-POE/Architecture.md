@@ -42,15 +42,49 @@ graph TB
 
 ## Design Drivers
 
-1. **Each phase is a PDCA cycle.** Plan (increment planning) → Do (autonomous execution) → Check (retrospective, validity) → Act (replan, update skills and knowledge). The cycle repeats. Without the Act step, the loop doesn't close and the agent team doesn't improve. The human dial sits on top of the cycle — each quadrant can be autonomous, collaborative, or human-led depending on project maturity.
+1. **Each phase runs two nested PDCA loops.** The outer loop checks and corrects what was built; the inner loop checks and corrects how it was planned and executed. Both loops must close. A system with only an outer loop learns slowly and wastes effort on rework that better planning would have prevented. A system with only an inner loop improves execution efficiency but never asks whether it is building the right thing.
 
-   > **Design note**: The PDCA frame arrived late in the design session as an intuition, not as a starting point. It immediately validated the existing stage structure and became the primary conceptual anchor for the whole phase model. It is listed first here because it should be the first thing an implementer understands — but it was the last thing discovered. Stay open to these late-arriving frames; they often carry the most clarity.
+   > **Design note**: The PDCA frame arrived late in the design session as an intuition, not as a starting point. It immediately validated the existing stage structure and became the primary conceptual anchor for the whole phase model. The two-loop refinement arrived even later — as a nagging intuition that a single loop felt incomplete. Once named, it resolved the ambiguity between Rework (inner Act) and Retrospective (outer Act), which had previously felt like overlapping concerns. They are not: they operate on different objects at different cadences.
+
+   ### The Inner Loop — Plan Quality
+
+   Operates within a phase. Checks and corrects the plan itself: whether work was well-decomposed, dependencies were correct, tasks were right-sized.
+
    ```
-   Plan  →  define T, assemble K, choose S
-   Do    →  f(C, T, S, K, H) → C'
-   Check →  compare C' against C!
-   Act   →  tighten T, S, K to close the gap
+   Plan  →  Increment Planning: decompose into epics, features, tasks; define T; assign skills S
+   Do    →  Execution: f(C, T, S, K, H) → C'
+   Check →  PM Review: did the plan hold? were tasks right-sized? were dependencies correct?
+   Act   →  Rework: fix the plan deficiencies; re-execute affected tasks
    ```
+
+   The inner Act corrects **T** (task decomposition quality) and incorporates **H** (human guidance on scope and priority). It does not touch skills or the knowledge register — those are outer loop concerns.
+
+   ### The Outer Loop — Deliverable and Process Quality
+
+   Operates across phases. Checks and corrects what was built and how the agent team performed.
+
+   ```
+   Plan  →  CONOPS + Guardrails: define C! (what done looks like); establish S baseline
+   Do    →  The full phase (inner loop included)
+   Check →  Validity Analysis: does C' satisfy C!? where is the gap?
+   Act   →  Retrospective: RCA on quality gaps → update S (skills), update K (knowledge register),
+             tighten guardrails if needed
+   ```
+
+   The outer Act corrects **S** (skill quality) and **K** (knowledge gaps). It does not re-execute tasks — that is the inner loop's territory. It prepares the agent team to perform better in the next phase.
+
+   ### Why Both Loops Are Necessary
+
+   | | Inner Loop | Outer Loop |
+   |---|---|---|
+   | **Cadence** | Within a phase | Across phases |
+   | **Checks** | Plan quality — was the work correctly decomposed? | Deliverable quality — was the right thing built? |
+   | **Acts on** | Task structure, dependencies, scope | Skills, knowledge register, guardrails |
+   | **Corrects** | **T** and **H** | **S** and **K** |
+   | **Stage types** | PM Review → Rework | Validity Analysis → Retrospective |
+
+   A defect that the inner loop catches is a planning failure. A defect that only the outer loop catches is a skill or knowledge failure. This distinction drives where the correction goes — and makes the Retrospective's output (updated skills and knowledge) meaningful rather than generic "lessons learned."
+
 2. **Plan broadly, implement narrowly, replan aggressively.** The CONOPS and Phase plan define the shape. Execution is focused and bounded. The Retrospective updates the plan before the next Phase begins.
 3. **Local-first.** All project state lives in `{project}/.poe/` — portable, no central store.
 4. **Event-driven.** No polling. Agents emit structured events; the backend ingests them into SQLite and pushes deltas to the frontend via Tauri events.

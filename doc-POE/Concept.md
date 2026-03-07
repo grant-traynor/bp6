@@ -141,21 +141,37 @@ The queue should be sparse. A busy queue is a signal that the stage's preconditi
 
 The following stage types form the initial library. Most projects will use a subset in roughly this order, but there is no enforced sequence.
 
+Each phase runs two nested PDCA loops. Stage types map to these loops as follows — see Architecture.md for the full model.
+
+**Setup (establishes the outer loop baseline):**
+
 | Stage Type | Purpose | Key Specialists | Primary Output |
 |---|---|---|---|
 | Project Onboarding | Join or resume a project; synthesise existing artifacts into a shared understanding | Operational Analyst | `onboarding-summary.md` |
 | CONOPS | Define the product concept, users, goals, and operational context | Operational Analyst | `conops.md` |
 | Guardrails | Define architecture, design system, user model, and must-nots | Architecture, Design, User, Must-Not Analysts + EM review | `architecture-constraints.md`, `design-system.md`, `user-analysis.md`, `must-nots.md`, `guardrails-review.md` |
-| Increment Planning | Select a meaningful next increment; decompose into epics, features, tasks | Product Manager | `phase-N-plan.md` |
-| Execution | Run a planned task set autonomously; produce a review on completion | Task specialists (per task type) + PM review | Code + `phase-N-review.md` |
-| Rework | Address review findings with a minimal targeted task plan | Product Manager + task specialists | Updated artifacts (per task) |
-| Retrospective | Validate what was built against the CONOPS; run root cause analysis; improve skills | Validity Analyst, RCA Analyst | `phase-N-validity.md`, `phase-N-rca.md`, updated skills |
+
+**Inner loop — Plan quality (Plan → Do → Check → Act on the plan):**
+
+| Stage Type | PDCA | Purpose | Key Specialists | Primary Output |
+|---|---|---|---|---|
+| Increment Planning | Plan | Select a meaningful next increment; decompose into epics, features, tasks | Product Manager | `phase-N-plan.md` |
+| Execution | Do | Run a planned task set autonomously | Task specialists (per task type) | Code + artifacts |
+| PM Review | Check | Assess whether the plan held: tasks right-sized, dependencies correct, scope delivered | Product Manager | `phase-N-review.md` |
+| Rework | Act | Address plan deficiencies with a targeted task plan; re-execute affected tasks | Product Manager + task specialists | Updated artifacts (per task) |
+
+**Outer loop — Deliverable and process quality (Check → Act on what was built and how):**
+
+| Stage Type | PDCA | Purpose | Key Specialists | Primary Output |
+|---|---|---|---|---|
+| Validity Analysis | Check | Validate what was built against the CONOPS; identify the gap between C' and C! | Validity Analyst | `phase-N-validity.md` |
+| Retrospective | Act | Root cause analysis on quality gaps; update skills, knowledge register, and guardrails | RCA Analyst | `phase-N-rca.md`, updated skills, updated knowledge |
 
 ---
 
 ## Agent Protocol
 
-Agents communicate with POE via structured JSON events written to stdout, prefixed `poe:`. This is the structured layer that drives the activity feed, artifact tracking, task management, and the decision queue.
+Agents communicate with POE via structured JSON events written to stdout — one event per line, each a JSON object with a `"poe"` key identifying the event type. This is the structured layer that drives the activity feed, artifact tracking, task management, and the decision queue. See `doc-POE/Protocol.md §2` for the full wire format.
 
 The protocol is fundamentally **CRUD against the project database**. The DAG is not a static plan — it evolves as execution reveals new information, scope is refined, and dependencies are discovered or invalidated. Agents have full mutation rights over the graph.
 
