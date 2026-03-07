@@ -324,7 +324,77 @@ Polling introduces latency that makes the activity feed feel dead. poe:brief and
 
 ---
 
-## 5. Phase 3 Tauri Command Surface
+## 5. Agent Spawn Model
+
+This section is the authoritative reference for how Claude agents are spawned. Every implementer touching `agent_lifecycle` must read this. Inconsistency here breaks `poe:decision` resolution, session resume, and mid-task context injection.
+
+### Correct invocation
+
+```
+claude --dangerously-skip-permissions
+```
+
+**No `-p` flag. No prompt argument on the command line.**
+
+The T+S+K input bundle is written to the agent's **stdin pipe** immediately after spawn. Claude reads it as its opening context and begins work.
+
+```
+spawn: claude --dangerously-skip-permissions
+  → write T+S+K bundle to stdin pipe
+  → keep stdin pipe open
+  → read stdout for poe: events
+  → on poe:done: mark task complete, kill process
+```
+
+### Why not `-p`
+
+`-p` passes the prompt as a CLI argument and Claude exits after the first response. This breaks:
+
+1. **`poe:decision` resolution** — the human resolves, the orchestrator writes `---\nHuman: {resolution}\n` to stdin. With `-p`, Claude has already exited. The resolution is lost.
+2. **`poe:review` injection** — same problem. The reviewer's output arrives after Claude has exited.
+3. **Large bundles** — CLI arguments have a ~2MB system limit. A full artifact corpus in K can exceed this.
+4. **Session resume** — `--resume` with `-p` is undefined behaviour.
+
+### Completion signal
+
+`poe:done` received on stdout is the **sole authority** for task completion.
+
+Claude exits non-zero in interactive mode on some error conditions, and the exit code is unreliable. Do not use it. The watchdog reads node status from SQLite after the PTY reader hits EOF:
+
+```
+PTY EOF (Claude exited)
+  → check nodes.status for this task
+  → Complete  → success, notify orchestrator
+  → Running   → poe:done was never emitted; re-queue task to Pending
+  → anything else → failure path
+```
+
+### Session ID capture
+
+After spawn, read Claude's startup banner from stdout to extract the session ID. Store it in `nodes.session_id`. On app restart, pass it to `--resume` to attempt continuation of interrupted tasks.
+
+### Mid-task input delivery
+
+Decision resolutions and review results are written to the agent's open stdin pipe:
+
+```
+\n---\nHuman: {resolution text}\n
+```
+
+The pipe stays open from spawn until `poe:done` is received and the process is killed. Never close stdin before the agent emits `poe:done`.
+
+### Skill design constraint
+
+Because agents run in a single interactive session with no human at the keyboard, **skills must be designed for autonomous single-pass execution**:
+
+- Do not prompt the user with questions and wait for typed answers — there is no keyboard.
+- Raise genuine blockers via `poe:decision`. Continue working on everything that doesn't depend on the answer.
+- Emit `poe:done` as the final event. The process is killed after this.
+- A skill that is designed for iterative conversation (ask → answer → ask → answer) will produce skeleton output when run autonomously. Rewrite it to reason through the task from the injected context alone.
+
+---
+
+## 6. Phase 3 Tauri Command Surface
 
 New Tauri commands required for Phase 3. All work in `poe2/src-tauri/src/`. Commands shared across beads are noted.
 
