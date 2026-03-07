@@ -379,20 +379,28 @@ pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
     cmd.cwd(cwd);
 
     let mut child = pair.slave.spawn_command(cmd).context("Failed to spawn claude")?;
+    // Capture pid now — used to send SIGTERM/SIGKILL after poe:done.
+    let child_pid = child.process_id();
+
     let mut writer = pair.master.take_writer().context("Failed to get PTY writer")?;
     let reader = pair.master.try_clone_reader().context("Failed to get PTY reader")?;
 
-    // TUI-ready channel — internal protocol detail encapsulated here.
-    // The watchdog fires this when Claude's input loop signals readiness (⏵ U+23F5).
+    // TUI-ready channel — fires when ⏵ (U+23F5) appears in PTY output.
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<()>();
     let ready_tx = Arc::new(Mutex::new(Some(ready_tx)));
     let ready_tx_clone = ready_tx.clone();
+
+    // Done channel — fires when the reader thread sees poe:done.
+    // Claude is a persistent TUI; it does not exit on its own after finishing a task.
+    // We must detect completion from the output stream and terminate it ourselves.
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
 
     let lines: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let lines_clone = lines.clone();
 
     let reader_thread = std::thread::spawn(move || {
         let buf_reader = BufReader::new(reader);
+        let mut done_sent = false;
         for line in buf_reader.lines() {
             match line {
                 Ok(line) => {
@@ -401,6 +409,15 @@ pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
                         if let Some(tx) = guard.take() {
                             if line.contains('\u{23F5}') {
                                 let _ = tx.send(());
+                            }
+                        }
+                    }
+                    // Fire done when poe:done is parsed — agent has finished its work.
+                    if !done_sent {
+                        if let Some((t, _)) = crate::event_ingester::parse_poe_event(&line) {
+                            if t == "done" {
+                                let _ = done_tx.send(());
+                                done_sent = true;
                             }
                         }
                     }
@@ -420,9 +437,43 @@ pub fn run_agent_capturing(bundle: &str, cwd: &Path) -> Result<Vec<String>> {
     writer.write_all(b"\r").context("Failed to write submit keystroke")?;
     writer.flush().context("Failed to flush bundle")?;
 
-    // Wait for the child to exit, then drain the remaining PTY output.
-    let _ = child.wait();
+    // Wait for poe:done — the agent has finished its work. 120 s for slow models.
+    let _ = done_rx.recv_timeout(Duration::from_secs(120));
+
+    // Claude does not exit on its own. Signal it to terminate:
+    //   1. Ctrl-C (interrupts the current Claude operation)
+    //   2. Close the write side of the PTY master (signals no more input)
+    //   3. SIGTERM via the captured pid (graceful exit)
+    //   4. SIGKILL if it still hasn't exited after 10 s
+    let _ = writer.write_all(&[3u8]); // Ctrl-C
+    let _ = writer.flush();
     drop(writer);
+
+    if let Some(pid) = child_pid {
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+    }
+
+    // Poll for process exit with a 10 s timeout, then SIGKILL as last resort.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if child.try_wait().ok().flatten().is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            if let Some(pid) = child_pid {
+                let _ = std::process::Command::new("kill")
+                    .args(["-9", &pid.to_string()])
+                    .status();
+            }
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.wait(); // reap the zombie
+
+    // Join reader thread — it will have exited once the slave closed on child exit.
     reader_thread.join().ok();
 
     let result = lines.lock().unwrap().clone();
