@@ -173,9 +173,22 @@ One event per line. No multi-line JSON.
 // Signal task completion.
 {"poe": "done", "summary": "..."}  // summary optional
 
-// Request a peer review. Orchestrator assigns reviewer_skill agent,
-// injects result via stdin, unblocks this agent.
-{"poe": "review", "reviewer_skill": "senior-engineer", "content": "..."}
+// Request a peer review. Orchestrator spawns reviewer_skill agent,
+// injects result via stdin when complete, unblocks this agent.
+// id is required when emitting multiple poe:review events so the agent
+// can correlate incoming verdicts to its pending requests.
+{"poe": "review", "reviewer_skill": "senior-engineer", "content": "...", "id": "optional-correlation-id"}
+
+// Multi-specialist plan review — product-manager emits one per domain:
+// {"poe": "review", "reviewer_skill": "senior-engineer",      "id": "r-eng",  "content": "..."}
+// {"poe": "review", "reviewer_skill": "architecture-analyst", "id": "r-arch", "content": "..."}
+// {"poe": "review", "reviewer_skill": "interface-analyst",    "id": "r-icd",  "content": "..."}
+// Orchestrator spawns all reviewers in parallel. Each result delivered via stdin:
+// ---
+// ReviewResult id=r-eng skill=senior-engineer verdict=APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED
+// {findings text}
+// ---
+// Agent counts pending review ids and waits until all N results have arrived before proceeding.
 ```
 
 ### Ingester responsibilities per event type
