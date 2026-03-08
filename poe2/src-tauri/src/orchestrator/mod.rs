@@ -10,8 +10,17 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
 };
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;
+
+// ── Reviewer watchdog configuration ───────────────────────────────────────────
+
+/// Default timeout in seconds before the watchdog fires for a reviewer task.
+const REVIEWER_TIMEOUT_SECS: u64 = 300; // 5 minutes
+
+/// Maximum number of retries before the reviewer is marked cancelled.
+const REVIEWER_MAX_RETRY: u32 = 2;
 
 // ── Concurrency limits ────────────────────────────────────────────────────────
 
@@ -370,7 +379,15 @@ async fn handle_review_yield(
             }
         };
 
-        // TODO bp6-m2f.19: spawn per-reviewer watchdog timer here
+        // bp6-m2f.19: spawn per-reviewer watchdog timer
+        spawn_reviewer_watchdog(
+            app.clone(),
+            project_id.to_owned(),
+            reviewer_node.id.clone(),
+            waiting_task.id.clone(),
+            REVIEWER_TIMEOUT_SECS,
+            REVIEWER_MAX_RETRY,
+        );
 
         reviewer_nodes.push(reviewer_node);
     }
@@ -644,6 +661,172 @@ async fn check_review_completion(
             requesting_task_id, e
         );
     }
+}
+
+// ── Reviewer watchdog ─────────────────────────────────────────────────────────
+
+/// Spawn a Tokio background task that wakes after `timeout_secs` and checks the
+/// reviewer node's status.
+///
+/// - If the reviewer finished normally: no-op (normal completion beat the timer).
+/// - If `retry_count < max_retry`: increment retry_count, reset node to pending
+///   so the run_loop re-dispatches it (SF-1), and spawn a fresh watchdog.
+/// - If `retry_count >= max_retry`: mark the node as cancelled, then call
+///   `check_review_completion` — if all reviewers are now accounted for, SF-3
+///   resumes the requesting task with a FAILED verdict for this reviewer.
+fn spawn_reviewer_watchdog(
+    app: AppHandle,
+    project_id: String,
+    reviewer_task_id: String,
+    requesting_task_id: String,
+    timeout_secs: u64,
+    max_retry: u32,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(timeout_secs)).await;
+
+        eprintln!(
+            "[orchestrator] watchdog fired: reviewer={} requesting={} timeout={}s",
+            reviewer_task_id, requesting_task_id, timeout_secs
+        );
+
+        let registry = app.state::<ProjectRegistry>().inner().clone();
+        let dag_tx = app.state::<mpsc::UnboundedSender<DagChanged>>().inner().clone();
+
+        // Read current node state under a short-lived lock
+        let (current_status, current_retry) = {
+            let reg = registry.lock().unwrap();
+            let db = match reg.values().find(|db| db.project.id == project_id) {
+                Some(db) => db.clone(),
+                None => {
+                    eprintln!("[orchestrator] watchdog: project not found {}", project_id);
+                    return;
+                }
+            };
+            drop(reg);
+            let conn = db.conn.lock().unwrap();
+            match dag_store::db_get_node(&conn, &reviewer_task_id) {
+                Ok(n) => (n.status, n.retry_count),
+                Err(e) => {
+                    eprintln!(
+                        "[orchestrator] watchdog: reviewer node not found {}: {}",
+                        reviewer_task_id, e
+                    );
+                    return;
+                }
+            }
+        };
+
+        // If the reviewer already finished or was cancelled — normal completion won the race
+        match current_status {
+            NodeStatus::Complete | NodeStatus::Cancelled => {
+                eprintln!(
+                    "[orchestrator] watchdog: reviewer={} already terminal ({}) — no action",
+                    reviewer_task_id, current_status
+                );
+                return;
+            }
+            _ => {}
+        }
+
+        if (current_retry as u32) < max_retry {
+            // Retry path: increment retry_count, requeue to pending
+            eprintln!(
+                "[orchestrator] watchdog: reviewer={} retry {}/{} — requeueing to pending",
+                reviewer_task_id, current_retry + 1, max_retry
+            );
+
+            let requeued = {
+                let reg = registry.lock().unwrap();
+                let db = match reg.values().find(|db| db.project.id == project_id) {
+                    Some(db) => db.clone(),
+                    None => return,
+                };
+                drop(reg);
+                let conn = db.conn.lock().unwrap();
+                let new_retry = match dag_store::db_increment_retry_count(&conn, &reviewer_task_id) {
+                    Ok(n) => n,
+                    Err(e) => {
+                        eprintln!("[orchestrator] watchdog: increment retry failed: {}", e);
+                        return;
+                    }
+                };
+                let update = dag_store::UpdateNodeInput {
+                    status: Some(NodeStatus::Pending),
+                    title: None,
+                    description: None,
+                    skill_id: None,
+                    assignee: None,
+                    ..Default::default()
+                };
+                match dag_store::db_update_node(&conn, &reviewer_task_id, &update) {
+                    Ok(n) => {
+                        eprintln!(
+                            "[orchestrator] watchdog: reviewer={} requeued, retry_count now {}",
+                            reviewer_task_id, new_retry
+                        );
+                        n
+                    }
+                    Err(e) => {
+                        eprintln!("[orchestrator] watchdog: requeue update failed: {}", e);
+                        return;
+                    }
+                }
+            };
+            let _ = requeued; // status change will trigger run_loop via DagChanged
+
+            // Signal the run_loop to re-dispatch the pending reviewer (SF-1)
+            let _ = dag_tx.send(DagChanged::DagStructureChanged {
+                project_id: project_id.clone(),
+            });
+
+            // Spawn a fresh watchdog for the retry
+            spawn_reviewer_watchdog(
+                app,
+                project_id,
+                reviewer_task_id,
+                requesting_task_id,
+                timeout_secs,
+                max_retry,
+            );
+        } else {
+            // Max retries exhausted — cancel the reviewer node
+            eprintln!(
+                "[orchestrator] watchdog: reviewer={} max retries ({}) exhausted — cancelling",
+                reviewer_task_id, max_retry
+            );
+
+            {
+                let reg = registry.lock().unwrap();
+                let db = match reg.values().find(|db| db.project.id == project_id) {
+                    Some(db) => db.clone(),
+                    None => return,
+                };
+                drop(reg);
+                let conn = db.conn.lock().unwrap();
+                let update = dag_store::UpdateNodeInput {
+                    status: Some(NodeStatus::Cancelled),
+                    title: None,
+                    description: None,
+                    skill_id: None,
+                    assignee: None,
+                    ..Default::default()
+                };
+                if let Err(e) = dag_store::db_update_node(&conn, &reviewer_task_id, &update) {
+                    eprintln!("[orchestrator] watchdog: cancel update failed: {}", e);
+                    return;
+                }
+                eprintln!(
+                    "[orchestrator] watchdog: reviewer={} marked cancelled",
+                    reviewer_task_id
+                );
+            }
+
+            // Run the completion check — if all reviewers are now accounted for,
+            // this triggers SF-3 with a FAILED verdict for the cancelled node.
+            check_review_completion(&requesting_task_id, &project_id, &registry, &dag_tx, &app).await;
+        }
+    });
 }
 
 // ── Core loop ─────────────────────────────────────────────────────────────────
