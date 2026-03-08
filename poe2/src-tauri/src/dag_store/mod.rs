@@ -806,7 +806,7 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
          WHERE n.project_id = ?1
            AND n.status = 'pending'
            AND (n.phase_id IS NULL OR (p.lifecycle_stage = 'execution' AND p.gate_held = 0))
-           AND n.node_type IN ('task', 'bug', 'chore', 'subtask')
+           AND n.node_type IN ('task', 'bug', 'chore', 'subtask', 'plan_review')
            AND NOT EXISTS (
                SELECT 1 FROM edges e
                JOIN nodes dep ON dep.id = e.from_id
@@ -840,6 +840,52 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("Failed to find ready tasks")?;
     Ok(rows)
+}
+
+/// Query all `poe:review` events logged for a given task.
+/// Returns a list of (review_id, reviewer_skill) pairs parsed from event payloads.
+/// Events without a valid `id` field are skipped (single-reviewer path — id is optional per Protocol.md §2).
+pub fn db_list_review_events_for_task(conn: &Connection, task_id: &str) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT payload FROM events WHERE task_id = ?1 AND event_type = 'poe:review' ORDER BY created_at"
+    )?;
+    let mut results = Vec::new();
+    for row in stmt.query_map([task_id], |row| row.get::<_, String>(0))? {
+        let payload_str = row?;
+        let payload: serde_json::Value = serde_json::from_str(&payload_str).unwrap_or_default();
+        if let (Some(id), Some(skill)) = (
+            payload.get("id").and_then(|v| v.as_str()).map(str::to_owned),
+            payload.get("reviewer_skill").and_then(|v| v.as_str()).map(str::to_owned),
+        ) {
+            results.push((id, skill));
+        }
+    }
+    Ok(results)
+}
+
+/// Check reviewer completion for a waiting task.
+/// Returns (expected_ids, answered_ids) where answered_ids = review_id values
+/// from reviewer nodes with status=complete or status=cancelled.
+pub fn db_reviewer_completion_status(conn: &Connection, requesting_task_id: &str) -> Result<(Vec<String>, Vec<String>)> {
+    // answered_ids: reviewer nodes that have finished (done or cancelled)
+    let mut stmt = conn.prepare(
+        "SELECT review_id FROM nodes WHERE requesting_task_id = ?1 AND status IN ('complete', 'cancelled') AND review_id IS NOT NULL"
+    )?;
+    let answered: Vec<String> = stmt
+        .query_map([requesting_task_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to query answered reviewer nodes")?;
+
+    // expected_ids: all reviewer nodes created for this task
+    let mut stmt2 = conn.prepare(
+        "SELECT review_id FROM nodes WHERE requesting_task_id = ?1 AND review_id IS NOT NULL"
+    )?;
+    let expected: Vec<String> = stmt2
+        .query_map([requesting_task_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to query expected reviewer nodes")?;
+
+    Ok((expected, answered))
 }
 
 pub fn db_count_running_agents(conn: &Connection, project_id: &str) -> Result<usize> {

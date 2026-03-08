@@ -13,6 +13,9 @@ pub enum NodeType {
     Bug,
     Chore,
     Subtask,
+    /// Reviewer node spawned by SF-4 yield-handling when reason='review'.
+    /// Was previously represented as NodeType::Task as a workaround.
+    PlanReview,
 }
 
 impl std::fmt::Display for NodeType {
