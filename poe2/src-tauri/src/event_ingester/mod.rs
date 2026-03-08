@@ -91,6 +91,11 @@ struct PoeDone {
 }
 
 #[derive(Debug, serde::Deserialize)]
+struct PoeYield {
+    reason: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct PoeReview {
     reviewer_skill: String,
     content: Option<String>,
@@ -150,6 +155,7 @@ pub fn ingest_line(
         "step" => handle_log_only("poe:step", trimmed, project_id, task_id, agent_id, registry, app),
         "decision" => handle_decision(trimmed, project_id, task_id, agent_id, registry, app),
         "done" => handle_done(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
+        "yield" => handle_yield(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
         "review" => handle_review(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
         other => {
             eprintln!("[event_ingester] Unknown poe: event type: {}", other);
@@ -197,6 +203,9 @@ fn handle_task(
         description: payload.description.clone(),
         skill_id: payload.skill.clone(),
         initial_status: None,
+        requesting_task_id: None,
+        review_id: None,
+        retry_count: None,
     };
 
     with_project_conn(registry, project_id, |conn| {
@@ -468,10 +477,13 @@ fn handle_decision(
     })
 }
 
-/// Pure DB mutation for `poe:done`: mark Complete or stay Waiting depending on queue.
+/// Pure DB mutation for `poe:done`: always marks the node Complete.
 ///
 /// Returns the resulting `NodeStatus`. Separated from the full handler so tests can
 /// call it without an AppHandle or dag_tx.
+///
+/// Checkpoint (staying Waiting) is handled exclusively by `poe:yield`. Once an agent
+/// emits `poe:done`, the task is unconditionally complete.
 pub(crate) fn db_handle_done(
     conn: &rusqlite::Connection,
     json: &str,
@@ -481,19 +493,14 @@ pub(crate) fn db_handle_done(
 ) -> Result<NodeStatus> {
     let _payload: PoeDone = serde_json::from_str(json)?;
 
-    // If this task has unresolved queue items, it's waiting for a decision — don't mark complete
-    let unresolved = dag_store::db_count_unresolved_queue_items_for_task(conn, task_id)
-        .unwrap_or(0);
-    let new_status = if unresolved > 0 {
-        NodeStatus::Waiting
-    } else {
-        NodeStatus::Complete
-    };
+    let new_status = NodeStatus::Complete;
 
     let update = UpdateNodeInput {
-        title: None, description: None,
+        title: None,
+        description: None,
         status: Some(new_status.clone()),
-        skill_id: None, assignee: None,
+        skill_id: None,
+        assignee: None,
         ..Default::default()
     };
     dag_store::db_update_node(conn, task_id, &update)?;
@@ -511,22 +518,67 @@ fn handle_done(
     app: &AppHandle,
 ) -> Result<Option<DagChanged>> {
     with_project_conn(registry, project_id, |conn| {
-        let new_status = db_handle_done(conn, json, project_id, task_id, agent_id)?;
+        let _new_status = db_handle_done(conn, json, project_id, task_id, agent_id)?;
         let node = dag_store::db_get_node(conn, task_id)?;
 
-        if new_status == NodeStatus::Complete {
-            emit_tauri_event(app, "poe-task-done", &node);
-            let change = DagChanged::NodeStatusChanged {
-                project_id: project_id.to_string(),
-                node_id: task_id.to_string(),
-            };
-            let _ = dag_tx.send(change.clone());
-            Ok(Some(change))
-        } else {
-            // Waiting — emit node update but don't trigger orchestrator to advance
-            emit_tauri_event(app, "poe-node-updated", &node);
-            Ok(None)
-        }
+        emit_tauri_event(app, "poe-task-done", &node);
+        let change = DagChanged::NodeStatusChanged {
+            project_id: project_id.to_string(),
+            node_id: task_id.to_string(),
+        };
+        let _ = dag_tx.send(change.clone());
+        Ok(Some(change))
+    })
+}
+
+/// Handle `poe:yield` — sets task status=waiting, records yield_reason, signals orchestrator.
+///
+/// Under SF-4, this is the single point where a running task suspends. The
+/// orchestrator receives NodeStatusChanged and is responsible for any follow-on
+/// work (spawning reviewer tasks, etc.).
+fn handle_yield(
+    json: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    registry: &ProjectRegistry,
+    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) -> Result<Option<DagChanged>> {
+    let payload: PoeYield = serde_json::from_str(json)?;
+
+    with_project_conn(registry, project_id, |conn| {
+        let update = UpdateNodeInput {
+            status: Some(NodeStatus::Waiting),
+            yield_reason: Some(payload.reason.clone()),
+            title: None,
+            description: None,
+            skill_id: None,
+            assignee: None,
+            session_id: None,
+        };
+        let node = dag_store::db_update_node(conn, task_id, &update)?;
+        dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:yield", json)?;
+
+        // poe://task-update — frontend updates node status in the tree
+        emit_tauri_event(app, "poe-node-updated", &node);
+
+        // poe://event — activity feed entry
+        emit_tauri_event(app, "poe-event", &serde_json::json!({
+            "eventType": "poe:yield",
+            "projectId": project_id,
+            "agentId": agent_id,
+            "taskId": task_id,
+            "summary": format!("Yielded — awaiting {}", payload.reason),
+            "payload": json,
+        }));
+
+        let change = DagChanged::NodeStatusChanged {
+            project_id: project_id.to_string(),
+            node_id: task_id.to_string(),
+        };
+        let _ = dag_tx.send(change.clone());
+        Ok(Some(change))
     })
 }
 
@@ -559,53 +611,23 @@ fn handle_log_only(
     })
 }
 
-/// Handle `poe:review` — creates a review task, blocks the requesting task,
-/// and wires the dependency so the orchestrator unblocks the original when the review completes.
+/// Handle `poe:review` — log-only. Records the event and emits activity feed entry.
+///
+/// Under SF-4, reviewer task creation, NodeStatus::Blocked, and edge wiring all
+/// move to the orchestrator post-poe:yield. The ingester only persists the event
+/// record here so the activity feed reflects the review request immediately.
 fn handle_review(
     json: &str,
     project_id: &str,
     task_id: &str,
     agent_id: &str,
     registry: &ProjectRegistry,
-    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    _dag_tx: &mpsc::UnboundedSender<DagChanged>,
     app: &AppHandle,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeReview = serde_json::from_str(json)?;
 
     with_project_conn(registry, project_id, |conn| {
-        // Get the requesting task to inherit phase/parent context
-        let requesting_task = dag_store::db_get_node(conn, task_id)?;
-
-        // Create review task node
-        let review_input = CreateNodeInput {
-            project_id: project_id.to_string(),
-            phase_id: requesting_task.phase_id.clone(),
-            parent_id: requesting_task.parent_id.clone(),
-            node_type: NodeType::Task,
-            title: format!("Review: {}", requesting_task.title),
-            description: payload.content,
-            skill_id: Some(payload.reviewer_skill.clone()),
-            initial_status: None,
-        };
-        let review_task = dag_store::db_create_node(conn, &review_input)?;
-
-        // Block the requesting task
-        let block_update = UpdateNodeInput {
-            status: Some(NodeStatus::Blocked),
-            title: None, description: None, skill_id: None, assignee: None,
-            ..Default::default()
-        };
-        dag_store::db_update_node(conn, task_id, &block_update)?;
-
-        // Finish-to-start: review_task must finish before requesting_task can continue.
-        // from=review_task, to=requesting_task.
-        dag_store::db_create_edge(
-            conn,
-            &review_task.id,
-            task_id,
-            EdgeType::DependsOn,
-        )?;
-
         dag_store::db_log_event(
             conn,
             project_id,
@@ -615,17 +637,16 @@ fn handle_review(
             json,
         )?;
 
-        emit_tauri_event(app, "poe-review-requested", &serde_json::json!({
-            "requestingTaskId": task_id,
-            "reviewTaskId": review_task.id,
-            "reviewerSkillId": payload.reviewer_skill,
+        emit_tauri_event(app, "poe-event", &serde_json::json!({
+            "eventType": "poe:review",
+            "projectId": project_id,
+            "agentId": agent_id,
+            "taskId": task_id,
+            "summary": format!("Review requested — {}", payload.reviewer_skill),
+            "payload": json,
         }));
 
-        let change = DagChanged::DagStructureChanged {
-            project_id: project_id.to_string(),
-        };
-        let _ = dag_tx.send(change.clone());
-        Ok(Some(change))
+        Ok(None) // orchestrator handles structural changes post-poe:yield
     })
 }
 
@@ -747,55 +768,28 @@ mod tests {
         assert_eq!(total, 1, "expected exactly one queue_item row");
     }
 
-    /// poe:done with an unresolved queue_item → node stays Waiting.
+    /// poe:done always marks Complete — checkpoint (staying Waiting) is poe:yield's job.
+    ///
+    /// Under the old protocol, poe:done conditionally stayed Waiting if unresolved
+    /// queue_items existed. Under SF-4 / bp6-m2f.13, poe:done is unconditionally
+    /// Complete. The agent must emit poe:yield before poe:done if it wants to wait.
     #[test]
-    fn done_with_unresolved_queue_item_stays_waiting() {
+    fn done_always_completes_regardless_of_queue_items() {
         let conn = make_test_conn();
         let project_id = insert_project(&conn);
         let task_id = insert_task(&conn, &project_id);
 
-        // Put the task in Waiting with an open queue_item
+        // Put the task in Waiting with an open queue_item (simulates poe:decision)
         let decision_json = r#"{"poe":"decision","question":"Confirm before proceeding?"}"#;
         db_handle_decision(&conn, decision_json, &project_id, &task_id, "agent-1").unwrap();
+        assert_eq!(count_unresolved(&conn, &task_id), 1);
 
-        // Now poe:done fires while queue_item is still unresolved
+        // poe:done must now always → Complete (queue_item presence is irrelevant)
         let done_json = r#"{"poe":"done","summary":"work finished"}"#;
         let resulting_status =
             db_handle_done(&conn, done_json, &project_id, &task_id, "agent-1").unwrap();
 
-        assert_eq!(resulting_status, NodeStatus::Waiting);
-        assert_eq!(read_status(&conn, &task_id), NodeStatus::Waiting);
-    }
-
-    /// Full Waiting→resume path:
-    ///   decision → done (stays Waiting) → resolve queue_item → done again → Complete.
-    #[test]
-    fn waiting_resume_path_complete_after_resolve() {
-        let conn = make_test_conn();
-        let project_id = insert_project(&conn);
-        let task_id = insert_task(&conn, &project_id);
-
-        // Step 1: agent emits poe:decision
-        let decision_json = r#"{"poe":"decision","question":"Proceed with plan A?"}"#;
-        let item =
-            db_handle_decision(&conn, decision_json, &project_id, &task_id, "agent-1").unwrap();
-        assert_eq!(read_status(&conn, &task_id), NodeStatus::Waiting);
-
-        // Step 2: agent emits poe:done — should stay Waiting (queue_item unresolved)
-        let done_json = r#"{"poe":"done"}"#;
-        let status1 =
-            db_handle_done(&conn, done_json, &project_id, &task_id, "agent-1").unwrap();
-        assert_eq!(status1, NodeStatus::Waiting);
-        assert_eq!(read_status(&conn, &task_id), NodeStatus::Waiting);
-
-        // Step 3: human resolves the queue_item
-        crate::dag_store::db_resolve_queue_item(&conn, &item.id, "yes, proceed").unwrap();
-        assert_eq!(count_unresolved(&conn, &task_id), 0);
-
-        // Step 4: agent resumes and emits poe:done again — now should be Complete
-        let status2 =
-            db_handle_done(&conn, done_json, &project_id, &task_id, "agent-1").unwrap();
-        assert_eq!(status2, NodeStatus::Complete);
+        assert_eq!(resulting_status, NodeStatus::Complete);
         assert_eq!(read_status(&conn, &task_id), NodeStatus::Complete);
     }
 
