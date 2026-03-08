@@ -140,7 +140,7 @@ Examples: `operational-analyst`, `architecture-analyst`, `validity-analyst`.
 
 ### Reactive specialist (senior-engineer)
 
-Not assigned directly to task nodes. Spawned by the orchestrator in response to a `poe:review` event from another agent. Receives a modified stdin bundle — the T section has `**Type**: plan_review` or `**Type**: task` to indicate mode.
+`senior-engineer` operates in two modes: **proactive** (assigned directly to lifecycle task nodes — Guardrails review, Plan Review inner loop) and **reactive** (spawned by the orchestrator in response to a `poe:review` event from another agent). In both cases it receives a stdin bundle with `**Type**: plan_review` or `**Type**: task` to indicate which mode is active.
 
 ```yaml
 modes: [autonomous]
@@ -229,7 +229,7 @@ Every skill should include a quality checklist before `poe:done`. See `product-m
 | `data-model-analyst` | Guardrails | autonomous | None |
 | `must-not-analyst` | Guardrails | autonomous | None |
 | `senior-engineer` | Guardrails review, Plan Review, ad-hoc | autonomous | None |
-| `product-manager` | Increment Planning | autonomous | None |
+| `product-manager` | Increment Planning | autonomous | **v1 event format** — uses `poe:node` (not `poe:task`), `type:` prefix on all events, `POE_WORKFLOW_ID` env var injection. Do not use as a format reference. Fix tracked in bp6-rub.5. |
 | `validity-analyst` | Validity Analysis | autonomous | None |
 | `rca-analyst` | Retrospective | autonomous | None |
 | `implementer` | Execution | autonomous | Missing `modes:` and `protocol_version:`; simplified event protocol section does not reference poe-base.md |
