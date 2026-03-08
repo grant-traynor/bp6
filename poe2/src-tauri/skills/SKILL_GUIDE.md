@@ -99,11 +99,12 @@ One event per line. No multi-line JSON. No markdown wrappers. Events are embedde
 {"poe": "step",     "name": "...", "detail": "..."}           // detail optional
 {"poe": "artifact", "name": "<filename>", "artifact_type": "<type>", "content": "..."}
 {"poe": "knowledge","key": "<slug>", "content": "...", "supersedes": "<id>"}  // supersedes optional
+{"poe": "skill",    "name": "<skill-id>", "content": "<full SKILL.md markdown>"}  // NOT automatic — emit only when pattern is worth capturing
 {"poe": "decision", "question": "...", "options": ["A", "B"]}  // options optional
 {"poe": "review",   "reviewer_skill": "<id>", "content": "...", "id": "<review-id>"}
 {"poe": "task",     "id": "<uuid>", "title": "...", "description": "...", "skill": "<id>",
                     "type": "task", "parent_id": "<id>", "depends_on": ["<id>"]}
-{"poe": "edge",     "from": "<task-id>", "to": "<task-id>"}
+{"poe": "edge",     "from": "<task-id>", "to": "<task-id>"}  // finish-to-start: "from" must finish before "to" starts
 {"poe": "done",     "summary": "..."}                          // summary optional
 ```
 
@@ -183,7 +184,86 @@ Full plan-review protocol: `poe-base.md §Dual Activation Mode`.
 
 ---
 
-## 6. Common Patterns
+## 6. poe:yield — Blocking for Review or Decision
+
+Use `poe:yield` when the agent must pause and wait for an asynchronous response before it can continue. It is the correct handoff event for any checkpoint where the task status must become `waiting`. It is **not** a completion event.
+
+### When to emit poe:yield
+
+| Situation | Correct pattern |
+|---|---|
+| Agent requests peer review and must wait for results | Emit `poe:review` event(s), then `poe:yield` with `reason: "review"` |
+| Agent raises a decision that blocks further progress | Emit `poe:decision` event, then `poe:yield` with `reason: "decision"` |
+| Agent has completed all work | Emit `poe:done` — never `poe:yield` |
+
+`poe:done` is reserved for **task completion only**. Never use `poe:done` as a checkpoint or to signal that the agent is waiting for something. An agent that emits `poe:done` is marked `status = done` — the orchestrator will not resume it.
+
+### Required event sequence
+
+The required ordering is strict:
+
+1. Emit all `poe:review` **or** `poe:decision` events for this checkpoint first.
+2. Emit `poe:yield` as the **last** event before the process exits.
+
+The ingester logs each `poe:review` / `poe:decision` event as it arrives. When `poe:yield` is received, the ingester marks the task `waiting` and signals the orchestrator. The orchestrator then reads the accumulated `poe:review` events (or waits for human resolution of the `poe:decision`) before triggering SF-4 (Agent Continuation). See `doc-POE/Flows.md §SF-3` and `§SF-4` for the full orchestrator sequence.
+
+### Wire format
+
+```
+{"poe": "yield", "reason": "review"}
+{"poe": "yield", "reason": "decision"}
+```
+
+`reason` is required. Values: `"review"` | `"decision"`.
+
+### Code example — review yield
+
+```
+// Correct: emit all poe:review events first, then yield
+{"poe": "review", "reviewer_skill": "senior-engineer", "id": "r-eng", "content": "..."}
+{"poe": "review", "reviewer_skill": "architecture-analyst", "id": "r-arch", "content": "..."}
+{"poe": "yield", "reason": "review"}
+
+// The process exits. Orchestrator dispatches reviewers in parallel (SF-3).
+// When all reviews complete, orchestrator resumes via --resume (SF-4).
+// Agent receives ReviewResult blocks in its continuation bundle and continues work.
+// Agent completes remaining work and emits poe:done (task completion).
+{"poe": "done", "summary": "..."}
+```
+
+### Code example — decision yield
+
+```
+// Correct: emit poe:decision, then yield to wait for human resolution
+{"poe": "decision", "question": "Should Stage 1 include user account management?", "options": ["Include", "Defer"]}
+{"poe": "yield", "reason": "decision"}
+
+// The process exits. Orchestrator waits for human resolution (SF-3).
+// When resolved, orchestrator resumes via --resume (SF-4).
+// Agent receives "Human: {resolution}" in continuation bundle and continues.
+// Agent completes work and emits poe:done.
+{"poe": "done", "summary": "..."}
+```
+
+### Anti-patterns
+
+```
+// WRONG: poe:done after poe:decision — task is marked complete, orchestrator will not resume it
+{"poe": "decision", "question": "..."}
+{"poe": "done", "summary": "Awaiting decision."}   // ← BUG: use poe:yield instead
+
+// WRONG: poe:yield after all work is done — task stays waiting forever
+{"poe": "artifact", ...}
+{"poe": "yield", "reason": "review"}   // ← BUG: use poe:done if no review was requested
+
+// WRONG: poe:yield before the poe:review events — orchestrator sees no reviews to dispatch
+{"poe": "yield", "reason": "review"}   // ← BUG: emit poe:review events first
+{"poe": "review", "reviewer_skill": "...", "id": "r1", "content": "..."}
+```
+
+---
+
+## 7. Common Patterns
 
 ### Single-pass, no wait
 
@@ -223,7 +303,7 @@ Every skill should include a quality checklist before `poe:done`. See `validity-
 
 ---
 
-## 7. Existing Skill Inventory
+## 8. Existing Skill Inventory
 
 | Skill | Stage | Modes | Inconsistencies vs this guide |
 |---|---|---|---|
@@ -234,7 +314,7 @@ Every skill should include a quality checklist before `poe:done`. See `validity-
 | `data-model-analyst` | Guardrails | autonomous | None |
 | `must-not-analyst` | Guardrails | autonomous | None |
 | `senior-engineer` | Guardrails review, Plan Review, ad-hoc | autonomous | None |
-| `product-manager` | Increment Planning | autonomous | **v1 context model** — `Input Context` section injects `POE_WORKFLOW_ID`, `POE_NODE_ID`, `POE_NODE_DATA` env vars. POE2 delivers context via stdin bundle (Protocol.md §3), not env vars. Event emission section uses v1 payload format. Do not use as a format reference. Fix tracked in bp6-rub.5. |
+| `product-manager` | Increment Planning | autonomous | **v1 context model** — `Input Context` section injects `POE_WORKFLOW_ID`, `POE_NODE_ID`, `POE_NODE_DATA` env vars. POE2 delivers context via stdin bundle (Protocol.md §3), not env vars. Event emission section uses v1 payload format. Do not use as a format reference. Fix tracked in bp6-rub.5. BLOCKED path now correctly emits `poe:yield reason="decision"` (was incorrectly `poe:done` — fixed in bp6-m2f.17). |
 | `validity-analyst` | Validity Analysis | autonomous | None |
 | `rca-analyst` | Retrospective | autonomous | None |
 | `implementer` | Execution | autonomous | None |

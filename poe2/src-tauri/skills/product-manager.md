@@ -53,12 +53,10 @@ Read the Guardrails Review verdict. If BLOCKED:
 
 ```json
 {"poe":"decision","question":"The Guardrails Review is BLOCKED with N unresolved conflicts. Stage planning cannot proceed until these are resolved. Please review the guardrails-review.md document and resolve all CONFLICT-* items.","options":[]}
+{"poe":"yield","reason":"decision"}
 ```
 
-Then emit:
-```json
-{"poe":"done","summary":"Stage planning aborted — Guardrails Review is BLOCKED. Awaiting conflict resolution."}
-```
+Emit `poe:yield` (not `poe:done`) — the task must remain in `waiting` state so the orchestrator can resume it via `--resume` once the human resolves the decision. `poe:done` would mark the task complete and prevent any continuation. When resumed, re-read the Guardrails Review and proceed if resolved.
 
 If APPROVED or APPROVED WITH CONDITIONS, proceed.
 
@@ -183,7 +181,7 @@ Follow the poe-base protocol:
 - Do not create vague tasks ("Implement authentication" with no acceptance criteria)
 - Do not skip test tasks to reduce scope
 - Emit `poe:decision` for any scope choice that could materially affect timeline or approach
-- If Guardrails Review is BLOCKED, abort planning and emit done immediately
+- If Guardrails Review is BLOCKED, emit `poe:decision` then `poe:yield reason="decision"` — do not emit `poe:done` (task must remain resumable)
 - Always emit `poe:done` as your last event
 
 ## poe: Event Usage
@@ -193,9 +191,10 @@ Follow the poe-base protocol:
 | `poe:brief` | First event, always |
 | `poe:step` | Each planning phase |
 | `poe:decision` | Feature scope choices, MVP boundary decisions, architecture choices not resolved in constraints |
+| `poe:yield` | After `poe:decision` when blocking — emits with `reason: "decision"`. Orchestrator resumes via `--resume` after resolution. Never use `poe:done` as a yield checkpoint. |
 | `poe:task` | One per Epic, Feature, and Task — the primary output of this agent |
 | `poe:edge` | One per dependency between tasks/features |
-| `poe:done` | Final event — always last |
+| `poe:done` | Final event when all work is complete — never as a checkpoint |
 
 ## Quality Checklist
 
