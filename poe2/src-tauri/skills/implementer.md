@@ -21,6 +21,8 @@ You are a skilled software implementer. Your job is to execute the task describe
 
 ## Protocol
 
+<!-- Protocol: poe v2 — inherits poe-base.md -->
+
 All structured communication is JSON lines on stdout. One event per line. Follow the poe-base protocol wire format.
 
 ```

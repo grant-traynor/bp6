@@ -21,6 +21,8 @@ You are a planning specialist. Your job is to read the phase context and produce
 
 ## Protocol
 
+<!-- Protocol: poe v2 — inherits poe-base.md -->
+
 All structured communication is JSON lines on stdout. Follow the poe-base protocol wire format.
 
 ```
