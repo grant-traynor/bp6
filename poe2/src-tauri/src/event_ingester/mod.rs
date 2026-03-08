@@ -413,6 +413,39 @@ fn handle_knowledge(
     })
 }
 
+/// Pure DB mutation for `poe:decision`: set task Waiting, create queue_item.
+///
+/// Separated from the full handler so tests can call it without an AppHandle.
+pub(crate) fn db_handle_decision(
+    conn: &rusqlite::Connection,
+    json: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+) -> Result<dag_store::QueueItem> {
+    let payload: PoeDecision = serde_json::from_str(json)?;
+    let options_str = payload
+        .options
+        .map(|opts| serde_json::to_string(&opts).unwrap_or_default());
+
+    let wait_update = UpdateNodeInput {
+        status: Some(NodeStatus::Waiting),
+        title: None, description: None, skill_id: None, assignee: None,
+    };
+    dag_store::db_update_node(conn, task_id, &wait_update)?;
+
+    let item = dag_store::db_create_queue_item(
+        conn,
+        project_id,
+        Some(agent_id),
+        Some(task_id),
+        &payload.question,
+        options_str.as_deref(),
+    )?;
+    dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:decision", json)?;
+    Ok(item)
+}
+
 fn handle_decision(
     json: &str,
     project_id: &str,
@@ -421,31 +454,43 @@ fn handle_decision(
     registry: &ProjectRegistry,
     app: &AppHandle,
 ) -> Result<Option<DagChanged>> {
-    let payload: PoeDecision = serde_json::from_str(json)?;
-    let options_str = payload
-        .options
-        .map(|opts| serde_json::to_string(&opts).unwrap_or_default());
-
     with_project_conn(registry, project_id, |conn| {
-        // Set task status to Waiting — agent is paused pending human decision
-        let wait_update = UpdateNodeInput {
-            status: Some(NodeStatus::Waiting),
-            title: None, description: None, skill_id: None, assignee: None,
-        };
-        dag_store::db_update_node(conn, task_id, &wait_update)?;
-
-        let item = dag_store::db_create_queue_item(
-            conn,
-            project_id,
-            Some(agent_id),
-            Some(task_id),
-            &payload.question,
-            options_str.as_deref(),
-        )?;
-        dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:decision", json)?;
+        let item = db_handle_decision(conn, json, project_id, task_id, agent_id)?;
         emit_tauri_event(app, "poe-decision-queued", &item);
         Ok(None)
     })
+}
+
+/// Pure DB mutation for `poe:done`: mark Complete or stay Waiting depending on queue.
+///
+/// Returns the resulting `NodeStatus`. Separated from the full handler so tests can
+/// call it without an AppHandle or dag_tx.
+pub(crate) fn db_handle_done(
+    conn: &rusqlite::Connection,
+    json: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+) -> Result<NodeStatus> {
+    let _payload: PoeDone = serde_json::from_str(json)?;
+
+    // If this task has unresolved queue items, it's waiting for a decision — don't mark complete
+    let unresolved = dag_store::db_count_unresolved_queue_items_for_task(conn, task_id)
+        .unwrap_or(0);
+    let new_status = if unresolved > 0 {
+        NodeStatus::Waiting
+    } else {
+        NodeStatus::Complete
+    };
+
+    let update = UpdateNodeInput {
+        title: None, description: None,
+        status: Some(new_status.clone()),
+        skill_id: None, assignee: None,
+    };
+    dag_store::db_update_node(conn, task_id, &update)?;
+    dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:done", json)?;
+    Ok(new_status)
 }
 
 fn handle_done(
@@ -457,25 +502,9 @@ fn handle_done(
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
     app: &AppHandle,
 ) -> Result<Option<DagChanged>> {
-    let _payload: PoeDone = serde_json::from_str(json)?;
-
     with_project_conn(registry, project_id, |conn| {
-        // If this task has unresolved queue items, it's waiting for a decision — don't mark complete
-        let unresolved = dag_store::db_count_unresolved_queue_items_for_task(conn, task_id)
-            .unwrap_or(0);
-        let new_status = if unresolved > 0 {
-            NodeStatus::Waiting
-        } else {
-            NodeStatus::Complete
-        };
-
-        let update = UpdateNodeInput {
-            title: None, description: None,
-            status: Some(new_status.clone()),
-            skill_id: None, assignee: None,
-        };
-        let node = dag_store::db_update_node(conn, task_id, &update)?;
-        dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:done", json)?;
+        let new_status = db_handle_done(conn, json, project_id, task_id, agent_id)?;
+        let node = dag_store::db_get_node(conn, task_id)?;
 
         if new_status == NodeStatus::Complete {
             emit_tauri_event(app, "poe-task-done", &node);
@@ -610,6 +639,170 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Decision state machine helpers ────────────────────────────────────────
+
+    /// Set up an in-memory SQLite connection with the full schema applied.
+    fn make_test_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory DB");
+        conn.execute_batch(crate::dag_store::schema::CREATE_TABLES)
+            .expect("schema");
+        conn
+    }
+
+    /// Insert a minimal project row and return its id.
+    fn insert_project(conn: &rusqlite::Connection) -> String {
+        let id = "proj-test".to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, "Test Project", "/tmp/test-project", now, now],
+        )
+        .unwrap();
+        id
+    }
+
+    /// Insert a minimal task node (status=pending) and return its id.
+    fn insert_task(conn: &rusqlite::Connection, project_id: &str) -> String {
+        let id = "task-test".to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO nodes (id, project_id, node_type, title, status, created_at, updated_at)
+             VALUES (?1, ?2, 'task', 'Test Task', 'pending', ?3, ?4)",
+            rusqlite::params![id, project_id, now, now],
+        )
+        .unwrap();
+        id
+    }
+
+    /// Read the current status of a node.
+    fn read_status(conn: &rusqlite::Connection, node_id: &str) -> crate::dag_store::NodeStatus {
+        let s: String = conn
+            .query_row("SELECT status FROM nodes WHERE id = ?1", [node_id], |r| r.get(0))
+            .unwrap();
+        s.parse().unwrap()
+    }
+
+    /// Count queue_items for a task where resolved_at IS NULL.
+    fn count_unresolved(conn: &rusqlite::Connection, task_id: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM queue_items WHERE task_id = ?1 AND resolved_at IS NULL",
+            [task_id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    // ── Tests ─────────────────────────────────────────────────────────────────
+
+    /// poe:decision → node becomes Waiting, one unresolved queue_item created.
+    #[test]
+    fn decision_sets_waiting_and_creates_queue_item() {
+        let conn = make_test_conn();
+        let project_id = insert_project(&conn);
+        let task_id = insert_task(&conn, &project_id);
+
+        let json = r#"{"poe":"decision","question":"Which approach?","options":["A","B"]}"#;
+        let item = db_handle_decision(&conn, json, &project_id, &task_id, "agent-1").unwrap();
+
+        // Node must now be Waiting
+        assert_eq!(read_status(&conn, &task_id), NodeStatus::Waiting);
+
+        // Exactly one unresolved queue_item
+        assert_eq!(count_unresolved(&conn, &task_id), 1);
+
+        // The returned item has no resolution
+        assert!(item.resolved_at.is_none());
+        assert_eq!(item.question, "Which approach?");
+        assert_eq!(item.task_id.as_deref(), Some(task_id.as_str()));
+    }
+
+    /// poe:decision creates exactly one queue_item row (not duplicated).
+    #[test]
+    fn decision_creates_exactly_one_queue_item() {
+        let conn = make_test_conn();
+        let project_id = insert_project(&conn);
+        let task_id = insert_task(&conn, &project_id);
+
+        let json = r#"{"poe":"decision","question":"Deploy now?"}"#;
+        db_handle_decision(&conn, json, &project_id, &task_id, "agent-1").unwrap();
+
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM queue_items WHERE task_id = ?1",
+                [&task_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, 1, "expected exactly one queue_item row");
+    }
+
+    /// poe:done with an unresolved queue_item → node stays Waiting.
+    #[test]
+    fn done_with_unresolved_queue_item_stays_waiting() {
+        let conn = make_test_conn();
+        let project_id = insert_project(&conn);
+        let task_id = insert_task(&conn, &project_id);
+
+        // Put the task in Waiting with an open queue_item
+        let decision_json = r#"{"poe":"decision","question":"Confirm before proceeding?"}"#;
+        db_handle_decision(&conn, decision_json, &project_id, &task_id, "agent-1").unwrap();
+
+        // Now poe:done fires while queue_item is still unresolved
+        let done_json = r#"{"poe":"done","summary":"work finished"}"#;
+        let resulting_status =
+            db_handle_done(&conn, done_json, &project_id, &task_id, "agent-1").unwrap();
+
+        assert_eq!(resulting_status, NodeStatus::Waiting);
+        assert_eq!(read_status(&conn, &task_id), NodeStatus::Waiting);
+    }
+
+    /// Full Waiting→resume path:
+    ///   decision → done (stays Waiting) → resolve queue_item → done again → Complete.
+    #[test]
+    fn waiting_resume_path_complete_after_resolve() {
+        let conn = make_test_conn();
+        let project_id = insert_project(&conn);
+        let task_id = insert_task(&conn, &project_id);
+
+        // Step 1: agent emits poe:decision
+        let decision_json = r#"{"poe":"decision","question":"Proceed with plan A?"}"#;
+        let item =
+            db_handle_decision(&conn, decision_json, &project_id, &task_id, "agent-1").unwrap();
+        assert_eq!(read_status(&conn, &task_id), NodeStatus::Waiting);
+
+        // Step 2: agent emits poe:done — should stay Waiting (queue_item unresolved)
+        let done_json = r#"{"poe":"done"}"#;
+        let status1 =
+            db_handle_done(&conn, done_json, &project_id, &task_id, "agent-1").unwrap();
+        assert_eq!(status1, NodeStatus::Waiting);
+        assert_eq!(read_status(&conn, &task_id), NodeStatus::Waiting);
+
+        // Step 3: human resolves the queue_item
+        crate::dag_store::db_resolve_queue_item(&conn, &item.id, "yes, proceed").unwrap();
+        assert_eq!(count_unresolved(&conn, &task_id), 0);
+
+        // Step 4: agent resumes and emits poe:done again — now should be Complete
+        let status2 =
+            db_handle_done(&conn, done_json, &project_id, &task_id, "agent-1").unwrap();
+        assert_eq!(status2, NodeStatus::Complete);
+        assert_eq!(read_status(&conn, &task_id), NodeStatus::Complete);
+    }
+
+    /// poe:done with NO unresolved queue items → status=Complete immediately (happy path).
+    #[test]
+    fn done_with_no_queue_items_completes_immediately() {
+        let conn = make_test_conn();
+        let project_id = insert_project(&conn);
+        let task_id = insert_task(&conn, &project_id);
+
+        let done_json = r#"{"poe":"done","summary":"all done"}"#;
+        let resulting_status =
+            db_handle_done(&conn, done_json, &project_id, &task_id, "agent-1").unwrap();
+
+        assert_eq!(resulting_status, NodeStatus::Complete);
+        assert_eq!(read_status(&conn, &task_id), NodeStatus::Complete);
+    }
 
     #[test]
     fn parse_poe_event_valid() {
