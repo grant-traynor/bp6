@@ -166,6 +166,10 @@ pub struct Node {
     pub session_id: Option<String>,
     /// Reviewer tasks only: back-reference to the task that requested this review.
     pub requesting_task_id: Option<String>,
+    /// The 'id' from the originating poe:review event. NULL for non-reviewer tasks.
+    pub review_id: Option<String>,
+    /// Watchdog retry counter for reviewer tasks.
+    pub retry_count: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -259,6 +263,12 @@ pub struct CreateNodeInput {
     /// Initial status — defaults to `pending` if absent.
     /// Use `waiting` to prevent autonomous dispatch immediately on creation.
     pub initial_status: Option<NodeStatus>,
+    /// Reviewer tasks only: back-reference to the task that requested this review.
+    pub requesting_task_id: Option<String>,
+    /// The 'id' from the originating poe:review event. NULL for non-reviewer tasks.
+    pub review_id: Option<String>,
+    /// Watchdog retry counter initial value. Defaults to 0.
+    pub retry_count: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize)]

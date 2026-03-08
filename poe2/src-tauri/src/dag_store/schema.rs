@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     yield_reason        TEXT,
     session_id          TEXT,
     requesting_task_id  TEXT REFERENCES nodes(id),
+    review_id           TEXT,
+    retry_count         INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );

@@ -47,6 +47,8 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN requesting_task_id TEXT REFERENCES nodes(id)");
     // Add index for requesting_task_id (CREATE INDEX IF NOT EXISTS is safe to re-run).
     let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_nodes_requesting_task_id ON nodes(requesting_task_id)");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN review_id TEXT");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
 
     // Upsert the project record based on path
     let path_str = project_path.to_string_lossy().to_string();
@@ -124,13 +126,15 @@ pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node
     let status = input.initial_status.as_ref()
         .map(|s| s.to_string())
         .unwrap_or_else(|| "pending".to_owned());
+    let retry_count = input.retry_count.unwrap_or(0);
     conn.execute(
-        "INSERT INTO nodes (id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO nodes (id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, requesting_task_id, review_id, retry_count, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
             id, input.project_id, input.phase_id, input.parent_id,
             input.node_type.to_string(), input.title, input.description,
-            status, input.skill_id, now, now
+            status, input.skill_id, input.requesting_task_id, input.review_id,
+            retry_count, now, now
         ],
     )
     .context("Failed to insert node")?;
@@ -139,7 +143,7 @@ pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node
 
 pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
     conn.query_row(
-        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, created_at, updated_at
+        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, created_at, updated_at
          FROM nodes WHERE id = ?1",
         [node_id],
         |row| {
@@ -157,8 +161,10 @@ pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
                 yield_reason: row.get(10)?,
                 session_id: row.get(11)?,
                 requesting_task_id: row.get(12)?,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                review_id: row.get(13)?,
+                retry_count: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
             })
         },
     )
@@ -212,7 +218,7 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
     let mut rows = Vec::new();
     if let Some(pid) = phase_id {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, created_at, updated_at
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, created_at, updated_at
              FROM nodes WHERE project_id = ?1 AND phase_id = ?2 ORDER BY created_at"
         )?;
         for row in stmt.query_map(rusqlite::params![project_id, pid], |row| {
@@ -221,21 +227,22 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
                 row.get::<_,Option<String>>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<String>>(8)?,
                 row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?,
                 row.get::<_,Option<String>>(11)?, row.get::<_,Option<String>>(12)?,
-                row.get::<_,String>(13)?, row.get::<_,String>(14)?))
+                row.get::<_,Option<String>>(13)?, row.get::<_,i64>(14)?,
+                row.get::<_,String>(15)?, row.get::<_,String>(16)?))
         })? {
             let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
-                 yield_reason, session_id, requesting_task_id, cat, uat) = row?;
+                 yield_reason, session_id, requesting_task_id, review_id, retry_count, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
-                yield_reason, session_id, requesting_task_id,
+                yield_reason, session_id, requesting_task_id, review_id, retry_count,
                 created_at: cat, updated_at: uat,
             });
         }
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, created_at, updated_at
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, created_at, updated_at
              FROM nodes WHERE project_id = ?1 ORDER BY created_at"
         )?;
         for row in stmt.query_map([project_id], |row| {
@@ -244,15 +251,16 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
                 row.get::<_,Option<String>>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<String>>(8)?,
                 row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?,
                 row.get::<_,Option<String>>(11)?, row.get::<_,Option<String>>(12)?,
-                row.get::<_,String>(13)?, row.get::<_,String>(14)?))
+                row.get::<_,Option<String>>(13)?, row.get::<_,i64>(14)?,
+                row.get::<_,String>(15)?, row.get::<_,String>(16)?))
         })? {
             let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
-                 yield_reason, session_id, requesting_task_id, cat, uat) = row?;
+                 yield_reason, session_id, requesting_task_id, review_id, retry_count, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
-                yield_reason, session_id, requesting_task_id,
+                yield_reason, session_id, requesting_task_id, review_id, retry_count,
                 created_at: cat, updated_at: uat,
             });
         }
@@ -521,6 +529,23 @@ pub fn db_count_unresolved_queue_items_for_task(conn: &Connection, task_id: &str
     Ok(count as usize)
 }
 
+/// Atomically increment retry_count for a reviewer task (watchdog use).
+pub fn db_increment_retry_count(conn: &Connection, node_id: &str) -> Result<i64> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE nodes SET retry_count = retry_count + 1, updated_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, node_id],
+    )
+    .context("Failed to increment retry_count")?;
+    let count: i64 = conn.query_row(
+        "SELECT retry_count FROM nodes WHERE id = ?1",
+        [node_id],
+        |row| row.get(0),
+    )
+    .with_context(|| format!("Node not found after retry increment: {}", node_id))?;
+    Ok(count)
+}
+
 /// Write session_id to nodes.session_id — canonical location per Protocol.md §1.
 pub fn db_update_node_session(conn: &Connection, task_id: &str, session_id: &str) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
@@ -775,7 +800,7 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
     let mut stmt = conn.prepare(
         "SELECT n.id, n.project_id, n.phase_id, n.parent_id, n.node_type, n.title, n.description,
                 n.status, n.skill_id, n.assignee, n.yield_reason, n.session_id, n.requesting_task_id,
-                n.created_at, n.updated_at
+                n.review_id, n.retry_count, n.created_at, n.updated_at
          FROM nodes n
          LEFT JOIN phases p ON p.id = n.phase_id
          WHERE n.project_id = ?1
@@ -806,8 +831,10 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
                 yield_reason: row.get(10)?,
                 session_id: row.get(11)?,
                 requesting_task_id: row.get(12)?,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                review_id: row.get(13)?,
+                retry_count: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
