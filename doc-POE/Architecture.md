@@ -287,7 +287,7 @@ Every `tasks` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_
 
 ## Agent Event Protocol
 
-Agents communicate with POE via structured JSON events embedded in the `--output-format stream-json` transport — not PTY scraping. The orchestrator spawns agents with `claude --output-format stream-json -p --dangerously-skip-permissions`, writes the T+S+K bundle to stdin, and reads newline-delimited JSON from stdout. poe: events are extracted from assistant text content via a line-accumulation buffer. See `doc-POE/Protocol.md §2` and `§5` for the full wire format and spawn model.
+Agents communicate with POE via structured JSON events embedded in the `--output-format stream-json` transport — not PTY scraping. The orchestrator spawns agents with `claude --output-format stream-json -p --dangerously-skip-permissions [--model <id>]`, writes the T+S+K bundle to stdin, and reads newline-delimited JSON from stdout. The `--model` flag is included when the skill's frontmatter declares a `model:` field; otherwise the claude binary uses its configured default. poe: events are extracted from assistant text content via a line-accumulation buffer. See `doc-POE/Protocol.md §2` and `§5` for the full wire format and spawn model.
 
 | Event | Purpose |
 |---|---|
@@ -534,6 +534,20 @@ MCP tooling is a planned capability. The `poe:` event protocol is sufficient for
 ## Skill System
 
 Skills are the specialist definitions that agents execute under. Each skill is a markdown file with YAML frontmatter defining the role, behaviour, and expected outputs.
+
+### Frontmatter Schema
+
+Key fields parsed by the orchestrator at load time:
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | Yes | Kebab-case; must match filename stem |
+| `name` | Yes | Human-readable display name |
+| `description` | Yes | One sentence — surfaced in UI and event trail |
+| `modes` | Yes | `[autonomous]`, `[interactive]`, or both. Defaults to `[autonomous]` if absent |
+| `model` | No | Claude model ID (e.g. `claude-opus-4-6`). When present, passed as `--model` to the claude spawn. When absent, claude uses its configured default |
+
+Informational fields (`tags`, `applies_to`, `protocol_version`) are not parsed by the orchestrator.
 
 ### Load Order (highest priority wins)
 
