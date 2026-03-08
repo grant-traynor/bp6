@@ -208,7 +208,8 @@ The protocol is fundamentally **CRUD against the project database**. The DAG is 
 | `poe:brief` | Agent's interpretation of its task — written before execution begins, non-blocking |
 | `poe:step` | Named progress milestone during execution |
 | `poe:decision` | Raise a question for the human queue, with candidate options if available |
-| `poe:done` | Signal task completion |
+| `poe:yield` | Yield control while awaiting a review or decision response. Task status → waiting. |
+| `poe:done` | Signal task completion (all work done). |
 
 ### The Living DAG
 

@@ -45,10 +45,13 @@ CREATE TABLE tasks (
   parent_id   TEXT    REFERENCES tasks(id),
   title       TEXT    NOT NULL,
   description TEXT,
-  type        TEXT    NOT NULL DEFAULT 'task',    -- 'task' | 'bug' | 'chore' | 'subtask'
+  type        TEXT    NOT NULL DEFAULT 'task',    -- 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review'
   skill       TEXT,
   status      TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'running' | 'waiting' | 'done' | 'cancelled'
-  session_id  TEXT,   -- Claude --resume handle, stored on spawn, used on restart
+  session_id   TEXT,        -- Claude --resume handle, stored on spawn, used on restart
+  yield_reason TEXT,        -- 'review' | 'decision' | NULL. Set when status=waiting. Used by recovery to determine SF-4 path without event_log join.
+  review_id    TEXT,        -- populated for reviewer tasks only: the 'id' from the originating poe:review event. Enables ID-based completion tracking.
+  retry_count  INTEGER NOT NULL DEFAULT 0,  -- reviewer tasks only: watchdog retry counter. Max configurable, default 2.
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
@@ -138,7 +141,8 @@ One event per line. No multi-line JSON.
 // Cancel a task (preserved in history, status → cancelled)
 {"poe": "task:cancel", "id": "<task-id>", "reason": "..."}  // reason optional
 
-// Add a dependency edge (from depends on to — to must complete before from)
+// Add a finish-to-start dependency edge: "from" must finish before "to" can start.
+// Example: {"poe":"edge","from":"A","to":"B"} — A must complete before B is dispatched.
 {"poe": "edge", "from": "<task-id>", "to": "<task-id>"}
 
 // Remove a dependency edge
@@ -177,11 +181,16 @@ One event per line. No multi-line JSON.
 // detail is optional
 
 // Raise a question for the human queue. Task status → waiting.
-// Agent then blocks (reads stdin). Orchestrator delivers resolution via stdin write.
+// Agent emits poe:yield immediately after. Orchestrator resumes via --resume once resolved.
 {"poe": "decision", "question": "...", "options": ["Option A", "Option B"]}
 // options is optional
 
-// Signal task completion.
+// Yield control while awaiting an asynchronous response.
+// Emitted after all poe:review or poe:decision events for this checkpoint.
+// task status → waiting. reason: "review" | "decision"
+{"poe": "yield", "reason": "review"}
+
+// Signal task completion (all work done — not a yield checkpoint).
 {"poe": "done", "summary": "..."}  // summary optional
 
 // Request a peer review. Orchestrator spawns reviewer_skill agent,
@@ -196,11 +205,13 @@ One event per line. No multi-line JSON.
 // {"poe": "review", "reviewer_skill": "interface-analyst",    "id": "r-icd",  "content": "..."}
 // Orchestrator spawns all reviewers in parallel. Each result delivered via stdin:
 // ---
-// ReviewResult id=r-eng skill=senior-engineer verdict=APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED
+// ReviewResult id=r-eng skill=senior-engineer verdict=APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED|FAILED
 // {findings text}
 // ---
-// Verdict values: APPROVED | APPROVED_WITH_CONDITIONS | BLOCKED (underscore, no spaces)
-// Agent counts pending review ids and waits until all N results have arrived before proceeding.
+// Verdict values: APPROVED | APPROVED_WITH_CONDITIONS | BLOCKED | FAILED (underscore, no spaces)
+// FAILED indicates the reviewer exceeded max retries and was cancelled by the watchdog.
+// Agent checks that all expected review IDs are present in the bundle before proceeding.
+// Any FAILED verdict should be treated as a signal to escalate via poe:decision.
 ```
 
 ### Ingester responsibilities per event type
@@ -217,9 +228,10 @@ One event per line. No multi-line JSON.
 | `poe:skill` | write `{project}/.poe/skills/{name}.md` | yes | `poe://event` |
 | `poe:brief` | — | yes | `poe://event` |
 | `poe:step` | — | yes | `poe://event` |
-| `poe:decision` | UPDATE tasks.status=waiting, INSERT decisions | yes | `poe://decision` |
-| `poe:review` | spawn reviewer agent | yes | `poe://event` |
-| `poe:done` | UPDATE tasks.status=done | yes | `poe://task-update` |
+| `poe:decision` | INSERT decisions | yes | `poe://decision` |
+| `poe:review` | INSERT event_log only (yield handles status) | yes | `poe://event` |
+| `poe:yield` | UPDATE tasks.status=waiting, SET yield_reason, signal orchestrator (SF-3) | yes | `poe://task-update` + `poe://event` |
+| `poe:done` | UPDATE tasks.status=done, signal orchestrator | yes | `poe://task-update` |
 
 ---
 
@@ -386,6 +398,8 @@ When the orchestrator spawns a reviewer agent in response to a `poe:review` even
 **Review ID**: {id from poe:review event}
 
 {content from poe:review event — the plan summary or artifact under review}
+
+> **Naming convention**: The reviewer MUST emit its artifact as `{"poe":"artifact","name":"review-{review_id}.md",...}` where `{review_id}` is the Review ID above. This makes the artifact path deterministic — the orchestrator derives `docs/review-{review_id}.md` directly without an artifacts table query.
 
 ---
 
@@ -556,7 +570,9 @@ process exits (result event received)
 
 ### Decision resolution via --resume
 
-When an agent emits `poe:decision` and then `poe:done` (indicating it is awaiting a human decision before it can continue):
+> **TODO**: Once the Decision Escalation flow is written in `Flows.md`, trim the sequence below to a wire-format reference + link, matching the pattern used for §"Review injection via --resume". The numbered steps are a flow description and belong in Flows.md.
+
+When an agent emits `poe:decision` and then `poe:yield` (indicating it is awaiting a human decision before it can continue):
 
 ```
 1. Orchestrator records decision in SQLite, marks task status = waiting
@@ -576,20 +592,16 @@ When an agent emits `poe:decision` and then `poe:done` (indicating it is awaitin
 
 ### Review injection via --resume
 
-When a reviewer agent completes, its result is delivered to the requesting agent via a new resumed session:
+The ReviewResult stdin bundle format:
 
 ```
-1. Orchestrator spawns requesting agent:
-     claude --output-format stream-json --verbose -p --dangerously-skip-permissions --resume <requester_session_id>
-2. Bundle written to stdin:
-     ---
-     ReviewResult id={id} skill={skill} verdict={APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED}
-     {findings text}
-     ---
-3. Agent reads session history + review result, continues
+---
+ReviewResult id={id} skill={skill} verdict={APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED|FAILED}
+{findings text}
+---
 ```
 
-Verdict values and the ReviewResult format are specified in §2.
+Verdict values are specified in §2. For the complete orchestrator-level sequence — when the resume is triggered, how multiple reviewer results are batched, and session_id handling — see `doc-POE/Flows.md §3.1`.
 
 ---
 

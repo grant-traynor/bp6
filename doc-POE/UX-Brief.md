@@ -91,6 +91,18 @@ Epic B        ████ ████        [ planned ]       [ scoped ]
 - **Within each cell** — task status, dependency indicators, assigned skill badge, running agent indicator (●)
 - **Phase header** — shows PDCA stage and human gate status (awaiting human / running / complete)
 
+**Task status visual states** (all must be visually distinct in the matrix cell):
+
+| Status | Indicator | Meaning |
+|---|---|---|
+| `pending` | `░░░░` | Not yet started |
+| `running` | `████ ●` | Agent actively executing |
+| `waiting` | `⏸ skill-name` | Agent yielded — awaiting review or decision result |
+| `done` | `████` muted | Complete |
+| `cancelled` | `────` strikethrough | Cancelled, preserved in history |
+
+`waiting` must be visually distinct from both `running` and `pending`. A task that shows `waiting` tells the human: the agent has done its part and handed off — the orchestrator is managing the continuation. No human action required unless the reason is `decision` (in which case the queue panel shows the pending item).
+
 Clicking a task opens a detail panel: full description, WBS ancestry, skill assignment, dependency chain, agent brief (`poe:brief`), event log, and the option to open a node-scoped agent conversation.
 
 ### 2b. Activity Feed
@@ -105,6 +117,19 @@ Each entry shows:
 - Timestamp
 
 Clicking an entry opens the **agent session handover** — an xterm.js panel that resumes the agent's Claude session (`claude --resume <session_id>`) in a PTY, bridged to the browser via WebSocket. The human can read the raw conversation, ask follow-up questions, or assist an agent that raised a decision. Closing the panel does not terminate the agent's session — the session_id persists in SQLite. Time filters carried forward from bp6: last hour, last 6 hours, since phase start.
+
+**Activity feed entry types** from `poe:` events:
+
+| Event | Feed entry |
+|---|---|
+| `poe:brief` | Agent interpretation of its task |
+| `poe:step` | Named progress milestone |
+| `poe:artifact` | Artifact produced: `{name}` |
+| `poe:yield reason=review` | Yielded — awaiting review from `{reviewer_skill}` |
+| `poe:yield reason=decision` | Yielded — awaiting human decision |
+| `poe:done` | Task complete |
+
+`poe:yield` must produce an activity feed entry. Without it, the human sees a task go from `running` to `waiting` with no explanation. The feed entry closes the glass-box gap.
 
 The activity feed is the glass box. It answers: *is everything running as expected?*
 

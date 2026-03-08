@@ -298,9 +298,10 @@ Agents communicate with POE via structured JSON events embedded in the `--output
 | `poe:edge` | Create a dependency edge between two nodes. |
 | `poe:knowledge` | Write an entry to the knowledge register. |
 | `poe:skill` | Write a reusable pattern to `{project}/.poe/skills/<name>.md`. Closes the self-improvement loop: any agent that discovers a project-specific pattern can persist it as a local skill override without manual authoring. |
-| `poe:decision` | Raise a question for the human decision queue. Agent then emits `poe:done`; orchestrator resumes via `--resume` with the human's resolution. |
-| `poe:review` | Request a peer review from another specialist agent. Agent emits `poe:done` (awaiting review); orchestrator spawns reviewer, then resumes requesting agent via `--resume` with the review result. |
-| `poe:done` | Signal task completion (or checkpoint when awaiting decision/review). |
+| `poe:decision` | Raise a question for the human decision queue. Agent emits `poe:yield` immediately after; orchestrator resumes via `--resume` with the human's resolution. |
+| `poe:review` | Request a peer review from another specialist agent. Agent emits `poe:yield` after all review requests; orchestrator spawns reviewer(s), then resumes requesting agent via `--resume` with results. |
+| `poe:yield` | Yield control while awaiting an asynchronous response (review or decision). task status → waiting. See Flows.md §SF-3. |
+| `poe:done` | Signal task completion. Task status → done. |
 
 Human access to the raw agent conversation is via **xterm.js session handover** — `claude --resume <session_id>` in a PTY, bridged to the browser via WebSocket. ANSI codes are rendered by xterm.js natively; no parsing occurs on this path. The structured event stream drives the UI; the xterm handover is a drill-down for human-in-the-loop interaction.
 
@@ -308,17 +309,7 @@ Human access to the raw agent conversation is via **xterm.js session handover** 
 
 Agents can request peer review from other specialist agents without human facilitation. This eliminates the need for a human to act as message relay between agents — the orchestrator routes the conversation.
 
-**The pattern:**
-
-```
-Agent A (e.g. Architect) emits poe:review
-  → Orchestrator creates a review task, assigns it to the named skill (e.g. tauri-engineer)
-  → Agent A status = blocked (waiting for review)
-  → Agent B (Tauri Engineer) receives full context: Agent A's brief + artifacts + the review question
-  → Agent B produces a review artifact (poe:artifact) and signals poe:done
-  → Orchestrator unblocks Agent A, injects Agent B's review into Agent A's context
-  → Agent A continues with the reviewer's assessment in hand
-```
+See `doc-POE/Flows.md §3.1` for the complete runtime sequence — reviewer dispatch, parallel multi-reviewer handling, result delivery via `--resume`, and key invariants.
 
 **poe:review payload:**
 
@@ -396,9 +387,10 @@ The orchestrator is a Rust service inside Tauri. It is not a sidecar, not an ext
 
 ### What Triggers It
 
-The orchestrator is reactive — it wakes on events, not on a timer:
+The orchestrator is reactive — it wakes on events, not on a timer. **One controlled exception**: when dispatching reviewer tasks (SF-3 review path), the orchestrator spawns a per-reviewer Tokio watchdog timer. On fire, the watchdog checks reviewer task status and re-queues or cancels as appropriate (see Flows.md §SF-3). This is the only timer in the system — it is scoped to reviewer tasks and does not affect the core scheduling loop.
 
 - `poe:done` received — a task completed, dependents may now be ready
+- `poe:yield` received — a task yielded; orchestrator dispatches reviewers (reason=review) or waits for human (reason=decision)
 - `poe:task` / `poe:task:cancel` — DAG structure changed
 - `poe:edge` / `poe:edge:remove` — dependency graph changed
 - Human resolves a queue item — a blocked agent can continue
@@ -471,11 +463,19 @@ On app restart:
 ```
 1. Open all known project databases
 2. Find tasks with status = running → agent process is gone
-3. Attempt to resume each interrupted agent using its stored session ID (Claude --resume)
-4. If resume fails → mark task back to pending, orchestrator re-spawns fresh
-5. Queue items persist as-is
-6. Artifacts persist on disk and in SQLite index
-7. Trigger orchestrator loop → re-evaluates all ready tasks
+   → Attempt to resume each via stored session_id (Claude --resume)
+   → If resume fails → mark back to pending, orchestrator re-spawns fresh
+3. Find tasks with status = waiting → agent process has already exited (expected)
+   → Query event_log for poe:yield event to recover yield_reason
+   → reason = review:
+       Query reviewer task statuses (requesting_task_id = task.id)
+       All done → trigger SF-4 (resume with batched ReviewResult)
+       Some still running → they will trigger SF-4 on completion via SF-2
+   → reason = decision:
+       Decision remains in queue. No action — human resolves when ready.
+4. Queue items persist as-is
+5. Artifacts persist on disk and in SQLite index
+6. Trigger orchestrator loop → re-evaluates all ready tasks
 ```
 
 Agent session IDs are captured from the `{"type":"system","subtype":"init","session_id":"..."}` JSON event at spawn time and stored in `nodes.session_id`. Resume is attempted first; clean restart is the fallback.
@@ -490,6 +490,8 @@ Two levels of concurrency limit, both configurable and visible in the UI:
 | Global | 15 | Max concurrent agents across all open projects |
 
 The orchestrator respects both limits when selecting tasks to spawn in the core loop. If the limit is reached, ready tasks are queued in the DAG (status remains pending) until a running agent completes.
+
+**`waiting` tasks do not count against the concurrency limit.** A task in `waiting` status has no live agent process — the process exited after emitting `poe:yield`. Counting waiting tasks would artificially suppress parallelism while reviewers run. Only `status = running` tasks consume a concurrency slot.
 
 The UI displays a concurrency indicator — running count / limit — for each project and globally. Both limits are adjustable from the UI. Higher limits suit powerful machines with fast API access; lower limits suit constrained environments or when the human wants to keep queue volume manageable.
 
