@@ -107,6 +107,11 @@ export default function ActivityFeed({ items, nodes, onHandoverOpen }: Props) {
                     : undefined
                 }
               />
+              {item.model && (
+                <span className="shrink-0 inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-violet-900 text-violet-300">
+                  {item.model}
+                </span>
+              )}
               <span className="text-neutral-300 text-[12px] break-words min-w-0 leading-5">
                 {item.message}
               </span>

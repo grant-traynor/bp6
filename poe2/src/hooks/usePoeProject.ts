@@ -85,14 +85,14 @@ export function usePoeProject(projectId: string | null): {
     async function hydrate() {
       const [fetchedNodes, fetchedQueue, fetchedEvents, fetchedPhases, fetchedArtifacts] = await Promise.all([
         invoke<Node[]>('list_nodes', { projectId, phaseId: null }),
-        invoke<QueueItem[]>('list_queue_items', { projectId, unresolvedOnly: true }),
+        invoke<QueueItem[]>('list_queue_items', { projectId }),
         invoke<EventRecord[]>('list_events', { projectId, since: null }),
         invoke<Phase[]>('list_phases', { projectId }),
         invoke<Artifact[]>('list_artifacts', { projectId }),
       ]);
       if (cancelled) return;
       setNodes(fetchedNodes);
-      setQueueItems(fetchedQueue.filter(q => q.resolvedAt === null));
+      setQueueItems(fetchedQueue);
       setFeedItems(fetchedEvents.map(eventRecordToFeedItem));
       setPhases(fetchedPhases);
       setArtifacts(fetchedArtifacts);
@@ -188,7 +188,6 @@ export function usePoeProject(projectId: string | null): {
         model?: string | null;
       }>('poe-agent-started', ({ payload }) => {
         if (payload.projectId !== projectId) return;
-        const modelSuffix = payload.model ? ` [${payload.model}]` : '';
         setFeedItems(prev => [
           ...prev,
           {
@@ -197,8 +196,9 @@ export function usePoeProject(projectId: string | null): {
             eventType: 'poe-agent-started',
             taskId: payload.taskId,
             skillId: payload.skillId,
-            model: payload.model,
-            message: `Agent started (skill: ${payload.skillId}${modelSuffix})`,
+            model: payload.model ?? null,
+            // Model displayed as a separate badge in ActivityFeed; omit from message.
+            message: `Agent started · ${payload.skillId}`,
             ts: new Date().toISOString(),
           },
         ]);
@@ -262,9 +262,14 @@ export function usePoeProject(projectId: string | null): {
       });
       unlisteners.push(u9);
 
-      const u10 = await listen<{ itemId: string; projectId: string }>('poe-decision-resolved', ({ payload }) => {
+      const u10 = await listen<{ itemId: string; projectId: string; resolution: string }>('poe-decision-resolved', ({ payload }) => {
         if (payload.projectId !== projectId) return;
-        setQueueItems(prev => prev.filter(q => q.id !== payload.itemId));
+        // Mark resolved in-place so thread mode retains history; pending items have resolvedAt === null.
+        setQueueItems(prev => prev.map(q =>
+          q.id === payload.itemId
+            ? { ...q, resolution: payload.resolution, resolvedAt: new Date().toISOString() }
+            : q
+        ));
       });
       unlisteners.push(u10);
     }
