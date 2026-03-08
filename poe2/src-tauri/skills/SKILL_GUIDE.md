@@ -44,7 +44,7 @@ protocol_version: v2         # Optional. Convention — include for new skills t
 | `applies_to` | No | Informational only |
 | `protocol_version` | No | Convention — include `v2` for new skills |
 
-> **Inconsistency note — existing skills**: `implementer.md` and `planner.md` are missing `modes:` and `protocol_version:`. They should be treated as `modes: [autonomous]` per Protocol.md §3. New skills must include `modes:` explicitly.
+> **Note — existing skills**: All current skills (`implementer.md`, `planner.md`, etc.) include `modes:` and `protocol_version: v2`. New skills must include both explicitly.
 
 ---
 

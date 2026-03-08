@@ -1,5 +1,6 @@
 use super::*;
 use tauri::State;
+use tokio::sync::mpsc;
 
 pub type Registry = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<ProjectDb>>>>;
 
@@ -7,6 +8,7 @@ pub type Registry = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<St
 pub async fn open_project(
     path: String,
     registry: State<'_, ProjectRegistry>,
+    dag_tx: State<'_, mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
 ) -> Result<Project, String> {
     let project_path = std::path::Path::new(&path);
     let (project, conn) = open_project_db(project_path).map_err(|e| e.to_string())?;
@@ -17,6 +19,12 @@ pub async fn open_project(
     });
 
     registry.lock().unwrap().insert(project.path.clone(), db);
+
+    // Wake the orchestrator so any pre-existing pending tasks are dispatched.
+    let _ = dag_tx.send(crate::event_ingester::DagChanged::DagStructureChanged {
+        project_id: project.id.clone(),
+    });
+
     Ok(project)
 }
 
@@ -57,9 +65,12 @@ where
 pub async fn create_node(
     input: CreateNodeInput,
     registry: State<'_, ProjectRegistry>,
+    dag_tx: State<'_, mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
 ) -> Result<Node, String> {
     let project_id = input.project_id.clone();
-    with_conn(&registry, &project_id, |conn| db_create_node(conn, &input))
+    let node = with_conn(&registry, &project_id, |conn| db_create_node(conn, &input))?;
+    let _ = dag_tx.send(crate::event_ingester::DagChanged::DagStructureChanged { project_id });
+    Ok(node)
 }
 
 #[tauri::command]

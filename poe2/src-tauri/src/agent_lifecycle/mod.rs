@@ -417,6 +417,11 @@ pub fn run_agent_capturing(
     let lines_for_chunk = lines.clone();
     let lines_for_complete = lines.clone();
 
+    // Wrap in Arc<Mutex<>> so both on_text_chunk and on_complete can call the observer.
+    let on_line: Arc<Mutex<Option<Box<dyn Fn(String) + Send + 'static>>>> =
+        Arc::new(Mutex::new(on_line));
+    let on_line_for_complete = on_line.clone();
+
     let extractor = Arc::new(Mutex::new(TextBufExtractor::new()));
     let extractor_for_chunk = extractor.clone();
     let extractor_for_complete = extractor.clone();
@@ -434,7 +439,7 @@ pub fn run_agent_capturing(
                 let complete = ex.push(&text);
                 drop(ex);
                 for line in complete {
-                    if let Some(ref cb) = on_line {
+                    if let Some(ref cb) = *on_line.lock().unwrap() {
                         cb(line.clone());
                     }
                     lines_for_chunk.lock().unwrap().push(line);
@@ -445,6 +450,10 @@ pub fn run_agent_capturing(
                 let tail = extractor_for_complete.lock().unwrap().flush();
                 if let Some(t) = tail {
                     if !t.is_empty() {
+                        // Also fire on_line for the tail so observers see it.
+                        if let Some(ref cb) = *on_line_for_complete.lock().unwrap() {
+                            cb(t.clone());
+                        }
                         lines_for_complete.lock().unwrap().push(t);
                     }
                 }

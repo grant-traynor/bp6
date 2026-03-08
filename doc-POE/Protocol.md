@@ -359,14 +359,14 @@ Use this to direct high-stakes analysis skills (e.g. `operational-analyst`) at a
 - If no artifacts are declared for this stage type, the Artifacts section is omitted entirely.
 - Knowledge register is always injected in full (entries are expected to stay small).
 - If a task has no declared skill, the `# Skill` section is omitted and the agent runs with no persona constraint.
-- **Decision resolution delivery**: when the human resolves a `poe:decision`, the orchestrator writes the following to the agent's open stdin pipe:
+- **Decision resolution delivery**: when the human resolves a `poe:decision`, the orchestrator spawns a new stream-json session with `--resume <session_id>` and writes the resolution as the bundle content:
 
 ```
 ---
 Human: {resolution text}
 ```
 
-The agent reads this as a continuation of its context and resumes. The pipe stays open until `poe:done` is received.
+The agent reads full session history plus this new message and continues. See §5 "Decision resolution via --resume" for the full spawn sequence. The original session's stdin pipe is closed (EOF) immediately after the initial bundle is written — the pipe does not stay open.
 
 ### Reviewer stdin bundle (ReviewRequest)
 
@@ -570,7 +570,7 @@ When an agent emits `poe:decision` and then `poe:done` (indicating it is awaitin
 6. Agent emits further poe: events + final poe:done
 ```
 
-`--resume` with `--output-format stream-json` is a proven combination (validated by `stdio_json_harness.rs` Q4 test).
+`--resume` with `--output-format stream-json` is a proven combination (validated by `stream_json_integration.rs::resume_continuation_captures_new_session_and_emits_done`).
 
 ---
 
@@ -600,13 +600,16 @@ When a human wants to directly interact with an agent's session (check-in, unblo
 ```
 1. Look up session_id from nodes.session_id in SQLite
 2. Spawn: claude --resume <session_id> --dangerously-skip-permissions (via PTY)
+   — cwd MUST match the project directory used for the original stream-json session (see constraint below)
 3. Bridge PTY output (raw bytes) → WebSocket → xterm.js in frontend
 4. Bridge xterm.js keyboard input → WebSocket → PTY stdin
 5. Handle resize: WS message {type:"resize", cols, rows} → PTY master.resize(PtySize)
 6. On browser tab close: Ctrl-C → drop PTY master → SIGTERM → poll 5s → SIGKILL
 ```
 
-xterm.js renders ANSI codes natively — **no stripping required on this path**. Raw bytes flow directly from PTY to browser. This is the `session_handoff_harness.rs` pattern.
+xterm.js renders ANSI codes natively — **no stripping required on this path**. Raw bytes flow directly from PTY to browser. This is the `session_handoff_harness.rs` / `decision_handoff_harness.rs` pattern.
+
+**Critical cwd constraint**: Claude scopes sessions to the working directory used at spawn time (by project directory hash). The PTY spawn and all `--resume` continuations **must use the same cwd** as the original stream-json session that created the session_id. A mismatch produces `"No conversation found with session ID: ..."`. In production this is natural — the project cwd is always `project.path` for every spawn. In tests, always pass the same path to every step in a multi-session flow.
 
 The PTY handover is for human use only. The orchestrator does not parse PTY output on this path.
 

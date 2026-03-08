@@ -615,6 +615,8 @@ Interactive Agent (claude --resume <session_id>, PTY)
   — human handover only — not parsed by orchestrator
   — raw bytes → WebSocket → xterm.js in browser
   — used for check-in, decision-assist, direct exploration
+  — cwd MUST match the project.path used for the original stream-json session
+    (Claude scopes sessions by directory — mismatch → "No conversation found")
 ```
 
 ---

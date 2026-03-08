@@ -1,7 +1,12 @@
 //! Protocol integration test harness for the poe: event wire format.
 //!
-//! Spawns a real Claude process via PTY, injects a deterministic test skill bundle,
-//! and validates that all poe: event types are correctly transmitted and parsed.
+//! Spawns a real Claude process via stream-json transport (run_agent_capturing),
+//! injects a deterministic test skill bundle, and validates that all 11 poe: event
+//! types are correctly transmitted and parsed.
+//!
+//! The long-content artifact test (test-long.txt, 300 A-chars) confirms that the
+//! stream-json transport does not truncate long lines. There is no PTY in this path;
+//! the bp6-pdr.13 column-wrap bug cannot occur here by construction.
 //!
 //! All output is written to `target/protocol-harness.log` regardless of test outcome
 //! or whether --nocapture is used. Monitor with: `tail -f target/protocol-harness.log`
@@ -272,8 +277,7 @@ fn protocol_end_to_end() {
     log.line(&format!("  artifact count: {}", artifacts.len()));
     assert_eq!(
         artifacts.len(), 2,
-        "Expected 2 poe:artifact events, got {} — if only 1, long-artifact JSON was \
-         likely fragmented by PTY column wrap (bp6-pdr.13). See {}",
+        "Expected 2 poe:artifact events, got {}. See {}",
         artifacts.len(), log.path().display()
     );
 
@@ -286,20 +290,18 @@ fn protocol_end_to_end() {
     log.line(&format!("  test-short.txt content length: {}", short_content.len()));
     assert!(!short_content.is_empty(), "test-short.txt content is empty — see {}", log.path().display());
 
-    // Long artifact — primary assertion for bp6-pdr.13 (PTY column-wrap bug)
+    // Long artifact — confirms stream-json transport does not truncate long lines.
     let long = artifacts
         .iter()
         .find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-long.txt"));
     assert!(
         long.is_some(),
-        "test-long.txt artifact not found — PTY column-wrap bug (bp6-pdr.13) is present: \
-         {}-char JSON line was split at col 220, neither fragment parsed. See {}",
-        82 + LONG_CONTENT.len() + 2,
+        "test-long.txt artifact not found. See {}",
         log.path().display()
     );
     let long_content = long.unwrap().get("content").and_then(|v| v.as_str()).unwrap_or("");
     log.line(&format!(
-        "  test-long.txt content length: {} (expected > 220, full: {})",
+        "  test-long.txt content length: {} (expected {})",
         long_content.len(), LONG_CONTENT.len()
     ));
     assert!(
