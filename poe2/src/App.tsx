@@ -34,6 +34,8 @@ function ConopsLauncher({ projectId, onLaunched, onOpenSession }: {
     setRunning(true);
     setError(null);
     try {
+      // Create directly as 'waiting' — prevents any race where the orchestrator
+      // could pick it up as 'pending' before the PTY handover opens.
       const node = await invoke<Node>('create_node', {
         input: {
           projectId,
@@ -43,16 +45,10 @@ function ConopsLauncher({ projectId, onLaunched, onOpenSession }: {
           title: 'Develop CONOPS',
           description: trimmed,
           skillId: 'operational-analyst',
+          initialStatus: 'waiting',
         },
       });
-      // Mark 'waiting' immediately so the autonomous orchestrator doesn't race
-      // to dispatch this task before the PTY handover opens.
-      await invoke('update_node', {
-        nodeId: node.id,
-        projectId,
-        input: { status: 'waiting' },
-      });
-      onLaunched({ ...node, status: 'waiting' } as Node);
+      onLaunched(node);
       // Guard against React Strict Mode double-invoke in dev.
       if (openedRef.current.has(node.id)) return;
       openedRef.current.add(node.id);

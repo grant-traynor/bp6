@@ -12,6 +12,9 @@ use tokio::sync::mpsc;
 pub enum DagChanged {
     NodeStatusChanged { project_id: String, node_id: String },
     DagStructureChanged { project_id: String },
+    /// Sent once when a project is first opened. Triggers ghost-agent recovery
+    /// before the normal scheduling loop runs.
+    ProjectOpened { project_id: String },
     QueueItemResolved {
         project_id: String,
         item_id: String,
@@ -193,14 +196,16 @@ fn handle_task(
         title: payload.title.clone(),
         description: payload.description.clone(),
         skill_id: payload.skill.clone(),
+        initial_status: None,
     };
 
     with_project_conn(registry, project_id, |conn| {
         let node = dag_store::db_create_node(conn, &input)?;
-        // Create edges for depends_on entries: from=node.id, to=dep
+        // Finish-to-start edges: dep must finish before node can start.
+        // from=dep, to=node — dep is the prerequisite, node is the dependent.
         if let Some(ref deps) = payload.depends_on {
             for dep_id in deps {
-                dag_store::db_create_edge(conn, &node.id, dep_id, EdgeType::DependsOn)?;
+                dag_store::db_create_edge(conn, dep_id, &node.id, EdgeType::DependsOn)?;
             }
         }
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:task", json)?;
@@ -577,6 +582,7 @@ fn handle_review(
             title: format!("Review: {}", requesting_task.title),
             description: payload.content,
             skill_id: Some(payload.reviewer_skill.clone()),
+            initial_status: None,
         };
         let review_task = dag_store::db_create_node(conn, &review_input)?;
 
@@ -587,8 +593,8 @@ fn handle_review(
         };
         dag_store::db_update_node(conn, task_id, &block_update)?;
 
-        // Wire dependency: requesting_task depends_on review_task
-        // (when review_task completes, orchestrator will unblock requesting_task)
+        // Finish-to-start: review_task must finish before requesting_task can continue.
+        // from=review_task, to=requesting_task.
         dag_store::db_create_edge(
             conn,
             &review_task.id,

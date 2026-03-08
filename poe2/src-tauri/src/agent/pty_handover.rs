@@ -295,46 +295,86 @@ pub async fn agent_handover_open(
 /// Close the PTY handover session for the given node.
 ///
 /// Sends SIGTERM to the claude --resume process, then SIGKILL after 5s.
+/// Marks the node `complete` — closing the modal means the user is done.
 #[tauri::command]
 pub async fn agent_handover_close(
     node_id: String,
     handover_map: tauri::State<'_, HandoverMap>,
+    registry: tauri::State<'_, crate::dag_store::ProjectRegistry>,
+    dag_tx: tauri::State<'_, tokio::sync::mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
 ) -> Result<(), String> {
     let session = {
         let mut map = handover_map.lock().unwrap();
         map.remove(&node_id)
     };
 
-    let Some(session) = session else {
-        return Err(format!("No handover session for node {}", node_id));
-    };
+    // `None` is fine — the modal can be closed after the process already exited.
+    let session = session;
 
     eprintln!("[pty_handover] closing handover for node={}", node_id);
 
-    if let Some(pid) = session.pid {
-        // SIGTERM first, then SIGKILL after 5s.
-        let _ = std::process::Command::new("kill")
-            .arg(pid.to_string())
-            .status();
+    if let Some(ref s) = session {
+        if let Some(pid) = s.pid {
+            // SIGTERM first, then SIGKILL after 5s.
+            let _ = std::process::Command::new("kill")
+                .arg(pid.to_string())
+                .status();
 
-        // Poll for exit with 5s timeout, then SIGKILL.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        loop {
-            let exited = std::process::Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .status()
-                .map(|s| !s.success())
-                .unwrap_or(true);
-            if exited || std::time::Instant::now() >= deadline {
-                break;
+            // Poll for exit with 5s timeout, then SIGKILL.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let exited = std::process::Command::new("kill")
+                    .args(["-0", &pid.to_string()])
+                    .status()
+                    .map(|s| !s.success())
+                    .unwrap_or(true);
+                if exited || std::time::Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
             }
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .status();
         }
-        let _ = std::process::Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .status();
+    }
+    // session._writer is dropped here, closing the PTY master fd.
+    drop(session);
+
+    // Mark the node complete — closing the session means the user is done.
+    // Only updates if the node is currently running/waiting; already-complete nodes
+    // (e.g. autonomous run finished before user closed modal) are left as-is.
+    {
+        let reg = registry.lock().unwrap();
+        for db in reg.values() {
+            let conn = db.conn.lock().unwrap();
+            let node_exists: bool = conn
+                .query_row("SELECT 1 FROM nodes WHERE id = ?1", [&node_id], |_| Ok(()))
+                .is_ok();
+            if !node_exists { continue; }
+            // Only complete if still running or waiting (don't overwrite an already-complete node).
+            let status: Option<String> = conn
+                .query_row("SELECT status FROM nodes WHERE id = ?1", [&node_id], |row| row.get(0))
+                .ok();
+            if matches!(status.as_deref(), Some("running") | Some("waiting")) {
+                let update = crate::dag_store::UpdateNodeInput {
+                    status: Some(crate::dag_store::NodeStatus::Complete),
+                    title: None, description: None, skill_id: None, assignee: None,
+                };
+                let _ = crate::dag_store::db_update_node(&conn, &node_id, &update);
+                let project_id = db.project.id.clone();
+                drop(conn);
+                drop(reg);
+                let _ = dag_tx.send(crate::event_ingester::DagChanged::NodeStatusChanged {
+                    project_id,
+                    node_id: node_id.clone(),
+                });
+                eprintln!("[pty_handover] node={} marked complete on session close", node_id);
+                return Ok(());
+            }
+            break;
+        }
     }
 
-    // session._writer is dropped here, closing the PTY master fd.
     Ok(())
 }

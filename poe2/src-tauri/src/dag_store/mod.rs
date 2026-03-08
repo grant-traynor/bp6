@@ -113,13 +113,16 @@ fn parse_lifecycle_stage(s: String) -> rusqlite::Result<PhaseLifecycleStage> {
 pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    let status = input.initial_status.as_ref()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "pending".to_owned());
     conn.execute(
         "INSERT INTO nodes (id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', ?8, ?9, ?10)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         rusqlite::params![
             id, input.project_id, input.phase_id, input.parent_id,
             input.node_type.to_string(), input.title, input.description,
-            input.skill_id, now, now
+            status, input.skill_id, now, now
         ],
     )
     .context("Failed to insert node")?;

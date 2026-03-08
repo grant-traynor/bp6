@@ -250,6 +250,9 @@ pub struct CreateNodeInput {
     pub title: String,
     pub description: Option<String>,
     pub skill_id: Option<String>,
+    /// Initial status — defaults to `pending` if absent.
+    /// Use `waiting` to prevent autonomous dispatch immediately on creation.
+    pub initial_status: Option<NodeStatus>,
 }
 
 #[derive(Debug, Deserialize)]
