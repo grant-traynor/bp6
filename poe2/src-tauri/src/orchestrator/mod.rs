@@ -1021,7 +1021,7 @@ pub async fn recover_interrupted(
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
     app: &AppHandle,
 ) {
-    let (interrupted, project_path) = {
+    let (interrupted, waiting_nodes, project_path) = {
         let reg = registry.lock().unwrap();
         let db = match reg.values().find(|db| db.project.id == project_id) {
             Some(db) => db.clone(),
@@ -1031,8 +1031,10 @@ pub async fn recover_interrupted(
         let conn = db.conn.lock().unwrap();
         let agents = dag_store::db_list_agents_by_status(&conn, project_id, "running")
             .unwrap_or_default();
+        let waiting = dag_store::db_list_nodes_by_status(&conn, project_id, "waiting")
+            .unwrap_or_default();
         let path = PathBuf::from(&db.project.path);
-        (agents, path)
+        (agents, waiting, path)
     };
 
     let resource_dir = app
@@ -1111,5 +1113,121 @@ pub async fn recover_interrupted(
                 let _ = dag_store::db_end_agent(&conn, &agent.id, "failed");
             }
         }
+    }
+
+    // ── Recover waiting nodes ─────────────────────────────────────────────────
+    // Handle nodes that were in status=waiting when the app was shut down.
+    for node in waiting_nodes {
+        eprintln!(
+            "[orchestrator] recover_interrupted: waiting node={} yield_reason={:?}",
+            node.id, node.yield_reason
+        );
+
+        match node.yield_reason.as_deref() {
+            Some("review") => {
+                recover_waiting_review(&node, project_id, registry, dag_tx, app).await;
+            }
+            Some("decision") => {
+                // Decision record persists in queue_items — human resolves when ready.
+                // No action needed; QueueItemResolved path handles it when resolved.
+                eprintln!(
+                    "[orchestrator] recover_interrupted: waiting node={} yield_reason=decision — no action (human must resolve)",
+                    node.id
+                );
+            }
+            other => {
+                eprintln!(
+                    "[orchestrator] recover_interrupted: waiting node={} unknown yield_reason={:?} — no action",
+                    node.id, other
+                );
+            }
+        }
+    }
+}
+
+/// Recovery path for a waiting node with yield_reason='review'.
+///
+/// Checks whether all reviewers already answered before the restart. If so,
+/// immediately triggers SF-3 (resume requesting task with ReviewResult bundle).
+/// Otherwise, any reviewer still running will re-enter the interrupted-agent
+/// recovery path above and trigger SF-3 on completion via the normal SF-2 path.
+/// Any pending (not-yet-started) reviewer nodes are re-dispatched via NodeStatusChanged.
+async fn recover_waiting_review(
+    node: &dag_store::Node,
+    project_id: &str,
+    registry: &ProjectRegistry,
+    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) {
+    eprintln!(
+        "[orchestrator] recover_waiting_review: checking reviewer completion for task={}",
+        node.id
+    );
+
+    // Query expected vs. answered reviewer nodes.
+    let (expected_ids, answered_ids) = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        match dag_store::db_reviewer_completion_status(&conn, &node.id) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] recover_waiting_review: failed to query completion status for task={}: {}",
+                    node.id, e
+                );
+                return;
+            }
+        }
+    };
+
+    let mut expected_sorted = expected_ids.clone();
+    expected_sorted.sort();
+    let mut answered_sorted = answered_ids.clone();
+    answered_sorted.sort();
+
+    eprintln!(
+        "[orchestrator] recover_waiting_review: task={} expected={:?} answered={:?}",
+        node.id, expected_sorted, answered_sorted
+    );
+
+    if expected_sorted.is_empty() {
+        // No reviewer nodes exist yet — they may have been lost before creation.
+        // Re-dispatch review yield so reviewer nodes are (re-)created.
+        eprintln!(
+            "[orchestrator] recover_waiting_review: task={} — no reviewer nodes found, re-dispatching review yield",
+            node.id
+        );
+        handle_review_yield(node, project_id, registry, dag_tx, app).await;
+        return;
+    }
+
+    if expected_sorted == answered_sorted {
+        // All reviewers finished before the restart — trigger SF-3 immediately.
+        eprintln!(
+            "[orchestrator] recover_waiting_review: task={} — all {} reviewers already done, resuming immediately",
+            node.id,
+            expected_sorted.len()
+        );
+        check_review_completion(&node.id, project_id, registry, dag_tx, app).await;
+    } else {
+        // Some reviewers are not yet done. Running reviewer agents re-enter the
+        // interrupted-agent recovery path and will trigger SF-3 on completion.
+        // Emit NodeStatusChanged so run_loop picks up any pending (not-yet-started)
+        // reviewer nodes and dispatches them.
+        eprintln!(
+            "[orchestrator] recover_waiting_review: task={} — {} of {} reviewers pending/running, emitting NodeStatusChanged",
+            node.id,
+            expected_sorted.len().saturating_sub(answered_sorted.len()),
+            expected_sorted.len()
+        );
+        let _ = dag_tx.send(DagChanged::NodeStatusChanged {
+            project_id: project_id.to_owned(),
+            node_id: node.id.clone(),
+        });
     }
 }

@@ -888,6 +888,41 @@ pub fn db_reviewer_completion_status(conn: &Connection, requesting_task_id: &str
     Ok((expected, answered))
 }
 
+/// List all nodes for a project with a given status string (e.g. "waiting", "running").
+pub fn db_list_nodes_by_status(conn: &Connection, project_id: &str, status: &str) -> Result<Vec<Node>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status,
+                skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id,
+                retry_count, created_at, updated_at
+         FROM nodes WHERE project_id = ?1 AND status = ?2 ORDER BY created_at"
+    )?;
+    let rows = stmt
+        .query_map(rusqlite::params![project_id, status], |row| {
+            Ok(Node {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                phase_id: row.get(2)?,
+                parent_id: row.get(3)?,
+                node_type: parse_node_type(row.get(4)?)?,
+                title: row.get(5)?,
+                description: row.get(6)?,
+                status: parse_node_status(row.get(7)?)?,
+                skill_id: row.get(8)?,
+                assignee: row.get(9)?,
+                yield_reason: row.get(10)?,
+                session_id: row.get(11)?,
+                requesting_task_id: row.get(12)?,
+                review_id: row.get(13)?,
+                retry_count: row.get(14)?,
+                created_at: row.get(15)?,
+                updated_at: row.get(16)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to list nodes by status")?;
+    Ok(rows)
+}
+
 pub fn db_count_running_agents(conn: &Connection, project_id: &str) -> Result<usize> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM agents WHERE project_id = ?1 AND status = 'running'",
