@@ -155,8 +155,10 @@ export function usePoeProject(projectId: string | null): {
         taskId: string;
         projectId: string;
         skillId: string;
+        model?: string | null;
       }>('poe-agent-started', ({ payload }) => {
         if (payload.projectId !== projectId) return;
+        const modelSuffix = payload.model ? ` [${payload.model}]` : '';
         setFeedItems(prev => [
           ...prev,
           {
@@ -165,7 +167,8 @@ export function usePoeProject(projectId: string | null): {
             eventType: 'poe-agent-started',
             taskId: payload.taskId,
             skillId: payload.skillId,
-            message: `Agent started (skill: ${payload.skillId})`,
+            model: payload.model,
+            message: `Agent started (skill: ${payload.skillId}${modelSuffix})`,
             ts: new Date().toISOString(),
           },
         ]);

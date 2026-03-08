@@ -108,6 +108,7 @@ pub async fn spawn_agent(
                 "taskId": req.task_id,
                 "projectId": req.project_id,
                 "skillId": req.skill_id,
+                "model": req.model,
             }),
         );
     }

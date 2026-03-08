@@ -64,6 +64,7 @@ export interface FeedItem {
   eventType?: string;
   taskId?: string | null;
   skillId?: string | null;
+  model?: string | null;
   message: string;
   ts: string;   // ISO timestamp or createdAt
 }

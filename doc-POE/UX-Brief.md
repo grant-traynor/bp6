@@ -99,6 +99,7 @@ A live, structured stream of agent events across the selected project — not ra
 
 Each entry shows:
 - Agent identifier and assigned skill
+- Model override, if the skill declares one (e.g. `[claude-opus-4-6]`) — omitted when the skill uses the default
 - Task name and WBS ancestry
 - Event type: brief / step / artifact produced / decision raised / done
 - Timestamp
