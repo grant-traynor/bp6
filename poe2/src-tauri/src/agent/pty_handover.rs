@@ -104,6 +104,7 @@ pub async fn agent_handover_open(
                 description: None,
                 skill_id: None,
                 assignee: None,
+                ..Default::default()
             };
             let _ = crate::dag_store::db_update_node(&conn, &node_id, &update);
             // Create an agent record so session_id is captured when claude emits init.
@@ -360,6 +361,7 @@ pub async fn agent_handover_close(
                 let update = crate::dag_store::UpdateNodeInput {
                     status: Some(crate::dag_store::NodeStatus::Complete),
                     title: None, description: None, skill_id: None, assignee: None,
+                    ..Default::default()
                 };
                 let _ = crate::dag_store::db_update_node(&conn, &node_id, &update);
                 let project_id = db.project.id.clone();

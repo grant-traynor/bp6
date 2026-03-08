@@ -25,24 +25,28 @@ CREATE TABLE IF NOT EXISTS phases (
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
-    id          TEXT PRIMARY KEY,
-    project_id  TEXT NOT NULL REFERENCES projects(id),
-    phase_id    TEXT REFERENCES phases(id),
-    parent_id   TEXT REFERENCES nodes(id),
-    node_type   TEXT NOT NULL,
-    title       TEXT NOT NULL,
-    description TEXT,
-    status      TEXT NOT NULL DEFAULT 'pending',
-    skill_id    TEXT,
-    assignee    TEXT,
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    id                  TEXT PRIMARY KEY,
+    project_id          TEXT NOT NULL REFERENCES projects(id),
+    phase_id            TEXT REFERENCES phases(id),
+    parent_id           TEXT REFERENCES nodes(id),
+    node_type           TEXT NOT NULL,
+    title               TEXT NOT NULL,
+    description         TEXT,
+    status              TEXT NOT NULL DEFAULT 'pending',
+    skill_id            TEXT,
+    assignee            TEXT,
+    yield_reason        TEXT,
+    session_id          TEXT,
+    requesting_task_id  TEXT REFERENCES nodes(id),
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_nodes_project ON nodes(project_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_phase ON nodes(phase_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_status ON nodes(status);
+CREATE INDEX IF NOT EXISTS idx_nodes_requesting_task_id ON nodes(requesting_task_id);
 
 CREATE TABLE IF NOT EXISTS edges (
     id          TEXT PRIMARY KEY,

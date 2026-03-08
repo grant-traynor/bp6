@@ -74,6 +74,7 @@ pub async fn spawn_agent(
             description: None,
             skill_id: None,
             assignee: None,
+            ..Default::default()
         };
         dag_store::db_update_node(&conn, &req.task_id, &update)?;
         let record = dag_store::db_create_agent(
@@ -148,17 +149,21 @@ pub async fn spawn_agent(
         // Clone string keys for each closure independently.
         let project_id_for_session = project_id.clone();
         let project_id_for_chunk = project_id.clone();
+        let project_id_for_raw = project_id.clone();
         let project_id_for_complete = project_id.clone();
 
         let task_id_for_chunk = task_id.clone();
+        let task_id_for_raw = task_id.clone();
         let task_id_for_complete = task_id.clone();
 
         let agent_id_for_pid = agent_id_clone.clone();
         let agent_id_for_session = agent_id_clone.clone();
         let agent_id_for_chunk = agent_id_clone.clone();
+        let agent_id_for_raw = agent_id_clone.clone();
         let agent_id_for_complete = agent_id_clone.clone();
 
         let agent_map_for_pid = agent_map_clone.clone();
+        let agent_map_for_session = agent_map_clone.clone();
 
         let registry_for_session = registry_clone.clone();
         let registry_for_chunk = registry_clone.clone();
@@ -168,6 +173,7 @@ pub async fn spawn_agent(
         let dag_tx_for_complete = dag_tx_clone.clone();
 
         let app_for_chunk = app_clone.clone();
+        let app_for_raw = app_clone.clone();
         let app_for_complete = app_clone.clone();
 
         let project_path_for_chunk = project_path.clone();
@@ -200,15 +206,30 @@ pub async fn spawn_agent(
                         .find(|db| db.project.id == project_id_for_session)
                     {
                         let conn = db.conn.lock().unwrap();
+                        // Write to agents.session_id (legacy).
                         if let Err(e) = dag_store::db_update_agent_session(
                             &conn,
                             &agent_id_for_session,
                             &sid,
                         ) {
                             eprintln!(
-                                "[agent_lifecycle] agent={} failed to store session_id: {}",
+                                "[agent_lifecycle] agent={} failed to store agents.session_id: {}",
                                 agent_id_for_session, e
                             );
+                        }
+                        // Write to nodes.session_id (canonical per Protocol.md §1).
+                        let task_id_for_node_session = {
+                            let map = agent_map_for_session.lock().unwrap();
+                            map.get(&agent_id_for_session)
+                                .map(|a| a.task_id.clone())
+                        };
+                        if let Some(ref tid) = task_id_for_node_session {
+                            if let Err(e) = dag_store::db_update_node_session(&conn, tid, &sid) {
+                                eprintln!(
+                                    "[agent_lifecycle] agent={} failed to store nodes.session_id: {}",
+                                    agent_id_for_session, e
+                                );
+                            }
                         }
                     }
                 }),
@@ -217,16 +238,6 @@ pub async fn spawn_agent(
                     let lines = ex.push(&text);
                     drop(ex); // release lock before ingesting
                     for line in lines {
-                        use tauri::Emitter;
-                        let _ = app_for_chunk.emit(
-                            "poe-pty-line",
-                            serde_json::json!({
-                                "agentId": agent_id_for_chunk,
-                                "taskId": task_id_for_chunk,
-                                "projectId": project_id_for_chunk,
-                                "line": line,
-                            }),
-                        );
                         event_ingester::ingest_line(
                             &line,
                             &project_id_for_chunk,
@@ -241,22 +252,22 @@ pub async fn spawn_agent(
                 }),
                 on_raw_json: Box::new(move |json| {
                     eprintln!("[transport] raw: {}", json);
+                    use tauri::Emitter;
+                    let _ = app_for_raw.emit(
+                        "poe-agent-stream",
+                        serde_json::json!({
+                            "agentId": agent_id_for_raw,
+                            "taskId": task_id_for_raw,
+                            "projectId": project_id_for_raw,
+                            "event": json,
+                        }),
+                    );
                 }),
                 on_complete: Box::new(move || {
                     // Flush TextBufExtractor tail — last poe: event may lack a trailing newline.
                     let tail = extractor_for_complete.lock().unwrap().flush();
                     if let Some(tail) = tail {
                         if !tail.trim().is_empty() {
-                            use tauri::Emitter;
-                            let _ = app_for_complete.emit(
-                                "poe-pty-line",
-                                serde_json::json!({
-                                    "agentId": agent_id_for_complete,
-                                    "taskId": task_id_for_complete,
-                                    "projectId": project_id_for_complete,
-                                    "line": tail,
-                                }),
-                            );
                             event_ingester::ingest_line(
                                 &tail,
                                 &project_id_for_complete,
@@ -315,6 +326,7 @@ pub async fn spawn_agent(
                             description: None,
                             skill_id: None,
                             assignee: None,
+                            ..Default::default()
                         };
                         let _ = dag_store::db_update_node(&conn, &task_id, &update);
                         false

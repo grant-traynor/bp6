@@ -40,6 +40,14 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
     // Migrate: add promoted column to knowledge if not present (ignore error if exists)
     let _ = conn.execute_batch("ALTER TABLE knowledge ADD COLUMN promoted INTEGER NOT NULL DEFAULT 0");
 
+    // Migrate: add new node columns for existing databases (SQLite < 3.37 has no IF NOT EXISTS
+    // for ALTER TABLE ADD COLUMN, so we ignore the "duplicate column name" error).
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN yield_reason TEXT");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN session_id TEXT");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN requesting_task_id TEXT REFERENCES nodes(id)");
+    // Add index for requesting_task_id (CREATE INDEX IF NOT EXISTS is safe to re-run).
+    let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_nodes_requesting_task_id ON nodes(requesting_task_id)");
+
     // Upsert the project record based on path
     let path_str = project_path.to_string_lossy().to_string();
     let name = project_path
@@ -131,7 +139,7 @@ pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node
 
 pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
     conn.query_row(
-        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, created_at, updated_at
+        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, created_at, updated_at
          FROM nodes WHERE id = ?1",
         [node_id],
         |row| {
@@ -146,8 +154,11 @@ pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
                 status: parse_node_status(row.get(7)?)?,
                 skill_id: row.get(8)?,
                 assignee: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                yield_reason: row.get(10)?,
+                session_id: row.get(11)?,
+                requesting_task_id: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         },
     )
@@ -176,6 +187,14 @@ pub fn db_update_node(conn: &Connection, node_id: &str, input: &UpdateNodeInput)
         conn.execute("UPDATE nodes SET assignee = ?1, updated_at = ?2 WHERE id = ?3",
             rusqlite::params![assignee, now, node_id])?;
     }
+    if let Some(ref yield_reason) = input.yield_reason {
+        conn.execute("UPDATE nodes SET yield_reason = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![yield_reason, now, node_id])?;
+    }
+    if let Some(ref session_id) = input.session_id {
+        conn.execute("UPDATE nodes SET session_id = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![session_id, now, node_id])?;
+    }
     db_get_node(conn, node_id)
 }
 
@@ -193,39 +212,47 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
     let mut rows = Vec::new();
     if let Some(pid) = phase_id {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, created_at, updated_at
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, created_at, updated_at
              FROM nodes WHERE project_id = ?1 AND phase_id = ?2 ORDER BY created_at"
         )?;
         for row in stmt.query_map(rusqlite::params![project_id, pid], |row| {
             Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,Option<String>>(2)?,
                 row.get::<_,Option<String>>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?,
                 row.get::<_,Option<String>>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<String>>(8)?,
-                row.get::<_,Option<String>>(9)?, row.get::<_,String>(10)?, row.get::<_,String>(11)?))
+                row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?,
+                row.get::<_,Option<String>>(11)?, row.get::<_,Option<String>>(12)?,
+                row.get::<_,String>(13)?, row.get::<_,String>(14)?))
         })? {
-            let (id, proj, phase, parent, nt, title, desc, status, skill, assignee, cat, uat) = row?;
+            let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
+                 yield_reason, session_id, requesting_task_id, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
+                yield_reason, session_id, requesting_task_id,
                 created_at: cat, updated_at: uat,
             });
         }
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, created_at, updated_at
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, created_at, updated_at
              FROM nodes WHERE project_id = ?1 ORDER BY created_at"
         )?;
         for row in stmt.query_map([project_id], |row| {
             Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,Option<String>>(2)?,
                 row.get::<_,Option<String>>(3)?, row.get::<_,String>(4)?, row.get::<_,String>(5)?,
                 row.get::<_,Option<String>>(6)?, row.get::<_,String>(7)?, row.get::<_,Option<String>>(8)?,
-                row.get::<_,Option<String>>(9)?, row.get::<_,String>(10)?, row.get::<_,String>(11)?))
+                row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?,
+                row.get::<_,Option<String>>(11)?, row.get::<_,Option<String>>(12)?,
+                row.get::<_,String>(13)?, row.get::<_,String>(14)?))
         })? {
-            let (id, proj, phase, parent, nt, title, desc, status, skill, assignee, cat, uat) = row?;
+            let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
+                 yield_reason, session_id, requesting_task_id, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
+                yield_reason, session_id, requesting_task_id,
                 created_at: cat, updated_at: uat,
             });
         }
@@ -494,7 +521,45 @@ pub fn db_count_unresolved_queue_items_for_task(conn: &Connection, task_id: &str
     Ok(count as usize)
 }
 
+/// Write session_id to nodes.session_id — canonical location per Protocol.md §1.
+pub fn db_update_node_session(conn: &Connection, task_id: &str, session_id: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE nodes SET session_id = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![session_id, now, task_id],
+    )
+    .context("Failed to update nodes.session_id")?;
+    Ok(())
+}
+
+/// Get the session_id for a task. Reads from nodes.session_id (canonical) first,
+/// falling back to agents.session_id for backwards compatibility.
+pub fn db_get_session_id_for_task(conn: &Connection, task_id: &str) -> Result<Option<String>> {
+    // Try nodes.session_id first (canonical per Protocol.md §1).
+    let node_result: rusqlite::Result<Option<String>> = conn.query_row(
+        "SELECT session_id FROM nodes WHERE id = ?1",
+        [task_id],
+        |row| row.get(0),
+    );
+    if let Ok(Some(sid)) = node_result {
+        return Ok(Some(sid));
+    }
+
+    // Fallback: agents table (legacy path).
+    let agent_result: rusqlite::Result<Option<String>> = conn.query_row(
+        "SELECT session_id FROM agents WHERE task_id = ?1 ORDER BY started_at DESC LIMIT 1",
+        [task_id],
+        |row| row.get(0),
+    );
+    match agent_result {
+        Ok(v) => Ok(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Get the most recent session_id from the agents table for a given task.
+/// Kept for backwards compatibility; prefer db_get_session_id_for_task.
 pub fn db_get_agent_session_for_task(conn: &Connection, task_id: &str) -> Result<Option<String>> {
     let result: rusqlite::Result<Option<String>> = conn.query_row(
         "SELECT session_id FROM agents WHERE task_id = ?1 ORDER BY started_at DESC LIMIT 1",
@@ -709,7 +774,8 @@ pub fn db_advance_stage_gate(conn: &Connection, phase_id: &str) -> Result<Phase>
 pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<Node>> {
     let mut stmt = conn.prepare(
         "SELECT n.id, n.project_id, n.phase_id, n.parent_id, n.node_type, n.title, n.description,
-                n.status, n.skill_id, n.assignee, n.created_at, n.updated_at
+                n.status, n.skill_id, n.assignee, n.yield_reason, n.session_id, n.requesting_task_id,
+                n.created_at, n.updated_at
          FROM nodes n
          LEFT JOIN phases p ON p.id = n.phase_id
          WHERE n.project_id = ?1
@@ -737,8 +803,11 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
                 status: parse_node_status(row.get(7)?)?,
                 skill_id: row.get(8)?,
                 assignee: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                yield_reason: row.get(10)?,
+                session_id: row.get(11)?,
+                requesting_task_id: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()

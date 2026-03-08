@@ -160,6 +160,12 @@ pub struct Node {
     pub status: NodeStatus,
     pub skill_id: Option<String>,
     pub assignee: Option<String>,
+    /// 'review' | 'decision' | NULL — set when status=waiting. Used by recovery.
+    pub yield_reason: Option<String>,
+    /// Claude --resume handle. Canonical location per Protocol.md §1.
+    pub session_id: Option<String>,
+    /// Reviewer tasks only: back-reference to the task that requested this review.
+    pub requesting_task_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -255,7 +261,7 @@ pub struct CreateNodeInput {
     pub initial_status: Option<NodeStatus>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateNodeInput {
     pub title: Option<String>,
@@ -263,6 +269,8 @@ pub struct UpdateNodeInput {
     pub status: Option<NodeStatus>,
     pub skill_id: Option<String>,
     pub assignee: Option<String>,
+    pub yield_reason: Option<String>,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

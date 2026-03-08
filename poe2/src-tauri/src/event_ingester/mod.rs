@@ -234,6 +234,7 @@ fn handle_task_update(
         status: None,
         skill_id: payload.skill,
         assignee: None,
+        ..Default::default()
     };
 
     with_project_conn(registry, project_id, |conn| {
@@ -436,6 +437,7 @@ pub(crate) fn db_handle_decision(
     let wait_update = UpdateNodeInput {
         status: Some(NodeStatus::Waiting),
         title: None, description: None, skill_id: None, assignee: None,
+        ..Default::default()
     };
     dag_store::db_update_node(conn, task_id, &wait_update)?;
 
@@ -492,6 +494,7 @@ pub(crate) fn db_handle_done(
         title: None, description: None,
         status: Some(new_status.clone()),
         skill_id: None, assignee: None,
+        ..Default::default()
     };
     dag_store::db_update_node(conn, task_id, &update)?;
     dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:done", json)?;
@@ -590,6 +593,7 @@ fn handle_review(
         let block_update = UpdateNodeInput {
             status: Some(NodeStatus::Blocked),
             title: None, description: None, skill_id: None, assignee: None,
+            ..Default::default()
         };
         dag_store::db_update_node(conn, task_id, &block_update)?;
 

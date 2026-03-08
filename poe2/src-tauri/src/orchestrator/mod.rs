@@ -53,20 +53,27 @@ impl ConcurrencyLimits {
 
 /// Start the orchestrator loop. Receives a channel receiver created in app setup.
 pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChanged>) {
+    eprintln!("[orchestrator] start: loop running");
     loop {
         let signal = match dag_rx.recv().await {
             Some(s) => s,
             None => break,
         };
+        eprintln!("[orchestrator] start: received signal {:?}", signal);
 
-        // Drain all pending signals — categorise into resume requests and DAG changes
+        // Drain all pending signals — categorise into buckets
         let mut resume_requests: Vec<(String, String, String, String)> = Vec::new(); // (project_id, task_id, session_id, resolution)
+        let mut opened_projects: Vec<String> = Vec::new(); // projects needing ghost-agent recovery
         let mut project_ids = std::collections::HashSet::new();
 
         // Process a single signal inline (closure not used due to borrow rules)
         match signal {
             DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, .. } => {
                 resume_requests.push((project_id, task_id, session_id, resolution));
+            }
+            DagChanged::ProjectOpened { project_id } => {
+                opened_projects.push(project_id.clone());
+                project_ids.insert(project_id);
             }
             other => {
                 project_ids.insert(signal_project_id(&other).to_owned());
@@ -78,6 +85,10 @@ pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChange
                 DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, .. } => {
                     resume_requests.push((project_id, task_id, session_id, resolution));
                 }
+                DagChanged::ProjectOpened { project_id } => {
+                    opened_projects.push(project_id.clone());
+                    project_ids.insert(project_id);
+                }
                 other => {
                     project_ids.insert(signal_project_id(&other).to_owned());
                 }
@@ -87,6 +98,12 @@ pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChange
         let registry = app.state::<ProjectRegistry>().inner().clone();
         let limits = app.state::<Arc<ConcurrencyLimits>>().inner().clone();
         let dag_tx = app.state::<mpsc::UnboundedSender<DagChanged>>().inner().clone();
+
+        // Recover ghost agents from previously-interrupted sessions before scheduling.
+        for project_id in &opened_projects {
+            eprintln!("[orchestrator] project opened — running ghost-agent recovery for {}", project_id);
+            recover_interrupted(project_id, &registry, &dag_tx, &app).await;
+        }
 
         // Handle resume continuations for resolved decisions
         for (project_id, task_id, session_id, resolution) in resume_requests {
@@ -104,6 +121,7 @@ fn signal_project_id(signal: &DagChanged) -> &str {
     match signal {
         DagChanged::NodeStatusChanged { project_id, .. } => project_id,
         DagChanged::DagStructureChanged { project_id } => project_id,
+        DagChanged::ProjectOpened { project_id } => project_id,
         DagChanged::QueueItemResolved { project_id, .. } => project_id,
     }
 }
@@ -174,11 +192,16 @@ async fn run_loop(
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
     app: &AppHandle,
 ) {
+    eprintln!("[orchestrator] run_loop wakeup project={}", project_id);
+
     let ready_tasks = {
         let reg = registry.lock().unwrap();
         let db = match reg.values().find(|db| db.project.id == project_id) {
             Some(db) => db.clone(),
-            None => return,
+            None => {
+                eprintln!("[orchestrator] run_loop: project not open in registry, skipping");
+                return;
+            }
         };
         drop(reg);
 
@@ -186,26 +209,53 @@ async fn run_loop(
 
         let global_running = dag_store::db_count_running_agents_global(&conn).unwrap_or(0);
         let global_limit = limits.global_limit.load(Ordering::Relaxed);
+        eprintln!(
+            "[orchestrator] run_loop: global_running={} global_limit={}",
+            global_running, global_limit
+        );
         if global_running >= global_limit {
+            eprintln!("[orchestrator] run_loop: global concurrency limit reached, skipping");
             return;
         }
 
         let project_running = dag_store::db_count_running_agents(&conn, project_id).unwrap_or(0);
         let project_limit = limits.get_project_limit(project_id);
+        eprintln!(
+            "[orchestrator] run_loop: project_running={} project_limit={}",
+            project_running, project_limit
+        );
         if project_running >= project_limit {
+            eprintln!("[orchestrator] run_loop: project concurrency limit reached, skipping");
             return;
         }
 
         let slots = (project_limit - project_running).min(global_limit - global_running);
 
         match dag_store::db_find_ready_tasks(&conn, project_id) {
-            Ok(tasks) => tasks.into_iter().take(slots).collect::<Vec<_>>(),
+            Ok(tasks) => {
+                eprintln!(
+                    "[orchestrator] run_loop: found {} ready task(s), slots={}",
+                    tasks.len(),
+                    slots
+                );
+                for t in &tasks {
+                    eprintln!(
+                        "[orchestrator] run_loop: ready task id={} title={:?} skill={:?}",
+                        t.id, t.title, t.skill_id
+                    );
+                }
+                tasks.into_iter().take(slots).collect::<Vec<_>>()
+            }
             Err(e) => {
                 eprintln!("[orchestrator] Failed to find ready tasks: {}", e);
                 return;
             }
         }
     };
+
+    if ready_tasks.is_empty() {
+        eprintln!("[orchestrator] run_loop: no ready tasks to dispatch");
+    }
 
     for task in ready_tasks {
         dispatch_task(task, project_id, registry, dag_tx, app).await;
@@ -219,6 +269,11 @@ async fn dispatch_task(
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
     app: &AppHandle,
 ) {
+    eprintln!(
+        "[orchestrator] dispatch_task: id={} title={:?} skill={:?}",
+        task.id, task.title, task.skill_id
+    );
+
     let bundle_data = {
         let reg = registry.lock().unwrap();
         let db = match reg.values().find(|db| db.project.id == project_id) {
@@ -261,7 +316,13 @@ async fn dispatch_task(
     let (project_path, skill_id, resource_dir, knowledge, ancestry, artifacts) = bundle_data;
 
     let skill = match skills::load_skill(&skill_id, &project_path, &resource_dir) {
-        Ok(s) => s,
+        Ok(s) => {
+            eprintln!(
+                "[orchestrator] dispatch_task: skill loaded skill_id={} source={} model={:?}",
+                s.skill_id, s.source, s.model
+            );
+            s
+        }
         Err(e) => {
             eprintln!("[orchestrator] Failed to load skill '{}': {}", skill_id, e);
             return;
@@ -334,7 +395,13 @@ pub async fn recover_interrupted(
         .unwrap_or_else(|_| PathBuf::from("."));
 
     for agent in interrupted {
+        eprintln!(
+            "[orchestrator] recover_interrupted: agent={} task={} session={:?}",
+            agent.id, agent.task_id, agent.session_id
+        );
+
         if let Some(ref session_id) = agent.session_id {
+            // Session was established — try to resume where we left off.
             let skill = skills::load_skill(&agent.skill_id, &project_path, &resource_dir).ok();
             let model = skill.as_ref().and_then(|s| s.model.clone());
             let input_bundle = skill
@@ -369,11 +436,33 @@ pub async fn recover_interrupted(
                             description: None,
                             skill_id: None,
                             assignee: None,
+                            ..Default::default()
                         };
                         let _ = dag_store::db_update_node(&conn, &agent.task_id, &update);
                         let _ = dag_store::db_end_agent(&conn, &agent.id, "failed");
                     }
                 }
+            }
+        } else {
+            // Session ID was never recorded (crash before on_session_id fired).
+            // Cannot resume — requeue to pending so the orchestrator can restart fresh.
+            eprintln!(
+                "[orchestrator] recover_interrupted: no session_id for agent={}, requeueing task={} to pending",
+                agent.id, agent.task_id
+            );
+            let reg = registry.lock().unwrap();
+            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                let conn = db.conn.lock().unwrap();
+                let update = dag_store::UpdateNodeInput {
+                    status: Some(dag_store::NodeStatus::Pending),
+                    title: None,
+                    description: None,
+                    skill_id: None,
+                    assignee: None,
+                    ..Default::default()
+                };
+                let _ = dag_store::db_update_node(&conn, &agent.task_id, &update);
+                let _ = dag_store::db_end_agent(&conn, &agent.id, "failed");
             }
         }
     }

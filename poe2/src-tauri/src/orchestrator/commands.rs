@@ -136,6 +136,7 @@ pub async fn pause_stage(
             let update = UpdateNodeInput {
                 status: Some(NodeStatus::Pending),
                 title: None, description: None, skill_id: None, assignee: None,
+                ..Default::default()
             };
             let _ = dag_store::db_update_node(&conn, task_id, &update);
         }

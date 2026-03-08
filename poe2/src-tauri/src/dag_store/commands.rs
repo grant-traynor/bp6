@@ -20,8 +20,10 @@ pub async fn open_project(
 
     registry.lock().unwrap().insert(project.path.clone(), db);
 
-    // Wake the orchestrator so any pre-existing pending tasks are dispatched.
-    let _ = dag_tx.send(crate::event_ingester::DagChanged::DagStructureChanged {
+    // Notify orchestrator: project just opened. This triggers ghost-agent recovery
+    // (running tasks from a previous session whose process is no longer alive)
+    // before the normal scheduling loop runs.
+    let _ = dag_tx.send(crate::event_ingester::DagChanged::ProjectOpened {
         project_id: project.id.clone(),
     });
 
