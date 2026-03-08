@@ -2,8 +2,8 @@ import type { Node } from '../types';
 
 interface Props {
   nodes: Node[];
-  onDebugOpen: (nodeId: string) => void;    // running nodes → DebugPanel
-  onHandoverOpen: (nodeId: string) => void; // waiting nodes → AgentHandover
+  onHandoverOpen: (nodeId: string) => void;
+  onDebugOpen: (nodeId: string) => void;
 }
 
 interface TreeNode {
@@ -39,7 +39,7 @@ function buildTree(nodes: Node[]): TreeNode[] {
 function statusDot(status: Node['status']): { symbol: string; cls: string } {
   switch (status) {
     case 'running':  return { symbol: '●', cls: 'text-emerald-400' };
-    case 'waiting':  return { symbol: '?', cls: 'text-amber-400' };
+    case 'waiting':  return { symbol: '⏸', cls: 'text-amber-400' };
     case 'complete': return { symbol: '✓', cls: 'text-neutral-600' };
     case 'cancelled':return { symbol: '✕', cls: 'text-neutral-700' };
     case 'blocked':  return { symbol: '⊘', cls: 'text-red-600' };
@@ -47,9 +47,15 @@ function statusDot(status: Node['status']): { symbol: string; cls: string } {
   }
 }
 
-function NodeRow({ item, onDebugOpen, onHandoverOpen }: { item: TreeNode; onDebugOpen: (id: string) => void; onHandoverOpen: (id: string) => void }) {
+function NodeRow({ item, onHandoverOpen, onDebugOpen }: {
+  item: TreeNode;
+  onHandoverOpen: (id: string) => void;
+  onDebugOpen: (id: string) => void;
+}) {
   const { symbol, cls } = statusDot(item.node.status);
-  const isActive = item.node.status === 'running' || item.node.status === 'waiting';
+  const isRunning = item.node.status === 'running';
+  const isWaiting = item.node.status === 'waiting';
+  const isActive = isRunning || isWaiting;
   const typeLabel = item.node.nodeType === 'epic' ? 'EPIC'
                   : item.node.nodeType === 'feature' ? 'FEAT'
                   : item.node.nodeType === 'bug' ? 'BUG'
@@ -63,14 +69,10 @@ function NodeRow({ item, onDebugOpen, onHandoverOpen }: { item: TreeNode; onDebu
         }`}
         style={{ paddingLeft: `${4 + item.depth * 16}px` }}
         onClick={() => {
-          if (item.node.status === 'running') onDebugOpen(item.node.id);
-          else if (item.node.status === 'waiting') onHandoverOpen(item.node.id);
+          if (isRunning) onDebugOpen(item.node.id);
+          else if (isWaiting) onHandoverOpen(item.node.id);
         }}
-        title={
-          item.node.status === 'running' ? 'Click to view raw output' :
-          item.node.status === 'waiting' ? 'Click to open agent handover' :
-          undefined
-        }
+        title={isRunning ? 'Click to view stream output' : isWaiting ? 'Click to open agent handover' : undefined}
       >
         <span className={`shrink-0 font-mono text-[11px] w-3 text-center ${cls}`}>{symbol}</span>
         {typeLabel && (
@@ -82,15 +84,18 @@ function NodeRow({ item, onDebugOpen, onHandoverOpen }: { item: TreeNode; onDebu
         {item.node.skillId && item.node.status === 'running' && (
           <span className="shrink-0 text-[10px] text-neutral-600 font-mono ml-auto pr-1">{item.node.skillId}</span>
         )}
+        {item.node.skillId && item.node.status === 'waiting' && (
+          <span className="shrink-0 text-[10px] text-amber-500/70 font-mono ml-auto pr-1">{item.node.skillId}</span>
+        )}
       </div>
       {item.children.map(child => (
-        <NodeRow key={child.node.id} item={child} onDebugOpen={onDebugOpen} onHandoverOpen={onHandoverOpen} />
+        <NodeRow key={child.node.id} item={child} onHandoverOpen={onHandoverOpen} onDebugOpen={onDebugOpen} />
       ))}
     </>
   );
 }
 
-export default function NodeTree({ nodes, onDebugOpen, onHandoverOpen }: Props) {
+export default function NodeTree({ nodes, onHandoverOpen, onDebugOpen }: Props) {
   const tree = buildTree(nodes);
 
   if (nodes.length === 0) return null;
@@ -98,7 +103,7 @@ export default function NodeTree({ nodes, onDebugOpen, onHandoverOpen }: Props) 
   return (
     <div className="overflow-y-auto border-b border-neutral-800 py-1">
       {tree.map(item => (
-        <NodeRow key={item.node.id} item={item} onDebugOpen={onDebugOpen} onHandoverOpen={onHandoverOpen} />
+        <NodeRow key={item.node.id} item={item} onHandoverOpen={onHandoverOpen} onDebugOpen={onDebugOpen} />
       ))}
     </div>
   );
