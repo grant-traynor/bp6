@@ -21,6 +21,10 @@ modes: [autonomous]          # REQUIRED. One or more of: autonomous, interactive
                              #   interactive — run in a human conversation (poe: events only on concrete output)
                              #   If omitted, orchestrator assumes [autonomous] only.
                              #   The UI blocks interactive sessions for autonomous-only skills.
+model: claude-opus-4-6       # Optional. Claude model ID for this skill's agent spawn.
+                             #   When present, the orchestrator passes --model <value> to claude.
+                             #   When absent, claude uses its configured default.
+                             #   Use for high-stakes analysis skills that benefit from a more capable model.
 tags: [poe, lifecycle, ...]  # Optional. Informational. Not parsed by the orchestrator.
 applies_to: [WorkflowType]   # Optional. Informational. Not parsed by the orchestrator.
 protocol_version: v2         # Optional. Convention — include for new skills to signal v2 format.
@@ -35,6 +39,7 @@ protocol_version: v2         # Optional. Convention — include for new skills t
 | `name` | Yes | Human-readable display name |
 | `description` | Yes | One sentence — what this specialist does |
 | `modes` | Yes | Declare explicitly — do not rely on the autonomous default |
+| `model` | No | Claude model ID; passes `--model` to claude spawn when present |
 | `tags` | No | Informational only |
 | `applies_to` | No | Informational only |
 | `protocol_version` | No | Convention — include `v2` for new skills |
@@ -223,7 +228,7 @@ Every skill should include a quality checklist before `poe:done`. See `validity-
 | Skill | Stage | Modes | Inconsistencies vs this guide |
 |---|---|---|---|
 | `poe-base` | Base (inherited by all) | autonomous | None — canonical reference |
-| `operational-analyst` | CONOPS | autonomous, interactive | None |
+| `operational-analyst` | CONOPS | autonomous, interactive | `model: claude-opus-4-6` set — proof-of-concept for multi-model routing |
 | `architecture-analyst` | Guardrails | autonomous | None |
 | `interface-analyst` | Guardrails | autonomous | None |
 | `data-model-analyst` | Guardrails | autonomous | None |
