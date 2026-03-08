@@ -582,4 +582,81 @@ mod tests {
         let (event_type, _) = parse_poe_event(line).unwrap();
         assert_eq!(event_type, "step");
     }
+
+    // ── Full-stack: TextBufExtractor → parse_poe_event ────────────────────────
+
+    #[test]
+    fn full_stack_sequential_poe_events() {
+        // Simulates what agent_lifecycle does: stream-json text chunks arrive,
+        // TextBufExtractor splits them into lines, parse_poe_event classifies each.
+        use crate::agent::text_extractor::TextBufExtractor;
+        let mut ex = TextBufExtractor::new();
+        let chunks = [
+            "{\"poe\":\"brief\",\"content\":\"starting\"}\n",
+            "{\"poe\":\"task\",\"id\":\"t-1\",\"title\":\"Build\"}\n",
+            "{\"poe\":\"done\"}\n",
+        ];
+        let events: Vec<String> = chunks
+            .iter()
+            .flat_map(|chunk| ex.push(chunk))
+            .filter_map(|line| parse_poe_event(&line).map(|(t, _)| t))
+            .collect();
+        assert_eq!(ex.flush(), None); // nothing left in buffer
+        assert_eq!(events, vec!["brief", "task", "done"]);
+    }
+
+    #[test]
+    fn full_stack_poe_json_split_across_chunks() {
+        // JSON object arrives fragmented across multiple text deltas.
+        use crate::agent::text_extractor::TextBufExtractor;
+        let mut ex = TextBufExtractor::new();
+        let chunks = [
+            "{\"poe\":\"artifact\",",
+            "\"name\":\"out.md\",",
+            "\"artifact_type\":\"doc\",\"content\":\"hello\"}",
+            "\n",
+        ];
+        let events: Vec<String> = chunks
+            .iter()
+            .flat_map(|chunk| ex.push(chunk))
+            .filter_map(|line| parse_poe_event(&line).map(|(t, _)| t))
+            .collect();
+        assert_eq!(events, vec!["artifact"]);
+    }
+
+    #[test]
+    fn full_stack_prose_lines_between_events_are_discarded() {
+        // Agent may emit prose commentary alongside poe: events.
+        // Only lines that parse as poe: events are retained.
+        use crate::agent::text_extractor::TextBufExtractor;
+        let mut ex = TextBufExtractor::new();
+        let chunks = [
+            "I am now going to analyze the task.\n",
+            "{\"poe\":\"brief\",\"content\":\"analysed\"}\n",
+            "And here is my summary.\n",
+            "{\"poe\":\"done\"}\n",
+        ];
+        let events: Vec<String> = chunks
+            .iter()
+            .flat_map(|chunk| ex.push(chunk))
+            .filter_map(|line| parse_poe_event(&line).map(|(t, _)| t))
+            .collect();
+        assert_eq!(events, vec!["brief", "done"]);
+    }
+
+    #[test]
+    fn full_stack_tail_flushed_after_result_event() {
+        // A poe:done event without a trailing newline is flushed via TextBufExtractor::flush().
+        use crate::agent::text_extractor::TextBufExtractor;
+        let mut ex = TextBufExtractor::new();
+        // Push everything but no trailing newline on the last event.
+        let lines_from_push: Vec<String> = ex.push("{\"poe\":\"brief\"}\n{\"poe\":\"done\"}");
+        // brief comes out on push (had newline), done stays in buffer.
+        assert_eq!(lines_from_push.len(), 1);
+        assert_eq!(parse_poe_event(&lines_from_push[0]).map(|(t, _)| t).as_deref(), Some("brief"));
+        // Flush retrieves the tail.
+        let tail = ex.flush().unwrap();
+        let (event_type, _) = parse_poe_event(&tail).unwrap();
+        assert_eq!(event_type, "done");
+    }
 }
