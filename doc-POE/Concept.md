@@ -112,7 +112,7 @@ A skill is a specialist definition: the role the agent plays, how it behaves, wh
 2. `~/.poe/skills/<skill-id>.md` — user-level overrides
 3. `<project>/.poe/skills/<skill-id>.md` — project-level overrides
 
-Skills improve over time. After each stage, a review process can produce updated project-local skill files capturing lessons learned (e.g. "this project targets embedded devices — never propose cloud-native patterns"). The human can promote project-local improvements to the user level if they apply broadly.
+Skills improve over time. Any agent can emit `poe:skill` during execution to write a project-local skill file capturing a discovered pattern (e.g. "this project targets embedded devices — never propose cloud-native patterns"). The Retrospective stage does this systematically. The human can promote project-local improvements to the user level if they apply broadly.
 
 ---
 
@@ -199,6 +199,7 @@ The protocol is fundamentally **CRUD against the project database**. The DAG is 
 |---|---|---|
 | `poe:artifact` | Create / Update | Produce or revise a named artifact (written to `docs/`, indexed in DB) |
 | `poe:knowledge` | Create / Supersede | Write an entry to the knowledge register |
+| `poe:skill` | Write | Write a reusable skill pattern to `{project}/.poe/skills/<name>.md` (project-level override, loadable immediately) |
 
 ### Execution & Oversight
 

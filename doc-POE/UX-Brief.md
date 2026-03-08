@@ -101,7 +101,7 @@ Each entry shows:
 - Agent identifier and assigned skill
 - Model override, if the skill declares one (e.g. `[claude-opus-4-6]`) — omitted when the skill uses the default
 - Task name and WBS ancestry
-- Event type: brief / step / artifact produced / decision raised / done
+- Event type: brief / step / artifact produced / skill captured / decision raised / done
 - Timestamp
 
 Clicking an entry opens the **agent session handover** — an xterm.js panel that resumes the agent's Claude session (`claude --resume <session_id>`) in a PTY, bridged to the browser via WebSocket. The human can read the raw conversation, ask follow-up questions, or assist an agent that raised a decision. Closing the panel does not terminate the agent's session — the session_id persists in SQLite. Time filters carried forward from bp6: last hour, last 6 hours, since phase start.

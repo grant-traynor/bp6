@@ -254,7 +254,7 @@ The knowledge register is the project's institutional memory. It is distinct fro
 - Things tried that did not work, and why
 - Constraints discovered during execution (not known at planning time)
 - Integration notes and gotchas
-- Project-local agent skill overrides (written by the Retrospective stage)
+- Project-local agent skill overrides (written by agents via `poe:skill` during execution or the Retrospective stage)
 
 ### Structure
 
@@ -297,6 +297,7 @@ Agents communicate with POE via structured JSON events embedded in the `--output
 | `poe:task` | Create a WBS node (used by planning specialist to populate the task graph). |
 | `poe:edge` | Create a dependency edge between two nodes. |
 | `poe:knowledge` | Write an entry to the knowledge register. |
+| `poe:skill` | Write a reusable pattern to `{project}/.poe/skills/<name>.md`. Closes the self-improvement loop: any agent that discovers a project-specific pattern can persist it as a local skill override without manual authoring. |
 | `poe:decision` | Raise a question for the human decision queue. Agent then emits `poe:done`; orchestrator resumes via `--resume` with the human's resolution. |
 | `poe:review` | Request a peer review from another specialist agent. Agent emits `poe:done` (awaiting review); orchestrator spawns reviewer, then resumes requesting agent via `--resume` with the review result. |
 | `poe:done` | Signal task completion (or checkpoint when awaiting decision/review). |

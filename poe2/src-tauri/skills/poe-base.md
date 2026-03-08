@@ -47,6 +47,7 @@ A line is a poe: event if and only if it parses as valid JSON and contains a `"p
 {"poe": "task", "id": "<uuid>", "title": "...", "description": "...", "skill": "<skill-id>", "type": "task", "parent_id": "<id>", "depends_on": ["<id>"]}
 {"poe": "task:update", "id": "<task-id>", "title": "...", "description": "...", "skill": "..."}
 {"poe": "edge", "from": "<task-id>", "to": "<task-id>"}
+{"poe": "skill", "name": "<skill-id>", "content": "<full SKILL.md markdown>"}
 {"poe": "done", "summary": "..."}
 ```
 

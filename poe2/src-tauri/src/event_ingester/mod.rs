@@ -87,6 +87,12 @@ struct PoeReview {
     content: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct PoeSkill {
+    name: String,
+    content: String,
+}
+
 // ── Core ingestion ────────────────────────────────────────────────────────────
 
 /// Detect and classify a single line as a poe: event.
@@ -129,6 +135,7 @@ pub fn ingest_line(
         "edge" => handle_edge(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
         "edge:remove" => handle_edge_remove(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
         "artifact" => handle_artifact(trimmed, project_id, task_id, agent_id, registry, app, project_path),
+        "skill" => handle_skill(trimmed, project_id, task_id, agent_id, registry, app, project_path),
         "knowledge" => handle_knowledge(trimmed, project_id, task_id, agent_id, registry, app),
         "brief" => handle_log_only("poe:brief", trimmed, project_id, task_id, agent_id, registry, app),
         "step" => handle_log_only("poe:step", trimmed, project_id, task_id, agent_id, registry, app),
@@ -333,6 +340,44 @@ fn handle_artifact(
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:artifact", json)?;
         emit_tauri_event(app, "poe-artifact-created", &artifact);
         Ok(None) // artifacts don't trigger orchestrator
+    })
+}
+
+/// Write skill markdown to `{project_path}/.poe/skills/{name}.md`.
+/// Creates the directory if it does not exist.
+/// Public so integration tests can call it directly without a Tauri AppHandle.
+pub fn write_project_skill(project_path: &Path, name: &str, content: &str) -> Result<()> {
+    let skills_dir = project_path.join(".poe").join("skills");
+    std::fs::create_dir_all(&skills_dir)?;
+    let skill_path = skills_dir.join(format!("{}.md", name));
+    std::fs::write(&skill_path, content)
+        .map_err(|e| anyhow::anyhow!("Failed to write skill {:?}: {}", skill_path, e))?;
+    Ok(())
+}
+
+fn handle_skill(
+    json: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    registry: &ProjectRegistry,
+    app: &AppHandle,
+    project_path: &Path,
+) -> Result<Option<DagChanged>> {
+    let payload: PoeSkill = serde_json::from_str(json)?;
+
+    write_project_skill(project_path, &payload.name, &payload.content)?;
+
+    with_project_conn(registry, project_id, |conn| {
+        dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:skill", json)?;
+        emit_tauri_event(app, "poe-event", &serde_json::json!({
+            "eventType": "poe:skill",
+            "projectId": project_id,
+            "agentId": agent_id,
+            "taskId": task_id,
+            "payload": json,
+        }));
+        Ok(None) // skill writes don't trigger orchestrator
     })
 }
 

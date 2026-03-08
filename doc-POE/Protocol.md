@@ -156,6 +156,13 @@ One event per line. No multi-line JSON.
 // supersedes retires the prior entry (not deleted, linked).
 {"poe": "knowledge", "key": "target-platform", "content": "...", "supersedes": "<prior-id>"}
 // supersedes is optional
+
+// Write a reusable skill pattern to {project}/.poe/skills/<name>.md.
+// Closes the self-improvement loop: agents that discover a useful pattern
+// can persist it as a project-local skill without manual prompt authoring.
+// The agent is responsible for producing well-formed SKILL.md content.
+// NOT emitted automatically — agents emit this explicitly when a pattern is worth capturing.
+{"poe": "skill", "name": "<skill-id>", "content": "<full SKILL.md markdown>"}
 ```
 
 #### Execution and oversight
@@ -207,6 +214,7 @@ One event per line. No multi-line JSON.
 | `poe:edge:remove` | DELETE edges | yes | — |
 | `poe:artifact` | UPSERT artifacts, write file | yes | `poe://event` |
 | `poe:knowledge` | INSERT knowledge | yes | `poe://event` |
+| `poe:skill` | write `{project}/.poe/skills/{name}.md` | yes | `poe://event` |
 | `poe:brief` | — | yes | `poe://event` |
 | `poe:step` | — | yes | `poe://event` |
 | `poe:decision` | UPDATE tasks.status=waiting, INSERT decisions | yes | `poe://decision` |
