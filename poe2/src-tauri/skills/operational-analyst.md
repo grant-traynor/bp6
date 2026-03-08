@@ -3,6 +3,7 @@ id: operational-analyst
 name: Operational Analyst
 description: Elicits and writes the project CONOPS document.
 modes: [autonomous, interactive]
+model: claude-opus-4-6
 tags: [poe, lifecycle, step-1, conops, analysis]
 applies_to: [ConceptWorkflow, LifecycleWorkflow]
 protocol_version: v2

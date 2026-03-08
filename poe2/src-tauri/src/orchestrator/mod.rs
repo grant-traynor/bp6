@@ -220,6 +220,7 @@ async fn dispatch_task(
         project_path,
         input_bundle,
         resume_session_id: None,
+        model: skill.model.clone(),
     };
 
     if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
@@ -257,6 +258,7 @@ pub async fn recover_interrupted(
     for agent in interrupted {
         if let Some(ref session_id) = agent.session_id {
             let skill = skills::load_skill(&agent.skill_id, &project_path, &resource_dir).ok();
+            let model = skill.as_ref().and_then(|s| s.model.clone());
             let input_bundle = skill
                 .map(|s| s.prompt)
                 .unwrap_or_else(|| "Resume previous task.".to_owned());
@@ -268,6 +270,7 @@ pub async fn recover_interrupted(
                 project_path: project_path.clone(),
                 input_bundle,
                 resume_session_id: Some(session_id.clone()),
+                model,
             };
 
             match agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {

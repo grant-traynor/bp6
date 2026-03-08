@@ -21,6 +21,10 @@ pub struct ResolvedSkill {
     pub source: String,
     /// Modes declared in skill YAML frontmatter. Defaults to `["autonomous"]` if absent.
     pub modes: Vec<String>,
+    /// Model override from skill YAML frontmatter (`model:` key). When `Some`, the
+    /// orchestrator passes `--model <value>` to the claude spawn. When `None`, the
+    /// claude binary uses its configured default.
+    pub model: Option<String>,
 }
 
 /// Load a skill by ID using the 3-level priority chain:
@@ -81,12 +85,14 @@ pub fn load_skill(skill_id: &str, project_path: &Path, resource_dir: &Path) -> R
         .with_context(|| format!("Failed to read skill file: {:?}", winning_path))?;
 
     let modes = parse_modes_from_frontmatter(&prompt);
+    let model = parse_model_from_frontmatter(&prompt);
 
     Ok(ResolvedSkill {
         skill_id: skill_id.to_owned(),
         prompt,
         source: winning_path.to_string_lossy().to_string(),
         modes,
+        model,
     })
 }
 
@@ -124,6 +130,35 @@ fn parse_modes_from_frontmatter(content: &str) -> Vec<String> {
         }
     }
     vec!["autonomous".to_string()]
+}
+
+/// Parse the `model:` field from YAML frontmatter at the top of a skill file.
+/// Returns `None` if the file has no frontmatter or no model field.
+fn parse_model_from_frontmatter(content: &str) -> Option<String> {
+    if !content.starts_with("---\n") && !content.starts_with("---\r\n") {
+        return None;
+    }
+    let after_start = if content.starts_with("---\r\n") { 5 } else { 4 };
+    let end_marker = if content[after_start..].contains("\n---\n") {
+        "\n---\n"
+    } else if content[after_start..].contains("\n---\r\n") {
+        "\n---\r\n"
+    } else {
+        return None;
+    };
+    let end_idx = content[after_start..].find(end_marker).unwrap_or(0);
+    let frontmatter = &content[after_start..after_start + end_idx];
+
+    for line in frontmatter.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("model:") {
+            let value = rest.trim().to_string();
+            if !value.is_empty() {
+                return Some(value);
+            }
+        }
+    }
+    None
 }
 
 /// Check that a skill supports the requested spawn mode.
@@ -285,6 +320,7 @@ mod tests {
             prompt: "You are an implementer.".to_owned(),
             source: "bundle".to_owned(),
             modes: vec!["autonomous".to_string()],
+            model: None,
         };
         let bundle = assemble_input_bundle(
             &SpawnMode::Autonomous,
@@ -309,6 +345,7 @@ mod tests {
             prompt: "You are an implementer.".to_owned(),
             source: "bundle".to_owned(),
             modes: vec!["autonomous".to_string()],
+            model: None,
         };
         let bundle = assemble_input_bundle(
             &SpawnMode::Autonomous,
@@ -336,6 +373,7 @@ mod tests {
             prompt: "You are an analyst.".to_owned(),
             source: "bundle".to_owned(),
             modes: vec!["autonomous".to_string(), "interactive".to_string()],
+            model: None,
         };
         let bundle = assemble_input_bundle(
             &SpawnMode::Interactive,
@@ -361,6 +399,7 @@ mod tests {
             prompt: "".to_owned(),
             source: "".to_owned(),
             modes: vec!["autonomous".to_string()],
+            model: None,
         };
         assert!(check_mode_compatibility(&skill, &SpawnMode::Autonomous).is_ok());
     }
@@ -372,6 +411,7 @@ mod tests {
             prompt: "".to_owned(),
             source: "".to_owned(),
             modes: vec!["autonomous".to_string()],
+            model: None,
         };
         assert!(check_mode_compatibility(&skill, &SpawnMode::Interactive).is_err());
         let err = check_mode_compatibility(&skill, &SpawnMode::Interactive).unwrap_err();
@@ -398,5 +438,38 @@ mod tests {
         write_skill(&bundle_dir, "nofront.md", content);
         let skill = load_skill("nofront", proj_dir.path(), skill_dir.path()).unwrap();
         assert_eq!(skill.modes, vec!["autonomous"]);
+    }
+
+    #[test]
+    fn parse_model_from_frontmatter_works() {
+        let content = "---\nid: analyst\nmodes: [autonomous]\nmodel: claude-opus-4-6\n---\n# Skill\nContent.";
+        let skill_dir = TempDir::new().unwrap();
+        let proj_dir = TempDir::new().unwrap();
+        let bundle_dir = skill_dir.path().join("skills");
+        write_skill(&bundle_dir, "analyst.md", content);
+        let skill = load_skill("analyst", proj_dir.path(), skill_dir.path()).unwrap();
+        assert_eq!(skill.model, Some("claude-opus-4-6".to_string()));
+    }
+
+    #[test]
+    fn parse_model_defaults_to_none_when_absent() {
+        let content = "---\nid: planner\nmodes: [autonomous]\n---\n# Skill\nContent.";
+        let skill_dir = TempDir::new().unwrap();
+        let proj_dir = TempDir::new().unwrap();
+        let bundle_dir = skill_dir.path().join("skills");
+        write_skill(&bundle_dir, "planner.md", content);
+        let skill = load_skill("planner", proj_dir.path(), skill_dir.path()).unwrap();
+        assert_eq!(skill.model, None);
+    }
+
+    #[test]
+    fn parse_model_defaults_to_none_when_no_frontmatter() {
+        let content = "# Skill\nNo frontmatter here.";
+        let skill_dir = TempDir::new().unwrap();
+        let proj_dir = TempDir::new().unwrap();
+        let bundle_dir = skill_dir.path().join("skills");
+        write_skill(&bundle_dir, "nofm.md", content);
+        let skill = load_skill("nofm", proj_dir.path(), skill_dir.path()).unwrap();
+        assert_eq!(skill.model, None);
     }
 }

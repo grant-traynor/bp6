@@ -37,6 +37,9 @@ pub struct SpawnRequest {
     pub project_path: PathBuf,
     pub input_bundle: String,
     pub resume_session_id: Option<String>,
+    /// Model override from skill frontmatter. When `Some`, passes `--model` to claude.
+    /// When `None`, claude uses its configured default.
+    pub model: Option<String>,
 }
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
@@ -127,6 +130,7 @@ pub async fn spawn_agent(
     let project_path = req.project_path.clone();
     let input_bundle = req.input_bundle.clone();
     let resume_session_id = req.resume_session_id.clone();
+    let model = req.model.clone();
     let agent_map_clone = agent_map.clone();
 
     std::thread::spawn(move || {
@@ -171,6 +175,7 @@ pub async fn spawn_agent(
         let result = JsonStreamTransport::run(
             &input_bundle,
             resume_session_id.as_deref(),
+            model.as_deref(),
             &project_path,
             StreamCallbacks {
                 on_pid: Some(Box::new(move |pid| {
@@ -417,6 +422,7 @@ pub fn run_agent_capturing(
 
     JsonStreamTransport::run(
         bundle,
+        None,
         None,
         cwd,
         StreamCallbacks {

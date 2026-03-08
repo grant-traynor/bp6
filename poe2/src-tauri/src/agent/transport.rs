@@ -24,12 +24,13 @@ impl JsonStreamTransport {
     /// callbacks for key events.
     ///
     /// Command: `claude --output-format stream-json --verbose -p
-    ///           --dangerously-skip-permissions [--resume <id>]`
+    ///           --dangerously-skip-permissions [--model <id>] [--resume <id>]`
     ///
     /// Blocking — intended to be called from `std::thread::spawn`.
     pub fn run(
         bundle: &str,
         resume_session_id: Option<&str>,
+        model: Option<&str>,
         cwd: &Path,
         callbacks: StreamCallbacks,
     ) -> Result<()> {
@@ -38,6 +39,9 @@ impl JsonStreamTransport {
         cmd.arg("--verbose");
         cmd.arg("-p");
         cmd.arg("--dangerously-skip-permissions");
+        if let Some(m) = model {
+            cmd.arg("--model").arg(m);
+        }
         if let Some(sid) = resume_session_id {
             cmd.arg("--resume").arg(sid);
         }

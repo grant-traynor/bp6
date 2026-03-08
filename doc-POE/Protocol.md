@@ -260,9 +260,9 @@ You are in a conversation with a human developer.
 - End the conversation naturally. Do not emit `poe:done` unless explicitly asked.
 ```
 
-### Skill frontmatter — mode declaration
+### Skill frontmatter — mode declaration and model selection
 
-Skills declare which modes they support in YAML frontmatter:
+Skills declare which modes they support and, optionally, which Claude model to use in YAML frontmatter:
 
 ```yaml
 ---
@@ -270,6 +270,7 @@ id: operational-analyst
 name: Operational Analyst
 description: Elicits and writes the project CONOPS.
 modes: [autonomous, interactive]   # supports both
+model: claude-opus-4-6             # optional — overrides the default model
 ---
 ```
 
@@ -283,6 +284,10 @@ modes: [autonomous]                # autonomous only — not conversational
 ```
 
 If `modes` is omitted, the orchestrator assumes `[autonomous]` only.
+
+If `model` is omitted, the orchestrator uses the claude binary's configured default.
+When `model` is present, the orchestrator passes `--model <value>` to the claude spawn.
+Use this to direct high-stakes analysis skills (e.g. `operational-analyst`) at a more capable model.
 
 ### Template
 
