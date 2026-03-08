@@ -38,6 +38,7 @@ impl std::str::FromStr for NodeType {
 pub enum NodeStatus {
     Pending,
     Running,
+    Waiting,
     Blocked,
     Complete,
     Cancelled,

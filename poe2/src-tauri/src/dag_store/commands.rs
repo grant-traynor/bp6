@@ -190,8 +190,89 @@ pub async fn resolve_queue_item(
     project_id: String,
     resolution: String,
     registry: State<'_, ProjectRegistry>,
+    app: tauri::AppHandle,
+    dag_tx: State<'_, mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
 ) -> Result<QueueItem, String> {
-    with_conn(&registry, &project_id, |conn| db_resolve_queue_item(conn, &item_id, &resolution))
+    use tauri::Emitter;
+    use crate::event_ingester::DagChanged;
+
+    let (item, task_id, session_id) = with_conn(&registry, &project_id, |conn| {
+        let item = db_resolve_queue_item(conn, &item_id, &resolution)?;
+        let tid = item.task_id.clone().unwrap_or_default();
+        let sid = db_get_agent_session_for_task(conn, &tid)?.unwrap_or_default();
+        Ok((item, tid, sid))
+    })?;
+
+    // Emit frontend event so queue panel removes the item
+    let _ = app.emit("poe-decision-resolved", serde_json::json!({
+        "itemId": item_id,
+        "projectId": project_id,
+        "taskId": task_id,
+    }));
+
+    // Signal orchestrator to resume the waiting agent
+    if !session_id.is_empty() {
+        let _ = dag_tx.send(DagChanged::QueueItemResolved {
+            project_id: project_id.clone(),
+            item_id: item_id.clone(),
+            task_id: task_id.clone(),
+            session_id: session_id.clone(),
+            resolution: resolution.clone(),
+        });
+    }
+
+    Ok(item)
+}
+
+#[tauri::command]
+pub async fn read_artifact_content(
+    artifact_id: String,
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+) -> Result<String, String> {
+    with_conn(&registry, &project_id, |conn| {
+        let filename: String = conn.query_row(
+            "SELECT filename FROM artifacts WHERE id = ?1",
+            [&artifact_id],
+            |row| row.get(0),
+        ).map_err(|e| anyhow::anyhow!("Artifact not found {}: {}", artifact_id, e))?;
+
+        // Get the project path from the registry (we're inside with_conn so registry is unlocked)
+        // We need to look up project path separately — we have access to conn but not db.project.path here.
+        // Use a raw SQL query against the projects table to get path.
+        let project_path: String = conn.query_row(
+            "SELECT path FROM projects WHERE id = ?1",
+            [&project_id],
+            |row| row.get(0),
+        ).map_err(|e| anyhow::anyhow!("Project not found {}: {}", project_id, e))?;
+
+        let path = std::path::Path::new(&project_path).join("docs").join(&filename);
+        std::fs::read_to_string(&path)
+            .map_err(|e| anyhow::anyhow!("Failed to read artifact {:?}: {}", path, e))
+    })
+}
+
+#[tauri::command]
+pub async fn flag_knowledge_for_promotion(
+    id: String,
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+) -> Result<(), String> {
+    with_conn(&registry, &project_id, |conn| {
+        conn.execute(
+            "UPDATE knowledge SET promoted = 1 WHERE id = ?1",
+            [&id],
+        ).map_err(|e| anyhow::anyhow!("Failed to flag knowledge: {}", e))?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub async fn list_phases(
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+) -> Result<Vec<Phase>, String> {
+    with_conn(&registry, &project_id, |conn| db_list_phases(conn, &project_id))
 }
 
 #[tauri::command]

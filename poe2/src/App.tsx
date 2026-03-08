@@ -1,11 +1,16 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { Project, Node } from './types';
+import type { Project, Node, Artifact } from './types';
 import { usePoeProject } from './hooks/usePoeProject';
 import ActivityFeed from './components/ActivityFeed';
 import QueuePanel from './components/QueuePanel';
 import ProjectCard from './components/ProjectCard';
+import AgentHandover from './components/AgentHandover';
+import ArtifactViewer from './components/ArtifactViewer';
+import KnowledgePanel from './components/KnowledgePanel';
+import StageGate from './components/StageGate';
+import InterruptControls from './components/InterruptControls';
 
 // ── CONOPS launcher ───────────────────────────────────────────────────────────
 
@@ -63,7 +68,22 @@ function ConopsLauncher({ projectId, onLaunched }: { projectId: string; onLaunch
 export default function App() {
   const [openProjects, setOpenProjects] = useState<Project[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { nodes, queueItems, feedItems, setQueueItems, addNode } = usePoeProject(selectedId);
+  const {
+    nodes,
+    queueItems,
+    feedItems,
+    phases,
+    artifacts,
+    knowledgeEntries,
+    handoverNodeId,
+    setHandoverNodeId,
+    setQueueItems,
+    addNode,
+  } = usePoeProject(selectedId);
+
+  // Modal state
+  const [artifactViewer, setArtifactViewer] = useState<Artifact | null>(null);
+  const [showKnowledge, setShowKnowledge] = useState(false);
 
   useEffect(() => {
     invoke<Project[]>('list_projects')
@@ -96,6 +116,13 @@ export default function App() {
     if (selectedId === projectId) setSelectedId(null);
   }
 
+  // Active phase = first phase with lifecycleStage != 'complete'
+  const activePhase = phases.find(p => p.lifecycleStage !== 'complete') ?? null;
+  const runningAgentCount = nodes.filter(n => n.status === 'running').length;
+
+  // Handover node lookup
+  const handoverNode = handoverNodeId ? (nodes.find(n => n.id === handoverNodeId) ?? null) : null;
+
   return (
     <div className="flex h-screen bg-neutral-950 text-neutral-100 font-mono text-sm">
       {/* Sidebar */}
@@ -114,6 +141,7 @@ export default function App() {
               key={p.id}
               project={p}
               nodes={selectedId === p.id ? nodes : []}
+              phases={selectedId === p.id ? phases : []}
               queueCount={selectedId === p.id ? queueItems.length : 0}
               selected={selectedId === p.id}
               onSelect={() => setSelectedId(p.id)}
@@ -130,14 +158,59 @@ export default function App() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {selectedId ? (
           <>
+            {/* Project header with controls */}
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-neutral-800 shrink-0">
+              <div className="flex items-center gap-2">
+                {activePhase && (
+                  <span className="text-[11px] text-neutral-500 font-mono">
+                    {activePhase.title}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="px-2 py-0.5 rounded text-[10px] border border-teal-900 text-teal-600 hover:border-teal-700 hover:text-teal-400 transition-colors"
+                  onClick={() => setShowKnowledge(true)}
+                >
+                  Knowledge
+                </button>
+                <InterruptControls
+                  projectId={selectedId}
+                  activePhaseId={activePhase?.id ?? null}
+                  runningAgentCount={runningAgentCount}
+                />
+              </div>
+            </div>
+
             {nodes.length === 0 ? (
               <ConopsLauncher
                 projectId={selectedId}
                 onLaunched={addNode}
               />
             ) : (
-              <div className="flex-1 overflow-hidden">
-                <ActivityFeed items={feedItems} />
+              <div className="flex-1 overflow-hidden flex flex-col">
+                {/* Stage gate — shown when gate is held */}
+                {activePhase?.gateHeld && (
+                  <div className="px-3 py-2 border-b border-neutral-800 shrink-0">
+                    <StageGate
+                      phase={activePhase}
+                      projectId={selectedId}
+                      artifacts={artifacts}
+                      onArtifactOpen={setArtifactViewer}
+                      onAction={() => {
+                        // Refresh will happen via event listeners naturally;
+                        // nothing extra needed here
+                      }}
+                    />
+                  </div>
+                )}
+                <div className="flex-1 overflow-hidden">
+                  <ActivityFeed
+                    items={feedItems}
+                    nodes={nodes}
+                    onHandoverOpen={setHandoverNodeId}
+                  />
+                </div>
               </div>
             )}
             <div className="h-[260px] shrink-0 border-t border-neutral-800">
@@ -162,6 +235,29 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Modals */}
+      {handoverNodeId && (
+        <AgentHandover
+          nodeId={handoverNodeId}
+          node={handoverNode}
+          onClose={() => setHandoverNodeId(null)}
+        />
+      )}
+      {artifactViewer && selectedId && (
+        <ArtifactViewer
+          artifact={artifactViewer}
+          projectId={selectedId}
+          onClose={() => setArtifactViewer(null)}
+        />
+      )}
+      {showKnowledge && selectedId && (
+        <KnowledgePanel
+          entries={knowledgeEntries}
+          projectId={selectedId}
+          onClose={() => setShowKnowledge(false)}
+        />
+      )}
     </div>
   );
 }

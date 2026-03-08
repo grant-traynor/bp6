@@ -1,5 +1,6 @@
 use super::ConcurrencyLimits;
-use crate::dag_store::{self, ProjectRegistry};
+use crate::agent_lifecycle::{AgentMap, interrupt_agent_process};
+use crate::dag_store::{self, NodeStatus, ProjectRegistry, UpdateNodeInput};
 use crate::event_ingester::DagChanged;
 use std::sync::Arc;
 use tauri::State;
@@ -53,5 +54,191 @@ pub async fn set_concurrency_limit(
             .global_limit
             .store(limit, std::sync::atomic::Ordering::Relaxed);
     }
+    Ok(())
+}
+
+/// Cancel a single task and SIGTERM its running agent.
+#[tauri::command]
+pub async fn cancel_task(
+    node_id: String,
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+    agent_map: State<'_, AgentMap>,
+    dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+) -> Result<dag_store::Node, String> {
+    // SIGTERM any running agent for this task
+    {
+        let map = agent_map.lock().unwrap();
+        for agent in map.values() {
+            if agent.task_id == node_id {
+                let _ = interrupt_agent_process(&agent_map, &agent.agent_id);
+                break;
+            }
+        }
+    }
+    // Cancel in DB
+    let reg = registry.lock().unwrap();
+    let db = reg.values().find(|db| db.project.id == project_id)
+        .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
+    drop(reg);
+    let node = {
+        let conn = db.conn.lock().unwrap();
+        dag_store::db_cancel_node(&conn, &node_id).map_err(|e| e.to_string())?
+    };
+    let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
+    Ok(node)
+}
+
+/// SIGTERM all running agents in a phase; re-queue their tasks to Pending; hold the gate.
+#[tauri::command]
+pub async fn pause_stage(
+    phase_id: String,
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+    agent_map: State<'_, AgentMap>,
+    dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+) -> Result<(), String> {
+    // Collect task_ids running in this phase
+    let task_ids_in_phase: Vec<String> = {
+        let reg = registry.lock().unwrap();
+        let db = reg.values().find(|db| db.project.id == project_id)
+            .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id FROM nodes WHERE phase_id = ?1 AND status = 'running'"
+        ).map_err(|e| e.to_string())?;
+        let ids: Vec<String> = stmt.query_map([&phase_id], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        ids
+    };
+
+    // SIGTERM agents for those tasks
+    {
+        let map = agent_map.lock().unwrap();
+        for agent in map.values() {
+            if task_ids_in_phase.contains(&agent.task_id) {
+                let _ = interrupt_agent_process(&agent_map, &agent.agent_id);
+            }
+        }
+    }
+
+    // Re-queue tasks to Pending and hold gate
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg.values().find(|db| db.project.id == project_id)
+            .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        for task_id in &task_ids_in_phase {
+            let update = UpdateNodeInput {
+                status: Some(NodeStatus::Pending),
+                title: None, description: None, skill_id: None, assignee: None,
+            };
+            let _ = dag_store::db_update_node(&conn, task_id, &update);
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = conn.execute(
+            "UPDATE phases SET gate_held = 1, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase_id],
+        );
+    }
+
+    let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
+    Ok(())
+}
+
+/// SIGTERM all running agents across the project; re-queue their tasks to Pending.
+#[tauri::command]
+pub async fn abort_project(
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+    agent_map: State<'_, AgentMap>,
+    dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+) -> Result<(), String> {
+    // Collect all agent_ids for this project
+    let agent_ids: Vec<String> = {
+        let map = agent_map.lock().unwrap();
+        map.values()
+            .filter(|a| a.project_id == project_id)
+            .map(|a| a.agent_id.clone())
+            .collect()
+    };
+
+    for agent_id in &agent_ids {
+        let _ = interrupt_agent_process(&agent_map, agent_id);
+    }
+
+    // Re-queue all running tasks for this project to Pending
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg.values().find(|db| db.project.id == project_id)
+            .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = conn.execute(
+            "UPDATE nodes SET status = 'pending', updated_at = ?1 WHERE project_id = ?2 AND status = 'running'",
+            rusqlite::params![now, project_id],
+        );
+    }
+
+    let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
+    Ok(())
+}
+
+/// Reset a phase back to Planning stage (allows plan changes before re-running).
+#[tauri::command]
+pub async fn revise_stage(
+    phase_id: String,
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+    dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+) -> Result<(), String> {
+    let reg = registry.lock().unwrap();
+    let db = reg.values().find(|db| db.project.id == project_id)
+        .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
+    drop(reg);
+    {
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE phases SET lifecycle_stage = 'planning', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase_id],
+        ).map_err(|e| e.to_string())?;
+    }
+    let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
+    Ok(())
+}
+
+/// Re-queue all tasks in a phase to Pending and release the gate so the orchestrator picks them up.
+#[tauri::command]
+pub async fn rerun_stage(
+    phase_id: String,
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+    dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+) -> Result<(), String> {
+    let reg = registry.lock().unwrap();
+    let db = reg.values().find(|db| db.project.id == project_id)
+        .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
+    drop(reg);
+    {
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        // Re-queue all non-cancelled tasks in this phase
+        conn.execute(
+            "UPDATE nodes SET status = 'pending', updated_at = ?1 WHERE phase_id = ?2 AND status != 'cancelled'",
+            rusqlite::params![now, phase_id],
+        ).map_err(|e| e.to_string())?;
+        // Release the gate
+        conn.execute(
+            "UPDATE phases SET gate_held = 0, lifecycle_stage = 'execution', updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase_id],
+        ).map_err(|e| e.to_string())?;
+    }
+    let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
     Ok(())
 }

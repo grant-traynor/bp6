@@ -25,8 +25,8 @@ pub struct HandoverSession {
     pid: Option<u32>,
     /// WebSocket port the bridge is listening on.
     ws_port: u16,
-    /// PTY master writer — kept alive to prevent PTY from closing prematurely.
-    _writer: Box<dyn Write + Send>,
+    /// PTY master writer — shared so WS→PTY bridge can write keyboard input.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
 }
 
 /// Global map of node_id → active handover session.
@@ -53,27 +53,23 @@ pub async fn agent_handover_open(
     registry: tauri::State<'_, crate::dag_store::ProjectRegistry>,
     handover_map: tauri::State<'_, HandoverMap>,
 ) -> Result<u16, String> {
-    // 1. Look up session_id from SQLite agents table (task_id = node_id).
-    let session_id = {
+    // 1. Look up session_id and project_path from SQLite agents table (task_id = node_id).
+    let (session_id, project_path) = {
         let reg = registry.lock().unwrap();
-        let mut found_session: Option<String> = None;
+        let mut found: Option<(String, String)> = None;
         for db in reg.values() {
             let conn = db.conn.lock().unwrap();
             let result: rusqlite::Result<Option<String>> = conn.query_row(
-                "SELECT session_id FROM agents WHERE task_id = ?1 AND status = 'running' AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
+                "SELECT session_id FROM agents WHERE task_id = ?1 AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
                 [&node_id],
                 |row| row.get(0),
             );
-            match result {
-                Ok(Some(sid)) => {
-                    found_session = Some(sid);
-                    break;
-                }
-                _ => continue,
+            if let Ok(Some(sid)) = result {
+                found = Some((sid, db.project.path.clone()));
+                break;
             }
         }
-        found_session
-            .ok_or_else(|| format!("No active session_id found for node {}", node_id))?
+        found.ok_or_else(|| format!("No session_id found for node {}", node_id))?
     };
 
     eprintln!(
@@ -106,6 +102,7 @@ pub async fn agent_handover_open(
     cmd.arg("--resume");
     cmd.arg(&session_id);
     cmd.arg("--dangerously-skip-permissions");
+    cmd.cwd(&project_path); // CRITICAL: must match original session cwd
 
     let child = pair
         .slave
@@ -122,6 +119,8 @@ pub async fn agent_handover_open(
         .try_clone_reader()
         .map_err(|e| format!("Failed to get PTY reader: {}", e))?;
 
+    let shared_writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(writer));
+
     // 4. Store in handover map (keeps writer alive, prevents PTY close).
     let node_id_clone = node_id.clone();
     {
@@ -131,10 +130,12 @@ pub async fn agent_handover_open(
             HandoverSession {
                 pid: child_pid,
                 ws_port,
-                _writer: writer,
+                writer: shared_writer.clone(),
             },
         );
     }
+
+    let writer_clone = shared_writer.clone();
 
     // 5. Spawn async task to accept the WebSocket connection and bridge bytes.
     tokio::spawn(async move {
@@ -190,14 +191,9 @@ pub async fn agent_handover_open(
                     match msg {
                         Ok(Message::Binary(data)) => {
                             // Keyboard input → PTY stdin.
-                            // We need a fresh writer reference. Since we moved the original
-                            // writer into HandoverSession._writer, we use a new clone.
-                            // Note: portable_pty master writers cannot be cloned after take_writer().
-                            // Instead, use a shared writer stored separately.
-                            // For now, log and skip — the write path is handled by
-                            // a dedicated write channel set up at open time.
-                            // TODO: wire keyboard input properly (tracked in dkb.6 follow-up).
-                            let _ = data; // suppress unused warning
+                            if let Ok(mut w) = writer_clone.lock() {
+                                let _ = w.write_all(&data);
+                            }
                         }
                         Ok(Message::Text(text)) => {
                             // Resize message: {"type":"resize","cols":N,"rows":N}

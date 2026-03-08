@@ -18,7 +18,7 @@ export interface Node {
   nodeType: 'project' | 'phase' | 'epic' | 'feature' | 'task' | 'bug' | 'chore' | 'subtask';
   title: string;
   description: string | null;
-  status: 'pending' | 'running' | 'blocked' | 'complete' | 'cancelled';
+  status: 'pending' | 'running' | 'waiting' | 'blocked' | 'complete' | 'cancelled';
   skillId: string | null;
   assignee: string | null;
   createdAt: string;
@@ -56,6 +56,38 @@ export interface AgentRecord {
   sessionId: string | null;
   startedAt: string;
   endedAt: string | null;
+}
+
+export interface Phase {
+  id: string;
+  projectId: string;
+  number: number;
+  title: string;
+  lifecycleStage: 'planning' | 'execution' | 'retrospective' | 'complete';
+  gateHeld: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Artifact {
+  id: string;
+  projectId: string;
+  phaseId: string | null;
+  artifactType: string;
+  filename: string;
+  producedByStage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeEntry {
+  id: string;
+  projectId: string;
+  key: string;
+  value: string;
+  source: string | null;
+  supersededId: string | null;
+  createdAt: string;
 }
 
 export interface FeedItem {

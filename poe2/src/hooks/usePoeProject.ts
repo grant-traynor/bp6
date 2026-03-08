@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Node, QueueItem, EventRecord, FeedItem } from '../types';
+import type { Node, QueueItem, EventRecord, FeedItem, Phase, Artifact, KnowledgeEntry } from '../types';
 
 function eventRecordToFeedItem(ev: EventRecord): FeedItem {
   return {
@@ -24,16 +24,39 @@ function eventRecordToFeedItem(ev: EventRecord): FeedItem {
   };
 }
 
+export function getAncestry(nodeId: string | null | undefined, nodes: Node[]): Node[] {
+  const chain: Node[] = [];
+  let id = nodeId;
+  const visited = new Set<string>();
+  while (id && !visited.has(id)) {
+    visited.add(id);
+    const node = nodes.find(n => n.id === id);
+    if (!node) break;
+    chain.push(node);
+    id = node.parentId ?? null;
+  }
+  return chain; // closest first, root last
+}
+
 export function usePoeProject(projectId: string | null): {
   nodes: Node[];
   queueItems: QueueItem[];
   feedItems: FeedItem[];
+  phases: Phase[];
+  artifacts: Artifact[];
+  knowledgeEntries: KnowledgeEntry[];
+  handoverNodeId: string | null;
+  setHandoverNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   setQueueItems: React.Dispatch<React.SetStateAction<QueueItem[]>>;
   addNode: (node: Node) => void;
 } {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
+  const [phases, setPhases] = useState<Phase[]>([]);
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [knowledgeEntries, setKnowledgeEntries] = useState<KnowledgeEntry[]>([]);
+  const [handoverNodeId, setHandoverNodeId] = useState<string | null>(null);
 
   const updateNode = useCallback((updated: Node) => {
     setNodes(prev => {
@@ -50,6 +73,9 @@ export function usePoeProject(projectId: string | null): {
       setNodes([]);
       setQueueItems([]);
       setFeedItems([]);
+      setPhases([]);
+      setArtifacts([]);
+      setKnowledgeEntries([]);
       return;
     }
 
@@ -57,15 +83,19 @@ export function usePoeProject(projectId: string | null): {
     const unlisteners: UnlistenFn[] = [];
 
     async function hydrate() {
-      const [fetchedNodes, fetchedQueue, fetchedEvents] = await Promise.all([
+      const [fetchedNodes, fetchedQueue, fetchedEvents, fetchedPhases, fetchedArtifacts] = await Promise.all([
         invoke<Node[]>('list_nodes', { projectId, phaseId: null }),
         invoke<QueueItem[]>('list_queue_items', { projectId, unresolvedOnly: true }),
         invoke<EventRecord[]>('list_events', { projectId, since: null }),
+        invoke<Phase[]>('list_phases', { projectId }),
+        invoke<Artifact[]>('list_artifacts', { projectId }),
       ]);
       if (cancelled) return;
       setNodes(fetchedNodes);
       setQueueItems(fetchedQueue.filter(q => q.resolvedAt === null));
       setFeedItems(fetchedEvents.map(eventRecordToFeedItem));
+      setPhases(fetchedPhases);
+      setArtifacts(fetchedArtifacts);
     }
 
     async function subscribe() {
@@ -195,6 +225,48 @@ export function usePoeProject(projectId: string | null): {
         ]);
       });
       unlisteners.push(u7);
+
+      const u8 = await listen<Artifact>('poe-artifact-created', ({ payload }) => {
+        if (payload.projectId !== projectId) return;
+        setArtifacts(prev => {
+          const idx = prev.findIndex(a => a.id === payload.id);
+          if (idx === -1) return [...prev, payload];
+          const next = [...prev]; next[idx] = payload; return next;
+        });
+        setFeedItems(prev => [...prev, {
+          id: `art-${payload.id}`,
+          type: 'event' as const,
+          eventType: 'poe:artifact',
+          taskId: null,
+          message: `Artifact: ${payload.filename}`,
+          ts: payload.createdAt,
+        }]);
+      });
+      unlisteners.push(u8);
+
+      const u9 = await listen<KnowledgeEntry>('poe-knowledge-created', ({ payload }) => {
+        if (payload.projectId !== projectId) return;
+        setKnowledgeEntries(prev => {
+          const idx = prev.findIndex(k => k.id === payload.id);
+          if (idx === -1) return [...prev, payload];
+          const next = [...prev]; next[idx] = payload; return next;
+        });
+        setFeedItems(prev => [...prev, {
+          id: `know-${payload.id}`,
+          type: 'event' as const,
+          eventType: 'poe:knowledge',
+          taskId: null,
+          message: `Knowledge: ${payload.key}`,
+          ts: payload.createdAt,
+        }]);
+      });
+      unlisteners.push(u9);
+
+      const u10 = await listen<{ itemId: string; projectId: string }>('poe-decision-resolved', ({ payload }) => {
+        if (payload.projectId !== projectId) return;
+        setQueueItems(prev => prev.filter(q => q.id !== payload.itemId));
+      });
+      unlisteners.push(u10);
     }
 
     void hydrate();
@@ -206,5 +278,16 @@ export function usePoeProject(projectId: string | null): {
     };
   }, [projectId, updateNode]);
 
-  return { nodes, queueItems, feedItems, setQueueItems, addNode: updateNode };
+  return {
+    nodes,
+    queueItems,
+    feedItems,
+    phases,
+    artifacts,
+    knowledgeEntries,
+    handoverNodeId,
+    setHandoverNodeId,
+    setQueueItems,
+    addNode: updateNode,
+  };
 }

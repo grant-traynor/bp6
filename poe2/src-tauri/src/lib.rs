@@ -52,9 +52,19 @@ pub fn run() {
             dag_store::commands::list_queue_items,
             dag_store::commands::resolve_queue_item,
             dag_store::commands::list_events,
+            // New dag_store commands
+            dag_store::commands::read_artifact_content,
+            dag_store::commands::flag_knowledge_for_promotion,
+            dag_store::commands::list_phases,
             // orchestrator commands
             orchestrator::commands::advance_stage_gate,
             orchestrator::commands::set_concurrency_limit,
+            // New orchestrator commands
+            orchestrator::commands::cancel_task,
+            orchestrator::commands::pause_stage,
+            orchestrator::commands::abort_project,
+            orchestrator::commands::revise_stage,
+            orchestrator::commands::rerun_stage,
             // agent_lifecycle commands
             agent_lifecycle::commands::write_to_agent,
             agent_lifecycle::commands::interrupt_agent,

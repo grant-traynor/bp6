@@ -37,6 +37,9 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
     conn.execute_batch(schema::CREATE_TABLES)
         .context("Failed to apply schema")?;
 
+    // Migrate: add promoted column to knowledge if not present (ignore error if exists)
+    let _ = conn.execute_batch("ALTER TABLE knowledge ADD COLUMN promoted INTEGER NOT NULL DEFAULT 0");
+
     // Upsert the project record based on path
     let path_str = project_path.to_string_lossy().to_string();
     let name = project_path
@@ -475,6 +478,54 @@ pub fn db_list_queue_items(conn: &Connection, project_id: &str, unresolved_only:
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("Failed to list queue items")?;
+    Ok(rows)
+}
+
+/// Count unresolved queue items for a given task.
+pub fn db_count_unresolved_queue_items_for_task(conn: &Connection, task_id: &str) -> Result<usize> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM queue_items WHERE task_id = ?1 AND resolved_at IS NULL",
+        [task_id],
+        |row| row.get(0),
+    )?;
+    Ok(count as usize)
+}
+
+/// Get the most recent session_id from the agents table for a given task.
+pub fn db_get_agent_session_for_task(conn: &Connection, task_id: &str) -> Result<Option<String>> {
+    let result: rusqlite::Result<Option<String>> = conn.query_row(
+        "SELECT session_id FROM agents WHERE task_id = ?1 ORDER BY started_at DESC LIMIT 1",
+        [task_id],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(v) => Ok(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// List all phases for a project ordered by number.
+pub fn db_list_phases(conn: &Connection, project_id: &str) -> Result<Vec<Phase>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, number, title, lifecycle_stage, gate_held, created_at, updated_at
+         FROM phases WHERE project_id = ?1 ORDER BY number"
+    )?;
+    let rows = stmt
+        .query_map([project_id], |row| {
+            Ok(Phase {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                number: row.get(2)?,
+                title: row.get(3)?,
+                lifecycle_stage: parse_lifecycle_stage(row.get(4)?)?,
+                gate_held: row.get::<_, i64>(5)? != 0,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to list phases")?;
     Ok(rows)
 }
 

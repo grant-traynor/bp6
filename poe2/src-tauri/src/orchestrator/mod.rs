@@ -59,20 +59,41 @@ pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChange
             None => break,
         };
 
-        // Drain all pending signals — run the loop once per batch
-        let project_ids = {
-            let mut ids = std::collections::HashSet::new();
-            ids.insert(signal_project_id(&signal).to_owned());
-            while let Ok(s) = dag_rx.try_recv() {
-                ids.insert(signal_project_id(&s).to_owned());
+        // Drain all pending signals — categorise into resume requests and DAG changes
+        let mut resume_requests: Vec<(String, String, String, String)> = Vec::new(); // (project_id, task_id, session_id, resolution)
+        let mut project_ids = std::collections::HashSet::new();
+
+        // Process a single signal inline (closure not used due to borrow rules)
+        match signal {
+            DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, .. } => {
+                resume_requests.push((project_id, task_id, session_id, resolution));
             }
-            ids
-        };
+            other => {
+                project_ids.insert(signal_project_id(&other).to_owned());
+            }
+        }
+
+        while let Ok(s) = dag_rx.try_recv() {
+            match s {
+                DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, .. } => {
+                    resume_requests.push((project_id, task_id, session_id, resolution));
+                }
+                other => {
+                    project_ids.insert(signal_project_id(&other).to_owned());
+                }
+            }
+        }
 
         let registry = app.state::<ProjectRegistry>().inner().clone();
         let limits = app.state::<Arc<ConcurrencyLimits>>().inner().clone();
         let dag_tx = app.state::<mpsc::UnboundedSender<DagChanged>>().inner().clone();
 
+        // Handle resume continuations for resolved decisions
+        for (project_id, task_id, session_id, resolution) in resume_requests {
+            resume_waiting_agent(&project_id, &task_id, &session_id, &resolution, &registry, &dag_tx, &app).await;
+        }
+
+        // Run normal scheduling loop for DAG changes
         for project_id in project_ids {
             run_loop(&project_id, &registry, &limits, &dag_tx, &app).await;
         }
@@ -84,6 +105,63 @@ fn signal_project_id(signal: &DagChanged) -> &str {
         DagChanged::NodeStatusChanged { project_id, .. } => project_id,
         DagChanged::DagStructureChanged { project_id } => project_id,
         DagChanged::QueueItemResolved { project_id, .. } => project_id,
+    }
+}
+
+/// Resume an agent that was waiting for a human decision.
+/// Spawns a new stream-json session with --resume and the human's resolution as the bundle.
+async fn resume_waiting_agent(
+    project_id: &str,
+    task_id: &str,
+    session_id: &str,
+    resolution: &str,
+    registry: &ProjectRegistry,
+    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) {
+    let (project_path, skill_id, model) = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => {
+                eprintln!("[orchestrator] resume_waiting_agent: project not open {}", project_id);
+                return;
+            }
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let node = match dag_store::db_get_node(&conn, task_id) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("[orchestrator] resume_waiting_agent: task not found {}: {}", task_id, e);
+                return;
+            }
+        };
+        let skill_id = node.skill_id.unwrap_or_else(|| "implementer".to_owned());
+        let path = std::path::PathBuf::from(&db.project.path);
+        let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let model = skills::load_skill(&skill_id, &path, &resource_dir)
+            .ok()
+            .and_then(|s| s.model.clone());
+        (path, skill_id, model)
+    };
+
+    // Resolution bundle format per Protocol.md §5
+    let input_bundle = format!("---\nHuman: {}\n", resolution);
+
+    let spawn_req = agent_lifecycle::SpawnRequest {
+        project_id: project_id.to_owned(),
+        task_id: task_id.to_owned(),
+        skill_id,
+        project_path,
+        input_bundle,
+        resume_session_id: Some(session_id.to_owned()),
+        model,
+    };
+
+    eprintln!("[orchestrator] resuming waiting agent task={} session={}", task_id, session_id);
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+        eprintln!("[orchestrator] Failed to resume agent for task {}: {}", task_id, e);
     }
 }
 

@@ -1,8 +1,11 @@
 import { useEffect, useRef } from 'react';
-import type { FeedItem } from '../types';
+import type { FeedItem, Node } from '../types';
+import { getAncestry } from '../hooks/usePoeProject';
 
 interface Props {
   items: FeedItem[];
+  nodes: Node[];
+  onHandoverOpen: (nodeId: string) => void;
 }
 
 function formatTime(ts: string): string {
@@ -39,6 +42,8 @@ function Badge({ eventType, itemType, success }: BadgeProps) {
     cls = 'bg-neutral-700 text-neutral-400';
   } else if (eventType === 'poe:artifact' || eventType === 'poe-artifact') {
     cls = 'bg-green-900 text-green-300';
+  } else if (eventType === 'poe:knowledge' || eventType === 'poe-knowledge') {
+    cls = 'bg-teal-900 text-teal-300';
   } else if (
     eventType === 'poe:done' ||
     eventType === 'poe-done' ||
@@ -56,7 +61,7 @@ function Badge({ eventType, itemType, success }: BadgeProps) {
   );
 }
 
-export default function ActivityFeed({ items }: Props) {
+export default function ActivityFeed({ items, nodes, onHandoverOpen }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,25 +78,47 @@ export default function ActivityFeed({ items }: Props) {
 
   return (
     <div className="h-full overflow-y-auto px-3 py-2 space-y-1">
-      {items.map(item => (
-        <div key={item.id} className="flex items-start gap-2 min-w-0">
-          <span className="shrink-0 text-neutral-600 text-[11px] tabular-nums pt-0.5">
-            {formatTime(item.ts)}
-          </span>
-          <Badge
-            eventType={item.eventType}
-            itemType={item.type}
-            success={
-              item.type === 'agent-exit'
-                ? !item.message.includes('failed')
-                : undefined
-            }
-          />
-          <span className="text-neutral-300 text-[12px] break-words min-w-0 leading-5">
-            {item.message}
-          </span>
-        </div>
-      ))}
+      {items.map(item => {
+        const ancestry = getAncestry(item.taskId, nodes);
+        const ancestryLabel = ancestry.length > 1
+          ? ancestry
+              .slice()
+              .reverse()
+              .map(n => n.title)
+              .join(' › ')
+          : null;
+
+        return (
+          <div
+            key={item.id}
+            className="flex flex-col min-w-0 rounded px-1 py-0.5 cursor-pointer hover:bg-neutral-800/40 transition-colors"
+            onClick={() => item.taskId && onHandoverOpen(item.taskId)}
+          >
+            <div className="flex items-start gap-2 min-w-0">
+              <span className="shrink-0 text-neutral-600 text-[11px] tabular-nums pt-0.5">
+                {formatTime(item.ts)}
+              </span>
+              <Badge
+                eventType={item.eventType}
+                itemType={item.type}
+                success={
+                  item.type === 'agent-exit'
+                    ? !item.message.includes('failed')
+                    : undefined
+                }
+              />
+              <span className="text-neutral-300 text-[12px] break-words min-w-0 leading-5">
+                {item.message}
+              </span>
+            </div>
+            {ancestryLabel && (
+              <p className="text-[10px] text-neutral-600 pl-[72px] truncate leading-4">
+                {ancestryLabel}
+              </p>
+            )}
+          </div>
+        );
+      })}
       <div ref={bottomRef} />
     </div>
   );

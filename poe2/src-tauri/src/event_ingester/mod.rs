@@ -12,7 +12,13 @@ use tokio::sync::mpsc;
 pub enum DagChanged {
     NodeStatusChanged { project_id: String, node_id: String },
     DagStructureChanged { project_id: String },
-    QueueItemResolved { project_id: String, item_id: String },
+    QueueItemResolved {
+        project_id: String,
+        item_id: String,
+        task_id: String,
+        session_id: String,
+        resolution: String,
+    },
 }
 
 // ── poe: event payloads (Protocol.md §2 wire format) ─────────────────────────
@@ -421,6 +427,13 @@ fn handle_decision(
         .map(|opts| serde_json::to_string(&opts).unwrap_or_default());
 
     with_project_conn(registry, project_id, |conn| {
+        // Set task status to Waiting — agent is paused pending human decision
+        let wait_update = UpdateNodeInput {
+            status: Some(NodeStatus::Waiting),
+            title: None, description: None, skill_id: None, assignee: None,
+        };
+        dag_store::db_update_node(conn, task_id, &wait_update)?;
+
         let item = dag_store::db_create_queue_item(
             conn,
             project_id,
@@ -431,7 +444,7 @@ fn handle_decision(
         )?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:decision", json)?;
         emit_tauri_event(app, "poe-decision-queued", &item);
-        Ok(None) // decisions don't trigger orchestrator
+        Ok(None)
     })
 }
 
@@ -446,24 +459,37 @@ fn handle_done(
 ) -> Result<Option<DagChanged>> {
     let _payload: PoeDone = serde_json::from_str(json)?;
 
-    let update = UpdateNodeInput {
-        title: None,
-        description: None,
-        status: Some(NodeStatus::Complete),
-        skill_id: None,
-        assignee: None,
-    };
-
     with_project_conn(registry, project_id, |conn| {
+        // If this task has unresolved queue items, it's waiting for a decision — don't mark complete
+        let unresolved = dag_store::db_count_unresolved_queue_items_for_task(conn, task_id)
+            .unwrap_or(0);
+        let new_status = if unresolved > 0 {
+            NodeStatus::Waiting
+        } else {
+            NodeStatus::Complete
+        };
+
+        let update = UpdateNodeInput {
+            title: None, description: None,
+            status: Some(new_status.clone()),
+            skill_id: None, assignee: None,
+        };
         let node = dag_store::db_update_node(conn, task_id, &update)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:done", json)?;
-        emit_tauri_event(app, "poe-task-done", &node);
-        let change = DagChanged::NodeStatusChanged {
-            project_id: project_id.to_string(),
-            node_id: task_id.to_string(),
-        };
-        let _ = dag_tx.send(change.clone());
-        Ok(Some(change))
+
+        if new_status == NodeStatus::Complete {
+            emit_tauri_event(app, "poe-task-done", &node);
+            let change = DagChanged::NodeStatusChanged {
+                project_id: project_id.to_string(),
+                node_id: task_id.to_string(),
+            };
+            let _ = dag_tx.send(change.clone());
+            Ok(Some(change))
+        } else {
+            // Waiting — emit node update but don't trigger orchestrator to advance
+            emit_tauri_event(app, "poe-node-updated", &node);
+            Ok(None)
+        }
     })
 }
 
