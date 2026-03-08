@@ -71,7 +71,7 @@ Quick reference (for reading; follow poe-base.md for authoritative text):
 5. poe:done    — LAST, always.
 ```
 
-**Senior engineer exception**: `senior-engineer` is reactive (spawned by `poe:review`), not proactive. It follows a different sequence — see `senior-engineer.md` and `poe-base.md §Dual Activation Mode`.
+**Senior engineer exception**: `senior-engineer` operates in both proactive mode (assigned to Guardrails review and Plan Review lifecycle task nodes) and reactive mode (spawned via `poe:review`). In both cases it follows the plan-review sequence, not the standard proactive sequence — see `senior-engineer.md` and `poe-base.md §Dual Activation Mode`.
 
 ### In your skill file
 
@@ -146,7 +146,7 @@ Examples: `operational-analyst`, `architecture-analyst`, `validity-analyst`.
 modes: [autonomous]
 ```
 
-Do not follow the proactive event sequence for reactive skills. See `senior-engineer.md` for the correct pattern.
+When operating as a reviewer (reactive), `senior-engineer` follows the plan-review sequence from §5, not the proactive sequence from §3. When operating as a proactive lifecycle specialist, it follows the standard sequence. See `senior-engineer.md` for full detail.
 
 ### Plan-review mode
 
@@ -209,7 +209,7 @@ A high `poe:decision` volume during execution signals that the upstream CONOPS o
 
 ### Quality checklist pattern
 
-Every skill should include a quality checklist before `poe:done`. See `product-manager.md` or `validity-analyst.md` for examples. Minimum checklist items:
+Every skill should include a quality checklist before `poe:done`. See `validity-analyst.md` or `poe-base.md §Quality Gate` for examples. Minimum checklist items:
 
 - [ ] `poe:brief` was the first event emitted
 - [ ] All major phases covered by `poe:step` events
@@ -229,10 +229,8 @@ Every skill should include a quality checklist before `poe:done`. See `product-m
 | `data-model-analyst` | Guardrails | autonomous | None |
 | `must-not-analyst` | Guardrails | autonomous | None |
 | `senior-engineer` | Guardrails review, Plan Review, ad-hoc | autonomous | None |
-| `product-manager` | Increment Planning | autonomous | **v1 event format** — uses `poe:node` (not `poe:task`), `type:` prefix on all events, `POE_WORKFLOW_ID` env var injection. Do not use as a format reference. Fix tracked in bp6-rub.5. |
+| `product-manager` | Increment Planning | autonomous | **v1 context model** — `Input Context` section injects `POE_WORKFLOW_ID`, `POE_NODE_ID`, `POE_NODE_DATA` env vars. POE2 delivers context via stdin bundle (Protocol.md §3), not env vars. Event emission section uses v1 payload format. Do not use as a format reference. Fix tracked in bp6-rub.5. |
 | `validity-analyst` | Validity Analysis | autonomous | None |
 | `rca-analyst` | Retrospective | autonomous | None |
-| `implementer` | Execution | autonomous | Missing `modes:` and `protocol_version:`; simplified event protocol section does not reference poe-base.md |
-| `planner` | Execution | autonomous | Missing `modes:` and `protocol_version:`; simplified event protocol section does not reference poe-base.md |
-
-**For new skills**: follow this guide. Do not mirror the format from `implementer.md` or `planner.md`.
+| `implementer` | Execution | autonomous | None |
+| `planner` | Execution | autonomous | None |
