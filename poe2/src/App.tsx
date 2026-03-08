@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { Project, Node, Artifact } from './types';
@@ -7,24 +7,32 @@ import ActivityFeed from './components/ActivityFeed';
 import QueuePanel from './components/QueuePanel';
 import ProjectCard from './components/ProjectCard';
 import NodeTree from './components/NodeTree';
-import DebugPanel from './components/DebugPanel';
 import AgentHandover from './components/AgentHandover';
 import ArtifactViewer from './components/ArtifactViewer';
 import KnowledgePanel from './components/KnowledgePanel';
 import StageGate from './components/StageGate';
 import InterruptControls from './components/InterruptControls';
+import DebugPanel from './components/DebugPanel';
 
 // ── CONOPS launcher ───────────────────────────────────────────────────────────
 // Shown when a project has no nodes yet. Bootstraps the first task.
 
-function ConopsLauncher({ projectId, onLaunched }: { projectId: string; onLaunched: (node: Node) => void }) {
+function ConopsLauncher({ projectId, onLaunched, onOpenSession }: {
+  projectId: string;
+  onLaunched: (node: Node) => void;
+  onOpenSession: (nodeId: string) => void;
+}) {
+  // Used to prevent double-open in React Strict Mode dev double-invoke.
+  const openedRef = useRef(new Set<string>());
   const [brief, setBrief] = useState('');
   const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit() {
     const trimmed = brief.trim();
     if (!trimmed) return;
     setRunning(true);
+    setError(null);
     try {
       const node = await invoke<Node>('create_node', {
         input: {
@@ -37,9 +45,22 @@ function ConopsLauncher({ projectId, onLaunched }: { projectId: string; onLaunch
           skillId: 'operational-analyst',
         },
       });
-      onLaunched(node);
+      // Mark 'waiting' immediately so the autonomous orchestrator doesn't race
+      // to dispatch this task before the PTY handover opens.
+      await invoke('update_node', {
+        nodeId: node.id,
+        projectId,
+        input: { status: 'waiting' },
+      });
+      onLaunched({ ...node, status: 'waiting' } as Node);
+      // Guard against React Strict Mode double-invoke in dev.
+      if (openedRef.current.has(node.id)) return;
+      openedRef.current.add(node.id);
+      // Open interactive session — CONOPS is a Q&A, not an autonomous run.
+      onOpenSession(node.id);
     } catch (err) {
       console.error('Failed to create CONOPS task:', err);
+      setError(String(err));
       setRunning(false);
     }
   }
@@ -49,7 +70,7 @@ function ConopsLauncher({ projectId, onLaunched }: { projectId: string; onLaunch
       <div className="w-full max-w-xl flex flex-col gap-3">
         <p className="text-[11px] text-neutral-500 uppercase tracking-widest">Start project — CONOPS</p>
         <p className="text-[11px] text-neutral-600">
-          Describe the project. The operational-analyst will conduct a structured elicitation.
+          Describe the project briefly. A session will open where the analyst asks you questions.
         </p>
         <textarea
           className="w-full h-40 bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-100 placeholder-neutral-600 resize-none focus:outline-none focus:border-neutral-500"
@@ -59,12 +80,15 @@ function ConopsLauncher({ projectId, onLaunched }: { projectId: string; onLaunch
           disabled={running}
           autoFocus
         />
+        {error && (
+          <p className="text-[11px] text-red-400">{error}</p>
+        )}
         <button
           onClick={() => void handleSubmit()}
           disabled={running || !brief.trim()}
           className="self-end px-4 py-2 bg-neutral-100 text-neutral-950 text-xs font-bold rounded hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {running ? 'Starting…' : 'Run CONOPS →'}
+          {running ? 'Opening session…' : 'Start CONOPS session →'}
         </button>
       </div>
     </div>
@@ -86,13 +110,14 @@ export default function App() {
     knowledgeEntries,
     handoverNodeId,
     setHandoverNodeId,
+    streamEventMap,
     addNode,
-    rawLines,
   } = usePoeProject(selectedId);
+
+  const [debugNodeId, setDebugNodeId] = useState<string | null>(null);
 
   const [artifactViewer, setArtifactViewer] = useState<Artifact | null>(null);
   const [showKnowledge, setShowKnowledge] = useState(false);
-  const [debugNodeId, setDebugNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<Project[]>('list_projects')
@@ -123,6 +148,8 @@ export default function App() {
   const runningAgentCount = nodes.filter(n => n.status === 'running').length;
   const pendingQueueCount = queueItems.filter(q => q.resolvedAt === null).length;
   const handoverNode = handoverNodeId ? (nodes.find(n => n.id === handoverNodeId) ?? null) : null;
+  const debugNode = debugNodeId ? (nodes.find(n => n.id === debugNodeId) ?? null) : null;
+  const debugStreamEvents = debugNodeId ? (streamEventMap.get(debugNodeId) ?? []) : [];
 
   // Global stats across all open projects: for now use selected project's data.
   // Phase 3 will track all projects simultaneously.
@@ -237,7 +264,7 @@ export default function App() {
 
               {nodes.length === 0 ? (
                 /* Empty project — show CONOPS launcher */
-                <ConopsLauncher projectId={selectedId} onLaunched={addNode} />
+                <ConopsLauncher projectId={selectedId} onLaunched={addNode} onOpenSession={setHandoverNodeId} />
               ) : (
                 <>
                   {/* Pane 2a — Phase × Scope (WBS node tree) */}
@@ -254,8 +281,8 @@ export default function App() {
                     </div>
                     <NodeTree
                       nodes={nodes}
-                      onDebugOpen={setDebugNodeId}
                       onHandoverOpen={setHandoverNodeId}
+                      onDebugOpen={setDebugNodeId}
                     />
                   </div>
 
@@ -307,17 +334,14 @@ export default function App() {
       </div>
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}
-      {debugNodeId && (() => {
-        const debugNode = nodes.find(n => n.id === debugNodeId);
-        return debugNode ? (
-          <DebugPanel
-            node={debugNode}
-            lines={rawLines.get(debugNodeId) ?? []}
-            onHandoverOpen={setHandoverNodeId}
-            onClose={() => setDebugNodeId(null)}
-          />
-        ) : null;
-      })()}
+      {debugNodeId && debugNode && (
+        <DebugPanel
+          node={debugNode}
+          streamEvents={debugStreamEvents}
+          onHandoverOpen={setHandoverNodeId}
+          onClose={() => setDebugNodeId(null)}
+        />
+      )}
       {handoverNodeId && (
         <AgentHandover
           nodeId={handoverNodeId}

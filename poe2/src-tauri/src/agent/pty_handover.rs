@@ -40,45 +40,86 @@ pub fn new_handover_map() -> HandoverMap {
 
 /// Open a PTY handover session for the given node.
 ///
-/// Looks up the session_id stored in the agents table (by task_id = node_id),
-/// spawns `claude --resume <session_id> --dangerously-skip-permissions` in a PTY,
-/// starts a WebSocket server on a random loopback port, and bridges
-/// raw bytes between the PTY and the WebSocket.
+/// Two modes:
+/// - **Resume**: if a prior agent session_id exists in the DB, spawns
+///   `claude --resume <session_id> --dangerously-skip-permissions` in a PTY.
+/// - **Fresh**: if no session exists (e.g. CONOPS bootstrap, new interactive task),
+///   marks the node as `running` to prevent autonomous dispatch, creates an agent
+///   record, and spawns a plain `claude --dangerously-skip-permissions` session.
 ///
-/// Returns the WebSocket port. Frontend connects xterm.js to
+/// Starts a WebSocket server on a random loopback port and bridges raw bytes
+/// between the PTY and the WebSocket. Frontend connects xterm.js to
 /// `ws://127.0.0.1:<port>`.
 #[tauri::command]
 pub async fn agent_handover_open(
     node_id: String,
     registry: tauri::State<'_, crate::dag_store::ProjectRegistry>,
     handover_map: tauri::State<'_, HandoverMap>,
+    dag_tx: tauri::State<'_, tokio::sync::mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
 ) -> Result<u16, String> {
-    // 1. Look up session_id and project_path from SQLite agents table (task_id = node_id).
-    let (session_id, project_path) = {
+    // 1. Look up session_id and project_path from the registry.
+    //    session_id is None for brand-new tasks that have never been run.
+    let (session_id_opt, project_path, project_id) = {
         let reg = registry.lock().unwrap();
-        let mut found: Option<(String, String)> = None;
+        let mut found: Option<(Option<String>, String, String)> = None;
         for db in reg.values() {
             let conn = db.conn.lock().unwrap();
-            let result: rusqlite::Result<Option<String>> = conn.query_row(
-                "SELECT session_id FROM agents WHERE task_id = ?1 AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
-                [&node_id],
-                |row| row.get(0),
-            );
-            if let Ok(Some(sid)) = result {
-                found = Some((sid, db.project.path.clone()));
-                break;
+            // Check if this project owns the node.
+            let node_exists: bool = conn
+                .query_row("SELECT 1 FROM nodes WHERE id = ?1", [&node_id], |_| Ok(()))
+                .is_ok();
+            if !node_exists {
+                continue;
             }
+            let sid: Option<String> = conn
+                .query_row(
+                    "SELECT session_id FROM agents WHERE task_id = ?1 AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1",
+                    [&node_id],
+                    |row| row.get(0),
+                )
+                .ok()
+                .flatten();
+            found = Some((sid, db.project.path.clone(), db.project.id.clone()));
+            break;
         }
-        found.ok_or_else(|| format!("No session_id found for node {}", node_id))?
+        found.ok_or_else(|| format!("Node {} not found in any open project", node_id))?
     };
 
+    let is_fresh = session_id_opt.is_none();
+
     eprintln!(
-        "[pty_handover] opening handover for node={} session={}",
-        node_id, session_id
+        "[pty_handover] opening handover for node={} session={:?} fresh={}",
+        node_id, session_id_opt, is_fresh
     );
 
+    // 2. For fresh sessions: mark node 'running' so the autonomous orchestrator
+    //    doesn't race to dispatch the same task.
+    if is_fresh {
+        let reg = registry.lock().unwrap();
+        if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+            let conn = db.conn.lock().unwrap();
+            let update = crate::dag_store::UpdateNodeInput {
+                status: Some(crate::dag_store::NodeStatus::Running),
+                title: None,
+                description: None,
+                skill_id: None,
+                assignee: None,
+            };
+            let _ = crate::dag_store::db_update_node(&conn, &node_id, &update);
+            // Create an agent record so session_id is captured when claude emits init.
+            // Skill ID is best-effort; 'interactive' marks it as a human-driven session.
+            let _ = crate::dag_store::db_create_agent(
+                &conn,
+                &project_id,
+                "interactive",
+                &node_id,
+                None,
+            );
+        }
+    }
+
     // 2. Bind to a random loopback port.
-    let listener = TcpListener::bind("127.0.0.1:0")
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|e| format!("Failed to bind WebSocket listener: {}", e))?;
     let ws_port = listener
         .local_addr()
@@ -87,7 +128,9 @@ pub async fn agent_handover_open(
 
     eprintln!("[pty_handover] node={} ws_port={}", node_id, ws_port);
 
-    // 3. Spawn PTY: claude --resume <session_id> --dangerously-skip-permissions
+    // 3. Spawn PTY.
+    //    Resume: claude --resume <session_id> --dangerously-skip-permissions
+    //    Fresh:  claude --dangerously-skip-permissions (new interactive session)
     let pty_system = NativePtySystem::default();
     let pair = pty_system
         .openpty(PtySize {
@@ -99,8 +142,10 @@ pub async fn agent_handover_open(
         .map_err(|e| format!("Failed to open PTY: {}", e))?;
 
     let mut cmd = CommandBuilder::new("claude");
-    cmd.arg("--resume");
-    cmd.arg(&session_id);
+    if let Some(ref sid) = session_id_opt {
+        cmd.arg("--resume");
+        cmd.arg(sid);
+    }
     cmd.arg("--dangerously-skip-permissions");
     cmd.cwd(&project_path); // CRITICAL: must match original session cwd
 
@@ -145,6 +190,11 @@ pub async fn agent_handover_open(
             Ok((tcp_stream, peer)) => {
                 eprintln!("[pty_handover] node={} WS connected from {}", node_id_clone, peer);
                 tcp_stream.set_nodelay(true).ok();
+                // tokio requires non-blocking mode before from_std.
+                if let Err(e) = tcp_stream.set_nonblocking(true) {
+                    eprintln!("[pty_handover] node={} set_nonblocking error: {}", node_id_clone, e);
+                    return;
+                }
                 // Convert std TcpStream to tokio for tungstenite.
                 let tokio_stream = match tokio::net::TcpStream::from_std(tcp_stream) {
                     Ok(s) => s,
