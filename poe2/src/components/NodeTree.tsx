@@ -2,7 +2,8 @@ import type { Node } from '../types';
 
 interface Props {
   nodes: Node[];
-  onHandoverOpen: (nodeId: string) => void;
+  onDebugOpen: (nodeId: string) => void;    // running nodes → DebugPanel
+  onHandoverOpen: (nodeId: string) => void; // waiting nodes → AgentHandover
 }
 
 interface TreeNode {
@@ -46,7 +47,7 @@ function statusDot(status: Node['status']): { symbol: string; cls: string } {
   }
 }
 
-function NodeRow({ item, onHandoverOpen }: { item: TreeNode; onHandoverOpen: (id: string) => void }) {
+function NodeRow({ item, onDebugOpen, onHandoverOpen }: { item: TreeNode; onDebugOpen: (id: string) => void; onHandoverOpen: (id: string) => void }) {
   const { symbol, cls } = statusDot(item.node.status);
   const isActive = item.node.status === 'running' || item.node.status === 'waiting';
   const typeLabel = item.node.nodeType === 'epic' ? 'EPIC'
@@ -61,8 +62,15 @@ function NodeRow({ item, onHandoverOpen }: { item: TreeNode; onHandoverOpen: (id
           isActive ? 'cursor-pointer hover:bg-neutral-800/60' : ''
         }`}
         style={{ paddingLeft: `${4 + item.depth * 16}px` }}
-        onClick={() => isActive && onHandoverOpen(item.node.id)}
-        title={isActive ? 'Click to open agent session' : undefined}
+        onClick={() => {
+          if (item.node.status === 'running') onDebugOpen(item.node.id);
+          else if (item.node.status === 'waiting') onHandoverOpen(item.node.id);
+        }}
+        title={
+          item.node.status === 'running' ? 'Click to view raw output' :
+          item.node.status === 'waiting' ? 'Click to open agent handover' :
+          undefined
+        }
       >
         <span className={`shrink-0 font-mono text-[11px] w-3 text-center ${cls}`}>{symbol}</span>
         {typeLabel && (
@@ -76,13 +84,13 @@ function NodeRow({ item, onHandoverOpen }: { item: TreeNode; onHandoverOpen: (id
         )}
       </div>
       {item.children.map(child => (
-        <NodeRow key={child.node.id} item={child} onHandoverOpen={onHandoverOpen} />
+        <NodeRow key={child.node.id} item={child} onDebugOpen={onDebugOpen} onHandoverOpen={onHandoverOpen} />
       ))}
     </>
   );
 }
 
-export default function NodeTree({ nodes, onHandoverOpen }: Props) {
+export default function NodeTree({ nodes, onDebugOpen, onHandoverOpen }: Props) {
   const tree = buildTree(nodes);
 
   if (nodes.length === 0) return null;
@@ -90,7 +98,7 @@ export default function NodeTree({ nodes, onHandoverOpen }: Props) {
   return (
     <div className="overflow-y-auto border-b border-neutral-800 py-1">
       {tree.map(item => (
-        <NodeRow key={item.node.id} item={item} onHandoverOpen={onHandoverOpen} />
+        <NodeRow key={item.node.id} item={item} onDebugOpen={onDebugOpen} onHandoverOpen={onHandoverOpen} />
       ))}
     </div>
   );

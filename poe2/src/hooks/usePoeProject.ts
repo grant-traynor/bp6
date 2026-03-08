@@ -38,6 +38,8 @@ export function getAncestry(nodeId: string | null | undefined, nodes: Node[]): N
   return chain; // closest first, root last
 }
 
+const RAW_LINE_LIMIT = 500; // max lines stored per task
+
 export function usePoeProject(projectId: string | null): {
   nodes: Node[];
   queueItems: QueueItem[];
@@ -49,10 +51,12 @@ export function usePoeProject(projectId: string | null): {
   setHandoverNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   setQueueItems: React.Dispatch<React.SetStateAction<QueueItem[]>>;
   addNode: (node: Node) => void;
+  rawLines: Map<string, string[]>;  // taskId → last N raw output lines
 } {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
+  const [rawLines, setRawLines] = useState<Map<string, string[]>>(new Map());
   const [phases, setPhases] = useState<Phase[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [knowledgeEntries, setKnowledgeEntries] = useState<KnowledgeEntry[]>([]);
@@ -76,6 +80,7 @@ export function usePoeProject(projectId: string | null): {
       setPhases([]);
       setArtifacts([]);
       setKnowledgeEntries([]);
+      setRawLines(new Map());
       return;
     }
 
@@ -272,6 +277,24 @@ export function usePoeProject(projectId: string | null): {
         ));
       });
       unlisteners.push(u10);
+
+      // poe-pty-line: raw agent output, one line per event.
+      // Stored per taskId for the DebugPanel; capped at RAW_LINE_LIMIT lines.
+      const u11 = await listen<{ agentId: string; taskId: string; projectId: string; line: string }>(
+        'poe-pty-line',
+        ({ payload }) => {
+          if (payload.projectId !== projectId) return;
+          const taskId = payload.taskId;
+          setRawLines(prev => {
+            const next = new Map(prev);
+            const existing = next.get(taskId) ?? [];
+            const appended = [...existing, payload.line];
+            next.set(taskId, appended.length > RAW_LINE_LIMIT ? appended.slice(-RAW_LINE_LIMIT) : appended);
+            return next;
+          });
+        }
+      );
+      unlisteners.push(u11);
     }
 
     void hydrate();
@@ -294,5 +317,6 @@ export function usePoeProject(projectId: string | null): {
     setHandoverNodeId,
     setQueueItems,
     addNode: updateNode,
+    rawLines,
   };
 }

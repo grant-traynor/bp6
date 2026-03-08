@@ -7,6 +7,7 @@ import ActivityFeed from './components/ActivityFeed';
 import QueuePanel from './components/QueuePanel';
 import ProjectCard from './components/ProjectCard';
 import NodeTree from './components/NodeTree';
+import DebugPanel from './components/DebugPanel';
 import AgentHandover from './components/AgentHandover';
 import ArtifactViewer from './components/ArtifactViewer';
 import KnowledgePanel from './components/KnowledgePanel';
@@ -86,10 +87,12 @@ export default function App() {
     handoverNodeId,
     setHandoverNodeId,
     addNode,
+    rawLines,
   } = usePoeProject(selectedId);
 
   const [artifactViewer, setArtifactViewer] = useState<Artifact | null>(null);
   const [showKnowledge, setShowKnowledge] = useState(false);
+  const [debugNodeId, setDebugNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<Project[]>('list_projects')
@@ -251,6 +254,7 @@ export default function App() {
                     </div>
                     <NodeTree
                       nodes={nodes}
+                      onDebugOpen={setDebugNodeId}
                       onHandoverOpen={setHandoverNodeId}
                     />
                   </div>
@@ -303,6 +307,17 @@ export default function App() {
       </div>
 
       {/* ── Modals ─────────────────────────────────────────────────────────── */}
+      {debugNodeId && (() => {
+        const debugNode = nodes.find(n => n.id === debugNodeId);
+        return debugNode ? (
+          <DebugPanel
+            node={debugNode}
+            lines={rawLines.get(debugNodeId) ?? []}
+            onHandoverOpen={setHandoverNodeId}
+            onClose={() => setDebugNodeId(null)}
+          />
+        ) : null;
+      })()}
       {handoverNodeId && (
         <AgentHandover
           nodeId={handoverNodeId}
