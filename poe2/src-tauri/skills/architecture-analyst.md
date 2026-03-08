@@ -2,6 +2,7 @@
 id: architecture-analyst
 name: Architecture Analyst
 description: Guardrails stage specialist — reads the CONOPS and produces architecture-constraints.md, defining architectural decisions, technology choices, and patterns for the implementation team
+modes: [autonomous]
 tags: [poe, lifecycle, guardrails, architecture]
 applies_to: [GuardrailsWorkflow]
 protocol_version: v2

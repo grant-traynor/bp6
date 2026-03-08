@@ -2,6 +2,7 @@
 id: poe-base
 name: POE v2 Base Protocol
 description: Universal protocol rules inherited by all POE v2 skills. Read this before reading any specialist skill.
+modes: [autonomous]
 tags: [poe, protocol, base]
 protocol_version: v2
 ---

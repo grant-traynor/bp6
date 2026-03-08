@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod agent_lifecycle;
 pub mod dag_store;
 pub mod event_ingester;
@@ -21,6 +22,7 @@ pub fn run() {
             app.manage(dag_store::new_registry());
             app.manage(agent_lifecycle::new_agent_map());
             app.manage(orchestrator::ConcurrencyLimits::new());
+            app.manage(agent::pty_handover::new_handover_map());
             app.manage(dag_tx);
 
             // Start orchestrator loop with the receiver
@@ -57,6 +59,9 @@ pub fn run() {
             agent_lifecycle::commands::write_to_agent,
             agent_lifecycle::commands::interrupt_agent,
             agent_lifecycle::commands::list_agents,
+            // agent handover commands
+            agent::pty_handover::agent_handover_open,
+            agent::pty_handover::agent_handover_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running poe2 application");

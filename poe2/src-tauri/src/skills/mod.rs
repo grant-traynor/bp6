@@ -2,6 +2,14 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+/// Execution mode for an agent spawn — determines the protocol block injected
+/// at the top of the input bundle.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SpawnMode {
+    Autonomous,
+    Interactive,
+}
+
 /// The resolved skill prompt ready for injection into an agent's input bundle.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,6 +19,8 @@ pub struct ResolvedSkill {
     pub prompt: String,
     /// Source path where the winning file was loaded from.
     pub source: String,
+    /// Modes declared in skill YAML frontmatter. Defaults to `["autonomous"]` if absent.
+    pub modes: Vec<String>,
 }
 
 /// Load a skill by ID using the 3-level priority chain:
@@ -26,7 +36,19 @@ pub fn load_skill(skill_id: &str, project_path: &Path, resource_dir: &Path) -> R
     // Build candidates in ascending priority order; last match wins.
     let mut candidates: Vec<PathBuf> = Vec::new();
 
-    // 1. App bundle defaults
+    // 1a. Dev-mode fallback: look next to the source tree (CARGO_MANIFEST_DIR = src-tauri/).
+    //     In production the bundle resources take over; this is a no-op in release builds.
+    #[cfg(debug_assertions)]
+    {
+        let dev_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("skills")
+            .join(&filename);
+        if dev_path.exists() {
+            candidates.push(dev_path);
+        }
+    }
+
+    // 1b. App bundle defaults (production: resources/skills/<skill-id>.md)
     let bundle_path = resource_dir.join("skills").join(&filename);
     if bundle_path.exists() {
         candidates.push(bundle_path);
@@ -58,23 +80,84 @@ pub fn load_skill(skill_id: &str, project_path: &Path, resource_dir: &Path) -> R
     let prompt = std::fs::read_to_string(winning_path)
         .with_context(|| format!("Failed to read skill file: {:?}", winning_path))?;
 
+    let modes = parse_modes_from_frontmatter(&prompt);
+
     Ok(ResolvedSkill {
         skill_id: skill_id.to_owned(),
         prompt,
         source: winning_path.to_string_lossy().to_string(),
+        modes,
     })
+}
+
+/// Parse the `modes:` field from YAML frontmatter at the top of a skill file.
+/// Returns `["autonomous"]` if the file has no frontmatter or no modes field.
+fn parse_modes_from_frontmatter(content: &str) -> Vec<String> {
+    if !content.starts_with("---\n") && !content.starts_with("---\r\n") {
+        return vec!["autonomous".to_string()];
+    }
+    // Find end of frontmatter block.
+    let after_start = if content.starts_with("---\r\n") { 5 } else { 4 };
+    let end_marker = if content[after_start..].contains("\n---\n") {
+        "\n---\n"
+    } else if content[after_start..].contains("\n---\r\n") {
+        "\n---\r\n"
+    } else {
+        return vec!["autonomous".to_string()];
+    };
+    let end_idx = content[after_start..].find(end_marker).unwrap_or(0);
+    let frontmatter = &content[after_start..after_start + end_idx];
+
+    for line in frontmatter.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("modes:") {
+            let rest = rest.trim();
+            // Handle: modes: [autonomous, interactive]
+            if rest.starts_with('[') && rest.ends_with(']') {
+                let inner = &rest[1..rest.len() - 1];
+                return inner
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+    }
+    vec!["autonomous".to_string()]
+}
+
+/// Check that a skill supports the requested spawn mode.
+/// Returns `Err` if the skill's declared modes do not include the requested mode.
+pub fn check_mode_compatibility(skill: &ResolvedSkill, mode: &SpawnMode) -> Result<()> {
+    let mode_str = match mode {
+        SpawnMode::Autonomous => "autonomous",
+        SpawnMode::Interactive => "interactive",
+    };
+    if !skill.modes.contains(&mode_str.to_string()) {
+        return Err(anyhow::anyhow!(
+            "Skill '{}' does not support {} mode (supports: {}). \
+             Add 'modes: [{}]' to the skill's YAML frontmatter to enable it.",
+            skill.skill_id,
+            mode_str,
+            skill.modes.join(", "),
+            mode_str,
+        ));
+    }
+    Ok(())
 }
 
 /// Assemble the full input bundle string for an agent.
 ///
 /// Layout:
 /// The output format is:
+/// - Mode protocol block (Protocol.md §3)
 /// - Skill prompt
 /// - Task Context (WBS ancestry)
 /// - Task title and description
 /// - Knowledge Register entries
 /// - Relevant Artifacts list
 pub fn assemble_input_bundle(
+    mode: &SpawnMode,
     skill: &ResolvedSkill,
     task_title: &str,
     task_description: Option<&str>,
@@ -83,6 +166,28 @@ pub fn assemble_input_bundle(
     artifacts: &[(&str, &str)],    // [(artifact_type, filename)]
 ) -> String {
     let mut bundle = String::new();
+
+    // Mode protocol block (Protocol.md §3) — prepended before skill content.
+    let mode_block = match mode {
+        SpawnMode::Autonomous => concat!(
+            "## Execution Protocol\n\n",
+            "You are running in autonomous mode — there is no human at the keyboard.\n\n",
+            "- Begin by emitting `poe:brief` describing your understanding of the task.\n",
+            "- Work from the context in this bundle. Do not ask questions.\n",
+            "- Raise genuine blockers via `poe:decision`, then continue with your best judgement.\n",
+            "- Emit `poe:done` as your final output. The process exits after this.\n",
+        ),
+        SpawnMode::Interactive => concat!(
+            "## Execution Protocol\n\n",
+            "You are in a conversation with a human developer.\n\n",
+            "- This is a collaborative, multi-round session — ask questions and wait for answers.\n",
+            "- Do not emit poe: events unless you have produced a concrete output\n",
+            "  (poe:artifact when you write a document, poe:knowledge when you record a decision).\n",
+            "- End the conversation naturally. Do not emit `poe:done` unless explicitly asked.\n",
+        ),
+    };
+    bundle.push_str(mode_block);
+    bundle.push_str("\n---\n\n");
 
     // Skill prompt
     bundle.push_str(&skill.prompt);
@@ -147,6 +252,7 @@ mod tests {
         let skill = load_skill("planner", project.path(), tmp.path()).unwrap();
         assert_eq!(skill.skill_id, "planner");
         assert!(skill.prompt.contains("You are a planner."));
+        assert_eq!(skill.modes, vec!["autonomous".to_string()]);
     }
 
     #[test]
@@ -161,6 +267,7 @@ mod tests {
 
         let skill = load_skill("planner", project.path(), tmp.path()).unwrap();
         assert!(skill.prompt.contains("Project-specific planner."));
+        assert_eq!(skill.modes, vec!["autonomous".to_string()]);
     }
 
     #[test]
@@ -177,8 +284,10 @@ mod tests {
             skill_id: "implementer".to_owned(),
             prompt: "You are an implementer.".to_owned(),
             source: "bundle".to_owned(),
+            modes: vec!["autonomous".to_string()],
         };
         let bundle = assemble_input_bundle(
+            &SpawnMode::Autonomous,
             &skill,
             "Implement login",
             Some("Add JWT-based login to the API"),
@@ -191,5 +300,103 @@ mod tests {
         assert!(bundle.contains("Auth"));
         assert!(bundle.contains("jwt-secret"));
         assert!(bundle.contains("auth-design.md"));
+    }
+
+    #[test]
+    fn assemble_bundle_autonomous_mode_block() {
+        let skill = ResolvedSkill {
+            skill_id: "implementer".to_owned(),
+            prompt: "You are an implementer.".to_owned(),
+            source: "bundle".to_owned(),
+            modes: vec!["autonomous".to_string()],
+        };
+        let bundle = assemble_input_bundle(
+            &SpawnMode::Autonomous,
+            &skill,
+            "Build feature",
+            None,
+            &[],
+            &[],
+            &[],
+        );
+        assert!(bundle.contains("autonomous mode"));
+        assert!(bundle.contains("poe:brief"));
+        assert!(bundle.contains("poe:done"));
+        assert!(bundle.contains("You are an implementer."));
+        // Mode block must come before skill prompt
+        let mode_pos = bundle.find("autonomous mode").unwrap();
+        let skill_pos = bundle.find("You are an implementer.").unwrap();
+        assert!(mode_pos < skill_pos, "mode block must precede skill prompt");
+    }
+
+    #[test]
+    fn assemble_bundle_interactive_mode_block() {
+        let skill = ResolvedSkill {
+            skill_id: "analyst".to_owned(),
+            prompt: "You are an analyst.".to_owned(),
+            source: "bundle".to_owned(),
+            modes: vec!["autonomous".to_string(), "interactive".to_string()],
+        };
+        let bundle = assemble_input_bundle(
+            &SpawnMode::Interactive,
+            &skill,
+            "Discuss requirements",
+            None,
+            &[],
+            &[],
+            &[],
+        );
+        assert!(bundle.contains("conversation with a human developer"));
+        // The interactive block must not contain the autonomous mandate ("Emit `poe:done` as your final output").
+        assert!(
+            !bundle.contains("Emit `poe:done` as your final output"),
+            "interactive block must not contain the autonomous poe:done mandate"
+        );
+    }
+
+    #[test]
+    fn mode_guard_autonomous_ok() {
+        let skill = ResolvedSkill {
+            skill_id: "pm".to_owned(),
+            prompt: "".to_owned(),
+            source: "".to_owned(),
+            modes: vec!["autonomous".to_string()],
+        };
+        assert!(check_mode_compatibility(&skill, &SpawnMode::Autonomous).is_ok());
+    }
+
+    #[test]
+    fn mode_guard_blocks_interactive_when_not_declared() {
+        let skill = ResolvedSkill {
+            skill_id: "pm".to_owned(),
+            prompt: "".to_owned(),
+            source: "".to_owned(),
+            modes: vec!["autonomous".to_string()],
+        };
+        assert!(check_mode_compatibility(&skill, &SpawnMode::Interactive).is_err());
+        let err = check_mode_compatibility(&skill, &SpawnMode::Interactive).unwrap_err();
+        assert!(err.to_string().contains("does not support interactive mode"));
+    }
+
+    #[test]
+    fn parse_modes_from_frontmatter_works() {
+        let content = "---\nid: test\nmodes: [autonomous, interactive]\n---\n# Skill\nContent.";
+        let skill_dir = TempDir::new().unwrap();
+        let proj_dir = TempDir::new().unwrap();
+        let bundle_dir = skill_dir.path().join("skills");
+        write_skill(&bundle_dir, "test.md", content);
+        let skill = load_skill("test", proj_dir.path(), skill_dir.path()).unwrap();
+        assert_eq!(skill.modes, vec!["autonomous", "interactive"]);
+    }
+
+    #[test]
+    fn parse_modes_defaults_to_autonomous() {
+        let content = "# Skill\nNo frontmatter here.";
+        let skill_dir = TempDir::new().unwrap();
+        let proj_dir = TempDir::new().unwrap();
+        let bundle_dir = skill_dir.path().join("skills");
+        write_skill(&bundle_dir, "nofront.md", content);
+        let skill = load_skill("nofront", proj_dir.path(), skill_dir.path()).unwrap();
+        assert_eq!(skill.modes, vec!["autonomous"]);
     }
 }

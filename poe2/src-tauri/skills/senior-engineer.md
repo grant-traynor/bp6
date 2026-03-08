@@ -1,7 +1,8 @@
 ---
 id: senior-engineer
 name: Senior Engineer
-description: Reactive technical reviewer — invoked via poe:review from other agents, produces a decisive technical review artifact and exits
+description: Reviews plans and implementation for technical correctness.
+modes: [autonomous]
 tags: [poe, review, technical, guardrails, plan-review]
 applies_to: [AnyWorkflow]
 protocol_version: v2

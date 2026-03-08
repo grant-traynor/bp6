@@ -2,6 +2,7 @@
 id: must-not-analyst
 name: Must-Not Analyst
 description: Guardrails stage specialist — reads CONOPS and architecture constraints to produce must-nots.md, defining hard constraints the system must never violate
+modes: [autonomous]
 tags: [poe, lifecycle, guardrails, must-nots, security, compliance]
 applies_to: [GuardrailsWorkflow]
 protocol_version: v2

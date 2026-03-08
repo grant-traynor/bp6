@@ -2,6 +2,7 @@
 id: rca-analyst
 name: RCA Analyst
 description: Outer loop Act specialist — reads the validity report and event log to perform root cause analysis, then produces phase-N-rca.md and updates skills and knowledge register
+modes: [autonomous]
 tags: [poe, lifecycle, retrospective, rca, outer-loop]
 applies_to: [RetrospectiveWorkflow]
 protocol_version: v2

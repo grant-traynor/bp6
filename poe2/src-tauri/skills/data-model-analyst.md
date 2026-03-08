@@ -2,6 +2,7 @@
 id: data-model-analyst
 name: Data Model Analyst
 description: Guardrails stage specialist — reads CONOPS, architecture constraints, and interface control to produce data-model.md, defining the complete DB schema, type definitions, and entity relationships
+modes: [autonomous]
 tags: [poe, lifecycle, guardrails, data-model]
 applies_to: [GuardrailsWorkflow]
 protocol_version: v2

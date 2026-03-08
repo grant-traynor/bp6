@@ -2,6 +2,7 @@
 id: validity-analyst
 name: Validity Analyst
 description: Outer loop Check specialist — compares execution output against the intended CONOPS and phase plan to identify gaps between what was built and what was intended
+modes: [autonomous]
 tags: [poe, lifecycle, validity, outer-loop, retrospective]
 applies_to: [ValidityWorkflow]
 protocol_version: v2

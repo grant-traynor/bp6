@@ -204,6 +204,7 @@ async fn dispatch_task(
         .collect();
 
     let input_bundle = skills::assemble_input_bundle(
+        &skills::SpawnMode::Autonomous,
         &skill,
         &task.title,
         task.description.as_deref(),

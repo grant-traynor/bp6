@@ -89,86 +89,23 @@ struct PoeReview {
 
 // ── Core ingestion ────────────────────────────────────────────────────────────
 
-/// Strip ANSI/VT escape sequences from a PTY output line.
-///
-/// Handles the three escape classes that appear in Claude's PTY output:
-///   - CSI sequences: `ESC [ <params> <final-byte>`  (colours, cursor movement, etc.)
-///   - OSC sequences: `ESC ] <text> ST`              (hyperlinks, window title)
-///   - Two-byte escapes: `ESC <single-byte>`         (e.g. ESC M = reverse index)
-///
-/// Note: cursor-forward codes (`ESC[NC`) advance the cursor without inserting
-/// space characters. After stripping, adjacent words concatenate with no separator.
-/// Use this function to clean poe: event lines before JSON parsing, not for
-/// reconstructing human-readable prose from TUI output.
-pub fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] != 0x1b {
-            out.push(b[i] as char);
-            i += 1;
-            continue;
-        }
-        i += 1; // consume ESC
-        if i >= b.len() {
-            break;
-        }
-        match b[i] {
-            b'[' => {
-                // CSI: ESC [ <param bytes 0x30-0x3F>* <intermediate 0x20-0x2F>* <final 0x40-0x7E>
-                i += 1;
-                while i < b.len() && b[i] >= 0x20 && b[i] < 0x40 {
-                    i += 1;
-                }
-                if i < b.len() {
-                    i += 1; // final byte
-                }
-            }
-            b']' => {
-                // OSC: ESC ] <text> BEL  or  ESC ] <text> ESC '\'
-                i += 1;
-                while i < b.len() {
-                    if b[i] == 0x07 {
-                        i += 1;
-                        break;
-                    }
-                    if b[i] == 0x1b && i + 1 < b.len() && b[i + 1] == b'\\' {
-                        i += 2;
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            _ => {
-                i += 1; // two-byte escape — skip the second byte
-            }
-        }
-    }
-    out
-}
-
-/// Detect and classify a single PTY output line as a poe: event.
-///
-/// Strips ANSI escape sequences before parsing so that terminal colour codes
-/// or cursor-movement codes applied by the PTY do not corrupt the JSON.
+/// Detect and classify a single line as a poe: event.
 ///
 /// Returns `Some((event_type, json_value))` if the line is valid JSON containing
-/// a `"poe"` key. Returns `None` for raw PTY output or non-poe JSON.
+/// a `"poe"` key. Returns `None` for non-JSON or non-poe lines.
 ///
-/// This is a pure function with no Tauri or SQLite dependencies — safe to call
-/// from integration tests and binaries that do not have an AppHandle.
+/// Pure function — no Tauri, no SQLite, safe to call from tests.
 pub fn parse_poe_event(line: &str) -> Option<(String, serde_json::Value)> {
-    let clean = strip_ansi(line.trim());
-    let json = serde_json::from_str::<serde_json::Value>(clean.trim()).ok()?;
+    let json = serde_json::from_str::<serde_json::Value>(line.trim()).ok()?;
     let event_type = json.get("poe")?.as_str()?.to_owned();
     Some((event_type, json))
 }
 
-/// Process a single line of PTY output from an agent.
+/// Process a single clean line from an agent.
 ///
+/// Lines arrive pre-stripped (ANSI removal is handled upstream by TextBufExtractor).
 /// A line is a poe: event iff it parses as valid JSON and contains a `"poe"` key.
-/// All other lines are raw PTY output — the caller handles those.
+/// All other lines are passed through — the caller handles those.
 pub fn ingest_line(
     line: &str,
     project_id: &str,
@@ -597,4 +534,52 @@ where
     drop(reg);
     let conn = db.conn.lock().unwrap();
     f(&conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_poe_event_valid() {
+        let line = r#"{"poe":"brief","content":"starting analysis"}"#;
+        let result = parse_poe_event(line);
+        assert!(result.is_some());
+        let (event_type, json) = result.unwrap();
+        assert_eq!(event_type, "brief");
+        assert_eq!(json["content"], "starting analysis");
+    }
+
+    #[test]
+    fn parse_poe_event_task() {
+        let line = r#"{"poe":"task","id":"t-1","title":"Implement feature","skill":"senior-engineer"}"#;
+        let (event_type, json) = parse_poe_event(line).unwrap();
+        assert_eq!(event_type, "task");
+        assert_eq!(json["id"], "t-1");
+    }
+
+    #[test]
+    fn parse_poe_event_done() {
+        let line = r#"{"poe":"done","summary":"all done"}"#;
+        let (event_type, _) = parse_poe_event(line).unwrap();
+        assert_eq!(event_type, "done");
+    }
+
+    #[test]
+    fn parse_poe_event_not_json() {
+        assert!(parse_poe_event("just some text").is_none());
+        assert!(parse_poe_event("").is_none());
+    }
+
+    #[test]
+    fn parse_poe_event_json_without_poe_key() {
+        assert!(parse_poe_event(r#"{"type":"result","subtype":"success"}"#).is_none());
+    }
+
+    #[test]
+    fn parse_poe_event_strips_leading_whitespace() {
+        let line = r#"  {"poe":"step","name":"analyzing"}  "#;
+        let (event_type, _) = parse_poe_event(line).unwrap();
+        assert_eq!(event_type, "step");
+    }
 }

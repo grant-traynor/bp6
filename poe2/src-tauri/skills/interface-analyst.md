@@ -2,6 +2,7 @@
 id: interface-analyst
 name: Interface Analyst
 description: Guardrails stage specialist — reads CONOPS and architecture constraints to produce interface-control.md, defining all wire formats, event protocols, API contracts, and inter-subsystem boundaries
+modes: [autonomous]
 tags: [poe, lifecycle, guardrails, interface]
 applies_to: [GuardrailsWorkflow]
 protocol_version: v2
