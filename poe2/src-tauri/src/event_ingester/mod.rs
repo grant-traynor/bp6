@@ -67,8 +67,13 @@ struct PoeEdgeRemove {
 #[derive(Debug, serde::Deserialize)]
 struct PoeArtifact {
     name: String,
+    #[serde(default = "default_artifact_type")]
     artifact_type: String,
     content: String,
+}
+
+fn default_artifact_type() -> String {
+    "document".to_string()
 }
 
 #[derive(Debug, serde::Deserialize)]

@@ -1163,8 +1163,15 @@ async fn dispatch_task(
         .map(|(t, f)| (t.as_str(), f.as_str()))
         .collect();
 
+    // Choose spawn mode: interactive when the skill declares it, autonomous otherwise.
+    let spawn_mode = if skill.modes.contains(&"interactive".to_string()) {
+        skills::SpawnMode::Interactive
+    } else {
+        skills::SpawnMode::Autonomous
+    };
+
     let input_bundle = skills::assemble_input_bundle(
-        &skills::SpawnMode::Autonomous,
+        &spawn_mode,
         &skill,
         &task.title,
         task.description.as_deref(),

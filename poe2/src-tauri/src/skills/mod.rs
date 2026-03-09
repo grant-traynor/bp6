@@ -213,12 +213,11 @@ pub fn assemble_input_bundle(
             "- Emit `poe:done` as your final output. The process exits after this.\n",
         ),
         SpawnMode::Interactive => concat!(
-            "## Execution Protocol\n\n",
-            "You are in a conversation with a human developer.\n\n",
-            "- This is a collaborative, multi-round session — ask questions and wait for answers.\n",
-            "- Do not emit poe: events unless you have produced a concrete output\n",
-            "  (poe:artifact when you write a document, poe:knowledge when you record a decision).\n",
-            "- End the conversation naturally. Do not emit `poe:done` unless explicitly asked.\n",
+            "## Interactive Mode\n\n",
+            "You are running in interactive mode — a human is present at the keyboard.\n\n",
+            "- Use `poe:chat` + `poe:yield` to ask questions and wait for the human's answer.\n",
+            "- The orchestrator will resume your run with the answer as `Human: {response}`.\n",
+            "- Follow the Interactive Mode instructions in your skill prompt exactly.\n",
         ),
     };
     bundle.push_str(mode_block);
@@ -384,8 +383,9 @@ mod tests {
             &[],
             &[],
         );
-        assert!(bundle.contains("conversation with a human developer"));
-        // The interactive block must not contain the autonomous mandate ("Emit `poe:done` as your final output").
+        assert!(bundle.contains("## Interactive Mode"));
+        assert!(bundle.contains("interactive mode"));
+        // The interactive block must not contain the autonomous mandate.
         assert!(
             !bundle.contains("Emit `poe:done` as your final output"),
             "interactive block must not contain the autonomous poe:done mandate"
