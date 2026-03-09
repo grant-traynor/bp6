@@ -114,6 +114,10 @@ fn node_status_transitions_pending_running_waiting_complete() {
             title: "Status test task".to_owned(),
             description: None,
             skill_id: None,
+            initial_status: None,
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
         },
     )
     .expect("create node");
@@ -130,6 +134,7 @@ fn node_status_transitions_pending_running_waiting_complete() {
             status: Some(NodeStatus::Running),
             skill_id: None,
             assignee: None,
+            ..Default::default()
         },
     )
     .expect("set running");
@@ -146,6 +151,7 @@ fn node_status_transitions_pending_running_waiting_complete() {
             status: Some(NodeStatus::Waiting),
             skill_id: None,
             assignee: None,
+            ..Default::default()
         },
     )
     .expect("set waiting");
@@ -162,6 +168,7 @@ fn node_status_transitions_pending_running_waiting_complete() {
             status: Some(NodeStatus::Complete),
             skill_id: None,
             assignee: None,
+            ..Default::default()
         },
     )
     .expect("set complete");
@@ -186,6 +193,10 @@ fn ancestry_three_level_hierarchy_closest_first() {
             title: "Grandparent".to_owned(),
             description: None,
             skill_id: None,
+            initial_status: None,
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
         },
     )
     .expect("create grandparent");
@@ -200,6 +211,10 @@ fn ancestry_three_level_hierarchy_closest_first() {
             title: "Parent".to_owned(),
             description: None,
             skill_id: None,
+            initial_status: None,
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
         },
     )
     .expect("create parent");
@@ -214,6 +229,10 @@ fn ancestry_three_level_hierarchy_closest_first() {
             title: "Child".to_owned(),
             description: None,
             skill_id: None,
+            initial_status: None,
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
         },
     )
     .expect("create child");
@@ -241,6 +260,10 @@ fn ancestry_root_node_returns_single_entry() {
             title: "Root epic".to_owned(),
             description: None,
             skill_id: None,
+            initial_status: None,
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
         },
     )
     .expect("create root");
@@ -338,6 +361,10 @@ fn agent_session_retrievable_for_task() {
             title: "Agent task".to_owned(),
             description: None,
             skill_id: None,
+            initial_status: None,
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
         },
     )
     .expect("create node");
@@ -452,6 +479,10 @@ fn add_task(conn: &Connection, project_id: &str, phase_id: &str, title: &str) ->
             title: title.to_owned(),
             description: None,
             skill_id: None,
+            initial_status: None,
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
         },
     )
     .expect("create task node")

@@ -478,7 +478,7 @@ fn handle_knowledge(
 /// Pure DB mutation for `poe:decision`: set task Waiting, create queue_item.
 ///
 /// Separated from the full handler so tests can call it without an AppHandle.
-pub(crate) fn db_handle_decision(
+pub fn db_handle_decision(
     conn: &rusqlite::Connection,
     json: &str,
     project_id: &str,
@@ -561,7 +561,7 @@ fn handle_chat(
 ///
 /// Checkpoint (staying Waiting) is handled exclusively by `poe:yield`. Once an agent
 /// emits `poe:done`, the task is unconditionally complete.
-pub(crate) fn db_handle_done(
+pub fn db_handle_done(
     conn: &rusqlite::Connection,
     json: &str,
     project_id: &str,
