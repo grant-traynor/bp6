@@ -196,7 +196,7 @@ One event per line. No multi-line JSON.
 // options is optional
 
 // Collaborative turn — agent sends a message or question to the human during a co-authoring session.
-// For interactive agents only — routes to the Collaborative Artifact View, NOT the Decision Queue.
+// For interactive agents only — routes to the Artifact Viewer chat panel, NOT the Decision Queue.
 // Agent emits poe:yield reason=chat immediately after. Orchestrator resumes via --resume once human responds.
 {"poe": "chat", "content": "...", "id": "c1"}
 // id is optional for single-turn sessions
@@ -472,7 +472,7 @@ All events use `app_handle.emit_all(event_name, payload)`.
 | `poe://event` | `{task_id, event_type, payload, created_at}` | Append to activity feed |
 | `poe://decision` | `{decision_id, task_id, question, options}` | Add item to queue panel, increment badge |
 | `poe://decision-resolved` | `{decision_id}` | Remove item from queue panel, decrement badge |
-| `poe://chat-turn` | `{turn_id, task_id, content}` | Display agent message in Collaborative Artifact View right panel |
+| `poe://chat-turn` | `{turn_id, task_id, content}` | Display agent message in Artifact Viewer chat panel |
 | `poe://task-update` | `{task_id, status, title?, updated_at}` | Update task status in Phase × Scope matrix and project card |
 | `poe://phase-update` | `{phase_id, status}` | Update phase lifecycle state in Phase × Scope Matrix header |
 | `poe://stage-update` | `{phase_id, status}` | Update stage pause/resume state in Phase × Scope Matrix |
@@ -496,7 +496,7 @@ The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_
 
 ### Chat response (Frontend → Rust)
 
-Human submits a response in the Collaborative Artifact View:
+Human submits a response in the Artifact Viewer chat panel:
 
 ```
 invoke("respond_to_chat", {turn_id, response: "..."})

@@ -108,7 +108,7 @@ The yield event is the handoff point — the agent process is about to exit and 
      → Resolution arrives via invoke("resolve_decision") → triggers SF-4
 
    reason = "chat":
-     → No immediate action — orchestrator waits for human response in Collaborative Artifact View
+     → No immediate action — orchestrator waits for human response in Artifact Viewer chat panel
      → Response arrives via invoke("respond_to_chat") → triggers SF-4
      → Continuation bundle format is identical to decision: "Human: {response text}"
 ```
@@ -1097,13 +1097,13 @@ The Retrospective stage gate shows a diff of skill file changes produced during 
 ---
 ### 3.8 Collaborative Artifact Building (`poe:chat`)
 
-**What it is**: A human and agent co-author a document together in the Collaborative Artifact View. The agent drives the session with `poe:chat` turns — questions, proposals, summaries. The human responds in the conversation panel on the right. The artifact evolves on the left as the agent emits `poe:artifact` events. The session concludes when the agent emits `poe:done` with the finalised artifact.
+**What it is**: A human and agent co-author a document together in the Artifact Viewer. The agent drives the session with `poe:chat` turns — questions, proposals, summaries. The human responds in the conversation panel on the right. The artifact evolves on the left as the agent emits `poe:artifact` events. The session concludes when the agent emits `poe:done` with the finalised artifact.
 
 **Canonical use case**: The operational-analyst is eliciting requirements for the CONOPS. It asks one question at a time via `poe:chat`. The human sees the evolving `conops.md` on the left and responds on the right. After sufficient rounds, the analyst writes the final artifact and completes.
 
 **Wire format reference**: Protocol.md §2 (`poe:chat`, `poe:yield`, `poe:artifact`, `poe:done`). Chat response: Protocol.md §4 "Chat response (Frontend → Rust)".
 
-**Distinction from Decision Arbitration**: `poe:decision` is an exception raised by an autonomous agent that cannot proceed. `poe:chat` is a normal turn in a collaborative session. They route to different surfaces (Decision Queue vs. Collaborative Artifact View) and carry different semantics. A collaborative agent uses `poe:chat` as its primary interaction mechanism; `poe:decision` remains available within a collaborative session for genuine structural calls that require explicit arbitration.
+**Distinction from Decision Arbitration**: `poe:decision` is an exception raised by an autonomous agent that cannot proceed. `poe:chat` is a normal turn in a collaborative session. They route to different surfaces (Decision Queue vs. Artifact Viewer chat panel) and carry different semantics. A collaborative agent uses `poe:chat` as its primary interaction mechanism; `poe:decision` remains available within a collaborative session for genuine structural calls that require explicit arbitration.
 
 #### Sequence Diagram
 
@@ -1131,7 +1131,7 @@ sequenceDiagram
     Ing->>Orch: DagChanged signal
     Ing-->>FE: emit poe://task-update (status: waiting)
 
-    Note over FE: Collaborative Artifact View opens<br/>Right panel: agent question<br/>Left panel: artifact (empty or partial draft)
+    Note over FE: Artifact Viewer opens in chat-active mode<br/>Right panel: agent question<br/>Left panel: artifact (empty or partial draft)
 
     Human->>FE: Types response in conversation panel
     FE->>Orch: invoke("respond_to_chat", {turn_id: "c1", response: "..."})
@@ -1184,7 +1184,7 @@ sequenceDiagram
 
 **Phase 1 — Dispatch**
 
-The orchestrator dispatches the task via SF-1 with the **interactive mode protocol block** prepended to the T+S+K bundle (Protocol.md §3). The agent reads its skill file, the project description, and the mode instruction. The Collaborative Artifact View opens in Pane 2 when the frontend receives the first `poe://chat-turn` event.
+The orchestrator dispatches the task via SF-1 with the **interactive mode protocol block** prepended to the T+S+K bundle (Protocol.md §3). The agent reads its skill file, the project description, and the mode instruction. The Artifact Viewer opens in chat-active mode when the frontend receives the first `poe://chat-turn` event.
 
 **Phase 2 — Agent turn**
 
@@ -1210,7 +1210,7 @@ When the agent has sufficient context it writes the final `poe:artifact` and emi
 
 1. **`poe:chat` is for interactive agents only**: An autonomous agent must not emit `poe:chat`. The skill's `modes:` frontmatter declares whether it supports interactive mode. The orchestrator injects the interactive mode protocol block only when the skill declares it.
 
-2. **Routing is exclusive**: `poe:chat` → Collaborative Artifact View. `poe:decision` → Decision Queue. These surfaces are independent. A collaborative agent may still emit `poe:decision` for genuine structural calls that require explicit arbitration — these appear in the queue normally, in addition to the chat session.
+2. **Routing is exclusive**: `poe:chat` → Artifact Viewer chat panel. `poe:decision` → Decision Queue. These surfaces are independent. A collaborative agent may still emit `poe:decision` for genuine structural calls that require explicit arbitration — these appear in the queue normally, in addition to the chat session.
 
 3. **Artifact is the primary object**: The conversation exists to build the artifact. The agent is expected to emit `poe:artifact` progressively as the session develops, not only at the end. Intermediate emissions give the human continuous visibility of what is being built.
 
@@ -1218,7 +1218,7 @@ When the agent has sufficient context it writes the final `poe:artifact` and emi
 
 5. **No watchdog timer for chat turns**: Human responses in a collaborative session are not time-bounded. Unlike reviewer tasks, there is no correct timeout — the human may take time to compose a considered response.
 
-6. **Session is resumable**: The Collaborative Artifact View can be closed and re-opened. The `session_id`, `chat_turns` history, and artifact content all persist in SQLite. Re-opening resumes from the last turn without loss.
+6. **Session is resumable**: The Artifact Viewer chat panel can be closed and re-opened. The `session_id`, `chat_turns` history, and artifact content all persist in SQLite. Re-opening resumes from the last turn without loss.
 
 7. **`poe:artifact` emissions are idempotent**: The agent may emit `poe:artifact` for the same document multiple times as sections develop. Each emission replaces prior content (UPSERT). The artifact viewer shows the latest version; prior versions are accessible via artifact history.
 

@@ -359,7 +359,7 @@ POE has two distinct models for human-agent interaction. They are not interchang
 
 **Decision Arbitration** — the Decision Queue handles this. An autonomous agent is running and encounters something it cannot resolve from available context. It raises `poe:decision`, yields, and waits. The human makes a call; the agent continues. The human is an *arbitrator* — making a discrete choice to unblock a stalled process. The interaction is asynchronous, brief, and exception-driven. A healthy project has a sparse queue.
 
-**Collaborative Artifact Building** — the Collaborative Artifact View handles this. A human and agent build a document together. The agent drives with `poe:chat` turns; the human shapes and refines through conversation. The evolving artifact is visible on the left; the conversation is on the right. The human is a *co-author* — participating in the creative process, not arbitrating an exception. The interaction is sustained, iterative, and goal-driven.
+**Collaborative Artifact Building** — the Artifact Viewer handles this. A human and agent build a document together. The agent drives with `poe:chat` turns; the human shapes and refines through conversation. The evolving artifact is visible on the left; the conversation is on the right. The human is a *co-author* — participating in the creative process, not arbitrating an exception. The interaction is sustained, iterative, and goal-driven.
 
 | | Decision Arbitration | Collaborative Artifact Building |
 |---|---|---|
@@ -367,7 +367,7 @@ POE has two distinct models for human-agent interaction. They are not interchang
 | **Human role** | Arbitrator | Co-author |
 | **Protocol event** | `poe:decision` | `poe:chat` |
 | **Yield reason** | `reason=decision` | `reason=chat` |
-| **Surface** | Decision Queue (Pane 3) | Collaborative Artifact View (Pane 2) |
+| **Surface** | Decision Queue (Pane 3) | Artifact Viewer — "Chat about this" activates chat panel |
 | **Artifact visible** | No | Yes — live on the left |
 | **Expected frequency** | Sparse — signals insufficient preconditions | Normal — the primary work mode for elicitation and planning stages |
 
