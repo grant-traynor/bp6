@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { Project, Node, Artifact } from './types';
@@ -17,13 +17,10 @@ import DebugPanel from './components/DebugPanel';
 // ── CONOPS launcher ───────────────────────────────────────────────────────────
 // Shown when a project has no nodes yet. Bootstraps the first task.
 
-function ConopsLauncher({ projectId, onLaunched, onOpenSession }: {
+function ConopsLauncher({ projectId, onLaunched }: {
   projectId: string;
   onLaunched: (node: Node) => void;
-  onOpenSession: (nodeId: string) => void;
 }) {
-  // Used to prevent double-open in React Strict Mode dev double-invoke.
-  const openedRef = useRef(new Set<string>());
   const [brief, setBrief] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,8 +31,8 @@ function ConopsLauncher({ projectId, onLaunched, onOpenSession }: {
     setRunning(true);
     setError(null);
     try {
-      // Create directly as 'waiting' — prevents any race where the orchestrator
-      // could pick it up as 'pending' before the PTY handover opens.
+      // Create as 'pending' — the orchestrator will dispatch via SF-1.
+      // The Artifact Viewer will open automatically when poe://chat-turn arrives.
       const node = await invoke<Node>('create_node', {
         input: {
           projectId,
@@ -45,15 +42,10 @@ function ConopsLauncher({ projectId, onLaunched, onOpenSession }: {
           title: 'Develop CONOPS',
           description: trimmed,
           skillId: 'operational-analyst',
-          initialStatus: 'waiting',
+          initialStatus: 'pending',
         },
       });
       onLaunched(node);
-      // Guard against React Strict Mode double-invoke in dev.
-      if (openedRef.current.has(node.id)) return;
-      openedRef.current.add(node.id);
-      // Open interactive session — CONOPS is a Q&A, not an autonomous run.
-      onOpenSession(node.id);
     } catch (err) {
       console.error('Failed to create CONOPS task:', err);
       setError(String(err));
@@ -260,7 +252,7 @@ export default function App() {
 
               {nodes.length === 0 ? (
                 /* Empty project — show CONOPS launcher */
-                <ConopsLauncher projectId={selectedId} onLaunched={addNode} onOpenSession={setHandoverNodeId} />
+                <ConopsLauncher projectId={selectedId} onLaunched={addNode} />
               ) : (
                 <>
                   {/* Pane 2a — Phase × Scope (WBS node tree) */}
