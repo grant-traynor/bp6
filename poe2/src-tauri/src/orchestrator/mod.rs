@@ -71,7 +71,7 @@ pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChange
         eprintln!("[orchestrator] start: received signal {:?}", signal);
 
         // Drain all pending signals — categorise into buckets
-        let mut resume_requests: Vec<(String, String, String, String)> = Vec::new(); // (project_id, task_id, session_id, resolution)
+        let mut resume_requests: Vec<(String, String, String, String, String)> = Vec::new(); // (project_id, task_id, session_id, resolution, item_id)
         let mut opened_projects: Vec<String> = Vec::new(); // projects needing ghost-agent recovery
         let mut node_status_changed: Vec<(String, String)> = Vec::new(); // (project_id, node_id) for NodeStatusChanged
         let mut project_ids = std::collections::HashSet::new();
@@ -93,9 +93,9 @@ pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChange
             recover_interrupted(project_id, &registry, &dag_tx, &app).await;
         }
 
-        // Handle resume continuations for resolved decisions
-        for (project_id, task_id, session_id, resolution) in resume_requests {
-            resume_waiting_agent(&project_id, &task_id, &session_id, &resolution, &registry, &dag_tx, &app).await;
+        // Handle resume continuations for resolved decisions and chat responses
+        for (project_id, task_id, session_id, resolution, item_id) in resume_requests {
+            resume_waiting_agent(&project_id, &task_id, &session_id, &resolution, &item_id, &registry, &dag_tx, &app).await;
         }
 
         // SF-4: handle NodeStatusChanged signals — yield-handling and completion checks
@@ -113,14 +113,14 @@ pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChange
 /// Route a single DagChanged signal into the appropriate processing bucket.
 fn categorise_signal(
     signal: DagChanged,
-    resume_requests: &mut Vec<(String, String, String, String)>,
+    resume_requests: &mut Vec<(String, String, String, String, String)>,
     opened_projects: &mut Vec<String>,
     node_status_changed: &mut Vec<(String, String)>,
     project_ids: &mut std::collections::HashSet<String>,
 ) {
     match signal {
-        DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, .. } => {
-            resume_requests.push((project_id, task_id, session_id, resolution));
+        DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, item_id } => {
+            resume_requests.push((project_id, task_id, session_id, resolution, item_id));
         }
         DagChanged::ProjectOpened { project_id } => {
             opened_projects.push(project_id.clone());
@@ -136,9 +136,54 @@ fn categorise_signal(
     }
 }
 
-/// Resume an agent that was waiting for a human decision.
-/// Spawns a new stream-json session with --resume and the human's resolution as the bundle.
+/// Resume an agent that was waiting for a human decision or a chat response.
+///
+/// The `item_id` field distinguishes the two cases:
+/// - If `item_id` is present in `chat_turns`, this is a chat continuation (SF-4 chat arm).
+/// - Otherwise, it is a decision resolution (SF-4 decision arm).
 async fn resume_waiting_agent(
+    project_id: &str,
+    task_id: &str,
+    session_id: &str,
+    resolution: &str,
+    item_id: &str,
+    registry: &ProjectRegistry,
+    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) {
+    // Check whether item_id references a chat_turns row (SF-4 chat arm) or a
+    // queue_items row (SF-4 decision arm).
+    let is_chat_turn = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => {
+                eprintln!("[orchestrator] resume_waiting_agent: project not open {}", project_id);
+                return;
+            }
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM chat_turns WHERE id = ?1",
+                rusqlite::params![item_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        count > 0
+    };
+
+    if is_chat_turn {
+        resume_chat_agent(project_id, task_id, session_id, item_id, registry, dag_tx, app).await;
+    } else {
+        resume_decision_agent(project_id, task_id, session_id, resolution, registry, dag_tx, app).await;
+    }
+}
+
+/// SF-4 decision arm: resume an agent that was waiting for a human decision.
+/// Spawns a new stream-json session with --resume and the human's resolution as the bundle.
+async fn resume_decision_agent(
     project_id: &str,
     task_id: &str,
     session_id: &str,
@@ -152,7 +197,7 @@ async fn resume_waiting_agent(
         let db = match reg.values().find(|db| db.project.id == project_id) {
             Some(db) => db.clone(),
             None => {
-                eprintln!("[orchestrator] resume_waiting_agent: project not open {}", project_id);
+                eprintln!("[orchestrator] resume_decision_agent: project not open {}", project_id);
                 return;
             }
         };
@@ -161,7 +206,7 @@ async fn resume_waiting_agent(
         let node = match dag_store::db_get_node(&conn, task_id) {
             Ok(n) => n,
             Err(e) => {
-                eprintln!("[orchestrator] resume_waiting_agent: task not found {}: {}", task_id, e);
+                eprintln!("[orchestrator] resume_decision_agent: task not found {}: {}", task_id, e);
                 return;
             }
         };
@@ -187,9 +232,129 @@ async fn resume_waiting_agent(
         model,
     };
 
-    eprintln!("[orchestrator] resuming waiting agent task={} session={}", task_id, session_id);
+    eprintln!("[orchestrator] resume_decision_agent: resuming task={} session={}", task_id, session_id);
     if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
-        eprintln!("[orchestrator] Failed to resume agent for task {}: {}", task_id, e);
+        eprintln!("[orchestrator] resume_decision_agent: failed to resume agent for task {}: {}", task_id, e);
+    }
+}
+
+/// SF-4 chat arm: resume an agent that yielded with yield_reason='chat' after a human responds.
+///
+/// Looks up the chat_turn by `turn_id`, verifies `responded_at IS NOT NULL` (guard against
+/// stale signals), then assembles `"Human: {response}"` and spawns --resume.
+async fn resume_chat_agent(
+    project_id: &str,
+    task_id: &str,
+    session_id: &str,
+    turn_id: &str,
+    registry: &ProjectRegistry,
+    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) {
+    eprintln!(
+        "[orchestrator] resume_chat_agent: task={} session={} turn_id={}",
+        task_id, session_id, turn_id
+    );
+
+    // Guard: verify responded_at IS NOT NULL — race condition / stale signal check.
+    let (response_text, project_path, skill_id, model) = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => {
+                eprintln!("[orchestrator] resume_chat_agent: project not open {}", project_id);
+                return;
+            }
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+
+        // Query the chat turn — must have responded_at set.
+        // Both response and responded_at are nullable columns → Option<String>.
+        let turn_row: Option<(Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT response, responded_at FROM chat_turns WHERE id = ?1",
+                rusqlite::params![turn_id],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .ok();
+
+        let (response_opt, responded_at) = match turn_row {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "[orchestrator] resume_chat_agent: chat turn not found turn_id={} — aborting",
+                    turn_id
+                );
+                return;
+            }
+        };
+
+        if responded_at.is_none() {
+            eprintln!(
+                "[orchestrator] resume_chat_agent: turn_id={} has no responded_at — stale signal, aborting",
+                turn_id
+            );
+            return;
+        }
+
+        let response_text = match response_opt {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "[orchestrator] resume_chat_agent: turn_id={} responded_at set but response is NULL — aborting",
+                    turn_id
+                );
+                return;
+            }
+        };
+
+        // Load skill info for the task.
+        let node = match dag_store::db_get_node(&conn, task_id) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] resume_chat_agent: task not found {}: {}",
+                    task_id, e
+                );
+                return;
+            }
+        };
+        let skill_id = node.skill_id.unwrap_or_else(|| "implementer".to_owned());
+        let path = std::path::PathBuf::from(&db.project.path);
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let model = skills::load_skill(&skill_id, &path, &resource_dir)
+            .ok()
+            .and_then(|s| s.model.clone());
+
+        (response_text, path, skill_id, model)
+    };
+
+    // Continuation bundle: identical format to decision resolution (Protocol.md §5).
+    let input_bundle = format!("---\nHuman: {}\n", response_text);
+
+    let spawn_req = agent_lifecycle::SpawnRequest {
+        project_id: project_id.to_owned(),
+        task_id: task_id.to_owned(),
+        skill_id,
+        project_path,
+        input_bundle,
+        resume_session_id: Some(session_id.to_owned()),
+        model,
+    };
+
+    eprintln!(
+        "[orchestrator] resume_chat_agent: spawning --resume for task={} session={}",
+        task_id, session_id
+    );
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+        eprintln!(
+            "[orchestrator] resume_chat_agent: failed to resume agent for task {}: {}",
+            task_id, e
+        );
     }
 }
 
@@ -243,6 +408,16 @@ async fn handle_node_status_changed(
                     // (already handled by QueueItemResolved path)
                     eprintln!(
                         "[orchestrator] handle_node_status_changed: node={} waiting for decision — no action",
+                        node.id
+                    );
+                }
+                Some("chat") => {
+                    // SF-3 chat arm: task has emitted a poe:chat event and is now waiting.
+                    // Do NOT auto-dispatch anything and do NOT set a watchdog timer.
+                    // Simply wait for respond_to_chat to fire DagChanged::QueueItemResolved,
+                    // which will be routed to resume_chat_agent (SF-4 chat arm).
+                    eprintln!(
+                        "[orchestrator] handle_node_status_changed: node={} waiting for chat response — no action",
                         node.id
                     );
                 }
@@ -1132,6 +1307,15 @@ pub async fn recover_interrupted(
                 // No action needed; QueueItemResolved path handles it when resolved.
                 eprintln!(
                     "[orchestrator] recover_interrupted: waiting node={} yield_reason=decision — no action (human must resolve)",
+                    node.id
+                );
+            }
+            Some("chat") => {
+                // Chat turn persists in chat_turns — human responds when ready.
+                // No action needed; respond_to_chat fires QueueItemResolved when the
+                // human replies, which routes to resume_chat_agent (SF-4 chat arm).
+                eprintln!(
+                    "[orchestrator] recover_interrupted: waiting node={} yield_reason=chat — no action (awaiting human chat response)",
                     node.id
                 );
             }
