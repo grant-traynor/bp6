@@ -454,7 +454,12 @@ All events use `app_handle.emit_all(event_name, payload)`.
 |---|---|---|
 | `poe://event` | `{task_id, event_type, payload, created_at}` | Append to activity feed |
 | `poe://decision` | `{decision_id, task_id, question, options}` | Add item to queue panel, increment badge |
+| `poe://decision-resolved` | `{decision_id}` | Remove item from queue panel, decrement badge |
 | `poe://task-update` | `{task_id, status, title?, updated_at}` | Update task status in Phase × Scope matrix and project card |
+| `poe://phase-update` | `{phase_id, status}` | Update phase lifecycle state in Phase × Scope Matrix header |
+| `poe://stage-update` | `{phase_id, status}` | Update stage pause/resume state in Phase × Scope Matrix |
+| `poe://project-update` | `{project_id, status}` | Update project card status in Projects Overview |
+| `poe://project-opened` | `{project_id, nodes, phases, artifacts, decisions}` | Hydrate full project view on open |
 
 ### Decision resolution (Frontend → Rust)
 
@@ -466,9 +471,10 @@ invoke("resolve_decision", {decision_id, resolution: "..."})
 
 Rust handler:
 1. Updates `decisions.resolution` and `resolved_at` in SQLite.
-2. Writes `\n---\nHuman: {resolution}\n` to the waiting agent's stdin.
-3. Updates `tasks.status = 'running'` for the unblocked task.
-4. Emits `poe://task-update` and `poe://decision-resolved {decision_id}` (frontend removes from queue).
+2. Signals the orchestrator (`DagChanged`).
+3. Emits `poe://decision-resolved {decision_id}` (frontend removes from queue).
+
+The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='decision'`, confirms all decisions are resolved, and triggers SF-4: Agent Continuation. The continuation bundle is `Human: {resolution text}` — see Flows.md §3.2 for the full sequence.
 
 ### Why not polling
 
@@ -570,20 +576,13 @@ process exits (result event received)
 
 ### Decision resolution via --resume
 
-> **TODO**: Once the Decision Escalation flow is written in `Flows.md`, trim the sequence below to a wire-format reference + link, matching the pattern used for §"Review injection via --resume". The numbered steps are a flow description and belong in Flows.md.
+When an agent emits `poe:decision` followed by `poe:yield reason=decision`, the orchestrator marks the task `waiting` and holds until the human resolves via `invoke("resolve_decision")`. On resolution, the orchestrator triggers SF-4 with the continuation bundle `Human: {resolution text}`. See Flows.md §3.2 for the full sequence.
 
-When an agent emits `poe:decision` and then `poe:yield` (indicating it is awaiting a human decision before it can continue):
+The continuation bundle format:
 
 ```
-1. Orchestrator records decision in SQLite, marks task status = waiting
-2. Human resolves via queue panel (or engages Advisor first)
-3. Orchestrator spawns a new stream-json session:
-     claude --output-format stream-json --verbose -p --dangerously-skip-permissions --resume <session_id>
-4. Bundle written to stdin:
-     ---
-     Human: {resolution text}
-5. Agent reads full session history + new message, continues work
-6. Agent emits further poe: events + final poe:done
+---
+Human: {resolution text}
 ```
 
 `--resume` with `--output-format stream-json` is a proven combination (validated by `stream_json_integration.rs::resume_continuation_captures_new_session_and_emits_done`).
