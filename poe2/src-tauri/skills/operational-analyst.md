@@ -57,7 +57,7 @@ _(Orchestrator resumes the run with `Human: {response}` appended. You then updat
 
 **Step 3 — After each answer, update the draft artifact:**
 ```
-{"poe": "artifact", "name": "conops.md", "content": "# Concept of Operations\n\n## Executive Summary\n\n[draft in progress — updating after each answer]\n\n..."}
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "# Concept of Operations\n\n## Executive Summary\n\n[draft in progress — updating after each answer]\n\n..."}
 ```
 
 **Step 4 — Final round: write the complete CONOPS and close:**

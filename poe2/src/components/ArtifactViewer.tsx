@@ -27,7 +27,7 @@ interface PoeEventPayload {
 }
 
 interface Props {
-  artifact: Artifact;
+  artifact?: Artifact | null;
   projectId: string;
   taskId?: string | null;
   onClose: () => void;
@@ -47,14 +47,16 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Load artifact content
+  // Load artifact content (only when an artifact is provided)
   useEffect(() => {
+    if (!artifact) return;
+    const art = artifact;
     setContent(null);
     setError(null);
-    invoke<string>('read_artifact_content', { artifactId: artifact.id, projectId })
+    invoke<string>('read_artifact_content', { artifactId: art.id, projectId })
       .then(setContent)
       .catch((e) => setError(String(e)));
-  }, [artifact.id, projectId]);
+  }, [artifact?.id, projectId]);
 
   // Hydrate existing chat turns and open panel if turns exist
   useEffect(() => {
@@ -191,8 +193,8 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
         {/* Toolbar */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-800 shrink-0">
           <div className="min-w-0 flex items-center gap-3">
-            <span className="text-xs font-semibold text-neutral-200">{artifact.filename}</span>
-            <span className="text-[10px] text-neutral-500 font-mono">{artifact.artifactType}</span>
+            <span className="text-xs font-semibold text-neutral-200">{artifact?.filename ?? 'Chat session'}</span>
+            {artifact?.artifactType && <span className="text-[10px] text-neutral-500 font-mono">{artifact.artifactType}</span>}
             {taskDone && (
               <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-900 text-emerald-300">
                 task complete
@@ -236,20 +238,26 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
         {/* Body */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Artifact pane */}
-          <div className={`flex flex-col overflow-hidden ${chatActive ? 'flex-1 border-r border-neutral-800' : 'w-full'}`}>
-            <div className="flex-1 overflow-y-auto p-4">
-              {error ? (
-                <p className="text-red-400 text-sm">{error}</p>
-              ) : content === null ? (
-                <p className="text-neutral-600 text-sm">Loading…</p>
-              ) : (
-                <pre className="text-neutral-300 text-[12px] font-mono whitespace-pre-wrap leading-5">
-                  {content}
-                </pre>
-              )}
+          {/* Artifact pane — hidden in chat-only mode (no artifact yet) */}
+          {(!chatActive || artifact) && (
+            <div className={`flex flex-col overflow-hidden ${chatActive ? 'flex-1 border-r border-neutral-800' : 'w-full'}`}>
+              <div className="flex-1 overflow-y-auto p-4">
+                {!artifact ? (
+                  <p className="text-neutral-700 text-[12px] font-mono">
+                    Artifact will appear here once the analyst writes it.
+                  </p>
+                ) : error ? (
+                  <p className="text-red-400 text-sm">{error}</p>
+                ) : content === null ? (
+                  <p className="text-neutral-600 text-sm">Loading…</p>
+                ) : (
+                  <pre className="text-neutral-300 text-[12px] font-mono whitespace-pre-wrap leading-5">
+                    {content}
+                  </pre>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Chat pane */}
           {chatActive && (

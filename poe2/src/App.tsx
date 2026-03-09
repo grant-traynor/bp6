@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { Project, Node, Artifact } from './types';
@@ -105,12 +106,26 @@ export default function App() {
   const [debugNodeId, setDebugNodeId] = useState<string | null>(null);
 
   const [artifactViewer, setArtifactViewer] = useState<Artifact | null>(null);
+  // taskId of an active chat session — opens ArtifactViewer in chat-only mode
+  const [chatTaskId, setChatTaskId] = useState<string | null>(null);
   const [showKnowledge, setShowKnowledge] = useState(false);
 
   useEffect(() => {
     invoke<Project[]>('list_projects')
       .then(projects => setOpenProjects(projects))
       .catch(console.error);
+  }, []);
+
+  // Auto-open ArtifactViewer in chat mode when agent emits poe:chat
+  useEffect(() => {
+    const unlisten = listen<{ turnId: string; taskId: string; content: string }>(
+      'poe://chat-turn',
+      ({ payload }) => {
+        // Only open if not already viewing this task
+        setChatTaskId(prev => prev === payload.taskId ? prev : payload.taskId);
+      }
+    );
+    return () => { void unlisten.then(u => u()); };
   }, []);
 
   async function handleOpenProject() {
@@ -337,11 +352,12 @@ export default function App() {
           onClose={() => setHandoverNodeId(null)}
         />
       )}
-      {artifactViewer && selectedId && (
+      {(artifactViewer || chatTaskId) && selectedId && (
         <ArtifactViewer
-          artifact={artifactViewer}
+          artifact={artifactViewer ?? undefined}
           projectId={selectedId}
-          onClose={() => setArtifactViewer(null)}
+          taskId={chatTaskId}
+          onClose={() => { setArtifactViewer(null); setChatTaskId(null); }}
         />
       )}
       {showKnowledge && selectedId && (

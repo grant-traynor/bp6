@@ -202,9 +202,11 @@ One event per line. No multi-line JSON.
 // id is optional for single-turn sessions
 
 // Yield control while awaiting an asynchronous response.
-// Emitted after all poe:review or poe:decision events for this checkpoint.
-// task status → waiting. reason: "review" | "decision" | "chat"
-{"poe": "yield", "reason": "review"}
+// Emitted after poe:chat, poe:decision, or poe:review events for this checkpoint.
+// task status → waiting. yield_reason is derived by the ingester from the last
+// substantive poe: event before this yield (poe:chat → 'chat', poe:decision → 'decision',
+// poe:review → 'review', none → NULL). The reason field on the wire was removed in Phase 2.3.
+{"poe": "yield"}
 
 // Signal task completion (all work done — not a yield checkpoint).
 {"poe": "done", "summary": "..."}  // summary optional
@@ -287,14 +289,13 @@ You are running in autonomous mode — there is no human at the keyboard.
 **Interactive mode block** (prepended for human-initiated conversations):
 
 ```markdown
-## Execution Protocol
+## Interactive Mode
 
-You are in a conversation with a human developer.
+You are running in interactive mode — a human is present at the keyboard.
 
-- This is a collaborative, multi-round session — ask questions and wait for answers.
-- Do not emit poe: events unless you have produced a concrete output
-  (poe:artifact when you write a document, poe:knowledge when you record a decision).
-- End the conversation naturally. Do not emit `poe:done` unless explicitly asked.
+- Use `poe:chat` + `poe:yield` to ask questions and wait for the human's answer.
+- The orchestrator will resume your run with the answer as `Human: {response}`.
+- Follow the Interactive Mode instructions in your skill prompt exactly.
 ```
 
 ### Skill frontmatter — mode declaration and model selection
@@ -499,7 +500,7 @@ The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_
 Human submits a response in the Artifact Viewer chat panel:
 
 ```
-invoke("respond_to_chat", {turn_id, response: "..."})
+invoke("respond_to_chat", {project_id, turn_id, response: "..."})
 ```
 
 Rust handler:

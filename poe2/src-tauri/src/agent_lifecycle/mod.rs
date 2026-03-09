@@ -146,6 +146,14 @@ pub async fn spawn_agent(
         let extractor_for_chunk = extractor.clone();
         let extractor_for_complete = extractor.clone();
 
+        // Persistent yield_reason tracker — tracks the last substantive poe: event
+        // emitted before poe:yield across all lines of the agent's output.
+        // Must survive across on_text_chunk calls (each call may carry only part of
+        // the output; poe:chat and poe:yield arrive in different chunks).
+        let last_substantive: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let last_sub_for_chunk = last_substantive.clone();
+        let last_sub_for_complete = last_substantive.clone();
+
         // Clone string keys for each closure independently.
         let project_id_for_session = project_id.clone();
         let project_id_for_chunk = project_id.clone();
@@ -237,8 +245,9 @@ pub async fn spawn_agent(
                     let mut ex = extractor_for_chunk.lock().unwrap();
                     let lines = ex.push(&text);
                     drop(ex); // release lock before ingesting
+                    let mut last_sub = last_sub_for_chunk.lock().unwrap();
                     for line in lines {
-                        event_ingester::ingest_line(
+                        event_ingester::ingest_line_with_tracker(
                             &line,
                             &project_id_for_chunk,
                             &task_id_for_chunk,
@@ -247,6 +256,7 @@ pub async fn spawn_agent(
                             &dag_tx_for_chunk,
                             &app_for_chunk,
                             &project_path_for_chunk,
+                            &mut *last_sub,
                         );
                     }
                 }),
@@ -268,7 +278,8 @@ pub async fn spawn_agent(
                     let tail = extractor_for_complete.lock().unwrap().flush();
                     if let Some(tail) = tail {
                         if !tail.trim().is_empty() {
-                            event_ingester::ingest_line(
+                            let mut last_sub = last_sub_for_complete.lock().unwrap();
+                            event_ingester::ingest_line_with_tracker(
                                 &tail,
                                 &project_id_for_complete,
                                 &task_id_for_complete,
@@ -277,6 +288,7 @@ pub async fn spawn_agent(
                                 &dag_tx_for_complete,
                                 &app_for_complete,
                                 &project_path_for_complete,
+                                &mut *last_sub,
                             );
                         }
                     }
