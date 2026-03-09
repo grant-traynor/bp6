@@ -251,6 +251,17 @@ pub struct QueueItem {
     pub resolved_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatTurn {
+    pub id: String,
+    pub task_id: String,
+    pub content: String,
+    pub response: Option<String>,
+    pub created_at: String,
+    pub responded_at: Option<String>,
+}
+
 // ── Input types for commands ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]

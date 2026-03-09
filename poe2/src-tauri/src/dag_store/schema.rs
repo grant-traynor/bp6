@@ -129,4 +129,15 @@ CREATE TABLE IF NOT EXISTS queue_items (
 
 CREATE INDEX IF NOT EXISTS idx_queue_project ON queue_items(project_id);
 CREATE INDEX IF NOT EXISTS idx_queue_unresolved ON queue_items(project_id, resolved_at);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id          TEXT PRIMARY KEY,
+    task_id     TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    response    TEXT,
+    created_at  TEXT NOT NULL,
+    responded_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id);
 ";

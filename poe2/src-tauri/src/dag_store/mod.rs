@@ -50,6 +50,19 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN review_id TEXT");
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
 
+    // Migrate: create chat_turns table for existing databases
+    let _ = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS chat_turns (
+            id          TEXT PRIMARY KEY,
+            task_id     TEXT NOT NULL,
+            content     TEXT NOT NULL,
+            response    TEXT,
+            created_at  TEXT NOT NULL,
+            responded_at TEXT
+        )"
+    );
+    let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id)");
+
     // Upsert the project record based on path
     let path_str = project_path.to_string_lossy().to_string();
     let name = project_path
@@ -930,6 +943,46 @@ pub fn db_count_running_agents(conn: &Connection, project_id: &str) -> Result<us
         |row| row.get(0),
     )?;
     Ok(count as usize)
+}
+
+// ── Chat turn helpers ─────────────────────────────────────────────────────────
+
+pub fn db_insert_chat_turn(conn: &Connection, id: &str, task_id: &str, content: &str) -> Result<ChatTurn> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO chat_turns (id, task_id, content, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![id, task_id, content, now],
+    )
+    .context("Failed to insert chat turn")?;
+    Ok(ChatTurn {
+        id: id.to_owned(),
+        task_id: task_id.to_owned(),
+        content: content.to_owned(),
+        response: None,
+        created_at: now,
+        responded_at: None,
+    })
+}
+
+pub fn db_list_chat_turns(conn: &Connection, task_id: &str) -> Result<Vec<ChatTurn>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, content, response, created_at, responded_at
+         FROM chat_turns WHERE task_id = ?1 ORDER BY created_at ASC"
+    )?;
+    let rows = stmt
+        .query_map([task_id], |row| {
+            Ok(ChatTurn {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                content: row.get(2)?,
+                response: row.get(3)?,
+                created_at: row.get(4)?,
+                responded_at: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to list chat turns")?;
+    Ok(rows)
 }
 
 pub fn db_count_running_agents_global(conn: &Connection) -> Result<usize> {

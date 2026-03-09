@@ -91,8 +91,12 @@ struct PoeDone {
 }
 
 #[derive(Debug, serde::Deserialize)]
-struct PoeYield {
-    reason: String,
+struct PoeYield {}
+
+#[derive(Debug, serde::Deserialize)]
+struct PoeChat {
+    content: String,
+    id: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -126,6 +130,10 @@ pub fn parse_poe_event(line: &str) -> Option<(String, serde_json::Value)> {
 /// Lines arrive pre-stripped (ANSI removal is handled upstream by TextBufExtractor).
 /// A line is a poe: event iff it parses as valid JSON and contains a `"poe"` key.
 /// All other lines are passed through — the caller handles those.
+///
+/// `last_substantive_event` tracks the most recent "substantive" poe: event
+/// (decision | chat | review) emitted in this session so that `poe:yield` can
+/// derive `yield_reason` without a wire field.
 pub fn ingest_line(
     line: &str,
     project_id: &str,
@@ -135,6 +143,32 @@ pub fn ingest_line(
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
     app: &AppHandle,
     project_path: &Path,
+) {
+    // Per-call mutable tracker — callers that need cross-line tracking should
+    // use ingest_line_with_tracker instead. This function resets to None each
+    // call, preserving backward compatibility for single-line event dispatch.
+    let mut last_substantive: Option<String> = None;
+    ingest_line_with_tracker(
+        line, project_id, task_id, agent_id, registry, dag_tx, app, project_path,
+        &mut last_substantive,
+    );
+}
+
+/// Variant of `ingest_line` that accepts an external last-substantive-event tracker.
+///
+/// The caller owns the `last_substantive` value across multiple calls for the
+/// same agent session, allowing `poe:yield` to derive `yield_reason` correctly
+/// even when the substantive event and `poe:yield` arrive on separate lines.
+pub fn ingest_line_with_tracker(
+    line: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    registry: &ProjectRegistry,
+    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+    project_path: &Path,
+    last_substantive: &mut Option<String>,
 ) {
     let trimmed = line.trim();
     let Some((poe_event, _)) = parse_poe_event(trimmed) else {
@@ -153,10 +187,23 @@ pub fn ingest_line(
         "knowledge" => handle_knowledge(trimmed, project_id, task_id, agent_id, registry, app),
         "brief" => handle_log_only("poe:brief", trimmed, project_id, task_id, agent_id, registry, app),
         "step" => handle_log_only("poe:step", trimmed, project_id, task_id, agent_id, registry, app),
-        "decision" => handle_decision(trimmed, project_id, task_id, agent_id, registry, app),
+        "decision" => {
+            *last_substantive = Some("decision".to_owned());
+            handle_decision(trimmed, project_id, task_id, agent_id, registry, app)
+        }
+        "chat" => {
+            *last_substantive = Some("chat".to_owned());
+            handle_chat(trimmed, project_id, task_id, agent_id, registry, dag_tx, app)
+        }
         "done" => handle_done(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
-        "yield" => handle_yield(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
-        "review" => handle_review(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
+        "yield" => {
+            let derived_reason = last_substantive.clone();
+            handle_yield(trimmed, project_id, task_id, agent_id, registry, dag_tx, app, derived_reason)
+        }
+        "review" => {
+            *last_substantive = Some("review".to_owned());
+            handle_review(trimmed, project_id, task_id, agent_id, registry, dag_tx, app)
+        }
         other => {
             eprintln!("[event_ingester] Unknown poe: event type: {}", other);
             Ok(None)
@@ -477,6 +524,36 @@ fn handle_decision(
     })
 }
 
+/// Handle `poe:chat` — agent requests a human chat turn.
+///
+/// Inserts a `chat_turns` row with content and no response yet, logs to `event_log`,
+/// and emits `poe://chat-turn` for the frontend.
+fn handle_chat(
+    json: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    registry: &ProjectRegistry,
+    _dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) -> Result<Option<DagChanged>> {
+    let payload: PoeChat = serde_json::from_str(json)?;
+    let turn_id = payload
+        .id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    with_project_conn(registry, project_id, |conn| {
+        let turn = dag_store::db_insert_chat_turn(conn, &turn_id, task_id, &payload.content)?;
+        dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:chat", json)?;
+        emit_tauri_event(app, "poe://chat-turn", &serde_json::json!({
+            "turnId": turn.id,
+            "taskId": task_id,
+            "content": payload.content,
+        }));
+        Ok(None) // orchestrator reacts via respond_to_chat → QueueItemResolved
+    })
+}
+
 /// Pure DB mutation for `poe:done`: always marks the node Complete.
 ///
 /// Returns the resulting `NodeStatus`. Separated from the full handler so tests can
@@ -536,6 +613,10 @@ fn handle_done(
 /// Under SF-4, this is the single point where a running task suspends. The
 /// orchestrator receives NodeStatusChanged and is responsible for any follow-on
 /// work (spawning reviewer tasks, etc.).
+///
+/// `derived_reason` is the last substantive poe: event emitted before this yield
+/// (decision | chat | review | None), passed in by the caller's event tracker.
+/// The wire format no longer carries a `reason` field.
 fn handle_yield(
     json: &str,
     project_id: &str,
@@ -544,13 +625,14 @@ fn handle_yield(
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
     app: &AppHandle,
+    derived_reason: Option<String>,
 ) -> Result<Option<DagChanged>> {
-    let payload: PoeYield = serde_json::from_str(json)?;
+    let _payload: PoeYield = serde_json::from_str(json)?;
 
     with_project_conn(registry, project_id, |conn| {
         let update = UpdateNodeInput {
             status: Some(NodeStatus::Waiting),
-            yield_reason: Some(payload.reason.clone()),
+            yield_reason: derived_reason.clone(),
             title: None,
             description: None,
             skill_id: None,
@@ -564,12 +646,16 @@ fn handle_yield(
         emit_tauri_event(app, "poe-node-updated", &node);
 
         // poe://event — activity feed entry
+        let summary = match derived_reason.as_deref() {
+            Some(r) => format!("Yielded — awaiting {}", r),
+            None => "Yielded".to_owned(),
+        };
         emit_tauri_event(app, "poe-event", &serde_json::json!({
             "eventType": "poe:yield",
             "projectId": project_id,
             "agentId": agent_id,
             "taskId": task_id,
-            "summary": format!("Yielded — awaiting {}", payload.reason),
+            "summary": summary,
             "payload": json,
         }));
 

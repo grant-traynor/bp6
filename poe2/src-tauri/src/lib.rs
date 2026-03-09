@@ -52,6 +52,8 @@ pub fn run() {
             dag_store::commands::list_queue_items,
             dag_store::commands::resolve_queue_item,
             dag_store::commands::list_events,
+            dag_store::commands::respond_to_chat,
+            dag_store::commands::get_chat_turns,
             // New dag_store commands
             dag_store::commands::read_artifact_content,
             dag_store::commands::flag_knowledge_for_promotion,

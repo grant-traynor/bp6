@@ -287,3 +287,70 @@ pub async fn list_events(
         db_list_events(conn, &project_id, since.as_deref())
     })
 }
+
+#[tauri::command]
+pub async fn respond_to_chat(
+    project_id: String,
+    turn_id: String,
+    response: String,
+    registry: State<'_, ProjectRegistry>,
+    app: tauri::AppHandle,
+    dag_tx: State<'_, mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    use crate::event_ingester::DagChanged;
+
+    let (task_id, session_id) = with_conn(&registry, &project_id, |conn| {
+        // Update response and responded_at
+        conn.execute(
+            "UPDATE chat_turns SET response = ?1, responded_at = datetime('now') WHERE id = ?2",
+            rusqlite::params![response, turn_id],
+        )
+        .map_err(|e| anyhow::anyhow!("Failed to update chat turn: {}", e))?;
+
+        // Look up task_id from this chat turn
+        let tid: String = conn
+            .query_row(
+                "SELECT task_id FROM chat_turns WHERE id = ?1",
+                [&turn_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| anyhow::anyhow!("Chat turn not found {}: {}", turn_id, e))?;
+
+        // Look up session_id from nodes
+        let sid = db_get_session_id_for_task(conn, &tid)?.unwrap_or_default();
+
+        Ok((tid, sid))
+    })?;
+
+    // Emit frontend event
+    let _ = app.emit("poe-chat-responded", serde_json::json!({
+        "turnId": turn_id,
+        "projectId": project_id,
+        "taskId": task_id,
+    }));
+
+    // Signal orchestrator to resume the waiting agent (reuse QueueItemResolved)
+    if !session_id.is_empty() {
+        let _ = dag_tx.send(DagChanged::QueueItemResolved {
+            project_id: project_id.clone(),
+            item_id: turn_id.clone(),
+            task_id: task_id.clone(),
+            session_id: session_id.clone(),
+            resolution: response.clone(),
+        });
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_chat_turns(
+    project_id: String,
+    task_id: String,
+    registry: State<'_, ProjectRegistry>,
+) -> Result<Vec<ChatTurn>, String> {
+    with_conn(&registry, &project_id, |conn| {
+        db_list_chat_turns(conn, &task_id)
+    })
+}
