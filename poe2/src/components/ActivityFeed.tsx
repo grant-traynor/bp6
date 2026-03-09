@@ -6,6 +6,8 @@ interface Props {
   items: FeedItem[];
   nodes: Node[];
   onHandoverOpen: (nodeId: string) => void;
+  // TODO(bp6-881.14): onChatOpen will be added when the dispatch mechanism is wired up.
+  // onChatOpen?: (taskId: string) => void;
 }
 
 function formatTime(ts: string): string {
@@ -52,6 +54,8 @@ function Badge({ eventType, itemType, success }: BadgeProps) {
     cls = 'bg-emerald-900 text-emerald-300';
   } else if (eventType === 'poe:decision' || eventType === 'poe-decision') {
     cls = 'bg-amber-900 text-amber-300';
+  } else if (eventType === 'poe:chat') {
+    cls = 'bg-sky-900 text-sky-300';
   }
 
   return (
@@ -88,10 +92,24 @@ export default function ActivityFeed({ items, nodes, onHandoverOpen }: Props) {
               .join(' › ')
           : null;
 
+        const isChatTurn = item.eventType === 'poe:chat';
+        // Navigation for poe:chat turns: opening the ArtifactViewer in chat-active mode
+        // requires a hook from the parent that isn't yet wired (see bp6-881.14). For now
+        // clicking a poe:chat entry falls through to onHandoverOpen so the task panel
+        // opens, giving the user context. The TODO comment below marks the upgrade point.
+        // TODO(bp6-881.14): replace onClick with onChatOpen(item.taskId) once wired.
+        const displayMessage = isChatTurn
+          ? `Chat turn — ${item.message.slice(0, 60)}${item.message.length > 60 ? '…' : ''}`
+          : item.message;
+
         return (
           <div
             key={item.id}
-            className="flex flex-col min-w-0 rounded px-1 py-0.5 cursor-pointer hover:bg-neutral-800/40 transition-colors"
+            className={`flex flex-col min-w-0 rounded px-1 py-0.5 cursor-pointer transition-colors ${
+              isChatTurn
+                ? 'hover:bg-sky-950/30 border-l-2 border-sky-900/50'
+                : 'hover:bg-neutral-800/40'
+            }`}
             onClick={() => item.taskId && onHandoverOpen(item.taskId)}
           >
             <div className="flex items-start gap-2 min-w-0">
@@ -112,8 +130,8 @@ export default function ActivityFeed({ items, nodes, onHandoverOpen }: Props) {
                   {item.model}
                 </span>
               )}
-              <span className="text-neutral-300 text-[12px] break-words min-w-0 leading-5">
-                {item.message}
+              <span className={`text-[12px] break-words min-w-0 leading-5 ${isChatTurn ? 'text-sky-300/80' : 'text-neutral-300'}`}>
+                {displayMessage}
               </span>
             </div>
             {ancestryLabel && (
