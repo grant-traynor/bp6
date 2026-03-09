@@ -1,7 +1,9 @@
 # POE — Runtime Flows
 
 **Status**: Draft
-**Last updated**: 2026-03-08
+**Last updated**: 2026-03-10
+
+**Artifact classification**: `flows.md` — the authoritative Runtime Flows document for POE v2. Specifies the dynamic execution model: what happens in what order, who is responsible at each step, and the invariants that must hold across orchestrator, ingester, agent, and frontend. Injected into every implementation task's input bundle alongside `interface-control.md` and `data-model.md`.
 
 > This document specifies the dynamic execution model for POE. It answers the question the other documents do not: *in what order do things happen, and who is responsible at each step?*
 >

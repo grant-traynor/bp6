@@ -217,6 +217,7 @@ Artifacts flow forward through the lifecycle. Each stage receives all artifacts 
 | `user-analysis.md` | Guardrails stage | Personas, user journeys, feature priority matrix |
 | `must-nots.md` | Guardrails stage | Hard constraints — security, compliance, things the system must never do |
 | `guardrails-review.md` | Guardrails stage (Senior Engineer review) | Cross-cutting review of all guardrails artifacts for conflicts and gaps |
+| `flows.md` | Guardrails stage (interface-analyst) | Runtime execution flows — orchestrator behaviour, agent lifecycle, yield/resume paths, and human interaction patterns |
 
 **Phase-level** — produced per phase:
 
@@ -228,7 +229,7 @@ Artifacts flow forward through the lifecycle. Each stage receives all artifacts 
 | `phase-N-validity.md` | Validity Analysis stage | Gap between C' and C! for this phase |
 | `phase-N-rca.md` | Retrospective stage | Root cause analysis and corrective actions |
 
-> **Note**: `interface-control.md` and `data-model.md` close the gap that existed in POE v1 — implementation agents had no authoritative spec for internal structure or interface contracts injected into their context, leading to protocol conflicts discovered only during coding. These documents are injected into every implementation task's input bundle via the standard K assembly.
+> **Note**: `interface-control.md`, `data-model.md`, and `flows.md` close the gap that existed in POE v1 — implementation agents had no authoritative spec for internal structure, interface contracts, or runtime behaviour injected into their context, leading to protocol conflicts and orchestration bugs discovered only during coding. These documents are injected into every implementation task's input bundle via the standard K assembly.
 
 ### Storage
 
