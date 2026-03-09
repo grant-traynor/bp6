@@ -204,7 +204,7 @@ invoke("respond_to_chat", {project_id, turn_id, response: "..."})
 
 Rust handler:
 1. Updates `chat_turns` — set `response` and `responded_at`.
-2. Signals orchestrator via `DagChanged::QueueItemResolved` (reuse existing variant, or add `ChatTurnResponded`).
+2. Signals orchestrator via `DagChanged::QueueItemResolved` — reuse this variant (`turn_id → item_id`, `response text → resolution`). No new variant needed.
 3. Orchestrator wakes, identifies waiting task with `yield_reason='chat'`, triggers SF-4.
 
 ---
