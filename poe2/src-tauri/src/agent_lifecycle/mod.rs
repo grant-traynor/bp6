@@ -313,38 +313,34 @@ pub async fn spawn_agent(
 
         // Determine success by node status — poe:done sets it to Complete.
         // Claude's exit code is unreliable; SQLite node status is the authority.
+        // Waiting (yielded) is also a clean exit — the agent paused intentionally.
         let task_complete = {
             let reg = registry_clone.lock().unwrap();
             if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
                 let conn = db.conn.lock().unwrap();
-                let _ = dag_store::db_end_agent(
-                    &conn,
-                    &agent_id_clone,
-                    if dag_store::db_get_node(&conn, &task_id)
-                        .map(|n| n.status == dag_store::NodeStatus::Complete)
-                        .unwrap_or(false)
-                    {
-                        "complete"
-                    } else {
-                        "failed"
-                    },
-                );
                 if let Ok(node) = dag_store::db_get_node(&conn, &task_id) {
-                    if node.status == dag_store::NodeStatus::Running {
-                        // poe:done never received — re-queue to Pending.
-                        let update = UpdateNodeInput {
-                            status: Some(dag_store::NodeStatus::Pending),
-                            title: None,
-                            description: None,
-                            skill_id: None,
-                            assignee: None,
-                            ..Default::default()
-                        };
-                        let _ = dag_store::db_update_node(&conn, &task_id, &update);
-                        false
-                    } else {
-                        node.status == dag_store::NodeStatus::Complete
-                    }
+                    let agent_status = match node.status {
+                        dag_store::NodeStatus::Complete => "complete",
+                        dag_store::NodeStatus::Waiting => "yielded",
+                        dag_store::NodeStatus::Running => {
+                            // Crashed — poe:done and poe:yield never received.
+                            // Re-queue to Pending so the orchestrator can retry.
+                            let update = UpdateNodeInput {
+                                status: Some(dag_store::NodeStatus::Pending),
+                                title: None,
+                                description: None,
+                                skill_id: None,
+                                assignee: None,
+                                ..Default::default()
+                            };
+                            let _ = dag_store::db_update_node(&conn, &task_id, &update);
+                            "failed"
+                        }
+                        _ => "failed",
+                    };
+                    let _ = dag_store::db_end_agent(&conn, &agent_id_clone, agent_status);
+                    // Success = completed normally OR paused via poe:yield.
+                    matches!(agent_status, "complete" | "yielded")
                 } else {
                     false
                 }

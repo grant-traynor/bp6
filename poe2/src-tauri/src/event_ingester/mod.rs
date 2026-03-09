@@ -550,7 +550,7 @@ fn handle_chat(
     with_project_conn(registry, project_id, |conn| {
         let turn = dag_store::db_insert_chat_turn(conn, &turn_id, task_id, &payload.content)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:chat", json)?;
-        emit_tauri_event(app, "poe://chat-turn", &serde_json::json!({
+        emit_tauri_event(app, "poe-chat-turn", &serde_json::json!({
             "turnId": turn.id,
             "taskId": task_id,
             "content": payload.content,

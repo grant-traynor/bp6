@@ -83,12 +83,12 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatTurns]);
 
-  // Listen for new poe://chat-turn events
+  // Listen for new poe-chat-turn events
   useEffect(() => {
     if (!localTaskId) return;
     let cancelled = false;
 
-    const unlistenPromise = listen<ChatTurnEvent>('poe://chat-turn', ({ payload }) => {
+    const unlistenPromise = listen<ChatTurnEvent>('poe-chat-turn', ({ payload }) => {
       if (cancelled) return;
       if (payload.taskId !== localTaskId) return;
       const newTurn: ChatTurn = {

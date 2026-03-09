@@ -33,7 +33,7 @@ function ConopsLauncher({ projectId, onLaunched }: {
     setError(null);
     try {
       // Create as 'pending' — the orchestrator will dispatch via SF-1.
-      // The Artifact Viewer will open automatically when poe://chat-turn arrives.
+      // The Artifact Viewer will open automatically when poe-chat-turn arrives.
       const node = await invoke<Node>('create_node', {
         input: {
           projectId,
@@ -119,7 +119,7 @@ export default function App() {
   // Auto-open ArtifactViewer in chat mode when agent emits poe:chat
   useEffect(() => {
     const unlisten = listen<{ turnId: string; taskId: string; content: string }>(
-      'poe://chat-turn',
+      'poe-chat-turn',
       ({ payload }) => {
         // Only open if not already viewing this task
         setChatTaskId(prev => prev === payload.taskId ? prev : payload.taskId);
