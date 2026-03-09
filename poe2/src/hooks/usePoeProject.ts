@@ -3,6 +3,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { Node, QueueItem, EventRecord, FeedItem, Phase, Artifact, KnowledgeEntry } from '../types';
 
+export interface AgentStreamEvent {
+  agentId: string;
+  taskId: string;
+  projectId: string;
+  event: Record<string, unknown>;
+}
+
 function eventRecordToFeedItem(ev: EventRecord): FeedItem {
   return {
     id: ev.id,
@@ -38,8 +45,6 @@ export function getAncestry(nodeId: string | null | undefined, nodes: Node[]): N
   return chain; // closest first, root last
 }
 
-const RAW_LINE_LIMIT = 500; // max lines stored per task
-
 export function usePoeProject(projectId: string | null): {
   nodes: Node[];
   queueItems: QueueItem[];
@@ -50,17 +55,18 @@ export function usePoeProject(projectId: string | null): {
   handoverNodeId: string | null;
   setHandoverNodeId: React.Dispatch<React.SetStateAction<string | null>>;
   setQueueItems: React.Dispatch<React.SetStateAction<QueueItem[]>>;
+  streamEventMap: Map<string, AgentStreamEvent[]>;
   addNode: (node: Node) => void;
-  rawLines: Map<string, string[]>;  // taskId → last N raw output lines
 } {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [feedItems, setFeedItems] = useState<FeedItem[]>([]);
-  const [rawLines, setRawLines] = useState<Map<string, string[]>>(new Map());
   const [phases, setPhases] = useState<Phase[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [knowledgeEntries, setKnowledgeEntries] = useState<KnowledgeEntry[]>([]);
   const [handoverNodeId, setHandoverNodeId] = useState<string | null>(null);
+  // taskId → ring buffer of stream-json events received via poe-agent-stream
+  const [streamEventMap, setStreamEventMap] = useState<Map<string, AgentStreamEvent[]>>(new Map());
 
   const updateNode = useCallback((updated: Node) => {
     setNodes(prev => {
@@ -80,7 +86,8 @@ export function usePoeProject(projectId: string | null): {
       setPhases([]);
       setArtifacts([]);
       setKnowledgeEntries([]);
-      setRawLines(new Map());
+      setStreamEventMap(new Map());
+
       return;
     }
 
@@ -104,6 +111,7 @@ export function usePoeProject(projectId: string | null): {
     }
 
     async function subscribe() {
+      console.log('[usePoeProject] subscribe() called, projectId=', projectId);
       const u1 = await listen<Node>('poe-task-created', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         updateNode(payload);
@@ -192,6 +200,7 @@ export function usePoeProject(projectId: string | null): {
         skillId: string;
         model?: string | null;
       }>('poe-agent-started', ({ payload }) => {
+        console.log('[poe-agent-started] agentId=', payload.agentId, 'taskId=', payload.taskId, 'projectId=', payload.projectId);
         if (payload.projectId !== projectId) return;
         setFeedItems(prev => [
           ...prev,
@@ -278,23 +287,27 @@ export function usePoeProject(projectId: string | null): {
       });
       unlisteners.push(u10);
 
-      // poe-pty-line: raw agent output, one line per event.
-      // Stored per taskId for the DebugPanel; capped at RAW_LINE_LIMIT lines.
-      const u11 = await listen<{ agentId: string; taskId: string; projectId: string; line: string }>(
-        'poe-pty-line',
-        ({ payload }) => {
-          if (payload.projectId !== projectId) return;
-          const taskId = payload.taskId;
-          setRawLines(prev => {
-            const next = new Map(prev);
-            const existing = next.get(taskId) ?? [];
-            const appended = [...existing, payload.line];
-            next.set(taskId, appended.length > RAW_LINE_LIMIT ? appended.slice(-RAW_LINE_LIMIT) : appended);
-            return next;
-          });
+      const MAX_STREAM_EVENTS = 500;
+      console.log('[usePoeProject] registering poe-agent-stream listener, projectId=', projectId);
+      const u11 = await listen<AgentStreamEvent>('poe-agent-stream', ({ payload }) => {
+        console.log('[poe-agent-stream] raw event arrived, payload.projectId=', payload.projectId, 'watching=', projectId, 'event.type=', payload.event?.['type']);
+        if (payload.projectId !== projectId) {
+          console.warn('[poe-agent-stream] DROPPED — projectId mismatch');
+          return;
         }
-      );
+        setStreamEventMap(prev => {
+          const taskId = payload.taskId;
+          const existing = prev.get(taskId) ?? [];
+          const next = existing.length >= MAX_STREAM_EVENTS
+            ? [...existing.slice(1), payload]
+            : [...existing, payload];
+          const m = new Map(prev);
+          m.set(taskId, next);
+          return m;
+        });
+      });
       unlisteners.push(u11);
+
     }
 
     void hydrate();
@@ -316,7 +329,7 @@ export function usePoeProject(projectId: string | null): {
     handoverNodeId,
     setHandoverNodeId,
     setQueueItems,
+    streamEventMap,
     addNode: updateNode,
-    rawLines,
   };
 }

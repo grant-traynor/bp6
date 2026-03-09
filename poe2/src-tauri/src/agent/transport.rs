@@ -48,11 +48,24 @@ impl JsonStreamTransport {
         cmd.current_dir(cwd);
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
+        // In debug builds, pipe claude's stderr to our terminal so errors are visible.
+        // In release builds, discard to avoid noise.
+        #[cfg(debug_assertions)]
+        cmd.stderr(std::process::Stdio::inherit());
+        #[cfg(not(debug_assertions))]
         cmd.stderr(std::process::Stdio::null());
         // Remove CLAUDECODE env var to prevent re-entrancy issues.
         cmd.env_remove("CLAUDECODE");
 
+        eprintln!(
+            "[transport] spawning claude cwd={} resume={:?} model={:?}",
+            cwd.display(),
+            resume_session_id,
+            model,
+        );
+
         let mut child = cmd.spawn().context("Failed to spawn claude process")?;
+        eprintln!("[transport] claude spawned pid={}", child.id());
 
         // Fire on_pid immediately after spawn.
         if let Some(ref on_pid) = callbacks.on_pid {
