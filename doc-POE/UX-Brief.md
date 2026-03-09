@@ -145,6 +145,8 @@ Always visible when the project is selected. Never in a tab.
 
 ### Decision Queue
 
+> **Scope**: The Decision Queue handles `poe:decision` events from **autonomous agents** only — exception escalations where an agent cannot proceed without a human call. Collaborative agent turns (`poe:chat`) route to the Collaborative Artifact View and do not appear here.
+
 Each queue item shows:
 - The question raised by the agent
 - The task and WBS context it came from
@@ -191,6 +193,45 @@ Persistent chat interface associated with the queue. The human can direct it to 
 The Advisor has full access to the project's artifact corpus, knowledge register, and DAG context. It does not resolve queue items — it informs human decisions. The human resolves.
 
 The Advisor is also available outside of queue items — for general project questions, scope exploration, or checking the state of the plan.
+
+---
+
+## Collaborative Artifact View
+
+Activated when the orchestrator dispatches a task whose skill declares `modes: [interactive]` (or `[autonomous, interactive]` and the session is human-initiated). Replaces the Phase × Scope Matrix in Pane 2 while the session is active.
+
+```
+┌─ Collaborative Artifact View ──────────────────────────────────────────┐
+│  [← Back to Matrix]   conops.md — in progress               [Close]   │
+│ ┌───────────────────────────────────┬────────────────────────────────┐ │
+│ │  Artifact (live)                  │  Conversation                  │ │
+│ │                                   │                                │ │
+│ │  # Project CONOPS                 │  ● Analyst                     │ │
+│ │                                   │  What problem does this        │ │
+│ │  ## Problem Statement             │  system solve?                 │ │
+│ │  [generating...]                  │                                │ │
+│ │                                   │  ● You                         │ │
+│ │  ## Users                         │  It's a tool for managing      │ │
+│ │  ...                              │  agentic workflows...          │ │
+│ │                                   │                                │ │
+│ │                                   │  ● Analyst                     │ │
+│ │                                   │  Who are the primary users?    │ │
+│ │                                   │                                │ │
+│ │                                   │  [ type your response...    ]  │ │
+│ │                                   │                    [ Send ↵ ]  │ │
+│ └───────────────────────────────────┴────────────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+**Left panel — artifact (live)**: the document's current markdown content, rendered live. Updates whenever the agent emits `poe:artifact`. Shows `[generating...]` in sections not yet written. Read-only — artifact content is shaped through conversation, not direct human edit. The artifact is the primary object of the session.
+
+**Right panel — conversation**: agent messages arrive via `poe:chat` events and are displayed as agent turns. Human types in the input field and submits. Full scroll history with timestamps. Visually distinct from the Decision Queue — different panel, different context, different semantic weight.
+
+**Distinction from the Decision Queue**: the Collaborative Artifact View is a dedicated surface for sustained co-authoring of a specific artifact with a specific agent. The Decision Queue handles exception arbitration across all autonomous agents. A task cannot appear in both simultaneously.
+
+**Session persistence**: closing the view does not end the session. The agent's `session_id` and the full conversation history (`chat_turns`) persist in SQLite. Re-opening the view resumes from the last turn.
+
+**Completion**: when the agent emits `poe:done`, the view shows a completion banner and offers "Return to Matrix" or "View Artifact". The produced artifact is now part of the project corpus — accessible from the artifact browser and injectable into subsequent task bundles.
 
 ---
 

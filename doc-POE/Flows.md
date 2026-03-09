@@ -104,13 +104,18 @@ The yield event is the handoff point — the agent process is about to exit and 
    reason = "decision":
      → No immediate action — orchestrator waits for human resolution
      → Resolution arrives via invoke("resolve_decision") → triggers SF-4
+
+   reason = "chat":
+     → No immediate action — orchestrator waits for human response in Collaborative Artifact View
+     → Response arrives via invoke("respond_to_chat") → triggers SF-4
+     → Continuation bundle format is identical to decision: "Human: {response text}"
 ```
 
-**Note**: `poe:decision` is logged by the ingester before `poe:yield` arrives. The orchestrator reads `nodes.yield_reason` (not event_log) when it processes the yield — direct column read, no join required.
+**Note**: `poe:decision` and `poe:chat` are both logged by the ingester before `poe:yield` arrives. The orchestrator reads `nodes.yield_reason` (not event_log) when it processes the yield — direct column read, no join required.
 
 ### SF-4: Agent Continuation (Resume)
 
-*Trigger*: Orchestrator determines a `waiting` task can continue — all reviewers accounted for (SF-3 review path), or human has resolved a decision (SF-3 decision path).
+*Trigger*: Orchestrator determines a `waiting` task can continue — all reviewers accounted for (SF-3 review path), human has resolved a decision (SF-3 decision path), or human has responded to a chat turn (SF-3 chat path).
 
 Distinct from SF-1: the agent process has exited but the Claude session is still valid. A new process is spawned against the existing session via `--resume`. The stdin bundle is a continuation payload, not a full T+S+K.
 
@@ -1088,6 +1093,136 @@ The Retrospective stage gate shows a diff of skill file changes produced during 
 6. **Phase gate is the outer PDCA loop closure**: The gate is where the human applies the Check step of the outer loop. Advance = the deliverable meets the bar. Revise = targeted Act. Re-run = full Act. The quality of this check determines whether the next phase starts on solid ground.
 
 ---
+### 3.8 Collaborative Artifact Building (`poe:chat`)
+
+**What it is**: A human and agent co-author a document together in the Collaborative Artifact View. The agent drives the session with `poe:chat` turns — questions, proposals, summaries. The human responds in the conversation panel on the right. The artifact evolves on the left as the agent emits `poe:artifact` events. The session concludes when the agent emits `poe:done` with the finalised artifact.
+
+**Canonical use case**: The operational-analyst is eliciting requirements for the CONOPS. It asks one question at a time via `poe:chat`. The human sees the evolving `conops.md` on the left and responds on the right. After sufficient rounds, the analyst writes the final artifact and completes.
+
+**Wire format reference**: Protocol.md §2 (`poe:chat`, `poe:yield`, `poe:artifact`, `poe:done`). Chat response: Protocol.md §4 "Chat response (Frontend → Rust)".
+
+**Distinction from Decision Arbitration**: `poe:decision` is an exception raised by an autonomous agent that cannot proceed. `poe:chat` is a normal turn in a collaborative session. They route to different surfaces (Decision Queue vs. Collaborative Artifact View) and carry different semantics. A collaborative agent uses `poe:chat` as its primary interaction mechanism; `poe:decision` remains available within a collaborative session for genuine structural calls that require explicit arbitration.
+
+#### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Orch as Orchestrator
+    participant A as Agent (operational-analyst)
+    participant Ing as Event Ingester
+    participant DB as SQLite
+    participant FE as Frontend
+    participant Human as Human
+
+    Note over Orch: SF-1: dispatch with interactive mode<br/>protocol block in T+S+K bundle
+
+    A-->>Ing: {"poe":"brief","content":"..."}
+    Ing->>DB: INSERT event_log
+    Ing-->>FE: emit poe://event (activity feed: brief)
+
+    A-->>Ing: {"poe":"chat","content":"What problem does this system solve?","id":"c1"}
+    Ing->>DB: INSERT chat_turns (id=c1, task_id=A.id, content=...)
+    Ing-->>FE: emit poe://chat-turn (turn_id=c1, content)
+
+    A-->>Ing: {"poe":"yield","reason":"chat"}
+    Ing->>DB: UPDATE nodes SET status='waiting', yield_reason='chat'
+    Ing->>Orch: DagChanged signal
+    Ing-->>FE: emit poe://task-update (status: waiting)
+
+    Note over FE: Collaborative Artifact View opens<br/>Right panel: agent question<br/>Left panel: artifact (empty or partial draft)
+
+    Human->>FE: Types response in conversation panel
+    FE->>Orch: invoke("respond_to_chat", {turn_id: "c1", response: "..."})
+
+    Orch->>DB: UPDATE chat_turns SET response=..., responded_at=now()
+    Orch->>Orch: DagChanged signal (internal)
+
+    Note over Orch: SF-4: waiting task, yield_reason=chat<br/>turn c1 has response → assemble continuation
+
+    Orch->>A: spawn --resume A1 (stream-json -p), cwd=project.path
+    Note over Orch,A: stdin bundle:<br/>Human: {response text}
+
+    A-->>Ing: {"type":"system","subtype":"init","session_id":"A2"}
+    Ing->>DB: UPDATE nodes SET session_id='A2', status='running'
+    Ing-->>FE: emit poe://task-update (status: running)
+
+    Note over A: Agent reads prior session + human response<br/>May draft artifact section before next question
+
+    opt Artifact draft updated
+        A-->>Ing: {"poe":"artifact","name":"conops.md","content":"..."}
+        Ing->>DB: UPSERT artifacts, write docs/conops.md
+        Ing-->>FE: emit poe://event (artifact updated)
+        Note over FE: Left panel updates with new content
+    end
+
+    A-->>Ing: {"poe":"chat","content":"Who are the primary users?","id":"c2"}
+    Ing->>DB: INSERT chat_turns (id=c2, ...)
+    Ing-->>FE: emit poe://chat-turn (turn_id=c2)
+
+    A-->>Ing: {"poe":"yield","reason":"chat"}
+    Note over Ing,DB: status=waiting — next turn begins<br/>Human responds — cycle repeats
+
+    Note over A: Final round: sufficient context gathered<br/>Agent writes complete artifact
+
+    A-->>Ing: {"poe":"artifact","name":"conops.md","content":"<final>"}
+    Ing->>DB: UPSERT artifacts, write docs/conops.md
+    Ing-->>FE: emit poe://event (artifact: conops.md — final)
+    Note over FE: Left panel shows complete artifact
+
+    A-->>Ing: {"poe":"done","summary":"CONOPS complete."}
+    Note over Ing,DB: SF-2: task marked done
+    Ing->>Orch: DagChanged signal
+    Ing-->>FE: emit poe://task-update (status: done)
+    Note over FE: Completion banner — "Return to Matrix" or "View Artifact"
+```
+
+---
+
+#### Walkthrough
+
+**Phase 1 — Dispatch**
+
+The orchestrator dispatches the task via SF-1 with the **interactive mode protocol block** prepended to the T+S+K bundle (Protocol.md §3). The agent reads its skill file, the project description, and the mode instruction. The Collaborative Artifact View opens in Pane 2 when the frontend receives the first `poe://chat-turn` event.
+
+**Phase 2 — Agent turn**
+
+The agent emits `poe:chat` with its first question or proposal, immediately followed by `poe:yield reason=chat`. The ingester inserts the turn into `chat_turns` and marks the task `waiting`. The conversation panel displays the agent's message.
+
+The agent may emit `poe:artifact` before yielding — a draft of the document in its current state. The artifact panel on the left updates immediately. On the first turn the artifact may be empty or skeletal; it fills over the course of the session.
+
+**Phase 3 — Human response**
+
+The human reads the agent's message and types a response. `invoke("respond_to_chat")` writes the response to `chat_turns` and signals `DagChanged`. The orchestrator wakes and triggers SF-4 with `Human: {response}` as the continuation bundle — identical format to decision resolution.
+
+**Phase 4 — Continuation**
+
+SF-4 resumes the agent via `--resume`. The agent reads its full session history plus the human response, continues — drafting the next artifact section if appropriate, then emitting the next `poe:chat` turn. The cycle repeats.
+
+**Phase 5 — Completion**
+
+When the agent has sufficient context it writes the final `poe:artifact` and emits `poe:done`. The view shows a completion banner. The artifact is now in the project corpus — accessible from the artifact browser and injectable into subsequent task bundles via the normal knowledge assembly.
+
+---
+
+#### Key Invariants
+
+1. **`poe:chat` is for interactive agents only**: An autonomous agent must not emit `poe:chat`. The skill's `modes:` frontmatter declares whether it supports interactive mode. The orchestrator injects the interactive mode protocol block only when the skill declares it.
+
+2. **Routing is exclusive**: `poe:chat` → Collaborative Artifact View. `poe:decision` → Decision Queue. These surfaces are independent. A collaborative agent may still emit `poe:decision` for genuine structural calls that require explicit arbitration — these appear in the queue normally, in addition to the chat session.
+
+3. **Artifact is the primary object**: The conversation exists to build the artifact. The agent is expected to emit `poe:artifact` progressively as the session develops, not only at the end. Intermediate emissions give the human continuous visibility of what is being built.
+
+4. **SF-4 is identical for chat, decision, and review**: The continuation mechanism is the same `--resume` + `Human: {text}` bundle regardless of yield reason. The difference is in routing (which surface captures the input) and semantics.
+
+5. **No watchdog timer for chat turns**: Human responses in a collaborative session are not time-bounded. Unlike reviewer tasks, there is no correct timeout — the human may take time to compose a considered response.
+
+6. **Session is resumable**: The Collaborative Artifact View can be closed and re-opened. The `session_id`, `chat_turns` history, and artifact content all persist in SQLite. Re-opening resumes from the last turn without loss.
+
+7. **`poe:artifact` emissions are idempotent**: The agent may emit `poe:artifact` for the same document multiple times as sections develop. Each emission replaces prior content (UPSERT). The artifact viewer shows the latest version; prior versions are accessible via artifact history.
+
+---
+
+
 
 ## 4. Error & Recovery Flows
 
@@ -1106,4 +1241,4 @@ The Retrospective stage gate shows a diff of skill file changes produced during 
 | Agent Interrupt | 3.5 | Draft |
 | Agent Session Handover | 3.6 | Draft |
 | Phase Closure & Stage Gate | 3.7 | Draft |
-| Human Chat (interactive mode) | — | Pending |
+| Collaborative Artifact Building (`poe:chat`) | 3.8 | Draft |

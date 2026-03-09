@@ -352,6 +352,26 @@ Agents that encounter genuine ambiguity emit a `poe:decision` event with a quest
 
 A low queue volume is a quality signal: it means the planning and guardrails stages produced sufficient context. A high volume indicates the preconditions were insufficient.
 
+### Two Human Interaction Models
+
+POE has two distinct models for human-agent interaction. They are not interchangeable and must not be conflated.
+
+**Decision Arbitration** — the Decision Queue handles this. An autonomous agent is running and encounters something it cannot resolve from available context. It raises `poe:decision`, yields, and waits. The human makes a call; the agent continues. The human is an *arbitrator* — making a discrete choice to unblock a stalled process. The interaction is asynchronous, brief, and exception-driven. A healthy project has a sparse queue.
+
+**Collaborative Artifact Building** — the Collaborative Artifact View handles this. A human and agent build a document together. The agent drives with `poe:chat` turns; the human shapes and refines through conversation. The evolving artifact is visible on the left; the conversation is on the right. The human is a *co-author* — participating in the creative process, not arbitrating an exception. The interaction is sustained, iterative, and goal-driven.
+
+| | Decision Arbitration | Collaborative Artifact Building |
+|---|---|---|
+| **Agent mode** | Autonomous — hit a blocker | Interactive — co-authoring |
+| **Human role** | Arbitrator | Co-author |
+| **Protocol event** | `poe:decision` | `poe:chat` |
+| **Yield reason** | `reason=decision` | `reason=chat` |
+| **Surface** | Decision Queue (Pane 3) | Collaborative Artifact View (Pane 2) |
+| **Artifact visible** | No | Yes — live on the left |
+| **Expected frequency** | Sparse — signals insufficient preconditions | Normal — the primary work mode for elicitation and planning stages |
+
+An autonomous agent must never emit `poe:chat`. A collaborative agent uses `poe:chat` as its primary interaction mechanism; `poe:decision` remains available within a collaborative session for genuine structural calls that require explicit human arbitration.
+
 ### Queue Advisor (AI Decision Aid)
 
 The decision queue is not a simple approval interface — it is a collaborative decision-making space. Each queue item has a chatbot advisor associated with it. When the human is uncertain how to resolve a question, they can instruct the advisor to help: *"Go check what the architecture constraints say about this"*, *"Has this come up before?"*, or *"Spawn a quick research task on X."*

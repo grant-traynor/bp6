@@ -49,7 +49,7 @@ CREATE TABLE tasks (
   skill       TEXT,
   status      TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'running' | 'waiting' | 'done' | 'cancelled'
   session_id   TEXT,        -- Claude --resume handle, stored on spawn, used on restart
-  yield_reason TEXT,        -- 'review' | 'decision' | NULL. Set when status=waiting. Used by recovery to determine SF-4 path without event_log join.
+  yield_reason TEXT,        -- 'review' | 'decision' | 'chat' | NULL. Set when status=waiting. Used by recovery to determine SF-4 path without event_log join.
   review_id    TEXT,        -- populated for reviewer tasks only: the 'id' from the originating poe:review event. Enables ID-based completion tracking.
   retry_count  INTEGER NOT NULL DEFAULT 0,  -- reviewer tasks only: watchdog retry counter. Max configurable, default 2.
   created_at  INTEGER NOT NULL,
@@ -79,6 +79,15 @@ CREATE TABLE decisions (
   resolution  TEXT,              -- null until human resolves
   created_at  INTEGER NOT NULL,
   resolved_at INTEGER
+);
+
+CREATE TABLE chat_turns (
+  id           TEXT    PRIMARY KEY,
+  task_id      TEXT    NOT NULL REFERENCES tasks(id),
+  content      TEXT    NOT NULL,   -- agent's message or question during co-authoring session
+  response     TEXT,               -- null until human responds via respond_to_chat
+  created_at   TEXT    NOT NULL,
+  responded_at TEXT
 );
 
 CREATE TABLE artifacts (
@@ -181,13 +190,20 @@ One event per line. No multi-line JSON.
 // detail is optional
 
 // Raise a question for the human queue. Task status → waiting.
+// For autonomous agents only — routes to the Decision Queue (Pane 3).
 // Agent emits poe:yield immediately after. Orchestrator resumes via --resume once resolved.
 {"poe": "decision", "question": "...", "options": ["Option A", "Option B"]}
 // options is optional
 
+// Collaborative turn — agent sends a message or question to the human during a co-authoring session.
+// For interactive agents only — routes to the Collaborative Artifact View, NOT the Decision Queue.
+// Agent emits poe:yield reason=chat immediately after. Orchestrator resumes via --resume once human responds.
+{"poe": "chat", "content": "...", "id": "c1"}
+// id is optional for single-turn sessions
+
 // Yield control while awaiting an asynchronous response.
 // Emitted after all poe:review or poe:decision events for this checkpoint.
-// task status → waiting. reason: "review" | "decision"
+// task status → waiting. reason: "review" | "decision" | "chat"
 {"poe": "yield", "reason": "review"}
 
 // Signal task completion (all work done — not a yield checkpoint).
@@ -229,6 +245,7 @@ One event per line. No multi-line JSON.
 | `poe:brief` | — | yes | `poe://event` |
 | `poe:step` | — | yes | `poe://event` |
 | `poe:decision` | INSERT decisions | yes | `poe://decision` |
+| `poe:chat` | INSERT chat_turns | yes | `poe://chat-turn` |
 | `poe:review` | INSERT event_log only (yield handles status) | yes | `poe://event` |
 | `poe:yield` | UPDATE tasks.status=waiting, SET yield_reason, signal orchestrator (SF-3) | yes | `poe://task-update` + `poe://event` |
 | `poe:done` | UPDATE tasks.status=done, signal orchestrator | yes | `poe://task-update` |
@@ -455,6 +472,7 @@ All events use `app_handle.emit_all(event_name, payload)`.
 | `poe://event` | `{task_id, event_type, payload, created_at}` | Append to activity feed |
 | `poe://decision` | `{decision_id, task_id, question, options}` | Add item to queue panel, increment badge |
 | `poe://decision-resolved` | `{decision_id}` | Remove item from queue panel, decrement badge |
+| `poe://chat-turn` | `{turn_id, task_id, content}` | Display agent message in Collaborative Artifact View right panel |
 | `poe://task-update` | `{task_id, status, title?, updated_at}` | Update task status in Phase × Scope matrix and project card |
 | `poe://phase-update` | `{phase_id, status}` | Update phase lifecycle state in Phase × Scope Matrix header |
 | `poe://stage-update` | `{phase_id, status}` | Update stage pause/resume state in Phase × Scope Matrix |
@@ -475,6 +493,23 @@ Rust handler:
 3. Emits `poe://decision-resolved {decision_id}` (frontend removes from queue).
 
 The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='decision'`, confirms all decisions are resolved, and triggers SF-4: Agent Continuation. The continuation bundle is `Human: {resolution text}` — see Flows.md §3.2 for the full sequence.
+
+### Chat response (Frontend → Rust)
+
+Human submits a response in the Collaborative Artifact View:
+
+```
+invoke("respond_to_chat", {turn_id, response: "..."})
+```
+
+Rust handler:
+1. Updates `chat_turns.response` and `responded_at` in SQLite.
+2. Signals the orchestrator (`DagChanged`).
+3. Emits `poe://chat-responded {turn_id}` (frontend scrolls, awaits next agent turn).
+
+The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='chat'`, confirms the turn has a response, and triggers SF-4. The continuation bundle is `Human: {response text}` — identical format to decision resolution. See Flows.md §3.8.
+
+---
 
 ### Why not polling
 
