@@ -95,7 +95,7 @@ This proves the full interactive wire protocol, the SF-1 → poe:chat → SF-4 o
 - Each turn shows: agent message (agent turn) or human message (human turn), with timestamp.
 - Input field + "Send" button at bottom of chat panel. On submit: `invoke("respond_to_chat", {turn_id, response})`.
 - Left panel (artifact) updates live on each `poe://event` of type `poe:artifact`.
-- **"Chat about this" button** in viewer toolbar — visible when the artifact's producing task is `done`. Clicking dispatches a new interactive session.
+- **"Chat about this" button** in viewer toolbar — visible when the artifact is loaded and no session is active. Clicking calls `create_node` with `skillId: 'operational-analyst'`, `initialStatus: 'pending'`, and the artifact content embedded in the description. The new task id becomes the active `taskId` for the chat panel. (Decision: option (a) — new task; completed tasks stay immutable.)
 - Chat panel closes (collapses, state preserved) when task reaches `done`. Shows completion banner.
 
 **Layout** (chat-active state):

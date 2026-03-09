@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Artifact } from '../types';
+import type { Artifact, Node } from '../types';
 
 interface ChatTurn {
   id: string;
@@ -37,6 +37,9 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // localTaskId: starts from prop, overwritten when human-initiated dispatch creates a new node
+  const [localTaskId, setLocalTaskId] = useState<string | null>(taskId ?? null);
+
   // Chat panel state
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [chatActive, setChatActive] = useState(false);
@@ -44,6 +47,10 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [taskDone, setTaskDone] = useState(false);
+
+  // Human-initiated dispatch state
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
@@ -60,8 +67,8 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
   // Hydrate existing chat turns and open panel if turns exist
   useEffect(() => {
-    if (!taskId) return;
-    invoke<ChatTurn[]>('get_chat_turns', { projectId, taskId })
+    if (!localTaskId) return;
+    invoke<ChatTurn[]>('get_chat_turns', { projectId, taskId: localTaskId })
       .then((turns) => {
         setChatTurns(turns);
         if (turns.length > 0) {
@@ -69,7 +76,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
         }
       })
       .catch((e) => console.error('[ArtifactViewer] get_chat_turns error:', e));
-  }, [projectId, taskId]);
+  }, [projectId, localTaskId]);
 
   // Scroll chat to bottom when turns change
   useEffect(() => {
@@ -78,12 +85,12 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
   // Listen for new poe://chat-turn events
   useEffect(() => {
-    if (!taskId) return;
+    if (!localTaskId) return;
     let cancelled = false;
 
     const unlistenPromise = listen<ChatTurnEvent>('poe://chat-turn', ({ payload }) => {
       if (cancelled) return;
-      if (payload.taskId !== taskId) return;
+      if (payload.taskId !== localTaskId) return;
       const newTurn: ChatTurn = {
         id: payload.turnId,
         taskId: payload.taskId,
@@ -103,17 +110,17 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
       cancelled = true;
       void unlistenPromise.then((u) => u());
     };
-  }, [taskId]);
+  }, [localTaskId]);
 
   // Listen for poe-event to detect poe:done for this task
   useEffect(() => {
-    if (!taskId) return;
+    if (!localTaskId) return;
     let cancelled = false;
 
     const unlistenPromise = listen<PoeEventPayload>('poe-event', ({ payload }) => {
       if (cancelled) return;
       if (payload.projectId !== projectId) return;
-      if (payload.taskId !== taskId) return;
+      if (payload.taskId !== localTaskId) return;
       if (payload.eventType === 'poe:done') {
         setTaskDone(true);
       }
@@ -123,11 +130,11 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
       cancelled = true;
       void unlistenPromise.then((u) => u());
     };
-  }, [projectId, taskId]);
+  }, [projectId, localTaskId]);
 
   // Also detect task done via poe-task-done (fires with node payload)
   useEffect(() => {
-    if (!taskId) return;
+    if (!localTaskId) return;
     let cancelled = false;
 
     const unlistenPromise = listen<{ id: string; projectId: string; status: string }>(
@@ -135,7 +142,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
       ({ payload }) => {
         if (cancelled) return;
         if (payload.projectId !== projectId) return;
-        if (payload.id !== taskId) return;
+        if (payload.id !== localTaskId) return;
         setTaskDone(true);
       }
     );
@@ -144,10 +151,37 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
       cancelled = true;
       void unlistenPromise.then((u) => u());
     };
-  }, [projectId, taskId]);
+  }, [projectId, localTaskId]);
 
   const pendingTurn =
     [...chatTurns].reverse().find((t: ChatTurn) => t.respondedAt === null) ?? null;
+
+  // Human-initiated: create a new interactive task referencing the artifact
+  async function handleDispatchChat() {
+    if (!artifact || !content || dispatching) return;
+    setDispatching(true);
+    setDispatchError(null);
+    try {
+      const node = await invoke<Node>('create_node', {
+        input: {
+          projectId,
+          phaseId: null,
+          parentId: null,
+          nodeType: 'task',
+          title: `Discuss: ${artifact.filename}`,
+          description: `The user wants to discuss the following artifact.\n\n---\n\n${content}`,
+          skillId: 'operational-analyst',
+          initialStatus: 'pending',
+        },
+      });
+      setLocalTaskId(node.id);
+      setChatActive(true);
+    } catch (e) {
+      setDispatchError(String(e));
+    } finally {
+      setDispatching(false);
+    }
+  }
 
   async function handleSubmit() {
     if (!pendingTurn || !inputValue.trim() || submitting) return;
@@ -202,18 +236,23 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
             )}
           </div>
           <div className="flex items-center gap-2">
-            {taskId && taskDone && !chatActive && chatTurns.length > 0 && (
+            {/* Human-initiated: artifact loaded, no active session yet */}
+            {artifact && content && !localTaskId && !chatActive && (
               <button
-                className="text-neutral-400 hover:text-neutral-100 text-[11px] font-mono border border-neutral-700 hover:border-neutral-500 px-2 py-0.5 rounded"
-                onClick={() => setChatActive(true)}
+                className="text-neutral-400 hover:text-neutral-100 text-[11px] font-mono border border-neutral-700 hover:border-neutral-500 px-2 py-0.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={dispatching}
+                onClick={() => void handleDispatchChat()}
               >
-                Chat about this
+                {dispatching ? 'Opening…' : 'Chat about this'}
               </button>
             )}
-            {taskId && taskDone && !chatActive && chatTurns.length === 0 && (
+            {dispatchError && (
+              <span className="text-red-400 text-[10px] font-mono">{dispatchError}</span>
+            )}
+            {/* Agent-initiated session done: re-show chat panel */}
+            {localTaskId && taskDone && !chatActive && chatTurns.length > 0 && (
               <button
-                className="text-neutral-600 text-[11px] font-mono border border-neutral-800 px-2 py-0.5 rounded cursor-not-allowed"
-                title="Start a new chat session — available in bp6-881.14"
+                className="text-neutral-400 hover:text-neutral-100 text-[11px] font-mono border border-neutral-700 hover:border-neutral-500 px-2 py-0.5 rounded"
                 onClick={() => setChatActive(true)}
               >
                 Chat about this
