@@ -11,7 +11,11 @@ protocol_version: v2
 
 This document defines the rules that apply to every agent running under a POE v2 skill. Specialist skills inherit these rules. If a specialist rule conflicts with this base, the specialist rule takes precedence.
 
-## Non-Interactive Rules
+## Interactive vs Autonomous Rules
+
+Your behaviour depends on whether an `## Interactive Mode` protocol block was injected at the top of the task bundle.
+
+### Autonomous mode (no Interactive Mode block)
 
 You are running autonomously inside a POE orchestration session. There is no keyboard. No human is reading your output in real time.
 
@@ -24,6 +28,19 @@ You are running autonomously inside a POE orchestration session. There is no key
 If information is unavailable, write your best substantive estimate and mark it `[PENDING: <specific question>]`. A document with good content and clear PENDING markers is far more valuable than a skeleton.
 
 A skill designed for iterative conversation — ask a question, wait for an answer, ask another — will produce useless output in autonomous mode. Do not write that way. Reason through the task from the injected context alone.
+
+### Interactive mode (Interactive Mode block present)
+
+A human is at the keyboard. The orchestrator delivers their answers and resumes your run.
+
+**Hard rule: every message to the human MUST be a `poe:chat` event.** If you write bare prose text it is captured in the debug log only — it does not reach the user. There is no other channel.
+
+- Use `poe:chat` for every question, acknowledgement, or response you send.
+- Follow `poe:chat` immediately with `poe:yield`, then stop. Do not emit anything else.
+- When the orchestrator resumes you with `Human: {response}`, your output is: optional `poe:artifact` (draft update), then `poe:chat` (next question or conclusion), then `poe:yield` — nothing else.
+- After 3–5 rounds emit the final artifact and `poe:done` instead of another `poe:chat` + `poe:yield`.
+
+The specialist skill's `## Interactive Mode` section defines the specific questions and sequence. This base rule governs the output channel.
 
 ## poe: Event Wire Format
 
@@ -43,6 +60,8 @@ A line is a poe: event if and only if it parses as valid JSON and contains a `"p
 {"poe": "artifact", "name": "<filename>", "artifact_type": "<type>", "content": "..."}
 {"poe": "knowledge", "key": "<slug>", "content": "...", "supersedes": "<prior-id>"}
 {"poe": "decision", "question": "...", "options": ["Option A", "Option B"]}
+{"poe": "chat", "content": "...", "id": "<turn-id>"}
+{"poe": "yield"}
 {"poe": "review", "reviewer_skill": "<skill-id>", "content": "..."}
 {"poe": "task", "id": "<uuid>", "title": "...", "description": "...", "skill": "<skill-id>", "type": "task", "parent_id": "<id>", "depends_on": ["<id>"]}
 {"poe": "task:update", "id": "<task-id>", "title": "...", "description": "...", "skill": "..."}
@@ -50,6 +69,10 @@ A line is a poe: event if and only if it parses as valid JSON and contains a `"p
 {"poe": "skill", "name": "<skill-id>", "content": "<full SKILL.md markdown>"}
 {"poe": "done", "summary": "..."}
 ```
+
+`poe:chat` — interactive mode only. Sends a message to the human. Must be followed immediately by `poe:yield`. The `id` field is optional but recommended — use a stable slug like `"c1"`, `"c2"` to identify the turn.
+
+`poe:yield` — suspends the task (status = waiting). The ingester derives the yield reason from the last substantive event emitted before this one (`chat`, `decision`, or `review`). Emit `poe:yield` as the **last** event before the process exits. Do NOT add a `reason` field — it is ignored.
 
 `detail` in `poe:step` is optional. `summary` in `poe:done` is optional. `options` in `poe:decision` is optional (include when you have identified candidates). `supersedes` in `poe:knowledge` is optional.
 

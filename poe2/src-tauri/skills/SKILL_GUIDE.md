@@ -101,6 +101,8 @@ One event per line. No multi-line JSON. No markdown wrappers. Events are embedde
 {"poe": "knowledge","key": "<slug>", "content": "...", "supersedes": "<id>"}  // supersedes optional
 {"poe": "skill",    "name": "<skill-id>", "content": "<full SKILL.md markdown>"}  // NOT automatic — emit only when pattern is worth capturing
 {"poe": "decision", "question": "...", "options": ["A", "B"]}  // options optional
+{"poe": "chat",     "content": "...", "id": "<turn-id>"}       // interactive mode only; id optional
+{"poe": "yield"}                                               // suspend; derive reason from last substantive event
 {"poe": "review",   "reviewer_skill": "<id>", "content": "...", "id": "<review-id>"}
 {"poe": "task",     "id": "<uuid>", "title": "...", "description": "...", "skill": "<id>",
                     "type": "task", "parent_id": "<id>", "depends_on": ["<id>"]}
@@ -192,17 +194,20 @@ Use `poe:yield` when the agent must pause and wait for an asynchronous response 
 
 | Situation | Correct pattern |
 |---|---|
-| Agent requests peer review and must wait for results | Emit `poe:review` event(s), then `poe:yield` with `reason: "review"` |
-| Agent raises a decision that blocks further progress | Emit `poe:decision` event, then `poe:yield` with `reason: "decision"` |
+| Interactive mode — sent a `poe:chat` question, waiting for the human | Emit `poe:chat`, then `poe:yield` |
+| Agent requests peer review and must wait for results | Emit `poe:review` event(s), then `poe:yield` |
+| Agent raises a decision that blocks further progress | Emit `poe:decision` event, then `poe:yield` |
 | Agent has completed all work | Emit `poe:done` — never `poe:yield` |
 
 `poe:done` is reserved for **task completion only**. Never use `poe:done` as a checkpoint or to signal that the agent is waiting for something. An agent that emits `poe:done` is marked `status = done` — the orchestrator will not resume it.
+
+**Note on the `reason` field**: Do NOT include a `reason` field in `poe:yield`. The ingester derives the yield reason automatically from the last substantive event emitted before it (`chat`, `decision`, or `review`). Any `reason` field you write is silently ignored.
 
 ### Required event sequence
 
 The required ordering is strict:
 
-1. Emit all `poe:review` **or** `poe:decision` events for this checkpoint first.
+1. Emit all `poe:chat` **or** `poe:review` **or** `poe:decision` events for this checkpoint first.
 2. Emit `poe:yield` as the **last** event before the process exits.
 
 The ingester logs each `poe:review` / `poe:decision` event as it arrives. When `poe:yield` is received, the ingester marks the task `waiting` and signals the orchestrator. The orchestrator then reads the accumulated `poe:review` events (or waits for human resolution of the `poe:decision`) before triggering SF-4 (Agent Continuation). See `doc-POE/Flows.md §SF-3` and `§SF-4` for the full orchestrator sequence.
@@ -215,6 +220,27 @@ The ingester logs each `poe:review` / `poe:decision` event as it arrives. When `
 ```
 
 `reason` is required. Values: `"review"` | `"decision"`.
+
+### Code example — chat yield (interactive mode)
+
+```
+// Correct: poe:chat sends the message, poe:yield suspends
+{"poe": "chat", "content": "What problem does this project solve?", "id": "c1"}
+{"poe": "yield"}
+
+// Process exits. Orchestrator waits for human to respond via respond_to_chat.
+// When human responds, orchestrator resumes via --resume with "Human: {response}".
+// Agent's ENTIRE output on resume: optional poe:artifact, then poe:chat, then poe:yield.
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "...draft..."}
+{"poe": "chat", "content": "Thanks. Next: who are the primary users?", "id": "c2"}
+{"poe": "yield"}
+
+// After enough rounds, conclude with poe:artifact + poe:done (no poe:chat or poe:yield).
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "...final..."}
+{"poe": "done", "summary": "CONOPS complete."}
+```
+
+**Never write bare prose text in interactive mode.** It goes to the debug log, not to the user.
 
 ### Code example — review yield
 
