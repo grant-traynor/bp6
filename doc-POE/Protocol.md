@@ -260,22 +260,22 @@ One event per line. No multi-line JSON.
 
 | Event | DAG write | event_log | Tauri emit |
 |---|---|---|---|
-| `poe:task` | INSERT tasks + edges | yes | `poe://task-update` |
-| `poe:task:update` | UPDATE tasks | yes | `poe://task-update` |
-| `poe:task:cancel` | UPDATE tasks.status | yes | `poe://task-update` |
-| `poe:edge` | INSERT edges | yes | — |
-| `poe:edge:remove` | DELETE edges | yes | — |
-| `poe:artifact` | UPSERT artifacts, write file | yes | `poe://event` |
-| `poe:knowledge` | INSERT knowledge | yes | `poe://event` |
-| `poe:skill` | write `{project}/.poe/skills/{name}.md` | yes | `poe://event` |
-| `poe:brief` | — | yes | `poe://event` |
-| `poe:step` | — | yes | `poe://event` |
-| `poe:decision` | INSERT decisions | yes | `poe://decision` |
-| `poe:chat` | INSERT chat_turns | yes | `poe://chat-turn` |
-| `poe:advisor` | INSERT advisor_turns | yes | `poe://advisor-turn` |
-| `poe:review` | INSERT event_log only (yield handles status) | yes | `poe://event` |
-| `poe:yield` | UPDATE tasks.status=waiting, SET yield_reason, signal orchestrator (SF-3) | yes | `poe://task-update` + `poe://event` |
-| `poe:done` | UPDATE tasks.status=done, signal orchestrator | yes | `poe://task-update` |
+| `poe:task` | INSERT tasks + edges | yes | `poe-task-created` |
+| `poe:task:update` | UPDATE tasks | yes | `poe-node-updated` |
+| `poe:task:cancel` | UPDATE tasks.status | yes | `poe-node-updated` |
+| `poe:edge` | INSERT edges | yes | `poe-edge-created` |
+| `poe:edge:remove` | DELETE edges | yes | `poe-edge-removed` |
+| `poe:artifact` | UPSERT artifacts, write file | yes | `poe-artifact-created` |
+| `poe:knowledge` | INSERT knowledge | yes | `poe-knowledge-created` |
+| `poe:skill` | write `{project}/.poe/skills/{name}.md` | yes | `poe-event` |
+| `poe:brief` | — | yes | `poe-event` |
+| `poe:step` | — | yes | `poe-event` |
+| `poe:decision` | INSERT queue_items, UPDATE task status=waiting | yes | `poe-decision-queued` |
+| `poe:chat` | INSERT chat_turns | yes | `poe-chat-turn` |
+| `poe:advisor` | INSERT advisor_turns | yes | `poe-advisor-turn` |
+| `poe:review` | log only (orchestrator handles reviewer dispatch post-poe:yield) | yes | `poe-event` |
+| `poe:yield` | UPDATE tasks.status=waiting, SET yield_reason, signal orchestrator | yes | `poe-node-updated` + `poe-event` |
+| `poe:done` | UPDATE tasks.status=complete, signal orchestrator | yes | `poe-task-done` |
 
 ---
 
@@ -297,6 +297,10 @@ Before assembling the bundle, the orchestrator determines the **execution mode**
 | Queue Advisor chatbot | `interactive` | Rust-side API proxy |
 
 The skill's `modes:` frontmatter field declares which modes it supports. If a human tries to open a node-scoped conversation with a skill that only supports `autonomous`, the UI blocks it with an explanation rather than starting a broken session.
+
+> **Mode invariant**: The orchestrator ALWAYS injects the autonomous mode block for tasks it schedules. Interactive mode is exclusively for human-initiated sessions (node-scoped conversations or advisor). An agent dispatched by the orchestrator cannot yield with `poe:chat` — it must use `poe:decision` for blockers.
+>
+> **`respond_to_chat` signal**: The `respond_to_chat` Tauri command writes the response to `chat_turns` and signals the orchestrator via `DagChanged::QueueItemResolved` (the same variant as decision resolution — the orchestrator routes by `node.yield_reason`, not by signal variant). This means the orchestrator's wake-up path is identical for both `poe:decision` and `poe:chat` continuations; only the yield_reason field differentiates them.
 
 **Autonomous mode block** (prepended for orchestrator-initiated tasks):
 
@@ -491,20 +495,26 @@ The frontend does **not poll**. All live state is event-driven via the Tauri eve
 
 ### Tauri events (Rust → Frontend)
 
-All events use `app_handle.emit_all(event_name, payload)`.
+All events use `app_handle.emit(event_name, payload)`. Event names use hyphen notation — there is no `poe://` prefix in the implementation.
 
 | Event | Payload | Frontend action |
 |---|---|---|
-| `poe://event` | `{task_id, event_type, payload, created_at}` | Append to activity feed |
-| `poe://decision` | `{decision_id, task_id, question, options}` | Add item to queue panel, increment badge |
-| `poe://decision-resolved` | `{decision_id}` | Remove item from queue panel, decrement badge |
-| `poe://chat-turn` | `{turn_id, task_id, content}` | Display agent message in Artifact Viewer chat panel |
-| `poe://advisor-turn` | `{turn_id, task_id, content}` | Display advisor message in Pane 3 advisor panel |
-| `poe://task-update` | `{task_id, status, skill_modes?, title?, updated_at}` | Update task status in Phase × Scope matrix and project card |
-| `poe://phase-update` | `{phase_id, status}` | Update phase lifecycle state in Phase × Scope Matrix header |
-| `poe://stage-update` | `{phase_id, status}` | Update stage pause/resume state in Phase × Scope Matrix |
-| `poe://project-update` | `{project_id, status}` | Update project card status in Projects Overview |
-| `poe://project-opened` | `{project_id, nodes, phases, artifacts, decisions}` | Hydrate full project view on open |
+| `poe-event` | `{eventType, projectId, agentId, taskId, payload, summary?}` | Append to activity feed |
+| `poe-agent-started` | `{agentId, taskId, projectId, skillId, model}` | Mark task as running in task tree; emitted before process spawns |
+| `poe-task-created` | `{id, title, skill, status, ...node fields}` | Add task node to DAG view |
+| `poe-node-updated` | `{id, status, title?, skill?, ...node fields}` | Update task status in Phase × Scope matrix |
+| `poe-task-done` | `{id, status: "complete", ...node fields}` | Mark task complete in task tree; triggers orchestrator scheduling loop |
+| `poe-edge-created` | `{fromId, toId, edgeType}` | Add dependency edge to DAG view |
+| `poe-edge-removed` | `{fromId, toId}` | Remove dependency edge from DAG view |
+| `poe-artifact-created` | `{id, filename, artifactType, projectId, ...}` | Add artifact to Artifact Viewer |
+| `poe-knowledge-created` | `{id, key, value, projectId, ...}` | Add entry to Knowledge Register panel |
+| `poe-decision-queued` | `{id, taskId, question, options, resolvedAt}` | Add item to queue panel, increment badge |
+| `poe-decision-resolved` | `{itemId, projectId, taskId}` | Remove item from queue panel, decrement badge |
+| `poe-chat-turn` | `{turnId, taskId, content}` | Display agent message in Artifact Viewer chat panel |
+| `poe-chat-responded` | `{turnId, projectId, taskId}` | Frontend scrolls, awaits next agent turn |
+| `poe-advisor-turn` | `{turnId, taskId, content}` | Display advisor message in Pane 3 advisor panel |
+| `poe-advisor-responded` | `{turnId, projectId, taskId}` | Frontend scrolls, awaits next advisor turn |
+| `poe-phase-update` | `{phaseId, status, projectId}` | Update phase lifecycle state in Phase × Scope Matrix header |
 
 ### Decision resolution (Frontend → Rust)
 
@@ -517,7 +527,7 @@ invoke("resolve_decision", {decision_id, resolution: "..."})
 Rust handler:
 1. Updates `decisions.resolution` and `resolved_at` in SQLite.
 2. Signals the orchestrator (`DagChanged`).
-3. Emits `poe://decision-resolved {decision_id}` (frontend removes from queue).
+3. Emits `poe-decision-resolved {itemId, projectId, taskId}` (frontend removes from queue).
 
 The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='decision'`, confirms all decisions are resolved, and triggers SF-4: Agent Continuation. The continuation bundle is `Human: {resolution text}` — see Flows.md §3.2 for the full sequence.
 
@@ -531,8 +541,8 @@ invoke("respond_to_chat", {project_id, turn_id, response: "..."})
 
 Rust handler:
 1. Updates `chat_turns.response` and `responded_at` in SQLite.
-2. Signals the orchestrator (`DagChanged`).
-3. Emits `poe://chat-responded {turn_id}` (frontend scrolls, awaits next agent turn).
+2. Signals the orchestrator (`DagChanged::QueueItemResolved`).
+3. Emits `poe-chat-responded {turnId, projectId, taskId}` (frontend scrolls, awaits next agent turn).
 
 The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='chat'`, confirms the turn has a response, and triggers SF-4. The continuation bundle is `Human: {response text}` — identical format to decision resolution. See Flows.md §3.8.
 
@@ -546,8 +556,8 @@ invoke("respond_to_advisor", {project_id, turn_id, response: "..."})
 
 Rust handler:
 1. Updates `advisor_turns.response` and `responded_at` in SQLite.
-2. Signals the orchestrator (`DagChanged`).
-3. Emits `poe://advisor-responded {turn_id}` (frontend scrolls, awaits next advisor turn).
+2. Signals the orchestrator (`DagChanged::QueueItemResolved`).
+3. Emits `poe-advisor-responded {turnId, projectId, taskId}` (frontend scrolls, awaits next advisor turn).
 
 The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='advisor'`, confirms the turn has a response, and triggers SF-4. The continuation bundle is `Human: {response text}` — identical format to chat and decision resolution. See Flows.md §3.9.
 
@@ -561,13 +571,15 @@ invoke("create_phase", {project_id, name, stage_type, number})
 // → Returns Phase. All phases created with status='pending'.
 
 // Step 2: activate the first phase (triggers orchestrator to begin execution)
-invoke("activate_phase", {phase_id: first_phase_id})
+invoke("activate_phase", {project_id, phase_id: first_phase_id})
 ```
 
+> **Note**: `project_id` is required — the handler uses it to look up the phase's project for bootstrap and event emission.
+
 `activate_phase` Rust handler:
-1. `UPDATE phases SET status='running' WHERE id = phase_id`.
-2. Signals the orchestrator (`DagChanged`).
-3. Emits `poe://phase-update {phase_id, status: 'running'}`.
+1. `UPDATE phases SET status='running' WHERE id = phase_id` (also runs `maybe_bootstrap_phase`).
+2. Signals the orchestrator (`DagChanged::DagStructureChanged`).
+3. Emits `poe-phase-update {phaseId, status: 'running', projectId}`.
 
 The orchestrator wakes, finds pending tasks in the now-active phase with no unmet dependencies, and dispatches via SF-1. See Flows.md SF-5.
 

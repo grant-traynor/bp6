@@ -195,7 +195,7 @@ Dependencies are horizontal linkages between tasks (and optionally features) wit
 
 ---
 
-## Artifact Corpus
+       
 
 Artifacts are the structured documents that define the product. They are phase outputs — produced by a lifecycle stage and injected as context into subsequent stages.
 
@@ -515,6 +515,23 @@ The orchestrator respects both limits when selecting tasks to spawn in the core 
 **`waiting` tasks do not count against the concurrency limit.** A task in `waiting` status has no live agent process — the process exited after emitting `poe:yield`. Counting waiting tasks would artificially suppress parallelism while reviewers run. Only `status = running` tasks consume a concurrency slot.
 
 The UI displays a concurrency indicator — running count / limit — for each project and globally. Both limits are adjustable from the UI. Higher limits suit powerful machines with fast API access; lower limits suit constrained environments or when the human wants to keep queue volume manageable.
+
+### Phase Bootstrap
+
+When a phase is activated via `activate_phase` or `advance_phase` and the phase has no tasks, the orchestrator auto-creates a default task using a static stage-type → skill mapping (`bootstrap_skill_for_stage` in `dag_store/commands.rs`).
+
+**Stage-type → bootstrap skill mapping:**
+
+| Stage type | Skill | Default task title |
+|---|---|---|
+| `conops` | `operational-analyst` | "Develop CONOPS" |
+| `guardrails` | `must-not-analyst` | "Develop Guardrails" |
+| `increment_planning` | `product-manager` | "Plan Increment" |
+| `execution` | — (no bootstrap) | Tasks come from product-manager `poe:task` events in the preceding increment_planning phase |
+
+**Bootstrap is skipped** if the phase already has tasks (human-added or previously bootstrapped). The check runs before the `DagChanged` signal is sent, so the orchestrator always sees at least one ready task when the phase activates.
+
+**Purpose**: ensures every bootstrappable phase has at least one task to dispatch immediately after activation, preventing the "zero ready tasks" stall where the orchestrator wakes but has nothing to schedule.
 
 ---
 
