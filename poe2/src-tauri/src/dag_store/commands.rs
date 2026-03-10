@@ -412,14 +412,59 @@ pub async fn activate_phase(
 ) -> Result<(), String> {
     use tauri::Emitter;
     use crate::event_ingester::DagChanged;
+    use crate::dag_store::{db_create_node, db_list_nodes};
+    use crate::dag_store::types::{CreateNodeInput, NodeType, NodeStatus};
+
+    // Stage-type → skill bootstrap mapping. Only stage types that have a
+    // single well-known entry-point skill get an auto-task. Execution phases
+    // get their tasks from the product-manager DAG in the preceding phase.
+    fn bootstrap_skill(stage_type: &str) -> Option<(&'static str, &'static str)> {
+        match stage_type {
+            "conops"             => Some(("operational-analyst", "Develop CONOPS")),
+            "guardrails"         => Some(("must-not-analyst",    "Develop Guardrails")),
+            "increment_planning" => Some(("product-manager",     "Plan Increment")),
+            _                    => None,
+        }
+    }
 
     with_conn(&registry, &project_id, |conn| {
         let now = chrono::Utc::now().to_rfc3339();
+
+        // Mark phase running.
         conn.execute(
             "UPDATE phases SET status = 'running', lifecycle_stage = 'execution', gate_held = 0, updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         )
         .map_err(|e| anyhow::anyhow!("Failed to activate phase: {}", e))?;
+
+        // Auto-create bootstrap task if the phase has no tasks yet.
+        let existing = db_list_nodes(conn, &project_id, Some(&phase_id))
+            .unwrap_or_default();
+        if existing.is_empty() {
+            let stage_type: Option<String> = conn.query_row(
+                "SELECT stage_type FROM phases WHERE id = ?1",
+                [&phase_id],
+                |r| r.get(0),
+            ).ok();
+
+            if let Some(st) = stage_type.as_deref() {
+                if let Some((skill_id, title)) = bootstrap_skill(st) {
+                    db_create_node(conn, &CreateNodeInput {
+                        project_id: project_id.clone(),
+                        phase_id: Some(phase_id.clone()),
+                        parent_id: None,
+                        node_type: NodeType::Task,
+                        title: title.to_string(),
+                        description: None,
+                        skill_id: Some(skill_id.to_string()),
+                        initial_status: Some(NodeStatus::Pending),
+                        requesting_task_id: None,
+                        review_id: None,
+                        retry_count: None,
+                    })?;
+                }
+            }
+        }
         Ok(())
     })?;
 

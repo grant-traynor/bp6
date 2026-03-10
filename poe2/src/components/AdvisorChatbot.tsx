@@ -37,7 +37,7 @@ export default function AdvisorChatbot({ projectId, taskNodeId, decisionId = nul
   useEffect(() => {
     if (!taskNodeId) return;
     let cancelled = false;
-    const unlisten = listen<AdvisorTurnEvent>('advisor-turn-added', ({ payload }) => {
+    const unlisten = listen<AdvisorTurnEvent>('poe-advisor-turn', ({ payload }) => {
       if (cancelled) return;
       if (payload.taskId !== taskNodeId) return;
       const newTurn: AdvisorTurn = {
