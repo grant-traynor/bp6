@@ -255,6 +255,7 @@ export default function PlanComposer({ projectId, onComplete }: Props) {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            deleteKeyCode={['Delete', 'Backspace']}
             fitView
             colorMode="dark"
             style={{ background: '#0a0a0a' }}
