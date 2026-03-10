@@ -58,9 +58,22 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Listen for poe-artifact-created during a chat session — auto-populate the artifact pane
+  // Hydrate liveArtifact from DB on mount when in chat mode with no artifact prop.
+  // Picks the most-recently-created artifact for the project.
   useEffect(() => {
-    if (!localTaskId || artifact) return; // only needed when we don't already have an artifact
+    if (artifact || !localTaskId) return;
+    invoke<Artifact[]>('list_artifacts', { projectId })
+      .then(arts => {
+        if (arts.length > 0) {
+          setLiveArtifact(arts[arts.length - 1]);
+        }
+      })
+      .catch(console.error);
+  }, [localTaskId, projectId, artifact]);
+
+  // Listen for poe-artifact-created during a chat session — update pane live as drafts arrive
+  useEffect(() => {
+    if (!localTaskId || artifact) return;
     let cancelled = false;
     const unlisten = listen<Artifact>('poe-artifact-created', ({ payload }) => {
       if (cancelled) return;
