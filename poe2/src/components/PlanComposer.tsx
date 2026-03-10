@@ -20,11 +20,6 @@ export const STAGE_TYPES = [
   'guardrails',
   'increment_planning',
   'execution',
-  'pm_review',
-  'rework',
-  'validity_analysis',
-  'retrospective',
-  'onboarding',
 ] as const;
 
 type StageType = (typeof STAGE_TYPES)[number];
@@ -35,11 +30,6 @@ const STAGE_IO: Record<StageType, { inputs: string[]; outputs: string[] }> = {
   guardrails:          { inputs: ['conops'],                   outputs: ['guardrails'] },
   increment_planning:  { inputs: ['conops', 'guardrails'],     outputs: ['phase-plan'] },
   execution:           { inputs: ['phase-plan'],               outputs: ['implementation'] },
-  pm_review:           { inputs: ['phase-plan'],               outputs: ['review'] },
-  rework:              { inputs: ['review'],                   outputs: ['phase-plan'] },
-  validity_analysis:   { inputs: ['implementation'],           outputs: ['validity-report'] },
-  retrospective:       { inputs: ['implementation', 'review'], outputs: ['retrospective'] },
-  onboarding:          { inputs: [],                           outputs: ['onboarding'] },
 };
 
 const STAGE_COLORS: Record<StageType, string> = {
@@ -47,11 +37,6 @@ const STAGE_COLORS: Record<StageType, string> = {
   guardrails:         '#3a2a1a',
   increment_planning: '#1a2a3a',
   execution:          '#1a3a2a',
-  pm_review:          '#2a1a3a',
-  rework:             '#3a1a1a',
-  validity_analysis:  '#1a3a3a',
-  retrospective:      '#2a3a1a',
-  onboarding:         '#1a1a3a',
 };
 
 interface StageNodeData {
@@ -201,7 +186,7 @@ export default function PlanComposer({ projectId, onComplete }: Props) {
       }
 
       if (firstPhaseId) {
-        await invoke('activate_phase', { phaseId: firstPhaseId });
+        await invoke('activate_phase', { projectId, phaseId: firstPhaseId });
       }
 
       onComplete();
