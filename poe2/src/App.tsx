@@ -16,75 +16,8 @@ import InterruptControls from './components/InterruptControls';
 import DebugPanel from './components/DebugPanel';
 import PhaseMatrix from './components/PhaseMatrix';
 import TaskDetailPanel from './components/TaskDetailPanel';
+import PlanComposer from './components/PlanComposer';
 
-// ── CONOPS launcher ───────────────────────────────────────────────────────────
-// Shown when a project has no nodes yet. Bootstraps the first task.
-
-function ConopsLauncher({ projectId, onLaunched }: {
-  projectId: string;
-  onLaunched: (node: Node) => void;
-}) {
-  const [brief, setBrief] = useState('');
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit() {
-    const trimmed = brief.trim();
-    if (!trimmed) return;
-    setRunning(true);
-    setError(null);
-    try {
-      // Create as 'pending' — the orchestrator will dispatch via SF-1.
-      // The Artifact Viewer will open automatically when poe-chat-turn arrives.
-      const node = await invoke<Node>('create_node', {
-        input: {
-          projectId,
-          phaseId: null,
-          parentId: null,
-          nodeType: 'task',
-          title: 'Develop CONOPS',
-          description: trimmed,
-          skillId: 'operational-analyst',
-          initialStatus: 'pending',
-        },
-      });
-      onLaunched(node);
-    } catch (err) {
-      console.error('Failed to create CONOPS task:', err);
-      setError(String(err));
-      setRunning(false);
-    }
-  }
-
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center p-8 gap-4">
-      <div className="w-full max-w-xl flex flex-col gap-3">
-        <p className="text-[11px] text-neutral-500 uppercase tracking-widest">Start project — CONOPS</p>
-        <p className="text-[11px] text-neutral-600">
-          Describe the project briefly. A session will open where the analyst asks you questions.
-        </p>
-        <textarea
-          className="w-full h-40 bg-neutral-900 border border-neutral-700 rounded p-3 text-sm text-neutral-100 placeholder-neutral-600 resize-none focus:outline-none focus:border-neutral-500"
-          placeholder="What are we building? Who is it for? What problem does it solve?"
-          value={brief}
-          onChange={e => setBrief(e.target.value)}
-          disabled={running}
-          autoFocus
-        />
-        {error && (
-          <p className="text-[11px] text-red-400">{error}</p>
-        )}
-        <button
-          onClick={() => void handleSubmit()}
-          disabled={running || !brief.trim()}
-          className="self-end px-4 py-2 bg-neutral-100 text-neutral-950 text-xs font-bold rounded hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        >
-          {running ? 'Opening session…' : 'Start CONOPS session →'}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
@@ -102,7 +35,6 @@ export default function App() {
     handoverNodeId,
     setHandoverNodeId,
     streamEventMap,
-    addNode,
   } = usePoeProject(selectedId);
 
   const [debugNodeId, setDebugNodeId] = useState<string | null>(null);
@@ -288,9 +220,9 @@ export default function App() {
                 </div>
               )}
 
-              {nodes.length === 0 ? (
-                /* Empty project — show CONOPS launcher */
-                <ConopsLauncher projectId={selectedId} onLaunched={addNode} />
+              {nodes.length === 0 && phases.length === 0 ? (
+                /* Empty project — show Plan Composer to design phase DAG */
+                <PlanComposer projectId={selectedId} onComplete={() => { /* phases reload via poe-phase-update */ }} />
               ) : (
                 <>
                   {/* Pane 2a — Phase × Scope matrix (Phase 3) or WBS tree */}

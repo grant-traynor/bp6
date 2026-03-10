@@ -308,6 +308,14 @@ export function usePoeProject(projectId: string | null): {
       });
       unlisteners.push(u11);
 
+      // Reload phases whenever the orchestrator updates phase state
+      // (gate reached, advance, revise, rerun, or activate).
+      const u12 = await listen<{ projectId: string }>('poe-phase-update', ({ payload }) => {
+        if (payload.projectId !== projectId) return;
+        invoke<Phase[]>('list_phases', { projectId }).then(setPhases).catch(console.error);
+      });
+      unlisteners.push(u12);
+
     }
 
     void hydrate();
