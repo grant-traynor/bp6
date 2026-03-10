@@ -40,6 +40,10 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
   // localTaskId: starts from prop, overwritten when human-initiated dispatch creates a new node
   const [localTaskId, setLocalTaskId] = useState<string | null>(taskId ?? null);
 
+  // liveArtifact: set when poe-artifact-created fires during a chat session (no artifact prop)
+  const [liveArtifact, setLiveArtifact] = useState<Artifact | null>(null);
+  const effectiveArtifact = artifact ?? liveArtifact;
+
   // Chat panel state
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [chatActive, setChatActive] = useState(false);
@@ -54,16 +58,28 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  // Load artifact content (only when an artifact is provided)
+  // Listen for poe-artifact-created during a chat session — auto-populate the artifact pane
   useEffect(() => {
-    if (!artifact) return;
-    const art = artifact;
+    if (!localTaskId || artifact) return; // only needed when we don't already have an artifact
+    let cancelled = false;
+    const unlisten = listen<Artifact>('poe-artifact-created', ({ payload }) => {
+      if (cancelled) return;
+      if (payload.projectId !== projectId) return;
+      setLiveArtifact(payload);
+    });
+    return () => { cancelled = true; void unlisten.then(u => u()); };
+  }, [localTaskId, projectId, artifact]);
+
+  // Load artifact content whenever effectiveArtifact changes
+  useEffect(() => {
+    if (!effectiveArtifact) return;
+    const art = effectiveArtifact;
     setContent(null);
     setError(null);
     invoke<string>('read_artifact_content', { artifactId: art.id, projectId })
       .then(setContent)
       .catch((e) => setError(String(e)));
-  }, [artifact?.id, projectId]);
+  }, [effectiveArtifact?.id, projectId]);
 
   // Hydrate existing chat turns and open panel if turns exist
   useEffect(() => {
@@ -158,7 +174,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
   // Human-initiated: create a new interactive task referencing the artifact
   async function handleDispatchChat() {
-    if (!artifact || !content || dispatching) return;
+    if (!effectiveArtifact || !content || dispatching) return;
     setDispatching(true);
     setDispatchError(null);
     try {
@@ -168,7 +184,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
           phaseId: null,
           parentId: null,
           nodeType: 'task',
-          title: `Discuss: ${artifact.filename}`,
+          title: `Discuss: ${effectiveArtifact.filename}`,
           description: `The user wants to discuss the following artifact.\n\n---\n\n${content}`,
           skillId: 'operational-analyst',
           initialStatus: 'pending',
@@ -227,8 +243,8 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
         {/* Toolbar */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-800 shrink-0">
           <div className="min-w-0 flex items-center gap-3">
-            <span className="text-xs font-semibold text-neutral-200">{artifact?.filename ?? 'Chat session'}</span>
-            {artifact?.artifactType && <span className="text-[10px] text-neutral-500 font-mono">{artifact.artifactType}</span>}
+            <span className="text-xs font-semibold text-neutral-200">{effectiveArtifact?.filename ?? 'Chat session'}</span>
+            {effectiveArtifact?.artifactType && <span className="text-[10px] text-neutral-500 font-mono">{effectiveArtifact.artifactType}</span>}
             {taskDone && (
               <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-900 text-emerald-300">
                 task complete
@@ -237,7 +253,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
           </div>
           <div className="flex items-center gap-2">
             {/* Human-initiated: artifact loaded, no active session yet */}
-            {artifact && content && !localTaskId && !chatActive && (
+            {effectiveArtifact && content && !localTaskId && !chatActive && (
               <button
                 className="text-neutral-400 hover:text-neutral-100 text-[11px] font-mono border border-neutral-700 hover:border-neutral-500 px-2 py-0.5 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                 disabled={dispatching}
@@ -277,13 +293,12 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
 
         {/* Body */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Artifact pane — hidden in chat-only mode (no artifact yet) */}
-          {(!chatActive || artifact) && (
-            <div className={`flex flex-col overflow-hidden ${chatActive ? 'flex-1 border-r border-neutral-800' : 'w-full'}`}>
+          {/* Artifact pane — always visible; populates live as poe:artifact events arrive */}
+          <div className={`flex flex-col overflow-hidden ${chatActive ? 'flex-1 border-r border-neutral-800' : 'w-full'}`}>
               <div className="flex-1 overflow-y-auto p-4">
-                {!artifact ? (
+                {!effectiveArtifact ? (
                   <p className="text-neutral-700 text-[12px] font-mono">
-                    Artifact will appear here once the analyst writes it.
+                    {localTaskId ? 'Building document… it will appear here.' : 'Artifact will appear here once the analyst writes it.'}
                   </p>
                 ) : error ? (
                   <p className="text-red-400 text-sm">{error}</p>
@@ -296,7 +311,6 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
                 )}
               </div>
             </div>
-          )}
 
           {/* Chat pane */}
           {chatActive && (
