@@ -140,4 +140,15 @@ CREATE TABLE IF NOT EXISTS chat_turns (
 );
 
 CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id);
+
+CREATE TABLE IF NOT EXISTS advisor_turns (
+    id           TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL REFERENCES nodes(id),
+    content      TEXT NOT NULL,
+    response     TEXT,
+    created_at   TEXT NOT NULL,
+    responded_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_advisor_turns_task ON advisor_turns(task_id);
 ";

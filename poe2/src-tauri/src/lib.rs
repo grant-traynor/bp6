@@ -54,10 +54,24 @@ pub fn run() {
             dag_store::commands::list_events,
             dag_store::commands::respond_to_chat,
             dag_store::commands::get_chat_turns,
-            // New dag_store commands
+            // Phase 2 dag_store commands
             dag_store::commands::read_artifact_content,
             dag_store::commands::flag_knowledge_for_promotion,
             dag_store::commands::list_phases,
+            // Phase 3 dag_store commands
+            dag_store::commands::list_edges,
+            dag_store::commands::update_node_sort_order,
+            dag_store::commands::create_phase,
+            dag_store::commands::activate_phase,
+            dag_store::commands::advance_phase,
+            dag_store::commands::revise_phase,
+            dag_store::commands::rerun_phase,
+            dag_store::commands::update_knowledge,
+            dag_store::commands::promote_knowledge,
+            dag_store::commands::get_node_ancestry,
+            dag_store::commands::start_advisor_session,
+            dag_store::commands::respond_to_advisor,
+            dag_store::commands::get_advisor_turns,
             // orchestrator commands
             orchestrator::commands::advance_stage_gate,
             orchestrator::commands::set_concurrency_limit,

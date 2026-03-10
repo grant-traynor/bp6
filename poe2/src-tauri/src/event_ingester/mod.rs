@@ -105,6 +105,12 @@ struct PoeChat {
 }
 
 #[derive(Debug, serde::Deserialize)]
+struct PoeAdvisor {
+    content: String,
+    id: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
 struct PoeReview {
     reviewer_skill: String,
     content: Option<String>,
@@ -199,6 +205,10 @@ pub fn ingest_line_with_tracker(
         "chat" => {
             *last_substantive = Some("chat".to_owned());
             handle_chat(trimmed, project_id, task_id, agent_id, registry, dag_tx, app)
+        }
+        "advisor" => {
+            *last_substantive = Some("advisor".to_owned());
+            handle_advisor(trimmed, project_id, task_id, agent_id, registry, dag_tx, app)
         }
         "done" => handle_done(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
         "yield" => {
@@ -556,6 +566,37 @@ fn handle_chat(
             "content": payload.content,
         }));
         Ok(None) // orchestrator reacts via respond_to_chat → QueueItemResolved
+    })
+}
+
+/// Handle `poe:advisor` — agent sends a message to the human in the Pane 3 advisor panel.
+///
+/// Inserts an `advisor_turns` row with content and no response yet, logs to `event_log`,
+/// and emits `poe://advisor-turn` for the frontend. Structurally identical to `poe:chat`
+/// but routes to a different surface.
+fn handle_advisor(
+    json: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    registry: &ProjectRegistry,
+    _dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) -> Result<Option<DagChanged>> {
+    let payload: PoeAdvisor = serde_json::from_str(json)?;
+    let turn_id = payload
+        .id
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    with_project_conn(registry, project_id, |conn| {
+        let turn = dag_store::db_insert_advisor_turn(conn, &turn_id, task_id, &payload.content)?;
+        dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:advisor", json)?;
+        emit_tauri_event(app, "poe-advisor-turn", &serde_json::json!({
+            "turnId": turn.id,
+            "taskId": task_id,
+            "content": payload.content,
+        }));
+        Ok(None) // orchestrator reacts via respond_to_advisor → QueueItemResolved
     })
 }
 

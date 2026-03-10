@@ -63,6 +63,25 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
     );
     let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id)");
 
+    // Phase 3 migrations
+    let _ = conn.execute_batch("ALTER TABLE phases ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'execution'");
+    let _ = conn.execute_batch("ALTER TABLE phases ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN sort_order INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN skill_modes TEXT");
+
+    // Migrate: create advisor_turns table for existing databases
+    let _ = conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS advisor_turns (
+            id           TEXT PRIMARY KEY,
+            task_id      TEXT NOT NULL,
+            content      TEXT NOT NULL,
+            response     TEXT,
+            created_at   TEXT NOT NULL,
+            responded_at TEXT
+        )"
+    );
+    let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_advisor_turns_task ON advisor_turns(task_id)");
+
     // Upsert the project record based on path
     let path_str = project_path.to_string_lossy().to_string();
     let name = project_path
@@ -156,7 +175,7 @@ pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node
 
 pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
     conn.query_row(
-        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, created_at, updated_at
+        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, created_at, updated_at
          FROM nodes WHERE id = ?1",
         [node_id],
         |row| {
@@ -176,8 +195,10 @@ pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
                 requesting_task_id: row.get(12)?,
                 review_id: row.get(13)?,
                 retry_count: row.get(14)?,
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
+                sort_order: row.get(15)?,
+                skill_modes: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         },
     )
@@ -231,8 +252,8 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
     let mut rows = Vec::new();
     if let Some(pid) = phase_id {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, created_at, updated_at
-             FROM nodes WHERE project_id = ?1 AND phase_id = ?2 ORDER BY created_at"
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, created_at, updated_at
+             FROM nodes WHERE project_id = ?1 AND phase_id = ?2 ORDER BY COALESCE(sort_order, 999999), created_at"
         )?;
         for row in stmt.query_map(rusqlite::params![project_id, pid], |row| {
             Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,Option<String>>(2)?,
@@ -241,22 +262,24 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
                 row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?,
                 row.get::<_,Option<String>>(11)?, row.get::<_,Option<String>>(12)?,
                 row.get::<_,Option<String>>(13)?, row.get::<_,i64>(14)?,
-                row.get::<_,String>(15)?, row.get::<_,String>(16)?))
+                row.get::<_,Option<i64>>(15)?, row.get::<_,Option<String>>(16)?,
+                row.get::<_,String>(17)?, row.get::<_,String>(18)?))
         })? {
             let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
-                 yield_reason, session_id, requesting_task_id, review_id, retry_count, cat, uat) = row?;
+                 yield_reason, session_id, requesting_task_id, review_id, retry_count,
+                 sort_order, skill_modes, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
                 yield_reason, session_id, requesting_task_id, review_id, retry_count,
-                created_at: cat, updated_at: uat,
+                sort_order, skill_modes, created_at: cat, updated_at: uat,
             });
         }
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, created_at, updated_at
-             FROM nodes WHERE project_id = ?1 ORDER BY created_at"
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, created_at, updated_at
+             FROM nodes WHERE project_id = ?1 ORDER BY COALESCE(sort_order, 999999), created_at"
         )?;
         for row in stmt.query_map([project_id], |row| {
             Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,Option<String>>(2)?,
@@ -265,16 +288,18 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
                 row.get::<_,Option<String>>(9)?, row.get::<_,Option<String>>(10)?,
                 row.get::<_,Option<String>>(11)?, row.get::<_,Option<String>>(12)?,
                 row.get::<_,Option<String>>(13)?, row.get::<_,i64>(14)?,
-                row.get::<_,String>(15)?, row.get::<_,String>(16)?))
+                row.get::<_,Option<i64>>(15)?, row.get::<_,Option<String>>(16)?,
+                row.get::<_,String>(17)?, row.get::<_,String>(18)?))
         })? {
             let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
-                 yield_reason, session_id, requesting_task_id, review_id, retry_count, cat, uat) = row?;
+                 yield_reason, session_id, requesting_task_id, review_id, retry_count,
+                 sort_order, skill_modes, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
                 yield_reason, session_id, requesting_task_id, review_id, retry_count,
-                created_at: cat, updated_at: uat,
+                sort_order, skill_modes, created_at: cat, updated_at: uat,
             });
         }
     }
@@ -614,7 +639,7 @@ pub fn db_get_agent_session_for_task(conn: &Connection, task_id: &str) -> Result
 /// List all phases for a project ordered by number.
 pub fn db_list_phases(conn: &Connection, project_id: &str) -> Result<Vec<Phase>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, number, title, lifecycle_stage, gate_held, created_at, updated_at
+        "SELECT id, project_id, number, title, lifecycle_stage, gate_held, stage_type, status, created_at, updated_at
          FROM phases WHERE project_id = ?1 ORDER BY number"
     )?;
     let rows = stmt
@@ -626,8 +651,10 @@ pub fn db_list_phases(conn: &Connection, project_id: &str) -> Result<Vec<Phase>>
                 title: row.get(3)?,
                 lifecycle_stage: parse_lifecycle_stage(row.get(4)?)?,
                 gate_held: row.get::<_, i64>(5)? != 0,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                stage_type: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "execution".to_owned()),
+                status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "pending".to_owned()),
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -771,7 +798,7 @@ pub fn db_list_agents_by_status(conn: &Connection, project_id: &str, status: &st
 
 pub fn db_get_phase(conn: &Connection, phase_id: &str) -> Result<Phase> {
     conn.query_row(
-        "SELECT id, project_id, number, title, lifecycle_stage, gate_held, created_at, updated_at
+        "SELECT id, project_id, number, title, lifecycle_stage, gate_held, stage_type, status, created_at, updated_at
          FROM phases WHERE id = ?1",
         [phase_id],
         |row| {
@@ -782,8 +809,10 @@ pub fn db_get_phase(conn: &Connection, phase_id: &str) -> Result<Phase> {
                 title: row.get(3)?,
                 lifecycle_stage: parse_lifecycle_stage(row.get(4)?)?,
                 gate_held: row.get::<_, i64>(5)? != 0,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                stage_type: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "execution".to_owned()),
+                status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "pending".to_owned()),
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         },
     )
@@ -813,13 +842,14 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
     let mut stmt = conn.prepare(
         "SELECT n.id, n.project_id, n.phase_id, n.parent_id, n.node_type, n.title, n.description,
                 n.status, n.skill_id, n.assignee, n.yield_reason, n.session_id, n.requesting_task_id,
-                n.review_id, n.retry_count, n.created_at, n.updated_at
+                n.review_id, n.retry_count, n.sort_order, n.skill_modes, n.created_at, n.updated_at
          FROM nodes n
          LEFT JOIN phases p ON p.id = n.phase_id
          WHERE n.project_id = ?1
            AND n.status = 'pending'
-           AND (n.phase_id IS NULL OR (p.lifecycle_stage = 'execution' AND p.gate_held = 0))
-           AND n.node_type IN ('task', 'bug', 'chore', 'subtask', 'plan_review')
+           AND (n.phase_id IS NULL OR (p.lifecycle_stage = 'execution' AND p.gate_held = 0)
+                OR (n.phase_id IS NOT NULL AND p.status = 'running' AND p.gate_held = 0))
+           AND n.node_type IN ('task', 'bug', 'chore', 'subtask', 'plan_review', 'advisor')
            AND NOT EXISTS (
                SELECT 1 FROM edges e
                JOIN nodes dep ON dep.id = e.from_id
@@ -846,8 +876,10 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
                 requesting_task_id: row.get(12)?,
                 review_id: row.get(13)?,
                 retry_count: row.get(14)?,
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
+                sort_order: row.get(15)?,
+                skill_modes: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -906,7 +938,7 @@ pub fn db_list_nodes_by_status(conn: &Connection, project_id: &str, status: &str
     let mut stmt = conn.prepare(
         "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status,
                 skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id,
-                retry_count, created_at, updated_at
+                retry_count, sort_order, skill_modes, created_at, updated_at
          FROM nodes WHERE project_id = ?1 AND status = ?2 ORDER BY created_at"
     )?;
     let rows = stmt
@@ -927,8 +959,10 @@ pub fn db_list_nodes_by_status(conn: &Connection, project_id: &str, status: &str
                 requesting_task_id: row.get(12)?,
                 review_id: row.get(13)?,
                 retry_count: row.get(14)?,
-                created_at: row.get(15)?,
-                updated_at: row.get(16)?,
+                sort_order: row.get(15)?,
+                skill_modes: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -992,4 +1026,195 @@ pub fn db_count_running_agents_global(conn: &Connection) -> Result<usize> {
         |row| row.get(0),
     )?;
     Ok(count as usize)
+}
+
+// ── Phase 3 helpers ───────────────────────────────────────────────────────────
+
+/// List all edges for a project by joining with nodes to get project_id.
+pub fn db_list_edges(conn: &Connection, project_id: &str) -> Result<Vec<Edge>> {
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.from_id, e.to_id, e.edge_type, e.created_at
+         FROM edges e
+         JOIN nodes n ON n.id = e.from_id
+         WHERE n.project_id = ?1"
+    )?;
+    let rows = stmt
+        .query_map([project_id], |row| {
+            Ok(Edge {
+                id: row.get(0)?,
+                from_id: row.get(1)?,
+                to_id: row.get(2)?,
+                edge_type: parse_edge_type(row.get(3)?)?,
+                created_at: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to list edges")?;
+    Ok(rows)
+}
+
+/// Update sort_order on a node (used by Matrix drag-to-reorder).
+pub fn db_update_node_sort_order(conn: &Connection, node_id: &str, sort_order: Option<i32>) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE nodes SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![sort_order, now, node_id],
+    )
+    .context("Failed to update sort_order")?;
+    Ok(())
+}
+
+/// Walk parent_id chain to root, returning [root, ..., parent, node] ordered root-first.
+pub fn db_get_node_ancestry(conn: &Connection, node_id: &str) -> Result<Vec<Node>> {
+    // Walk up the chain collecting nodes
+    let mut chain = Vec::new();
+    let mut current_id = Some(node_id.to_owned());
+    while let Some(id) = current_id {
+        let node = db_get_node(conn, &id)?;
+        current_id = node.parent_id.clone();
+        chain.push(node);
+    }
+    // chain is [node, parent, ..., root]; reverse to get root-first
+    chain.reverse();
+    Ok(chain)
+}
+
+/// Insert into advisor_turns.
+pub fn db_insert_advisor_turn(conn: &Connection, id: &str, task_id: &str, content: &str) -> Result<AdvisorTurn> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO advisor_turns (id, task_id, content, created_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![id, task_id, content, now],
+    )
+    .context("Failed to insert advisor turn")?;
+    Ok(AdvisorTurn {
+        id: id.to_owned(),
+        task_id: task_id.to_owned(),
+        content: content.to_owned(),
+        response: None,
+        created_at: now,
+        responded_at: None,
+    })
+}
+
+/// List advisor_turns for a task ordered by created_at.
+pub fn db_list_advisor_turns(conn: &Connection, task_id: &str) -> Result<Vec<AdvisorTurn>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, task_id, content, response, created_at, responded_at
+         FROM advisor_turns WHERE task_id = ?1 ORDER BY created_at ASC"
+    )?;
+    let rows = stmt
+        .query_map([task_id], |row| {
+            Ok(AdvisorTurn {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                content: row.get(2)?,
+                response: row.get(3)?,
+                created_at: row.get(4)?,
+                responded_at: row.get(5)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Failed to list advisor turns")?;
+    Ok(rows)
+}
+
+/// Get the responded advisor turn for a waiting task (used by SF-4 advisor arm).
+pub fn db_get_responded_advisor_turn(conn: &Connection, task_id: &str) -> Result<Option<AdvisorTurn>> {
+    let result = conn.query_row(
+        "SELECT id, task_id, content, response, created_at, responded_at
+         FROM advisor_turns WHERE task_id = ?1 AND responded_at IS NOT NULL
+         ORDER BY responded_at DESC LIMIT 1",
+        [task_id],
+        |row| {
+            Ok(AdvisorTurn {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                content: row.get(2)?,
+                response: row.get(3)?,
+                created_at: row.get(4)?,
+                responded_at: row.get(5)?,
+            })
+        },
+    );
+    match result {
+        Ok(turn) => Ok(Some(turn)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Create a phase with stage_type and status fields.
+pub fn db_create_phase(
+    conn: &Connection,
+    project_id: &str,
+    title: &str,
+    number: i64,
+    stage_type: &str,
+) -> Result<Phase> {
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO phases (id, project_id, number, title, lifecycle_stage, gate_held, stage_type, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'planning', 0, ?5, 'pending', ?6, ?7)",
+        rusqlite::params![id, project_id, number, title, stage_type, now, now],
+    )
+    .context("Failed to insert phase")?;
+    db_get_phase(conn, &id)
+}
+
+/// Update skill_modes on a node (written at SF-1 dispatch time).
+pub fn db_update_node_skill_modes(conn: &Connection, node_id: &str, skill_modes_json: &str) -> Result<()> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE nodes SET skill_modes = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![skill_modes_json, now, node_id],
+    )
+    .context("Failed to update skill_modes")?;
+    Ok(())
+}
+
+/// Get a knowledge entry by id.
+pub fn db_get_knowledge(conn: &Connection, id: &str) -> Result<KnowledgeEntry> {
+    conn.query_row(
+        "SELECT id, project_id, key, value, source, supersedes_id, created_at
+         FROM knowledge WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(KnowledgeEntry {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                key: row.get(2)?,
+                value: row.get(3)?,
+                source: row.get(4)?,
+                supersedes_id: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        },
+    )
+    .with_context(|| format!("Knowledge entry not found: {}", id))
+}
+
+/// Check whether an advisor_turns row exists for a given id.
+pub fn db_advisor_turn_exists(conn: &Connection, turn_id: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM advisor_turns WHERE id = ?1",
+        rusqlite::params![turn_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap_or(0) > 0
+}
+
+/// Get all done/cancelled task IDs in a phase.
+pub fn db_count_active_tasks_in_phase(conn: &Connection, phase_id: &str) -> Result<(usize, usize)> {
+    // (total non-cancelled tasks, done tasks)
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM nodes WHERE phase_id = ?1 AND status != 'cancelled' AND node_type IN ('task','bug','chore','subtask','plan_review','advisor')",
+        [phase_id], |row| row.get(0),
+    ).unwrap_or(0);
+    let done: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM nodes WHERE phase_id = ?1 AND status IN ('complete', 'done') AND node_type IN ('task','bug','chore','subtask','plan_review','advisor')",
+        [phase_id], |row| row.get(0),
+    ).unwrap_or(0);
+    Ok((total as usize, done as usize))
 }

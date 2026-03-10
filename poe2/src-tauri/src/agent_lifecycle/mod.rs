@@ -77,6 +77,16 @@ pub async fn spawn_agent(
             ..Default::default()
         };
         dag_store::db_update_node(&conn, &req.task_id, &update)?;
+
+        // Write skill_modes to nodes.skill_modes at SF-1 dispatch time (Phase 3).
+        // Load the skill to get its declared modes, then serialize as JSON array.
+        let resource_dir = std::path::PathBuf::from(".");
+        if let Ok(skill) = crate::skills::load_skill(&req.skill_id, &req.project_path, &resource_dir) {
+            if let Ok(modes_json) = serde_json::to_string(&skill.modes) {
+                let _ = dag_store::db_update_node_skill_modes(&conn, &req.task_id, &modes_json);
+            }
+        }
+
         let record = dag_store::db_create_agent(
             &conn,
             &req.project_id,

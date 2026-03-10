@@ -174,8 +174,27 @@ async fn resume_waiting_agent(
         count > 0
     };
 
+    // Check whether item_id references an advisor_turns row (SF-4 advisor arm)
+    let is_advisor_turn = if !is_chat_turn {
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => {
+                eprintln!("[orchestrator] resume_waiting_agent: project not open {}", project_id);
+                return;
+            }
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        dag_store::db_advisor_turn_exists(&conn, item_id)
+    } else {
+        false
+    };
+
     if is_chat_turn {
         resume_chat_agent(project_id, task_id, session_id, item_id, registry, dag_tx, app).await;
+    } else if is_advisor_turn {
+        resume_advisor_agent(project_id, task_id, session_id, item_id, registry, dag_tx, app).await;
     } else {
         resume_decision_agent(project_id, task_id, session_id, resolution, registry, dag_tx, app).await;
     }
@@ -358,6 +377,120 @@ async fn resume_chat_agent(
     }
 }
 
+/// SF-4 advisor arm: resume an agent that yielded with yield_reason='advisor' after a human responds.
+///
+/// Structurally identical to resume_chat_agent but queries advisor_turns.
+async fn resume_advisor_agent(
+    project_id: &str,
+    task_id: &str,
+    session_id: &str,
+    turn_id: &str,
+    registry: &ProjectRegistry,
+    dag_tx: &mpsc::UnboundedSender<DagChanged>,
+    app: &AppHandle,
+) {
+    eprintln!(
+        "[orchestrator] resume_advisor_agent: task={} session={} turn_id={}",
+        task_id, session_id, turn_id
+    );
+
+    let (response_text, project_path, skill_id, model) = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => {
+                eprintln!("[orchestrator] resume_advisor_agent: project not open {}", project_id);
+                return;
+            }
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+
+        let turn_row: Option<(Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT response, responded_at FROM advisor_turns WHERE id = ?1",
+                rusqlite::params![turn_id],
+                |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .ok();
+
+        let (response_opt, responded_at) = match turn_row {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "[orchestrator] resume_advisor_agent: advisor turn not found turn_id={} — aborting",
+                    turn_id
+                );
+                return;
+            }
+        };
+
+        if responded_at.is_none() {
+            eprintln!(
+                "[orchestrator] resume_advisor_agent: turn_id={} has no responded_at — stale signal, aborting",
+                turn_id
+            );
+            return;
+        }
+
+        let response_text = match response_opt {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "[orchestrator] resume_advisor_agent: turn_id={} responded_at set but response is NULL — aborting",
+                    turn_id
+                );
+                return;
+            }
+        };
+
+        let node = match dag_store::db_get_node(&conn, task_id) {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] resume_advisor_agent: task not found {}: {}",
+                    task_id, e
+                );
+                return;
+            }
+        };
+        let skill_id = node.skill_id.unwrap_or_else(|| "advisor".to_owned());
+        let path = std::path::PathBuf::from(&db.project.path);
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let model = skills::load_skill(&skill_id, &path, &resource_dir)
+            .ok()
+            .and_then(|s| s.model.clone());
+
+        (response_text, path, skill_id, model)
+    };
+
+    let input_bundle = format!("---\nHuman: {}\n", response_text);
+
+    let spawn_req = agent_lifecycle::SpawnRequest {
+        project_id: project_id.to_owned(),
+        task_id: task_id.to_owned(),
+        skill_id,
+        project_path,
+        input_bundle,
+        resume_session_id: Some(session_id.to_owned()),
+        model,
+    };
+
+    eprintln!(
+        "[orchestrator] resume_advisor_agent: spawning --resume for task={} session={}",
+        task_id, session_id
+    );
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+        eprintln!(
+            "[orchestrator] resume_advisor_agent: failed to resume agent for task {}: {}",
+            task_id, e
+        );
+    }
+}
+
 // ── SF-4: Yield handling ──────────────────────────────────────────────────────
 
 /// Called whenever a NodeStatusChanged signal is received.
@@ -421,6 +554,15 @@ async fn handle_node_status_changed(
                         node.id
                     );
                 }
+                Some("advisor") => {
+                    // SF-4 advisor arm: task has emitted a poe:advisor event and is now waiting.
+                    // Wait for respond_to_advisor to fire DagChanged::QueueItemResolved,
+                    // which will be routed to resume_advisor_agent.
+                    eprintln!(
+                        "[orchestrator] handle_node_status_changed: node={} waiting for advisor response — no action",
+                        node.id
+                    );
+                }
                 other => {
                     eprintln!(
                         "[orchestrator] handle_node_status_changed: node={} unknown yield_reason={:?}",
@@ -437,6 +579,12 @@ async fn handle_node_status_changed(
                     node.id, requesting_task_id
                 );
                 check_review_completion(requesting_task_id, project_id, registry, dag_tx, app).await;
+            }
+
+            // Phase completion detection: if this node belongs to a phase, check if all
+            // tasks in the phase are done or cancelled. If so, set phase status='gate'.
+            if let Some(ref phase_id) = node.phase_id {
+                check_phase_completion(phase_id, project_id, registry, app).await;
             }
         }
         _ => {
@@ -1002,6 +1150,74 @@ fn spawn_reviewer_watchdog(
             check_review_completion(&requesting_task_id, &project_id, &registry, &dag_tx, &app).await;
         }
     });
+}
+
+// ── Phase completion ──────────────────────────────────────────────────────────
+
+/// Check if all tasks in a phase are done/cancelled. If so, set phase status='gate'.
+async fn check_phase_completion(
+    phase_id: &str,
+    project_id: &str,
+    registry: &ProjectRegistry,
+    app: &AppHandle,
+) {
+    let should_gate = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+
+        // Get phase — only check if status='running'
+        let phase = match dag_store::db_get_phase(&conn, phase_id) {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        if phase.status != "running" {
+            return;
+        }
+
+        // Count pending/running/waiting tasks in this phase
+        let active_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE phase_id = ?1 AND status IN ('pending','running','waiting') AND node_type IN ('task','bug','chore','subtask','plan_review','advisor')",
+            [phase_id],
+            |row| row.get(0),
+        ).unwrap_or(1); // default to 1 (not done) on error
+
+        let total_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE phase_id = ?1 AND node_type IN ('task','bug','chore','subtask','plan_review','advisor')",
+            [phase_id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+
+        total_count > 0 && active_count == 0
+    };
+
+    if should_gate {
+        eprintln!("[orchestrator] check_phase_completion: phase={} all tasks done — setting status=gate", phase_id);
+        let reg = registry.lock().unwrap();
+        let db = match reg.values().find(|db| db.project.id == project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = conn.execute(
+            "UPDATE phases SET status = 'gate', gate_held = 1, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase_id],
+        );
+        drop(conn);
+
+        use tauri::Emitter;
+        let _ = app.emit("poe-phase-update", serde_json::json!({
+            "phaseId": phase_id,
+            "status": "gate",
+            "projectId": project_id,
+        }));
+    }
 }
 
 // ── Core loop ─────────────────────────────────────────────────────────────────

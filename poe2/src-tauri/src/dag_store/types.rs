@@ -16,6 +16,8 @@ pub enum NodeType {
     /// Reviewer node spawned by SF-4 yield-handling when reason='review'.
     /// Was previously represented as NodeType::Task as a workaround.
     PlanReview,
+    /// Advisor node for the Queue Advisor chatbot. Uses poe:advisor events.
+    Advisor,
 }
 
 impl std::fmt::Display for NodeType {
@@ -146,6 +148,10 @@ pub struct Phase {
     pub title: String,
     pub lifecycle_stage: PhaseLifecycleStage,
     pub gate_held: bool,
+    /// Stage type e.g. 'execution' | 'conops' | 'guardrails' | etc. Added in Phase 3.
+    pub stage_type: String,
+    /// Phase status: 'pending' | 'running' | 'gate' | 'complete'. Added in Phase 3.
+    pub status: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -173,6 +179,10 @@ pub struct Node {
     pub review_id: Option<String>,
     /// Watchdog retry counter for reviewer tasks.
     pub retry_count: i64,
+    /// Matrix drag-to-reorder position. NULL = render in creation order.
+    pub sort_order: Option<i64>,
+    /// JSON array of modes declared in skill frontmatter. NULL = treat as '["autonomous"]'.
+    pub skill_modes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -254,6 +264,18 @@ pub struct QueueItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatTurn {
+    pub id: String,
+    pub task_id: String,
+    pub content: String,
+    pub response: Option<String>,
+    pub created_at: String,
+    pub responded_at: Option<String>,
+}
+
+/// Structurally identical to ChatTurn but routes to Pane 3 (advisor panel).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvisorTurn {
     pub id: String,
     pub task_id: String,
     pub content: String,
