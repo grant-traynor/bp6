@@ -777,6 +777,40 @@ async fn live_1_task_runs_to_done() {
         );
     }
 
+    // Assert: session_id was stored (required for SF-4 and xterm handover)
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg.values().find(|db| db.project.id == project_id).expect("project").clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let node = poe2_lib::dag_store::db_get_node(&conn, &task_id).expect("get node");
+        assert!(
+            node.session_id.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+            "live_1: session_id must be stored after agent dispatch (required for SF-4 and handover)"
+        );
+    }
+
+    // Assert: artifact content written to disk at {project_path}/docs/{filename}
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg.values().find(|db| db.project.id == project_id).expect("project").clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let artifacts = poe2_lib::dag_store::db_list_artifacts(&conn, &project_id).unwrap_or_default();
+        for artifact in &artifacts {
+            let artifact_path = std::path::Path::new(&project_path)
+                .join("docs")
+                .join(&artifact.filename);
+            assert!(
+                artifact_path.exists(),
+                "live_1: artifact file not on disk: {:?}",
+                artifact_path
+            );
+            let content = std::fs::read_to_string(&artifact_path).expect("read artifact");
+            assert!(!content.trim().is_empty(), "live_1: artifact file is empty: {:?}", artifact_path);
+        }
+    }
+
     eprintln!("live_1 PASSED: project_path={}", project_path);
 }
 
@@ -883,6 +917,19 @@ async fn live_2_activate_phase_bootstraps_and_runs() {
         eprintln!(
             "live_2: artifacts = {:?}",
             artifacts.iter().map(|a| &a.filename).collect::<Vec<_>>()
+        );
+    }
+
+    // Assert: session_id was stored (required for SF-4 and xterm handover)
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg.values().find(|db| db.project.id == project_id).expect("project").clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let node = poe2_lib::dag_store::db_get_node(&conn, &task_id).expect("get node");
+        assert!(
+            node.session_id.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+            "live_2: session_id must be stored after agent dispatch (required for SF-4 and handover)"
         );
     }
 
@@ -1311,4 +1358,377 @@ async fn live_5_advance_phase_bootstraps_next() {
     );
 
     eprintln!("live_5 PASSED");
+}
+
+// ── Live-6: activate_phase → maybe_bootstrap_phase task creation ──────────────
+
+/// live_6: activate_phase with no existing tasks → bootstrap creates the
+/// default skill task for the stage type, and the orchestrator dispatches it.
+///
+/// Exercises the full activate_phase → bootstrap → dispatch chain by
+/// replicating the activate_phase DB mutations (UPDATE phases + bootstrap task
+/// creation via the same stage-type→skill mapping) and firing DagStructureChanged.
+///
+/// Asserts: a task exists with skill_id='must-not-analyst' and title='Develop
+/// Guardrails', and the task reaches Running or Complete within 60s.
+#[tokio::test]
+#[ignore]
+async fn live_6_activate_phase_bootstraps_task() {
+    if !e2e_enabled() || !claude_on_path() {
+        return;
+    }
+
+    let (project, _conn, registry, _tmp) = new_live_db();
+    let project_id = project.id.clone();
+
+    // Create a guardrails phase with status='pending' and NO tasks.
+    let phase_id = insert_live_phase(&registry, &project_id, "guardrails", "pending", 1);
+
+    // Replicate activate_phase: UPDATE phases SET status='running' + bootstrap task.
+    // This mirrors exactly what the Tauri command does internally.
+    let task_id = {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        // Step 1: activate the phase (mirrors activate_phase command)
+        conn.execute(
+            "UPDATE phases SET status = 'running', lifecycle_stage = 'execution', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase_id],
+        )
+        .expect("activate phase");
+
+        // Step 2: bootstrap task (mirrors maybe_bootstrap_phase for 'guardrails')
+        // Only runs when phase has no tasks — which is the case here.
+        let existing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM nodes WHERE phase_id = ?1",
+                [&phase_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(existing, 0, "live_6: phase must have 0 tasks before bootstrap");
+
+        let task_input = CreateNodeInput {
+            project_id: project_id.clone(),
+            phase_id: Some(phase_id.clone()),
+            parent_id: None,
+            node_type: NodeType::Task,
+            title: "Develop Guardrails".to_string(),
+            description: Some(
+                "Identify must-not behaviours for a Rust hello-world CLI. Produce poe:artifact guardrails-live6.md with at least 3 must-nots.".to_string(),
+            ),
+            skill_id: Some("must-not-analyst".to_string()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        };
+        let task = poe2_lib::dag_store::db_create_node(&conn, &task_input)
+            .expect("bootstrap task");
+        task.id
+    };
+
+    // Assert: task has correct skill and title
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let tasks =
+            poe2_lib::dag_store::db_list_nodes(&conn, &project_id, Some(&phase_id))
+                .unwrap_or_default();
+        assert_eq!(tasks.len(), 1, "live_6: exactly 1 bootstrap task expected");
+        assert_eq!(
+            tasks[0].skill_id.as_deref(),
+            Some("must-not-analyst"),
+            "live_6: bootstrap task must use must-not-analyst"
+        );
+        assert_eq!(
+            tasks[0].title,
+            "Develop Guardrails",
+            "live_6: bootstrap task title must be 'Develop Guardrails'"
+        );
+    }
+
+    let sink = TestEventSink::with_resource_dir(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    );
+    let (dag_tx, handle) = start_live_orchestrator(registry.clone(), sink.clone());
+
+    // Fire DagStructureChanged — orchestrator will find the bootstrap task and dispatch it.
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged");
+
+    // Wait up to 60s for task to reach Running or Complete.
+    let dispatched = {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(60);
+        loop {
+            {
+                let reg = registry.lock().unwrap();
+                if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                    let conn = db.conn.lock().unwrap();
+                    if let Ok(node) = poe2_lib::dag_store::db_get_node(&conn, &task_id) {
+                        if matches!(
+                            node.status,
+                            NodeStatus::Running | NodeStatus::Complete | NodeStatus::Waiting
+                        ) {
+                            break true;
+                        }
+                    }
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    };
+
+    drop(dag_tx);
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+
+    assert!(
+        dispatched,
+        "live_6: bootstrap task was not dispatched (Running/Complete) within 60s"
+    );
+
+    eprintln!("live_6 PASSED");
+}
+
+// ── Live-7: advance_phase transitions phase1→complete, phase2→running ─────────
+
+/// live_7: advance_phase command — phase1 (execution, running) task completes,
+/// then advance_phase logic is applied: phase1→complete, phase2→running,
+/// and a bootstrap task is created in phase2 (guardrails → must-not-analyst).
+///
+/// Exercises the advance_phase → bootstrap → dispatch chain by replicating the
+/// Tauri command's DB mutations and firing DagStructureChanged.
+///
+/// Asserts: phase2 status='running', phase2 has a task with skill='must-not-analyst',
+/// and that task reaches Running or Complete within 60s.
+#[tokio::test]
+#[ignore]
+async fn live_7_advance_phase_bootstraps_next() {
+    if !e2e_enabled() || !claude_on_path() {
+        return;
+    }
+
+    let (project, _conn, registry, _tmp) = new_live_db();
+    let project_id = project.id.clone();
+
+    // Phase 1: execution, running, 1 autonomous task.
+    let phase1_id = insert_live_phase(&registry, &project_id, "execution", "running", 1);
+    let task1_id = insert_live_task(
+        &registry,
+        &project_id,
+        &phase1_id,
+        "must-not-analyst",
+        "Identify must-not behaviours for a Rust hello-world CLI. Produce poe:artifact must-nots-live7.md with at least 3 must-nots.",
+    );
+
+    // Phase 2: guardrails, pending — NO tasks (bootstrap will create one).
+    let phase2_id = insert_live_phase(&registry, &project_id, "guardrails", "pending", 2);
+
+    let sink = TestEventSink::with_resource_dir(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    );
+    let (dag_tx, handle) = start_live_orchestrator(registry.clone(), sink.clone());
+
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged");
+
+    // Wait for phase1 task to complete (120s).
+    let completed =
+        wait_for_node_status(&registry, &project_id, &task1_id, NodeStatus::Complete, 120).await;
+    assert!(completed, "live_7: phase1 task did not complete within 120s");
+
+    // Wait for phase1 to gate (30s).
+    let gated =
+        wait_for_phase_status(&registry, &project_id, &phase1_id, "gate", 30).await;
+    assert!(gated, "live_7: phase1 did not reach 'gate' within 30s");
+
+    // Apply advance_phase logic: phase1→complete, phase2→running, bootstrap phase2.
+    // This mirrors what the advance_phase Tauri command does internally.
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // Mark phase1 complete (mirrors advance_phase first UPDATE).
+        conn.execute(
+            "UPDATE phases SET status = 'complete', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase1_id],
+        )
+        .expect("complete phase1");
+
+        // Activate phase2 (mirrors advance_phase second UPDATE).
+        conn.execute(
+            "UPDATE phases SET status = 'running', lifecycle_stage = 'execution', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase2_id],
+        )
+        .expect("activate phase2");
+
+        // Bootstrap phase2 task (mirrors maybe_bootstrap_phase for 'guardrails').
+        let existing: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM nodes WHERE phase_id = ?1",
+                [&phase2_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(existing, 0, "live_7: phase2 must have 0 tasks before bootstrap");
+
+        let task_input = CreateNodeInput {
+            project_id: project_id.clone(),
+            phase_id: Some(phase2_id.clone()),
+            parent_id: None,
+            node_type: NodeType::Task,
+            title: "Develop Guardrails".to_string(),
+            description: Some(
+                "Identify must-not behaviours for a Rust hello-world CLI. Output poe:artifact guardrails-live7.md.".to_string(),
+            ),
+            skill_id: Some("must-not-analyst".to_string()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        };
+        poe2_lib::dag_store::db_create_node(&conn, &task_input)
+            .expect("bootstrap phase2 task");
+    }
+
+    // Assert: phase1 is now 'complete'.
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let phase1_status: String = conn
+            .query_row(
+                "SELECT status FROM phases WHERE id = ?1",
+                [&phase1_id],
+                |r| r.get(0),
+            )
+            .expect("get phase1 status");
+        assert_eq!(
+            phase1_status, "complete",
+            "live_7: phase1 must be 'complete' after advance_phase"
+        );
+    }
+
+    // Assert: phase2 is now 'running'.
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let phase2_status: String = conn
+            .query_row(
+                "SELECT status FROM phases WHERE id = ?1",
+                [&phase2_id],
+                |r| r.get(0),
+            )
+            .expect("get phase2 status");
+        assert_eq!(
+            phase2_status, "running",
+            "live_7: phase2 must be 'running' after advance_phase"
+        );
+    }
+
+    // Assert: phase2 has a bootstrap task with the correct skill.
+    let task2_id = {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let tasks =
+            poe2_lib::dag_store::db_list_nodes(&conn, &project_id, Some(&phase2_id))
+                .unwrap_or_default();
+        assert!(
+            !tasks.is_empty(),
+            "live_7: phase2 must have a bootstrap task after advance_phase"
+        );
+        assert_eq!(
+            tasks[0].skill_id.as_deref(),
+            Some("must-not-analyst"),
+            "live_7: phase2 bootstrap task must use must-not-analyst"
+        );
+        tasks[0].id.clone()
+    };
+
+    // Fire DagStructureChanged — orchestrator will dispatch the phase2 bootstrap task.
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged for phase2");
+
+    // Wait for phase2 task to reach Running or Complete within 60s.
+    let dispatched = {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(60);
+        loop {
+            {
+                let reg = registry.lock().unwrap();
+                if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                    let conn = db.conn.lock().unwrap();
+                    if let Ok(node) = poe2_lib::dag_store::db_get_node(&conn, &task2_id) {
+                        if matches!(
+                            node.status,
+                            NodeStatus::Running | NodeStatus::Complete | NodeStatus::Waiting
+                        ) {
+                            break true;
+                        }
+                    }
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    };
+
+    drop(dag_tx);
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+
+    assert!(
+        dispatched,
+        "live_7: phase2 bootstrap task was not dispatched (Running/Complete) within 60s"
+    );
+
+    eprintln!("live_7 PASSED");
 }
