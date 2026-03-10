@@ -56,23 +56,35 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 3. Ingester: signal Orchestrator (DagChanged)
 4. Ingester: emit poe://task-update to frontend
 5. Orchestrator wakes → evaluates DAG for newly-ready tasks → runs SF-1 for each
+6. After dispatching newly-ready tasks, check all active phases for completion:
+   if all nodes in a phase have status IN ('done', 'cancelled'),
+   transition phase → status='gate' and emit poe-phase-update.
+   See §3.7 for gate handling.
 ```
 
 ### SF-3: Yield Handling
 
-*Trigger*: Ingester receives `{"poe":"yield", "reason":"..."}` in agent stdout.
+*Trigger*: Ingester receives `{"poe":"yield"}` in agent stdout.
 
-The yield event is the handoff point — the agent process is about to exit and control passes to the orchestrator. The reason field determines what the orchestrator does next.
+> **Note**: the reason field was removed from the `poe:yield` wire format in Phase 2.3. The ingester derives `yield_reason` by inspecting the last substantive `poe:` event written before the yield arrives:
+> - `poe:chat`     → `'chat'`
+> - `poe:advisor`  → `'advisor'`
+> - `poe:decision` → `'decision'`
+> - `poe:review`   → `'review'`
+> - none           → `NULL`
+
+The yield event is the handoff point — the agent process is about to exit and control passes to the orchestrator. The derived `yield_reason` determines what the orchestrator does next.
 
 ```
 1. Ingester: INSERT event_log (poe:yield, full payload)
-2. Ingester: UPDATE nodes SET status = 'waiting', yield_reason = payload.reason
+2. Ingester: derives yield_reason from the preceding poe: event type (see note above)
+   Ingester: UPDATE nodes SET status = 'waiting', yield_reason = <derived value>
 3. Ingester: emit poe://task-update to frontend (status change)
-4. Ingester: emit poe://event to frontend (activity feed entry: "Yielded — awaiting {reason}")
+4. Ingester: emit poe://event to frontend (activity feed entry: "Yielded — awaiting {yield_reason}")
 5. Ingester: signal Orchestrator (DagChanged)
 6. Orchestrator wakes, reads nodes.yield_reason:
 
-   reason = "review":
+   yield_reason = 'review':
      → Collect all poe:review events logged for this task (these carry id, reviewer_skill)
      → expected_ids = {event.id for each poe:review event}  ← identity set, not a count
      → For each poe:review event:
@@ -103,11 +115,11 @@ The yield event is the handoff point — the agent process is about to exit and 
              {Reviewer failed to respond after max retries. Escalate via poe:decision if required.}
          Else: await remaining reviewers (they may still complete)
 
-   reason = "decision":
+   yield_reason = 'decision':
      → No immediate action — orchestrator waits for human resolution
      → Resolution arrives via invoke("resolve_decision") → triggers SF-4
 
-   reason = "chat":
+   yield_reason = 'chat':
      → No immediate action — orchestrator waits for human response in Artifact Viewer chat panel
      → Response arrives via invoke("respond_to_chat") → triggers SF-4
      → Continuation bundle format is identical to decision: "Human: {response text}"
@@ -174,6 +186,13 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
    → Rust: signal Orchestrator (DagChanged)
    → Rust: emit poe://phase-update {phase_id, status: 'running'}
 
+2b. If the activated phase has no tasks, the activate_phase handler bootstraps a default task
+    using the stage-type → skill mapping before signalling DagChanged:
+    - conops             → operational-analyst / "Develop CONOPS"
+    - guardrails         → must-not-analyst    / "Develop Guardrails"
+    - increment_planning → product-manager     / "Plan Increment"
+    - execution          → (no bootstrap — tasks come from product-manager poe:task events)
+
 3. Orchestrator wakes → runs scheduler loop:
    → finds tasks in Phase 1 with status='pending' and no unmet dependencies
    → dispatches each via SF-1
@@ -181,7 +200,9 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
 4. Plan Composer UI replaced by Phase × Scope Matrix
 ```
 
-**Key invariant**: Only the first phase is activated by `activate_phase`. Subsequent phases remain `pending` until the orchestrator advances them after each stage gate (SF triggered by `advance_phase` — see §3.7). The human never calls `activate_phase` more than once per project.
+**Key invariants**:
+- Only the first phase is activated by `activate_phase`. Subsequent phases remain `pending` until the orchestrator advances them after each stage gate (SF triggered by `advance_phase` — see §3.7). The human never calls `activate_phase` more than once per project.
+- **Bootstrap is skipped if the phase already has tasks.** The human can pre-populate tasks via the Plan Composer or manually; bootstrap is the fallback only.
 
 ---
 
@@ -1042,6 +1063,7 @@ sequenceDiagram
 
         Orch->>DB: UPDATE phases SET status='complete' WHERE id=P1
         Orch->>DB: UPDATE phases SET status='running' WHERE id=P2
+        Note over Orch: If P2 has no tasks, bootstrap the default skill task<br/>for P2's stage_type (same mapping as SF-5 bootstrap)
         Orch->>Orch: DagChanged signal (synthetic)
         Orch-->>FE: emit poe://phase-update (P1: complete, P2: running)
 
@@ -1127,6 +1149,8 @@ The Retrospective stage gate shows a diff of skill file changes produced during 
 5. **Re-run does not delete artifacts**: Resetting a task to `pending` does not delete its previously-produced artifacts. When the task re-runs, it may produce updated versions of the same artifacts (UPSERT). The prior versions are accessible via the artifact history (same `name`, different `timestamp`).
 
 6. **Phase gate is the outer PDCA loop closure**: The gate is where the human applies the Check step of the outer loop. Advance = the deliverable meets the bar. Revise = targeted Act. Re-run = full Act. The quality of this check determines whether the next phase starts on solid ground.
+
+7. **`advance_phase` bootstraps tasks**: if the next phase has no tasks when advanced to, `maybe_bootstrap_phase` creates the default task for that `stage_type`. Without this, the orchestrator finds 0 ready tasks and the phase stalls silently.
 
 ---
 ### 3.8 Collaborative Artifact Building (`poe:chat`)
