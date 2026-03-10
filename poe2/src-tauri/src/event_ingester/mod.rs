@@ -222,8 +222,8 @@ pub fn ingest_line_with_tracker(
 
 fn emit_tauri_event(app: &AppHandle, event: &str, payload: &impl serde::Serialize) {
     use tauri::Emitter;
-    if let Ok(json) = serde_json::to_string(payload) {
-        let _ = app.emit(event, json);
+    if let Ok(value) = serde_json::to_value(payload) {
+        let _ = app.emit(event, value);
     }
 }
 
