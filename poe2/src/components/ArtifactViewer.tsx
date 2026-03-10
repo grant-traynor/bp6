@@ -97,7 +97,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, previousVe
     invoke<string>('read_artifact_content', { artifactId: art.id, projectId })
       .then(setContent)
       .catch((e) => setError(String(e)));
-  }, [effectiveArtifact?.id, projectId]);
+  }, [effectiveArtifact?.id, effectiveArtifact?.updatedAt, projectId]);
 
   // Load previous version content when previousVersionId is provided
   useEffect(() => {
