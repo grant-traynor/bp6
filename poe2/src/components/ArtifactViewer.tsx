@@ -152,6 +152,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
       if (payload.taskId !== localTaskId) return;
       if (payload.eventType === 'poe:done') {
         setTaskDone(true);
+        setChatActive(false);
       }
     });
 
@@ -173,6 +174,7 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
         if (payload.projectId !== projectId) return;
         if (payload.id !== localTaskId) return;
         setTaskDone(true);
+        setChatActive(false); // collapse chat — let document fill the view
       }
     );
 
@@ -308,6 +310,20 @@ export default function ArtifactViewer({ artifact, projectId, taskId, onClose }:
         <div className="flex flex-1 overflow-hidden">
           {/* Artifact pane — always visible; populates live as poe:artifact events arrive */}
           <div className={`flex flex-col overflow-hidden ${chatActive ? 'flex-1 border-r border-neutral-800' : 'w-full'}`}>
+              {taskDone && (
+                <div className="shrink-0 px-4 py-2 border-b border-emerald-900/50 bg-emerald-950/30 flex items-center gap-2">
+                  <span className="text-emerald-400 text-[11px] font-mono font-bold">✓ Complete</span>
+                  <span className="text-emerald-700 text-[11px] font-mono">— document ready</span>
+                  {!chatActive && chatTurns.length > 0 && (
+                    <button
+                      className="ml-auto text-[10px] text-neutral-600 hover:text-neutral-400 font-mono"
+                      onClick={() => setChatActive(true)}
+                    >
+                      review conversation
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="flex-1 overflow-y-auto p-4">
                 {!effectiveArtifact ? (
                   <p className="text-neutral-700 text-[12px] font-mono">
