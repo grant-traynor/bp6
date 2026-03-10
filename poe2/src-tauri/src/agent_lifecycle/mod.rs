@@ -4,11 +4,11 @@ use crate::agent::text_extractor::TextBufExtractor;
 use crate::agent::transport::{JsonStreamTransport, StreamCallbacks};
 use crate::dag_store::{self, ProjectRegistry, UpdateNodeInput};
 use crate::event_ingester::{self, DagChanged};
+use crate::event_sink::EventSink;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;
 
 // ── Active agent state ────────────────────────────────────────────────────────
@@ -55,7 +55,8 @@ pub async fn spawn_agent(
     req: SpawnRequest,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) -> Result<String> {
     // Mark task as running in DB and create agent record.
     let agent_id = {
@@ -80,7 +81,7 @@ pub async fn spawn_agent(
 
         // Write skill_modes to nodes.skill_modes at SF-1 dispatch time (Phase 3).
         // Load the skill to get its declared modes, then serialize as JSON array.
-        let resource_dir = std::path::PathBuf::from(".");
+        let resource_dir = sink.resource_dir();
         if let Ok(skill) = crate::skills::load_skill(&req.skill_id, &req.project_path, &resource_dir) {
             if let Ok(modes_json) = serde_json::to_string(&skill.modes) {
                 let _ = dag_store::db_update_node_skill_modes(&conn, &req.task_id, &modes_json);
@@ -98,7 +99,6 @@ pub async fn spawn_agent(
     };
 
     // Register in AgentMap.
-    let agent_map = app.state::<AgentMap>().inner().clone();
     {
         let active = Arc::new(ActiveAgent {
             agent_id: agent_id.clone(),
@@ -110,19 +110,16 @@ pub async fn spawn_agent(
     }
 
     // Emit agent started event.
-    {
-        use tauri::Emitter;
-        let _ = app.emit(
-            "poe-agent-started",
-            serde_json::json!({
-                "agentId": agent_id,
-                "taskId": req.task_id,
-                "projectId": req.project_id,
-                "skillId": req.skill_id,
-                "model": req.model,
-            }),
-        );
-    }
+    sink.emit(
+        "poe-agent-started",
+        &serde_json::json!({
+            "agentId": agent_id,
+            "taskId": req.task_id,
+            "projectId": req.project_id,
+            "skillId": req.skill_id,
+            "model": req.model,
+        }),
+    );
 
     eprintln!(
         "[agent_lifecycle] spawning agent={} task={} cwd={} resume={:?}",
@@ -135,7 +132,7 @@ pub async fn spawn_agent(
     // Clone everything needed by the transport thread / callbacks.
     let registry_clone = registry.clone();
     let dag_tx_clone = dag_tx.clone();
-    let app_clone = app.clone();
+    let sink_clone = sink.clone();
     let project_id = req.project_id.clone();
     let task_id = req.task_id.clone();
     let agent_id_clone = agent_id.clone();
@@ -190,9 +187,9 @@ pub async fn spawn_agent(
         let dag_tx_for_chunk = dag_tx_clone.clone();
         let dag_tx_for_complete = dag_tx_clone.clone();
 
-        let app_for_chunk = app_clone.clone();
-        let app_for_raw = app_clone.clone();
-        let app_for_complete = app_clone.clone();
+        let sink_for_chunk = sink_clone.clone();
+        let sink_for_raw = sink_clone.clone();
+        let sink_for_complete = sink_clone.clone();
 
         let project_path_for_chunk = project_path.clone();
         let project_path_for_complete = project_path.clone();
@@ -264,7 +261,7 @@ pub async fn spawn_agent(
                             &agent_id_for_chunk,
                             &registry_for_chunk,
                             &dag_tx_for_chunk,
-                            &app_for_chunk,
+                            sink_for_chunk.as_ref(),
                             &project_path_for_chunk,
                             &mut *last_sub,
                         );
@@ -272,10 +269,9 @@ pub async fn spawn_agent(
                 }),
                 on_raw_json: Box::new(move |json| {
                     eprintln!("[transport] raw: {}", json);
-                    use tauri::Emitter;
-                    let _ = app_for_raw.emit(
+                    sink_for_raw.emit(
                         "poe-agent-stream",
-                        serde_json::json!({
+                        &serde_json::json!({
                             "agentId": agent_id_for_raw,
                             "taskId": task_id_for_raw,
                             "projectId": project_id_for_raw,
@@ -296,7 +292,7 @@ pub async fn spawn_agent(
                                 &agent_id_for_complete,
                                 &registry_for_complete,
                                 &dag_tx_for_complete,
-                                &app_for_complete,
+                                sink_for_complete.as_ref(),
                                 &project_path_for_complete,
                                 &mut *last_sub,
                             );
@@ -364,10 +360,9 @@ pub async fn spawn_agent(
             agent_id_clone, task_complete
         );
 
-        use tauri::Emitter;
-        let _ = app_clone.emit(
+        sink_clone.emit(
             "poe-agent-exited",
-            serde_json::json!({
+            &serde_json::json!({
                 "agentId": agent_id_clone,
                 "taskId": task_id,
                 "projectId": project_id,

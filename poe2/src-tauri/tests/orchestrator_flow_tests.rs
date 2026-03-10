@@ -60,6 +60,11 @@ fn new_mem_db() -> Connection {
         )",
     );
     let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id)");
+    // Additional runtime migrations added after fixture tests were written.
+    let _ = conn.execute_batch("ALTER TABLE phases ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'execution'");
+    let _ = conn.execute_batch("ALTER TABLE phases ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN sort_order INTEGER");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN skill_modes TEXT");
     conn
 }
 

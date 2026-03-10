@@ -710,6 +710,7 @@ pub async fn start_advisor_session(
     decision_id: Option<String>,
     registry: State<'_, ProjectRegistry>,
     app: tauri::AppHandle,
+    agent_map: State<'_, crate::agent_lifecycle::AgentMap>,
     dag_tx: State<'_, mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
 ) -> Result<(), String> {
     use crate::event_ingester::DagChanged;
@@ -764,7 +765,10 @@ pub async fn start_advisor_session(
         drop(reg);
 
         let project_path = std::path::PathBuf::from(&db.project.path);
-        let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let resource_dir = {
+            use tauri::Manager;
+            app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        };
 
         let conn = db.conn.lock().unwrap();
         let knowledge: Vec<(String, String)> = db_list_knowledge(&conn, &project_id)
@@ -809,7 +813,9 @@ pub async fn start_advisor_session(
 
     let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id: project_id.clone() });
 
-    agent_lifecycle::spawn_agent(spawn_req, &registry, &dag_tx, &app)
+    let sink: std::sync::Arc<dyn crate::event_sink::EventSink> =
+        std::sync::Arc::new(crate::event_sink::TauriEventSink(app.clone()));
+    agent_lifecycle::spawn_agent(spawn_req, &registry, &dag_tx, &agent_map, sink)
         .await
         .map_err(|e| format!("Failed to spawn advisor agent: {}", e))?;
 

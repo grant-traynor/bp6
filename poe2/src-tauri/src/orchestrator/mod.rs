@@ -1,8 +1,9 @@
 pub mod commands;
 
-use crate::agent_lifecycle::{self, SpawnRequest};
+use crate::agent_lifecycle::{self, AgentMap, SpawnRequest};
 use crate::dag_store::{self, Node, NodeStatus, NodeType, ProjectRegistry};
 use crate::event_ingester::DagChanged;
+use crate::event_sink::EventSink;
 use crate::skills;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -11,7 +12,6 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Duration;
-use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;
 
 // ── Reviewer watchdog configuration ───────────────────────────────────────────
@@ -61,7 +61,14 @@ impl ConcurrencyLimits {
 // ── Orchestrator entry point ──────────────────────────────────────────────────
 
 /// Start the orchestrator loop. Receives a channel receiver created in app setup.
-pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChanged>) {
+pub async fn start(
+    sink: Arc<dyn EventSink>,
+    registry: ProjectRegistry,
+    limits: Arc<ConcurrencyLimits>,
+    agent_map: AgentMap,
+    dag_tx: mpsc::UnboundedSender<DagChanged>,
+    mut dag_rx: mpsc::UnboundedReceiver<DagChanged>,
+) {
     eprintln!("[orchestrator] start: loop running");
     loop {
         let signal = match dag_rx.recv().await {
@@ -83,29 +90,25 @@ pub async fn start(app: AppHandle, mut dag_rx: mpsc::UnboundedReceiver<DagChange
             categorise_signal(s, &mut resume_requests, &mut opened_projects, &mut node_status_changed, &mut project_ids);
         }
 
-        let registry = app.state::<ProjectRegistry>().inner().clone();
-        let limits = app.state::<Arc<ConcurrencyLimits>>().inner().clone();
-        let dag_tx = app.state::<mpsc::UnboundedSender<DagChanged>>().inner().clone();
-
         // Recover ghost agents from previously-interrupted sessions before scheduling.
         for project_id in &opened_projects {
             eprintln!("[orchestrator] project opened — running ghost-agent recovery for {}", project_id);
-            recover_interrupted(project_id, &registry, &dag_tx, &app).await;
+            recover_interrupted(project_id, &registry, &dag_tx, &agent_map, Arc::clone(&sink)).await;
         }
 
         // Handle resume continuations for resolved decisions and chat responses
         for (project_id, task_id, session_id, resolution, item_id) in resume_requests {
-            resume_waiting_agent(&project_id, &task_id, &session_id, &resolution, &item_id, &registry, &dag_tx, &app).await;
+            resume_waiting_agent(&project_id, &task_id, &session_id, &resolution, &item_id, &registry, &dag_tx, &agent_map, Arc::clone(&sink)).await;
         }
 
         // SF-4: handle NodeStatusChanged signals — yield-handling and completion checks
         for (project_id, node_id) in node_status_changed {
-            handle_node_status_changed(&project_id, &node_id, &registry, &dag_tx, &app).await;
+            handle_node_status_changed(&project_id, &node_id, &registry, &dag_tx, &agent_map, Arc::clone(&sink)).await;
         }
 
         // Run normal scheduling loop for DAG changes
         for project_id in project_ids {
-            run_loop(&project_id, &registry, &limits, &dag_tx, &app).await;
+            run_loop(&project_id, &registry, &limits, &dag_tx, &agent_map, Arc::clone(&sink)).await;
         }
     }
 }
@@ -149,7 +152,8 @@ async fn resume_waiting_agent(
     item_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     // Check whether item_id references a chat_turns row (SF-4 chat arm) or a
     // queue_items row (SF-4 decision arm).
@@ -192,11 +196,11 @@ async fn resume_waiting_agent(
     };
 
     if is_chat_turn {
-        resume_chat_agent(project_id, task_id, session_id, item_id, registry, dag_tx, app).await;
+        resume_chat_agent(project_id, task_id, session_id, item_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
     } else if is_advisor_turn {
-        resume_advisor_agent(project_id, task_id, session_id, item_id, registry, dag_tx, app).await;
+        resume_advisor_agent(project_id, task_id, session_id, item_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
     } else {
-        resume_decision_agent(project_id, task_id, session_id, resolution, registry, dag_tx, app).await;
+        resume_decision_agent(project_id, task_id, session_id, resolution, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
     }
 }
 
@@ -209,7 +213,8 @@ async fn resume_decision_agent(
     resolution: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     let (project_path, skill_id, model) = {
         let reg = registry.lock().unwrap();
@@ -231,7 +236,7 @@ async fn resume_decision_agent(
         };
         let skill_id = node.skill_id.unwrap_or_else(|| "implementer".to_owned());
         let path = std::path::PathBuf::from(&db.project.path);
-        let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let resource_dir = sink.resource_dir();
         let model = skills::load_skill(&skill_id, &path, &resource_dir)
             .ok()
             .and_then(|s| s.model.clone());
@@ -252,7 +257,7 @@ async fn resume_decision_agent(
     };
 
     eprintln!("[orchestrator] resume_decision_agent: resuming task={} session={}", task_id, session_id);
-    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, agent_map, sink).await {
         eprintln!("[orchestrator] resume_decision_agent: failed to resume agent for task {}: {}", task_id, e);
     }
 }
@@ -268,7 +273,8 @@ async fn resume_chat_agent(
     turn_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     eprintln!(
         "[orchestrator] resume_chat_agent: task={} session={} turn_id={}",
@@ -341,10 +347,7 @@ async fn resume_chat_agent(
         };
         let skill_id = node.skill_id.unwrap_or_else(|| "implementer".to_owned());
         let path = std::path::PathBuf::from(&db.project.path);
-        let resource_dir = app
-            .path()
-            .resource_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let resource_dir = sink.resource_dir();
         let model = skills::load_skill(&skill_id, &path, &resource_dir)
             .ok()
             .and_then(|s| s.model.clone());
@@ -369,7 +372,7 @@ async fn resume_chat_agent(
         "[orchestrator] resume_chat_agent: spawning --resume for task={} session={}",
         task_id, session_id
     );
-    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, agent_map, sink).await {
         eprintln!(
             "[orchestrator] resume_chat_agent: failed to resume agent for task {}: {}",
             task_id, e
@@ -387,7 +390,8 @@ async fn resume_advisor_agent(
     turn_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     eprintln!(
         "[orchestrator] resume_advisor_agent: task={} session={} turn_id={}",
@@ -456,10 +460,7 @@ async fn resume_advisor_agent(
         };
         let skill_id = node.skill_id.unwrap_or_else(|| "advisor".to_owned());
         let path = std::path::PathBuf::from(&db.project.path);
-        let resource_dir = app
-            .path()
-            .resource_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let resource_dir = sink.resource_dir();
         let model = skills::load_skill(&skill_id, &path, &resource_dir)
             .ok()
             .and_then(|s| s.model.clone());
@@ -483,7 +484,7 @@ async fn resume_advisor_agent(
         "[orchestrator] resume_advisor_agent: spawning --resume for task={} session={}",
         task_id, session_id
     );
-    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, agent_map, sink).await {
         eprintln!(
             "[orchestrator] resume_advisor_agent: failed to resume agent for task {}: {}",
             task_id, e
@@ -505,7 +506,8 @@ async fn handle_node_status_changed(
     node_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     let node = {
         let reg = registry.lock().unwrap();
@@ -534,7 +536,7 @@ async fn handle_node_status_changed(
             // SF-4 yield branch
             match node.yield_reason.as_deref() {
                 Some("review") => {
-                    handle_review_yield(&node, project_id, registry, dag_tx, app).await;
+                    handle_review_yield(&node, project_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
                 }
                 Some("decision") => {
                     // No action — await human resolution via resolve_decision command
@@ -578,13 +580,13 @@ async fn handle_node_status_changed(
                     "[orchestrator] handle_node_status_changed: reviewer node={} finished, checking completion for requesting_task={}",
                     node.id, requesting_task_id
                 );
-                check_review_completion(requesting_task_id, project_id, registry, dag_tx, app).await;
+                check_review_completion(requesting_task_id, project_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
             }
 
             // Phase completion detection: if this node belongs to a phase, check if all
             // tasks in the phase are done or cancelled. If so, set phase status='gate'.
             if let Some(ref phase_id) = node.phase_id {
-                check_phase_completion(phase_id, project_id, registry, app).await;
+                check_phase_completion(phase_id, project_id, registry, sink.as_ref()).await;
             }
         }
         _ => {
@@ -599,7 +601,8 @@ async fn handle_review_yield(
     project_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     eprintln!(
         "[orchestrator] handle_review_yield: task={} — querying poe:review events",
@@ -704,7 +707,10 @@ async fn handle_review_yield(
 
         // bp6-m2f.19: spawn per-reviewer watchdog timer
         spawn_reviewer_watchdog(
-            app.clone(),
+            Arc::clone(&sink),
+            registry.clone(),
+            dag_tx.clone(),
+            agent_map.clone(),
             project_id.to_owned(),
             reviewer_node.id.clone(),
             waiting_task.id.clone(),
@@ -717,7 +723,7 @@ async fn handle_review_yield(
 
     // Dispatch each reviewer via SF-1 (same dispatch path as run_loop uses for ready tasks)
     for reviewer in reviewer_nodes {
-        dispatch_reviewer_task(reviewer, project_id, waiting_task, registry, dag_tx, app).await;
+        dispatch_reviewer_task(reviewer, project_id, waiting_task, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
     }
 }
 
@@ -729,7 +735,8 @@ async fn dispatch_reviewer_task(
     requesting_task: &Node,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     eprintln!(
         "[orchestrator] dispatch_reviewer_task: reviewer={} review_id={:?} skill={:?}",
@@ -747,7 +754,7 @@ async fn dispatch_reviewer_task(
         let conn = db.conn.lock().unwrap();
         let project_path = PathBuf::from(&db.project.path);
         let skill_id = reviewer.skill_id.clone().unwrap_or_else(|| "implementer".to_owned());
-        let resource_dir = app.path().resource_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let resource_dir = sink.resource_dir();
         let knowledge: Vec<(String, String)> = dag_store::db_list_knowledge(&conn, project_id)
             .unwrap_or_default()
             .into_iter()
@@ -819,7 +826,7 @@ async fn dispatch_reviewer_task(
         model: skill.model.clone(),
     };
 
-    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, agent_map, sink).await {
         eprintln!("[orchestrator] dispatch_reviewer_task: failed to spawn agent for reviewer {}: {}", reviewer.id, e);
     }
 }
@@ -831,7 +838,8 @@ async fn check_review_completion(
     project_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     let (requesting_task, expected_ids, answered_ids, project_path) = {
         let reg = registry.lock().unwrap();
@@ -956,7 +964,7 @@ async fn check_review_completion(
 
     let (skill_id, model) = {
         let skill_id = requesting_task.skill_id.clone().unwrap_or_else(|| "implementer".to_owned());
-        let resource_dir = app.path().resource_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let resource_dir = sink.resource_dir();
         let model = skills::load_skill(&skill_id, &project_path, &resource_dir)
             .ok()
             .and_then(|s| s.model.clone());
@@ -978,7 +986,7 @@ async fn check_review_completion(
         requesting_task_id, session_id
     );
 
-    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, agent_map, sink).await {
         eprintln!(
             "[orchestrator] check_review_completion: failed to resume task {}: {}",
             requesting_task_id, e
@@ -998,7 +1006,10 @@ async fn check_review_completion(
 ///   `check_review_completion` — if all reviewers are now accounted for, SF-3
 ///   resumes the requesting task with a FAILED verdict for this reviewer.
 fn spawn_reviewer_watchdog(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
+    registry: ProjectRegistry,
+    dag_tx: mpsc::UnboundedSender<DagChanged>,
+    agent_map: AgentMap,
     project_id: String,
     reviewer_task_id: String,
     requesting_task_id: String,
@@ -1012,9 +1023,6 @@ fn spawn_reviewer_watchdog(
             "[orchestrator] watchdog fired: reviewer={} requesting={} timeout={}s",
             reviewer_task_id, requesting_task_id, timeout_secs
         );
-
-        let registry = app.state::<ProjectRegistry>().inner().clone();
-        let dag_tx = app.state::<mpsc::UnboundedSender<DagChanged>>().inner().clone();
 
         // Read current node state under a short-lived lock
         let (current_status, current_retry) = {
@@ -1105,7 +1113,10 @@ fn spawn_reviewer_watchdog(
 
             // Spawn a fresh watchdog for the retry
             spawn_reviewer_watchdog(
-                app,
+                sink,
+                registry,
+                dag_tx,
+                agent_map,
                 project_id,
                 reviewer_task_id,
                 requesting_task_id,
@@ -1147,7 +1158,7 @@ fn spawn_reviewer_watchdog(
 
             // Run the completion check — if all reviewers are now accounted for,
             // this triggers SF-3 with a FAILED verdict for the cancelled node.
-            check_review_completion(&requesting_task_id, &project_id, &registry, &dag_tx, &app).await;
+            check_review_completion(&requesting_task_id, &project_id, &registry, &dag_tx, &agent_map, sink).await;
         }
     });
 }
@@ -1159,7 +1170,7 @@ async fn check_phase_completion(
     phase_id: &str,
     project_id: &str,
     registry: &ProjectRegistry,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) {
     let should_gate = {
         let reg = registry.lock().unwrap();
@@ -1211,8 +1222,7 @@ async fn check_phase_completion(
         );
         drop(conn);
 
-        use tauri::Emitter;
-        let _ = app.emit("poe-phase-update", serde_json::json!({
+        sink.emit("poe-phase-update", &serde_json::json!({
             "phaseId": phase_id,
             "status": "gate",
             "projectId": project_id,
@@ -1227,7 +1237,8 @@ async fn run_loop(
     registry: &ProjectRegistry,
     limits: &Arc<ConcurrencyLimits>,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     eprintln!("[orchestrator] run_loop wakeup project={}", project_id);
 
@@ -1295,7 +1306,7 @@ async fn run_loop(
     }
 
     for task in ready_tasks {
-        dispatch_task(task, project_id, registry, dag_tx, app).await;
+        dispatch_task(task, project_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
     }
 }
 
@@ -1304,7 +1315,8 @@ async fn dispatch_task(
     project_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     eprintln!(
         "[orchestrator] dispatch_task: id={} title={:?} skill={:?}",
@@ -1324,10 +1336,7 @@ async fn dispatch_task(
         let project_path = PathBuf::from(&db.project.path);
         let skill_id = task.skill_id.clone().unwrap_or_else(|| "implementer".to_owned());
 
-        let resource_dir = app
-            .path()
-            .resource_dir()
-            .unwrap_or_else(|_| PathBuf::from("."));
+        let resource_dir = sink.resource_dir();
 
         let knowledge: Vec<(String, String)> = dag_store::db_list_knowledge(&conn, project_id)
             .unwrap_or_default()
@@ -1406,7 +1415,7 @@ async fn dispatch_task(
         model: skill.model.clone(),
     };
 
-    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+    if let Err(e) = agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, agent_map, sink).await {
         eprintln!("[orchestrator] Failed to spawn agent for task {}: {}", task.id, e);
     }
 }
@@ -1417,7 +1426,8 @@ pub async fn recover_interrupted(
     project_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     let (interrupted, waiting_nodes, project_path) = {
         let reg = registry.lock().unwrap();
@@ -1435,10 +1445,7 @@ pub async fn recover_interrupted(
         (agents, waiting, path)
     };
 
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .unwrap_or_else(|_| PathBuf::from("."));
+    let resource_dir = sink.resource_dir();
 
     for agent in interrupted {
         eprintln!(
@@ -1464,7 +1471,7 @@ pub async fn recover_interrupted(
                 model,
             };
 
-            match agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, app).await {
+            match agent_lifecycle::spawn_agent(spawn_req, registry, dag_tx, agent_map, Arc::clone(&sink)).await {
                 Ok(_) => {
                     eprintln!("[orchestrator] Resumed agent for task {}", agent.task_id);
                 }
@@ -1523,7 +1530,7 @@ pub async fn recover_interrupted(
 
         match node.yield_reason.as_deref() {
             Some("review") => {
-                recover_waiting_review(&node, project_id, registry, dag_tx, app).await;
+                recover_waiting_review(&node, project_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
             }
             Some("decision") => {
                 // Decision record persists in queue_items — human resolves when ready.
@@ -1564,7 +1571,8 @@ async fn recover_waiting_review(
     project_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    agent_map: &AgentMap,
+    sink: Arc<dyn EventSink>,
 ) {
     eprintln!(
         "[orchestrator] recover_waiting_review: checking reviewer completion for task={}",
@@ -1609,7 +1617,7 @@ async fn recover_waiting_review(
             "[orchestrator] recover_waiting_review: task={} — no reviewer nodes found, re-dispatching review yield",
             node.id
         );
-        handle_review_yield(node, project_id, registry, dag_tx, app).await;
+        handle_review_yield(node, project_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
         return;
     }
 
@@ -1620,7 +1628,7 @@ async fn recover_waiting_review(
             node.id,
             expected_sorted.len()
         );
-        check_review_completion(&node.id, project_id, registry, dag_tx, app).await;
+        check_review_completion(&node.id, project_id, registry, dag_tx, agent_map, sink).await;
     } else {
         // Some reviewers are not yet done. Running reviewer agents re-enter the
         // interrupted-agent recovery path and will trigger SF-3 on completion.

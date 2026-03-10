@@ -2,9 +2,13 @@ pub mod agent;
 pub mod agent_lifecycle;
 pub mod dag_store;
 pub mod event_ingester;
+pub mod event_sink;
 pub mod orchestrator;
 pub mod skills;
 
+pub use event_sink::{EventSink, TauriEventSink};
+
+use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::mpsc;
 
@@ -19,16 +23,20 @@ pub fn run() {
             let (dag_tx, dag_rx) = mpsc::unbounded_channel::<event_ingester::DagChanged>();
 
             // Register shared state
-            app.manage(dag_store::new_registry());
-            app.manage(agent_lifecycle::new_agent_map());
-            app.manage(orchestrator::ConcurrencyLimits::new());
+            let registry = dag_store::new_registry();
+            let agent_map = agent_lifecycle::new_agent_map();
+            let limits = orchestrator::ConcurrencyLimits::new();
+            app.manage(registry.clone());
+            app.manage(agent_map.clone());
+            app.manage(limits.clone());
             app.manage(agent::pty_handover::new_handover_map());
-            app.manage(dag_tx);
+            app.manage(dag_tx.clone());
 
             // Start orchestrator loop with the receiver
             let app_handle = app.handle().clone();
+            let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink(app_handle));
             tauri::async_runtime::spawn(async move {
-                orchestrator::start(app_handle, dag_rx).await;
+                orchestrator::start(sink, registry, limits, agent_map, dag_tx, dag_rx).await;
             });
 
             Ok(())

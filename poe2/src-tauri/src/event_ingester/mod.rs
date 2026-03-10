@@ -2,9 +2,9 @@ use crate::dag_store::{
     self, CreateArtifactInput, CreateKnowledgeInput, CreateNodeInput, EdgeType, NodeStatus,
     NodeType, ProjectRegistry, UpdateNodeInput,
 };
+use crate::event_sink::EventSink;
 use anyhow::Result;
 use std::path::Path;
-use tauri::AppHandle;
 use tokio::sync::mpsc;
 
 /// Signal sent to the orchestrator when DAG state changes.
@@ -152,7 +152,7 @@ pub fn ingest_line(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
     project_path: &Path,
 ) {
     // Per-call mutable tracker — callers that need cross-line tracking should
@@ -160,7 +160,7 @@ pub fn ingest_line(
     // call, preserving backward compatibility for single-line event dispatch.
     let mut last_substantive: Option<String> = None;
     ingest_line_with_tracker(
-        line, project_id, task_id, agent_id, registry, dag_tx, app, project_path,
+        line, project_id, task_id, agent_id, registry, dag_tx, sink, project_path,
         &mut last_substantive,
     );
 }
@@ -177,7 +177,7 @@ pub fn ingest_line_with_tracker(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
     project_path: &Path,
     last_substantive: &mut Option<String>,
 ) {
@@ -188,36 +188,36 @@ pub fn ingest_line_with_tracker(
     let poe_event = poe_event.as_str();
 
     let result = match poe_event {
-        "task" => handle_task(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
-        "task:update" => handle_task_update(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
-        "task:cancel" => handle_task_cancel(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
-        "edge" => handle_edge(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
-        "edge:remove" => handle_edge_remove(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
-        "artifact" => handle_artifact(trimmed, project_id, task_id, agent_id, registry, app, project_path),
-        "skill" => handle_skill(trimmed, project_id, task_id, agent_id, registry, app, project_path),
-        "knowledge" => handle_knowledge(trimmed, project_id, task_id, agent_id, registry, app),
-        "brief" => handle_log_only("poe:brief", trimmed, project_id, task_id, agent_id, registry, app),
-        "step" => handle_log_only("poe:step", trimmed, project_id, task_id, agent_id, registry, app),
+        "task" => handle_task(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
+        "task:update" => handle_task_update(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
+        "task:cancel" => handle_task_cancel(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
+        "edge" => handle_edge(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
+        "edge:remove" => handle_edge_remove(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
+        "artifact" => handle_artifact(trimmed, project_id, task_id, agent_id, registry, sink, project_path),
+        "skill" => handle_skill(trimmed, project_id, task_id, agent_id, registry, sink, project_path),
+        "knowledge" => handle_knowledge(trimmed, project_id, task_id, agent_id, registry, sink),
+        "brief" => handle_log_only("poe:brief", trimmed, project_id, task_id, agent_id, registry, sink),
+        "step" => handle_log_only("poe:step", trimmed, project_id, task_id, agent_id, registry, sink),
         "decision" => {
             *last_substantive = Some("decision".to_owned());
-            handle_decision(trimmed, project_id, task_id, agent_id, registry, app)
+            handle_decision(trimmed, project_id, task_id, agent_id, registry, sink)
         }
         "chat" => {
             *last_substantive = Some("chat".to_owned());
-            handle_chat(trimmed, project_id, task_id, agent_id, registry, dag_tx, app)
+            handle_chat(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink)
         }
         "advisor" => {
             *last_substantive = Some("advisor".to_owned());
-            handle_advisor(trimmed, project_id, task_id, agent_id, registry, dag_tx, app)
+            handle_advisor(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink)
         }
-        "done" => handle_done(trimmed, project_id, task_id, agent_id, registry, dag_tx, app),
+        "done" => handle_done(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
         "yield" => {
             let derived_reason = last_substantive.clone();
-            handle_yield(trimmed, project_id, task_id, agent_id, registry, dag_tx, app, derived_reason)
+            handle_yield(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink, derived_reason)
         }
         "review" => {
             *last_substantive = Some("review".to_owned());
-            handle_review(trimmed, project_id, task_id, agent_id, registry, dag_tx, app)
+            handle_review(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink)
         }
         other => {
             eprintln!("[event_ingester] Unknown poe: event type: {}", other);
@@ -230,11 +230,8 @@ pub fn ingest_line_with_tracker(
     }
 }
 
-fn emit_tauri_event(app: &AppHandle, event: &str, payload: &impl serde::Serialize) {
-    use tauri::Emitter;
-    if let Ok(value) = serde_json::to_value(payload) {
-        let _ = app.emit(event, value);
-    }
+fn emit_tauri_event(sink: &dyn EventSink, event: &str, payload: &impl serde::Serialize) {
+    crate::event_sink::emit_event(sink, event, payload);
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -246,7 +243,7 @@ fn handle_task(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeTask = serde_json::from_str(json)?;
     let node_type = payload
@@ -280,7 +277,7 @@ fn handle_task(
             }
         }
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:task", json)?;
-        emit_tauri_event(app, "poe-task-created", &node);
+        emit_tauri_event(sink, "poe-task-created", &node);
         let change = DagChanged::DagStructureChanged {
             project_id: project_id.to_string(),
         };
@@ -296,7 +293,7 @@ fn handle_task_update(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeTaskUpdate = serde_json::from_str(json)?;
     let input = UpdateNodeInput {
@@ -311,7 +308,7 @@ fn handle_task_update(
     with_project_conn(registry, project_id, |conn| {
         let node = dag_store::db_update_node(conn, &payload.id, &input)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:task:update", json)?;
-        emit_tauri_event(app, "poe-node-updated", &node);
+        emit_tauri_event(sink, "poe-node-updated", &node);
         let change = DagChanged::DagStructureChanged {
             project_id: project_id.to_string(),
         };
@@ -327,14 +324,14 @@ fn handle_task_cancel(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeTaskCancel = serde_json::from_str(json)?;
 
     with_project_conn(registry, project_id, |conn| {
         let node = dag_store::db_cancel_node(conn, &payload.id)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:task:cancel", json)?;
-        emit_tauri_event(app, "poe-node-updated", &node);
+        emit_tauri_event(sink, "poe-node-updated", &node);
         let change = DagChanged::DagStructureChanged {
             project_id: project_id.to_string(),
         };
@@ -350,14 +347,14 @@ fn handle_edge(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeEdge = serde_json::from_str(json)?;
 
     with_project_conn(registry, project_id, |conn| {
         let edge = dag_store::db_create_edge(conn, &payload.from, &payload.to, EdgeType::DependsOn)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), None, "poe:edge", json)?;
-        emit_tauri_event(app, "poe-edge-created", &edge);
+        emit_tauri_event(sink, "poe-edge-created", &edge);
         let change = DagChanged::DagStructureChanged {
             project_id: project_id.to_string(),
         };
@@ -373,14 +370,14 @@ fn handle_edge_remove(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeEdgeRemove = serde_json::from_str(json)?;
 
     with_project_conn(registry, project_id, |conn| {
         dag_store::db_remove_edge(conn, &payload.from, &payload.to)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), None, "poe:edge:remove", json)?;
-        emit_tauri_event(app, "poe-edge-removed", &serde_json::json!({
+        emit_tauri_event(sink, "poe-edge-removed", &serde_json::json!({
             "fromId": payload.from,
             "toId": payload.to,
         }));
@@ -398,7 +395,7 @@ fn handle_artifact(
     task_id: &str,
     agent_id: &str,
     registry: &ProjectRegistry,
-    app: &AppHandle,
+    sink: &dyn EventSink,
     project_path: &Path,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeArtifact = serde_json::from_str(json)?;
@@ -421,7 +418,7 @@ fn handle_artifact(
     with_project_conn(registry, project_id, |conn| {
         let artifact = dag_store::db_upsert_artifact(conn, &input)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:artifact", json)?;
-        emit_tauri_event(app, "poe-artifact-created", &artifact);
+        emit_tauri_event(sink, "poe-artifact-created", &artifact);
         Ok(None) // artifacts don't trigger orchestrator
     })
 }
@@ -444,7 +441,7 @@ fn handle_skill(
     task_id: &str,
     agent_id: &str,
     registry: &ProjectRegistry,
-    app: &AppHandle,
+    sink: &dyn EventSink,
     project_path: &Path,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeSkill = serde_json::from_str(json)?;
@@ -453,7 +450,7 @@ fn handle_skill(
 
     with_project_conn(registry, project_id, |conn| {
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:skill", json)?;
-        emit_tauri_event(app, "poe-event", &serde_json::json!({
+        emit_tauri_event(sink, "poe-event", &serde_json::json!({
             "eventType": "poe:skill",
             "projectId": project_id,
             "agentId": agent_id,
@@ -470,7 +467,7 @@ fn handle_knowledge(
     task_id: &str,
     agent_id: &str,
     registry: &ProjectRegistry,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeKnowledge = serde_json::from_str(json)?;
 
@@ -485,7 +482,7 @@ fn handle_knowledge(
     with_project_conn(registry, project_id, |conn| {
         let entry = dag_store::db_create_knowledge(conn, &input)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:knowledge", json)?;
-        emit_tauri_event(app, "poe-knowledge-created", &entry);
+        emit_tauri_event(sink, "poe-knowledge-created", &entry);
         Ok(None) // knowledge writes don't trigger orchestrator
     })
 }
@@ -530,11 +527,11 @@ fn handle_decision(
     task_id: &str,
     agent_id: &str,
     registry: &ProjectRegistry,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     with_project_conn(registry, project_id, |conn| {
         let item = db_handle_decision(conn, json, project_id, task_id, agent_id)?;
-        emit_tauri_event(app, "poe-decision-queued", &item);
+        emit_tauri_event(sink, "poe-decision-queued", &item);
         Ok(None)
     })
 }
@@ -550,7 +547,7 @@ fn handle_chat(
     agent_id: &str,
     registry: &ProjectRegistry,
     _dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeChat = serde_json::from_str(json)?;
     let turn_id = payload
@@ -560,7 +557,7 @@ fn handle_chat(
     with_project_conn(registry, project_id, |conn| {
         let turn = dag_store::db_insert_chat_turn(conn, &turn_id, task_id, &payload.content)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:chat", json)?;
-        emit_tauri_event(app, "poe-chat-turn", &serde_json::json!({
+        emit_tauri_event(sink, "poe-chat-turn", &serde_json::json!({
             "turnId": turn.id,
             "taskId": task_id,
             "content": payload.content,
@@ -581,7 +578,7 @@ fn handle_advisor(
     agent_id: &str,
     registry: &ProjectRegistry,
     _dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeAdvisor = serde_json::from_str(json)?;
     let turn_id = payload
@@ -591,7 +588,7 @@ fn handle_advisor(
     with_project_conn(registry, project_id, |conn| {
         let turn = dag_store::db_insert_advisor_turn(conn, &turn_id, task_id, &payload.content)?;
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:advisor", json)?;
-        emit_tauri_event(app, "poe-advisor-turn", &serde_json::json!({
+        emit_tauri_event(sink, "poe-advisor-turn", &serde_json::json!({
             "turnId": turn.id,
             "taskId": task_id,
             "content": payload.content,
@@ -638,13 +635,13 @@ fn handle_done(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     with_project_conn(registry, project_id, |conn| {
         let _new_status = db_handle_done(conn, json, project_id, task_id, agent_id)?;
         let node = dag_store::db_get_node(conn, task_id)?;
 
-        emit_tauri_event(app, "poe-task-done", &node);
+        emit_tauri_event(sink, "poe-task-done", &node);
         let change = DagChanged::NodeStatusChanged {
             project_id: project_id.to_string(),
             node_id: task_id.to_string(),
@@ -670,7 +667,7 @@ fn handle_yield(
     agent_id: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
     derived_reason: Option<String>,
 ) -> Result<Option<DagChanged>> {
     let _payload: PoeYield = serde_json::from_str(json)?;
@@ -689,14 +686,14 @@ fn handle_yield(
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:yield", json)?;
 
         // poe://task-update — frontend updates node status in the tree
-        emit_tauri_event(app, "poe-node-updated", &node);
+        emit_tauri_event(sink, "poe-node-updated", &node);
 
         // poe://event — activity feed entry
         let summary = match derived_reason.as_deref() {
             Some(r) => format!("Yielded — awaiting {}", r),
             None => "Yielded".to_owned(),
         };
-        emit_tauri_event(app, "poe-event", &serde_json::json!({
+        emit_tauri_event(sink, "poe-event", &serde_json::json!({
             "eventType": "poe:yield",
             "projectId": project_id,
             "agentId": agent_id,
@@ -721,7 +718,7 @@ fn handle_log_only(
     task_id: &str,
     agent_id: &str,
     registry: &ProjectRegistry,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     with_project_conn(registry, project_id, |conn| {
         dag_store::db_log_event(
@@ -732,7 +729,7 @@ fn handle_log_only(
             event_type,
             json,
         )?;
-        emit_tauri_event(app, "poe-event", &serde_json::json!({
+        emit_tauri_event(sink, "poe-event", &serde_json::json!({
             "eventType": event_type,
             "projectId": project_id,
             "agentId": agent_id,
@@ -755,7 +752,7 @@ fn handle_review(
     agent_id: &str,
     registry: &ProjectRegistry,
     _dag_tx: &mpsc::UnboundedSender<DagChanged>,
-    app: &AppHandle,
+    sink: &dyn EventSink,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeReview = serde_json::from_str(json)?;
 
@@ -769,7 +766,7 @@ fn handle_review(
             json,
         )?;
 
-        emit_tauri_event(app, "poe-event", &serde_json::json!({
+        emit_tauri_event(sink, "poe-event", &serde_json::json!({
             "eventType": "poe:review",
             "projectId": project_id,
             "agentId": agent_id,
