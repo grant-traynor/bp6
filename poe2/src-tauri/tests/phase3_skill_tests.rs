@@ -941,12 +941,12 @@ async fn se_1_reviews_plan() {
     let review_artifact = artifact_events.iter().find(|v| {
         v.get("artifact_type")
             .and_then(|t| t.as_str())
-            .map(|t| t == "review")
+            .map(|t| t == "plan-review")
             .unwrap_or(false)
     });
     assert!(
         review_artifact.is_some(),
-        "SE-1 FAIL: poe:artifact with artifact_type='review' not found. \
+        "SE-1 FAIL: poe:artifact with artifact_type='plan-review' not found. \
          Artifact events: {:?}",
         artifact_events
     );
@@ -1040,7 +1040,7 @@ async fn se_2_approve_path() {
     let review_artifact = artifact_events.iter().find(|v| {
         v.get("artifact_type")
             .and_then(|t| t.as_str())
-            .map(|t| t == "review")
+            .map(|t| t == "plan-review")
             .unwrap_or(false)
     });
 
@@ -1130,7 +1130,7 @@ async fn se_3_revise_path() {
     let review_artifact = artifact_events.iter().find(|v| {
         v.get("artifact_type")
             .and_then(|t| t.as_str())
-            .map(|t| t == "review")
+            .map(|t| t == "plan-review")
             .unwrap_or(false)
     });
 
@@ -1615,7 +1615,7 @@ async fn loop_1_pm_se_roundtrip() {
     let se_review_artifact = se_artifact_events.iter().find(|v| {
         v.get("artifact_type")
             .and_then(|t| t.as_str())
-            .map(|t| t == "review")
+            .map(|t| t == "plan-review")
             .unwrap_or(false)
     });
 
