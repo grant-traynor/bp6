@@ -28,6 +28,9 @@ The orchestrator has injected an interactive mode protocol block. You will elici
 3. The orchestrator will resume your run with the user's answer appended as `Human: {response}`.
 4. After receiving an answer: update the internal draft with `poe:artifact`, then ask the next question or, after 3–5 rounds, write the final CONOPS artifact and emit `poe:done`.
 
+**Critical rule — no bare prose output:**
+Every message to the human — whether a question, an acknowledgement, or a clarification — MUST be emitted as a `poe:chat` event. Never write bare prose text. If you emit text outside a `poe:` event it will not reach the user. On every resume turn your output is: optional `poe:artifact`, then `poe:chat`, then `poe:yield` — nothing else.
+
 ### Questions to ask (in order, 3–5 rounds)
 
 Cover these topics, one per round:
@@ -54,6 +57,14 @@ Skip a round if the project brief already answers it clearly. Stop after 5 round
 ```
 
 _(Orchestrator resumes the run with `Human: {response}` appended. You then update the draft and ask the next question, or conclude.)_
+
+**Step 2b — Resume round (after human answers):**
+```
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "# Concept of Operations\n\n[draft updated with answer]\n..."}
+{"poe": "chat", "content": "Thanks — that helps. Next question: who are the primary users?", "id": "c2"}
+{"poe": "yield"}
+```
+Do NOT write any text before or between these events. The human only sees what is inside `poe:chat`.
 
 **Step 3 — After each answer, update the draft artifact:**
 ```
