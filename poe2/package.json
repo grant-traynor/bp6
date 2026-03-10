@@ -16,7 +16,9 @@
     "@tauri-apps/plugin-opener": "^2",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "@xyflow/react": "^12",
     "react": "^19.1.0",
+    "react-diff-viewer-continued": "^4",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {

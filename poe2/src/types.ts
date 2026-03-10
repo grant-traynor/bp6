@@ -21,6 +21,8 @@ export interface Node {
   status: 'pending' | 'running' | 'waiting' | 'blocked' | 'complete' | 'cancelled';
   skillId: string | null;
   assignee: string | null;
+  skillModes: string | null;  // JSON array string, e.g. '["autonomous","interactive"]'
+  sortOrder: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,6 +89,40 @@ export interface KnowledgeEntry {
   value: string;
   source: string | null;
   supersededId: string | null;
+  createdAt: string;
+}
+
+// Phase 3 types
+
+export interface AdvisorTurn {
+  id: string;
+  taskId: string;
+  content: string;
+  response: string | null;
+  createdAt: string;
+  respondedAt: string | null;
+}
+
+export interface PhaseGateEvent {
+  phaseId: string;
+  phaseTitle: string;
+  completedCount: number;
+  totalCount: number;
+}
+
+export interface Edge {
+  fromId: string;
+  toId: string;
+}
+
+export interface KnowledgeItem {
+  id: string;
+  projectId: string;
+  key: string;
+  content: string;
+  sourceTaskId: string | null;
+  supersededId: string | null;
+  promoted: number;
   createdAt: string;
 }
 

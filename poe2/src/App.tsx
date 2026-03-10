@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { Project, Node, Artifact } from './types';
+import type { Project, Node, Artifact, Edge, AdvisorTurn } from './types';
 import { usePoeProject } from './hooks/usePoeProject';
 import ActivityFeed from './components/ActivityFeed';
 import QueuePanel from './components/QueuePanel';
@@ -14,6 +14,8 @@ import KnowledgePanel from './components/KnowledgePanel';
 import StageGate from './components/StageGate';
 import InterruptControls from './components/InterruptControls';
 import DebugPanel from './components/DebugPanel';
+import PhaseMatrix from './components/PhaseMatrix';
+import TaskDetailPanel from './components/TaskDetailPanel';
 
 // ── CONOPS launcher ───────────────────────────────────────────────────────────
 // Shown when a project has no nodes yet. Bootstraps the first task.
@@ -110,10 +112,31 @@ export default function App() {
   const [chatTaskId, setChatTaskId] = useState<string | null>(null);
   const [showKnowledge, setShowKnowledge] = useState(false);
 
+  // Phase 3: edges, task detail panel, advisor session
+  const [edges, setEdges] = useState<Edge[]>([]);
+  const [taskDetailNode, setTaskDetailNode] = useState<Node | null>(null);
+  const [advisorTaskId, setAdvisorTaskId] = useState<string | null>(null);
+
   useEffect(() => {
     invoke<Project[]>('list_projects')
       .then(projects => setOpenProjects(projects))
       .catch(console.error);
+  }, []);
+
+  // Load edges when project changes
+  useEffect(() => {
+    if (!selectedId) { setEdges([]); return; }
+    invoke<Edge[]>('list_edges', { projectId: selectedId })
+      .then(setEdges)
+      .catch(console.error);
+  }, [selectedId]);
+
+  // Listen for advisor-turn-added to know the active advisor task ID
+  useEffect(() => {
+    const unlisten = listen<AdvisorTurn>('advisor-turn-added', ({ payload }) => {
+      setAdvisorTaskId(payload.taskId);
+    });
+    return () => { void unlisten.then(u => u()); };
   }, []);
 
   // Auto-open ArtifactViewer in chat mode when agent emits poe:chat
@@ -270,24 +293,47 @@ export default function App() {
                 <ConopsLauncher projectId={selectedId} onLaunched={addNode} />
               ) : (
                 <>
-                  {/* Pane 2a — Phase × Scope (WBS node tree) */}
-                  <div className="shrink-0 max-h-[40%] overflow-y-auto border-b border-neutral-800">
-                    <div className="px-3 py-1 border-b border-neutral-800/60 flex items-center justify-between">
-                      <span className="text-[10px] uppercase tracking-widest text-neutral-600">Scope</span>
-                      <span className="text-[10px] text-neutral-700">
-                        {runningAgentCount > 0 && (
-                          <span className="text-emerald-600">{runningAgentCount} running · </span>
-                        )}
-                        {nodes.filter(n => n.status === 'pending').length} pending ·{' '}
-                        {nodes.filter(n => n.status === 'complete').length} done
-                      </span>
+                  {/* Pane 2a — Phase × Scope matrix (Phase 3) or WBS tree */}
+                  {phases.length > 0 ? (
+                    <div className="shrink-0 max-h-[45%] overflow-hidden border-b border-neutral-800 flex flex-col">
+                      <div className="px-3 py-1 border-b border-neutral-800/60 flex items-center justify-between shrink-0">
+                        <span className="text-[10px] uppercase tracking-widest text-neutral-600">Phase × Scope</span>
+                        <span className="text-[10px] text-neutral-700">
+                          {runningAgentCount > 0 && (
+                            <span className="text-emerald-600">{runningAgentCount} running · </span>
+                          )}
+                          {nodes.filter(n => n.status === 'pending').length} pending ·{' '}
+                          {nodes.filter(n => n.status === 'complete').length} done
+                        </span>
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <PhaseMatrix
+                          phases={phases}
+                          nodes={nodes}
+                          edges={edges}
+                          onTaskClick={setTaskDetailNode}
+                        />
+                      </div>
                     </div>
-                    <NodeTree
-                      nodes={nodes}
-                      onHandoverOpen={setHandoverNodeId}
-                      onDebugOpen={setDebugNodeId}
-                    />
-                  </div>
+                  ) : (
+                    <div className="shrink-0 max-h-[40%] overflow-y-auto border-b border-neutral-800">
+                      <div className="px-3 py-1 border-b border-neutral-800/60 flex items-center justify-between">
+                        <span className="text-[10px] uppercase tracking-widest text-neutral-600">Scope</span>
+                        <span className="text-[10px] text-neutral-700">
+                          {runningAgentCount > 0 && (
+                            <span className="text-emerald-600">{runningAgentCount} running · </span>
+                          )}
+                          {nodes.filter(n => n.status === 'pending').length} pending ·{' '}
+                          {nodes.filter(n => n.status === 'complete').length} done
+                        </span>
+                      </div>
+                      <NodeTree
+                        nodes={nodes}
+                        onHandoverOpen={setHandoverNodeId}
+                        onDebugOpen={setDebugNodeId}
+                      />
+                    </div>
+                  )}
 
                   {/* Pane 2b — Activity feed */}
                   <div className="flex-1 overflow-hidden flex flex-col">
@@ -308,30 +354,24 @@ export default function App() {
           )}
         </main>
 
-        {/* Pane 3 — Queue + (Advisor placeholder) */}
+        {/* Pane 3 — Queue + Advisor */}
         <aside className="w-[280px] shrink-0 border-l border-neutral-800 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-hidden">
-            <QueuePanel
-              items={queueItems}
-              nodes={nodes}
-              onResolve={async (itemId, resolution) => {
-                if (!selectedId) return;
-                // Fire and forget — poe-decision-resolved event listener
-                // updates state in-place (keeping resolved items for thread history).
-                await invoke('resolve_queue_item', {
-                  itemId,
-                  projectId: selectedId,
-                  resolution,
-                });
-              }}
-            />
-          </div>
-
-          {/* Advisor placeholder (Phase 3) */}
-          <div className="shrink-0 border-t border-neutral-800 p-3">
-            <p className="text-[10px] uppercase tracking-widest text-neutral-700 mb-1">Advisor</p>
-            <p className="text-[11px] text-neutral-700">Available in Phase 3</p>
-          </div>
+          <QueuePanel
+            items={queueItems}
+            nodes={nodes}
+            projectId={selectedId ?? ''}
+            advisorTaskId={advisorTaskId}
+            onResolve={async (itemId, resolution) => {
+              if (!selectedId) return;
+              // Fire and forget — poe-decision-resolved event listener
+              // updates state in-place (keeping resolved items for thread history).
+              await invoke('resolve_queue_item', {
+                itemId,
+                projectId: selectedId,
+                resolution,
+              });
+            }}
+          />
         </aside>
 
       </div>
@@ -365,6 +405,17 @@ export default function App() {
           entries={knowledgeEntries}
           projectId={selectedId}
           onClose={() => setShowKnowledge(false)}
+        />
+      )}
+      {taskDetailNode && selectedId && (
+        <TaskDetailPanel
+          node={taskDetailNode}
+          projectId={selectedId}
+          nodes={nodes}
+          artifacts={artifacts}
+          edges={edges}
+          onClose={() => setTaskDetailNode(null)}
+          onArtifactOpen={setArtifactViewer}
         />
       )}
     </div>

@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import type { QueueItem, Node } from '../types';
+import AdvisorChatbot from './AdvisorChatbot';
 
 interface Props {
   items: QueueItem[];   // all items for the project (resolved + pending)
   nodes: Node[];
+  projectId: string;
+  advisorTaskId: string | null;
   onResolve: (itemId: string, resolution: string) => Promise<void>;
 }
 
@@ -157,7 +160,7 @@ function ThreadCard({
   );
 }
 
-export default function QueuePanel({ items, nodes, onResolve }: Props) {
+export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onResolve }: Props) {
   // Group all items by taskId to detect thread mode.
   const taskGroups = new Map<string, { resolved: QueueItem[]; pending: QueueItem[] }>();
 
@@ -195,7 +198,7 @@ export default function QueuePanel({ items, nodes, onResolve }: Props) {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-0">
         {pendingGroups.length === 0 ? (
           <div className="flex h-full items-center justify-center text-neutral-600 text-xs">
             No pending decisions
@@ -225,6 +228,14 @@ export default function QueuePanel({ items, nodes, onResolve }: Props) {
             );
           })
         )}
+      </div>
+
+      {/* Advisor sub-panel */}
+      <div className="shrink-0 border-t border-neutral-800 h-[260px] min-h-0 flex flex-col">
+        <AdvisorChatbot
+          projectId={projectId}
+          taskNodeId={advisorTaskId}
+        />
       </div>
     </div>
   );

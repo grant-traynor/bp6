@@ -149,6 +149,40 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
 | **session_id** | First write | Overwrites prior value |
 | **Failure fallback** | n/a | Falls back to SF-1 |
 
+**SF-4 continuation bundle by yield_reason**:
+
+| yield_reason | Continuation bundle content |
+|---|---|
+| `review` | One `ReviewResult` block per reviewer (Protocol.md §5) |
+| `decision` | `Human: {resolution text}` |
+| `chat` | `Human: {response text}` |
+| `advisor` | `Human: {response text}` — identical format to chat |
+
+---
+
+### SF-5: Plan Composer → Phase Activation
+
+*Trigger*: Human completes plan composition in the Plan Composer and clicks "Run".
+
+```
+1. Frontend calls invoke("create_phase", ...) for each stage node in topological order
+   → Each phase created with status='pending'
+   → Returns Phase records with assigned IDs
+
+2. Frontend calls invoke("activate_phase", {phase_id: first_phase_id})
+   → Rust: UPDATE phases SET status='running' WHERE id = first_phase_id
+   → Rust: signal Orchestrator (DagChanged)
+   → Rust: emit poe://phase-update {phase_id, status: 'running'}
+
+3. Orchestrator wakes → runs scheduler loop:
+   → finds tasks in Phase 1 with status='pending' and no unmet dependencies
+   → dispatches each via SF-1
+
+4. Plan Composer UI replaced by Phase × Scope Matrix
+```
+
+**Key invariant**: Only the first phase is activated by `activate_phase`. Subsequent phases remain `pending` until the orchestrator advances them after each stage gate (SF triggered by `advance_phase` — see §3.7). The human never calls `activate_phase` more than once per project.
+
 ---
 
 ## 3. Primary Flows
@@ -1226,6 +1260,99 @@ When the agent has sufficient context it writes the final `poe:artifact` and emi
 
 
 
+### 3.9 Advisor Session (`poe:advisor`)
+
+**What it is**: A human consults the Queue Advisor before resolving a decision. The advisor is an interactive agent dispatched via SF-1, using `poe:advisor` + `poe:yield` to converse with the human in Pane 3's advisor panel. The session uses the standard `--resume` continuation path — no separate code path, no `reqwest`.
+
+**Distinction from Collaborative Artifact Building (§3.8)**: `poe:chat` drives artifact co-authoring in the Artifact Viewer (left panel = evolving document). `poe:advisor` drives decision research in the advisor panel (Pane 3 bottom). Different surfaces, different purpose. Routing is determined at the ingester level by event type — no task-type inspection required.
+
+**Canonical use case**: An autonomous agent raises `poe:decision` — "Should I use approach A or B?" The human is unsure. They ask the advisor: "What do the architecture constraints say about this?" The advisor reads the artifact corpus and knowledge register from its context bundle and responds. The human decides and resolves the queue item.
+
+**Wire format reference**: Protocol.md §2 (`poe:advisor`, `poe:yield`). Advisor response: Protocol.md §4 "Advisor response (Frontend → Rust)".
+
+#### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant Human as Human
+    participant FE as Frontend
+    participant Orch as Orchestrator
+    participant A as Advisor Agent
+    participant Ing as Event Ingester
+    participant DB as SQLite
+
+    Note over Human,FE: Human sees pending poe:decision in queue<br/>Clicks advisor panel to start a session
+
+    FE->>Orch: invoke("start_advisor_session", {project_id, decision_id?})
+
+    Note over Orch: Assemble T+S+K bundle:<br/>- Skill: advisor.md<br/>- Task: "Research for decision: {question}"<br/>- K: full artifact corpus + knowledge register<br/>- Mode: interactive (poe:advisor protocol)
+
+    Orch->>A: SF-1: spawn stream-json -p, write bundle to stdin
+
+    A-->>Ing: {"poe":"brief","content":"..."}
+    Ing->>DB: INSERT event_log
+    Ing-->>FE: emit poe://event (activity feed)
+
+    A-->>Ing: {"poe":"advisor","content":"I've reviewed the constraints. Here's what's relevant...","id":"a1"}
+    Ing->>DB: INSERT advisor_turns (id=a1, task_id=A.id, content=...)
+    Ing-->>FE: emit poe://advisor-turn (turn_id=a1, content)
+
+    A-->>Ing: {"poe":"yield"}
+    Ing->>DB: UPDATE nodes SET status='waiting', yield_reason='advisor'
+    Ing->>Orch: DagChanged signal
+    Ing-->>FE: emit poe://task-update (status: waiting)
+
+    Note over FE: Advisor panel shows response.<br/>Human reads, types follow-up.
+
+    Human->>FE: "Can you check what the knowledge register says about this pattern?"
+    FE->>Orch: invoke("respond_to_advisor", {turn_id: "a1", response: "..."})
+
+    Orch->>DB: UPDATE advisor_turns SET response=..., responded_at=now()
+    Orch->>Orch: DagChanged signal
+
+    Note over Orch: SF-4: yield_reason='advisor'<br/>turn a1 has response → assemble continuation
+
+    Orch->>A: spawn --resume (stream-json -p), stdin: "Human: {response}"
+    A-->>Ing: {"poe":"advisor","content":"The knowledge register has an entry on this...","id":"a2"}
+    Ing->>DB: INSERT advisor_turns (id=a2, ...)
+    Ing-->>FE: emit poe://advisor-turn (turn_id=a2)
+
+    Note over A: Session continues until human is satisfied<br/>or dismisses the advisor panel
+
+    A-->>Ing: {"poe":"done","summary":"Research complete."}
+    Note over Ing,DB: SF-2: advisor task marked done<br/>Advisor panel shows session ended
+```
+
+#### Walkthrough
+
+**Starting a session**
+
+The advisor session is initiated by the human (not the orchestrator). `invoke("start_advisor_session")` creates a new task node of `type='advisor'` and dispatches it via SF-1. The T+S+K bundle uses the `advisor` skill and includes the full artifact corpus and knowledge register as context. The pending `poe:decision` question (if selected) is included in the task description.
+
+**Context assembly**
+
+Unlike autonomous tasks, the advisor context is deliberately broad — all artifacts, all knowledge register entries, plus the blocked task's full WBS ancestry and the pending decision question. The advisor is designed to synthesise across the project corpus, not work from a filtered subset.
+
+**Conversation turns**
+
+The advisor emits `poe:advisor` (not `poe:chat`) for each turn. The ingester inserts into `advisor_turns` and emits `poe://advisor-turn`. The frontend appends to the advisor panel in Pane 3. The human responds via `respond_to_advisor`. SF-4 resumes via `--resume` — identical mechanism to chat continuation.
+
+**Session end**
+
+The advisor emits `poe:done` when it has nothing more to offer or the human dismisses the panel. The task reaches `done`. The advisor panel shows a completion indicator but conversation history persists in `advisor_turns` for the session.
+
+**The advisor does not resolve queue items**: it researches and responds. The human reads the advisor's output and then resolves the `poe:decision` separately via the queue panel. These are two independent actions.
+
+#### Key Invariants
+
+1. **`poe:advisor` is for the advisor skill only**: Other skills must not emit `poe:advisor`. The routing is determined by event type — misuse would send output to the wrong surface.
+2. **Session is independent of the queue item**: An advisor session can run without a pending decision (general project questions). A decision can be resolved without using the advisor. The association is informational, not structural.
+3. **No watchdog timer**: Like chat sessions, advisor sessions are not time-bounded. The human may take time.
+4. **SF-4 is identical**: `yield_reason='advisor'` uses the same `--resume` + `Human: {text}` continuation as `yield_reason='chat'`. The only difference is which table is queried for the responded turn.
+5. **Advisor task does not block execution**: The advisor node has no dependencies and no dependents. Running an advisor session does not hold up other tasks in the phase.
+
+---
+
 ## 4. Error & Recovery Flows
 
 *To be documented.*
@@ -1244,3 +1371,5 @@ When the agent has sufficient context it writes the final `poe:artifact` and emi
 | Agent Session Handover | 3.6 | Draft |
 | Phase Closure & Stage Gate | 3.7 | Draft |
 | Collaborative Artifact Building (`poe:chat`) | 3.8 | Draft |
+| Advisor Session (`poe:advisor`) | 3.9 | Draft |
+| Plan Composer → Phase Activation | SF-5 | Draft |

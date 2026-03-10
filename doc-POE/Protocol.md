@@ -45,13 +45,14 @@ CREATE TABLE tasks (
   parent_id   TEXT    REFERENCES tasks(id),
   title       TEXT    NOT NULL,
   description TEXT,
-  type        TEXT    NOT NULL DEFAULT 'task',    -- 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review'
+  type        TEXT    NOT NULL DEFAULT 'task',    -- 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review' | 'advisor'
   skill       TEXT,
   status      TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'running' | 'waiting' | 'done' | 'cancelled'
   session_id   TEXT,        -- Claude --resume handle, stored on spawn, used on restart
-  yield_reason TEXT,        -- 'review' | 'decision' | 'chat' | NULL. Set when status=waiting. Used by recovery to determine SF-4 path without event_log join.
+  yield_reason TEXT,        -- 'review' | 'decision' | 'chat' | 'advisor' | NULL. Set when status=waiting. Used by recovery to determine SF-4 path without event_log join.
   review_id    TEXT,        -- populated for reviewer tasks only: the 'id' from the originating poe:review event. Enables ID-based completion tracking.
   retry_count  INTEGER NOT NULL DEFAULT 0,  -- reviewer tasks only: watchdog retry counter. Max configurable, default 2.
+  skill_modes  TEXT,        -- JSON array of modes declared in skill frontmatter, e.g. '["autonomous","interactive"]'. Populated at SF-1 dispatch time. Used by frontend mode guard in task detail panel.
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
@@ -89,6 +90,17 @@ CREATE TABLE chat_turns (
   created_at   TEXT    NOT NULL,
   responded_at TEXT
 );
+
+CREATE TABLE advisor_turns (
+  id           TEXT    PRIMARY KEY,
+  task_id      TEXT    NOT NULL REFERENCES tasks(id),
+  content      TEXT    NOT NULL,   -- advisor agent's message or question
+  response     TEXT,               -- null until human responds via respond_to_advisor
+  created_at   TEXT    NOT NULL,
+  responded_at TEXT
+);
+-- advisor_turns is structurally identical to chat_turns but routes to Pane 3 (advisor panel),
+-- not the Artifact Viewer. Separation keeps routing unambiguous at the ingester level.
 
 CREATE TABLE artifacts (
   id                TEXT    PRIMARY KEY,
@@ -197,15 +209,27 @@ One event per line. No multi-line JSON.
 
 // Collaborative turn — agent sends a message or question to the human during a co-authoring session.
 // For interactive agents only — routes to the Artifact Viewer chat panel, NOT the Decision Queue.
-// Agent emits poe:yield reason=chat immediately after. Orchestrator resumes via --resume once human responds.
+// Agent emits poe:yield immediately after. Orchestrator resumes via --resume once human responds.
 {"poe": "chat", "content": "...", "id": "c1"}
 // id is optional for single-turn sessions
 
+// Advisor turn — advisor agent sends a message to the human in the Pane 3 advisor panel.
+// Structurally identical to poe:chat but routes to a different surface.
+// Use poe:advisor in the advisor skill; use poe:chat in artifact-building skills.
+// Agent emits poe:yield immediately after. Orchestrator resumes via --resume once human responds.
+{"poe": "advisor", "content": "...", "id": "a1"}
+// id is optional for single-turn sessions
+
 // Yield control while awaiting an asynchronous response.
-// Emitted after poe:chat, poe:decision, or poe:review events for this checkpoint.
+// Emitted after poe:chat, poe:advisor, poe:decision, or poe:review events for this checkpoint.
 // task status → waiting. yield_reason is derived by the ingester from the last
-// substantive poe: event before this yield (poe:chat → 'chat', poe:decision → 'decision',
-// poe:review → 'review', none → NULL). The reason field on the wire was removed in Phase 2.3.
+// substantive poe: event before this yield:
+//   poe:chat     → 'chat'
+//   poe:advisor  → 'advisor'
+//   poe:decision → 'decision'
+//   poe:review   → 'review'
+//   none         → NULL
+// The reason field on the wire was removed in Phase 2.3.
 {"poe": "yield"}
 
 // Signal task completion (all work done — not a yield checkpoint).
@@ -248,6 +272,7 @@ One event per line. No multi-line JSON.
 | `poe:step` | — | yes | `poe://event` |
 | `poe:decision` | INSERT decisions | yes | `poe://decision` |
 | `poe:chat` | INSERT chat_turns | yes | `poe://chat-turn` |
+| `poe:advisor` | INSERT advisor_turns | yes | `poe://advisor-turn` |
 | `poe:review` | INSERT event_log only (yield handles status) | yes | `poe://event` |
 | `poe:yield` | UPDATE tasks.status=waiting, SET yield_reason, signal orchestrator (SF-3) | yes | `poe://task-update` + `poe://event` |
 | `poe:done` | UPDATE tasks.status=done, signal orchestrator | yes | `poe://task-update` |
@@ -474,7 +499,8 @@ All events use `app_handle.emit_all(event_name, payload)`.
 | `poe://decision` | `{decision_id, task_id, question, options}` | Add item to queue panel, increment badge |
 | `poe://decision-resolved` | `{decision_id}` | Remove item from queue panel, decrement badge |
 | `poe://chat-turn` | `{turn_id, task_id, content}` | Display agent message in Artifact Viewer chat panel |
-| `poe://task-update` | `{task_id, status, title?, updated_at}` | Update task status in Phase × Scope matrix and project card |
+| `poe://advisor-turn` | `{turn_id, task_id, content}` | Display advisor message in Pane 3 advisor panel |
+| `poe://task-update` | `{task_id, status, skill_modes?, title?, updated_at}` | Update task status in Phase × Scope matrix and project card |
 | `poe://phase-update` | `{phase_id, status}` | Update phase lifecycle state in Phase × Scope Matrix header |
 | `poe://stage-update` | `{phase_id, status}` | Update stage pause/resume state in Phase × Scope Matrix |
 | `poe://project-update` | `{project_id, status}` | Update project card status in Projects Overview |
@@ -509,6 +535,51 @@ Rust handler:
 3. Emits `poe://chat-responded {turn_id}` (frontend scrolls, awaits next agent turn).
 
 The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='chat'`, confirms the turn has a response, and triggers SF-4. The continuation bundle is `Human: {response text}` — identical format to decision resolution. See Flows.md §3.8.
+
+### Advisor response (Frontend → Rust)
+
+Human submits a response in the Pane 3 advisor panel:
+
+```
+invoke("respond_to_advisor", {project_id, turn_id, response: "..."})
+```
+
+Rust handler:
+1. Updates `advisor_turns.response` and `responded_at` in SQLite.
+2. Signals the orchestrator (`DagChanged`).
+3. Emits `poe://advisor-responded {turn_id}` (frontend scrolls, awaits next advisor turn).
+
+The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_reason='advisor'`, confirms the turn has a response, and triggers SF-4. The continuation bundle is `Human: {response text}` — identical format to chat and decision resolution. See Flows.md §3.9.
+
+### Plan Composer — Phase activation (Frontend → Rust)
+
+After composing a plan in the Plan Composer and clicking "Run":
+
+```
+// Step 1: create all phase records (called once per stage node, in topological order)
+invoke("create_phase", {project_id, name, stage_type, number})
+// → Returns Phase. All phases created with status='pending'.
+
+// Step 2: activate the first phase (triggers orchestrator to begin execution)
+invoke("activate_phase", {phase_id: first_phase_id})
+```
+
+`activate_phase` Rust handler:
+1. `UPDATE phases SET status='running' WHERE id = phase_id`.
+2. Signals the orchestrator (`DagChanged`).
+3. Emits `poe://phase-update {phase_id, status: 'running'}`.
+
+The orchestrator wakes, finds pending tasks in the now-active phase with no unmet dependencies, and dispatches via SF-1. See Flows.md SF-5.
+
+### User-level knowledge promotion
+
+`promote_knowledge(id: String)` Rust handler:
+1. Reads the knowledge entry from SQLite by id.
+2. Writes `~/.poe/knowledge/{key}.md` — one file per entry, content is the raw `content` field.
+3. Logs the promotion action to `event_log` with `event_type = 'knowledge:promoted'`.
+4. Sets a `promoted = 1` flag on the knowledge row (already stubbed).
+
+**Bundle assembly merge**: at T+S+K assembly time, the orchestrator merges user-level knowledge from `~/.poe/knowledge/*.md` with the project's SQLite knowledge entries. Project-level entries take precedence on key collision (same `key` filename stem). User-level entries are injected as additional `## {key}` sections in the `# Knowledge Register` block, after project entries.
 
 ---
 
