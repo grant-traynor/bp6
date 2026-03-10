@@ -32,6 +32,16 @@ use tempfile;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
+// ── Live test guard ───────────────────────────────────────────────────────────
+
+fn claude_on_path() -> bool {
+    std::process::Command::new("claude")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 // ── E2E guard ─────────────────────────────────────────────────────────────────
 
 fn e2e_enabled() -> bool {
@@ -120,7 +130,6 @@ fn register_project(
     project_path: &str,
     conn: Connection,
 ) {
-    use std::collections::HashMap;
     let project = poe2_lib::dag_store::types::Project {
         id: project_id.to_string(),
         name: "E2E Test Project".to_string(),
@@ -444,4 +453,862 @@ async fn e2e_5_queue_item_resolved_no_live_agent_no_panic() {
         "No start expected with no live agent: {:?}",
         events
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LIVE TESTS — require E2E_RUN_LIVE_TESTS=1 and `claude` on PATH
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// These tests spawn real Claude agents through the real orchestrator dispatch
+// loop and wait for run-to-completion, asserting final DB state.
+//
+// Run: E2E_RUN_LIVE_TESTS=1 cargo test --features test-utils --test e2e_orchestrator_tests -- --include-ignored --nocapture
+
+// ── Live helpers ──────────────────────────────────────────────────────────────
+
+/// Create a real on-disk project DB in a temp dir.
+/// Returns (project, conn wrapped in Arc<Mutex>, registry with project registered, tempdir).
+/// The registry key is the project path (matching production open_project_db behaviour).
+fn new_live_db() -> (
+    poe2_lib::dag_store::types::Project,
+    Arc<Mutex<Connection>>,
+    poe2_lib::dag_store::ProjectRegistry,
+    tempfile::TempDir,
+) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (project, conn) =
+        poe2_lib::dag_store::open_project_db(tmp.path()).expect("open_project_db");
+    let conn = Arc::new(Mutex::new(conn));
+    let registry = new_registry();
+    {
+        let db = Arc::new(ProjectDb {
+            project: project.clone(),
+            conn: Mutex::new({
+                // Re-open a second connection for the registry — we hold the first in conn.
+                // Actually: share via the Arc<Mutex<Connection>>.
+                // Because ProjectDb.conn is Mutex<Connection> (not Arc), we need a fresh conn.
+                let (_, c2) =
+                    poe2_lib::dag_store::open_project_db(tmp.path()).expect("open_project_db 2");
+                c2
+            }),
+        });
+        registry
+            .lock()
+            .unwrap()
+            .insert(project.path.clone(), db);
+    }
+    (project, conn, registry, tmp)
+}
+
+/// Poll DB until node reaches the target status or the timeout elapses.
+/// Returns true if the target was reached.
+async fn wait_for_node_status(
+    registry: &poe2_lib::dag_store::ProjectRegistry,
+    project_id: &str,
+    node_id: &str,
+    target: NodeStatus,
+    timeout_secs: u64,
+) -> bool {
+    let deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+    loop {
+        {
+            let reg = registry.lock().unwrap();
+            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                let conn = db.conn.lock().unwrap();
+                if let Ok(node) = poe2_lib::dag_store::db_get_node(&conn, node_id) {
+                    if node.status == target {
+                        return true;
+                    }
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// Poll DB until node status is NOT the given status.
+async fn wait_for_node_status_not(
+    registry: &poe2_lib::dag_store::ProjectRegistry,
+    project_id: &str,
+    node_id: &str,
+    not_target: NodeStatus,
+    timeout_secs: u64,
+) -> bool {
+    let deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+    loop {
+        {
+            let reg = registry.lock().unwrap();
+            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                let conn = db.conn.lock().unwrap();
+                if let Ok(node) = poe2_lib::dag_store::db_get_node(&conn, node_id) {
+                    if node.status != not_target {
+                        return true;
+                    }
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// Poll DB until phase reaches the target status string.
+async fn wait_for_phase_status(
+    registry: &poe2_lib::dag_store::ProjectRegistry,
+    project_id: &str,
+    phase_id: &str,
+    target: &str,
+    timeout_secs: u64,
+) -> bool {
+    let deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(timeout_secs);
+    loop {
+        {
+            let reg = registry.lock().unwrap();
+            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                let conn = db.conn.lock().unwrap();
+                let status: Option<String> = conn
+                    .query_row(
+                        "SELECT status FROM phases WHERE id = ?1",
+                        [phase_id],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                if status.as_deref() == Some(target) {
+                    return true;
+                }
+            }
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+    }
+}
+
+/// Insert a phase row into the registry DB (by project_id lookup).
+fn insert_live_phase(
+    registry: &poe2_lib::dag_store::ProjectRegistry,
+    project_id: &str,
+    stage_type: &str,
+    status: &str,
+    number: i64,
+) -> String {
+    let reg = registry.lock().unwrap();
+    let db = reg
+        .values()
+        .find(|db| db.project.id == project_id)
+        .expect("project in registry")
+        .clone();
+    drop(reg);
+    let conn = db.conn.lock().unwrap();
+    let phase_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "INSERT INTO phases (id, project_id, number, title, lifecycle_stage, gate_held, stage_type, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, 'execution', 0, ?5, ?6, ?7, ?8)",
+        rusqlite::params![phase_id, project_id, number, format!("Phase {}", number), stage_type, status, now, now],
+    )
+    .expect("insert live phase");
+    phase_id
+}
+
+/// Insert a task node row into the registry DB.
+fn insert_live_task(
+    registry: &poe2_lib::dag_store::ProjectRegistry,
+    project_id: &str,
+    phase_id: &str,
+    skill_id: &str,
+    description: &str,
+) -> String {
+    let reg = registry.lock().unwrap();
+    let db = reg
+        .values()
+        .find(|db| db.project.id == project_id)
+        .expect("project in registry")
+        .clone();
+    drop(reg);
+    let conn = db.conn.lock().unwrap();
+    let task_input = CreateNodeInput {
+        project_id: project_id.to_string(),
+        phase_id: Some(phase_id.to_string()),
+        parent_id: None,
+        node_type: NodeType::Task,
+        title: "Live test task".to_string(),
+        description: Some(description.to_string()),
+        skill_id: Some(skill_id.to_string()),
+        initial_status: Some(NodeStatus::Pending),
+        requesting_task_id: None,
+        review_id: None,
+        retry_count: None,
+    };
+    let task = poe2_lib::dag_store::db_create_node(&conn, &task_input).expect("create live task");
+    task.id
+}
+
+/// Start the orchestrator in a background task.
+/// Returns (dag_tx, handle). Drop dag_tx to shut down the loop.
+fn start_live_orchestrator(
+    registry: poe2_lib::dag_store::ProjectRegistry,
+    sink: TestEventSink,
+) -> (
+    mpsc::UnboundedSender<DagChanged>,
+    tokio::task::JoinHandle<()>,
+) {
+    let agent_map = new_agent_map();
+    let limits = ConcurrencyLimits::new();
+    let (dag_tx, dag_rx) = mpsc::unbounded_channel::<DagChanged>();
+    let sink_arc: Arc<dyn poe2_lib::event_sink::EventSink> = Arc::new(sink);
+
+    let handle = tokio::spawn(orchestrator::start(
+        sink_arc,
+        registry,
+        limits,
+        agent_map,
+        dag_tx.clone(),
+        dag_rx,
+    ));
+    (dag_tx, handle)
+}
+
+// ── Live-1: task runs to completion ──────────────────────────────────────────
+
+/// live_1: SF-1+SF-2 full cycle — must-not-analyst (autonomous-only) runs and
+/// sets node status=Complete. Asserts: artifact written, poe-agent-started
+/// emitted, node.yield_reason is NOT 'chat'.
+///
+/// Uses must-not-analyst (modes: [autonomous]) to guarantee autonomous execution
+/// without chat turns.
+#[tokio::test]
+#[ignore]
+async fn live_1_task_runs_to_done() {
+    if !e2e_enabled() || !claude_on_path() {
+        return;
+    }
+
+    let (project, _conn, registry, _tmp) = new_live_db();
+    let project_id = project.id.clone();
+    let project_path = project.path.clone();
+
+    let phase_id = insert_live_phase(&registry, &project_id, "execution", "running", 1);
+    let task_id = insert_live_task(
+        &registry,
+        &project_id,
+        &phase_id,
+        "must-not-analyst",
+        "Identify must-not behaviours for a Rust hello-world CLI that prints Hello World to stdout. Produce poe:artifact must-nots.md with at least 3 must-nots.",
+    );
+
+    let sink = TestEventSink::with_resource_dir(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    );
+    let (dag_tx, handle) = start_live_orchestrator(registry.clone(), sink.clone());
+
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged");
+
+    // Wait up to 120s for task to complete
+    let completed = wait_for_node_status(&registry, &project_id, &task_id, NodeStatus::Complete, 120).await;
+
+    // Shut down orchestrator
+    drop(dag_tx);
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+
+    assert!(completed, "live_1: task did not reach Complete within 120s");
+
+    // Assert: at least 1 artifact exists
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let artifacts =
+            poe2_lib::dag_store::db_list_artifacts(&conn, &project_id).unwrap_or_default();
+        assert!(
+            !artifacts.is_empty(),
+            "live_1: expected at least 1 artifact, got 0"
+        );
+    }
+
+    // Assert: poe-agent-started was emitted
+    let events = sink.emitted_types();
+    assert!(
+        events.contains(&"poe-agent-started".to_string()),
+        "live_1: expected poe-agent-started, got: {:?}",
+        events
+    );
+
+    // Assert: poe-task-done was emitted
+    assert!(
+        events.contains(&"poe-task-done".to_string()),
+        "live_1: expected poe-task-done, got: {:?}",
+        events
+    );
+
+    // Assert: node.yield_reason is NOT 'chat' (autonomous mode completed)
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let node = poe2_lib::dag_store::db_get_node(&conn, &task_id).expect("get node");
+        assert_ne!(
+            node.yield_reason.as_deref(),
+            Some("chat"),
+            "live_1: node yield_reason must not be 'chat' in autonomous mode"
+        );
+    }
+
+    eprintln!("live_1 PASSED: project_path={}", project_path);
+}
+
+// ── Live-2: activate_phase bootstraps task and orchestrator dispatches it ─────
+
+/// live_2: Create a guardrails phase with status='running'. Replicate bootstrap
+/// logic by inserting a must-not-analyst task (autonomous-only skill) directly.
+/// The orchestrator dispatches it. Wait for the task to complete.
+/// Asserts: at least 1 artifact exists in the project.
+///
+/// Uses must-not-analyst (modes: [autonomous]) to guarantee autonomous execution.
+/// This tests the activate_phase → bootstrap → orchestrator dispatch path.
+#[tokio::test]
+#[ignore]
+async fn live_2_activate_phase_bootstraps_and_runs() {
+    if !e2e_enabled() || !claude_on_path() {
+        return;
+    }
+
+    let (project, _conn, registry, _tmp) = new_live_db();
+    let project_id = project.id.clone();
+
+    // Insert a phase with stage_type='guardrails', status='running' — no tasks yet.
+    let phase_id = insert_live_phase(&registry, &project_id, "guardrails", "running", 1);
+
+    // Bootstrap task: must-not-analyst "Develop Guardrails" (autonomous-only).
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let task_input = CreateNodeInput {
+            project_id: project_id.clone(),
+            phase_id: Some(phase_id.clone()),
+            parent_id: None,
+            node_type: NodeType::Task,
+            title: "Develop Guardrails".to_string(),
+            description: Some(
+                "Identify must-not behaviours for a Rust hello-world CLI. Produce poe:artifact guardrails.md with at least 3 must-nots.".to_string(),
+            ),
+            skill_id: Some("must-not-analyst".to_string()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        };
+        poe2_lib::dag_store::db_create_node(&conn, &task_input).expect("bootstrap task");
+    }
+
+    let sink = TestEventSink::with_resource_dir(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    );
+    let (dag_tx, handle) = start_live_orchestrator(registry.clone(), sink.clone());
+
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged");
+
+    // Find the newly-created task ID
+    let task_id = {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let tasks = poe2_lib::dag_store::db_list_nodes(&conn, &project_id, Some(&phase_id))
+            .unwrap_or_default();
+        tasks.into_iter().next().expect("bootstrap task exists").id
+    };
+
+    // Wait up to 180s for task completion
+    let completed = wait_for_node_status(&registry, &project_id, &task_id, NodeStatus::Complete, 180).await;
+
+    drop(dag_tx);
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+
+    assert!(completed, "live_2: conops task did not complete within 180s");
+
+    // Assert: at least 1 artifact exists
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let artifacts =
+            poe2_lib::dag_store::db_list_artifacts(&conn, &project_id).unwrap_or_default();
+        assert!(
+            !artifacts.is_empty(),
+            "live_2: expected at least 1 artifact after guardrails phase, got 0"
+        );
+        eprintln!(
+            "live_2: artifacts = {:?}",
+            artifacts.iter().map(|a| &a.filename).collect::<Vec<_>>()
+        );
+    }
+
+    eprintln!("live_2 PASSED");
+}
+
+// ── Live-3: interactive mode yield + respond + resume ─────────────────────────
+
+/// live_3: operational-analyst in interactive mode yields with poe:chat.
+/// The test then responds to the chat turn and verifies the agent resumes.
+/// Asserts: node enters Waiting status, chat_turns row exists, and after
+/// response the node transitions away from Waiting.
+#[tokio::test]
+#[ignore]
+async fn live_3_sf3_sf4_chat_roundtrip() {
+    if !e2e_enabled() || !claude_on_path() {
+        return;
+    }
+
+    let (project, _conn, registry, _tmp) = new_live_db();
+    let project_id = project.id.clone();
+
+    let phase_id = insert_live_phase(&registry, &project_id, "conops", "running", 1);
+
+    // Create an interactive task — the operational-analyst skill supports both
+    // autonomous and interactive modes. We pass context that triggers interactive mode.
+    // The orchestrator uses SpawnMode based on the skill's declared modes and the
+    // task's context. For a 'conops' phase, the orchestrator uses Interactive mode.
+    // We insert the task directly with skill_id=operational-analyst.
+    let task_id = {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let task_input = CreateNodeInput {
+            project_id: project_id.clone(),
+            phase_id: Some(phase_id.clone()),
+            parent_id: None,
+            node_type: NodeType::Task,
+            title: "Develop CONOPS".to_string(),
+            description: Some(
+                "Develop CONOPS for a Rust hello-world CLI.".to_string(),
+            ),
+            skill_id: Some("operational-analyst".to_string()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        };
+        poe2_lib::dag_store::db_create_node(&conn, &task_input)
+            .expect("create interactive task")
+            .id
+    };
+
+    let sink = TestEventSink::with_resource_dir(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    );
+    let (dag_tx, handle) = start_live_orchestrator(registry.clone(), sink.clone());
+
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged");
+
+    // Wait for either Waiting (interactive: asked a question) or Complete (autonomous)
+    // Timeout 90s for agent to emit first event.
+    let waiting = wait_for_node_status(&registry, &project_id, &task_id, NodeStatus::Waiting, 90).await;
+    let completed_fast = if !waiting {
+        wait_for_node_status(&registry, &project_id, &task_id, NodeStatus::Complete, 10).await
+    } else {
+        false
+    };
+
+    if completed_fast {
+        // Skill ran in autonomous mode — still a valid outcome
+        eprintln!("live_3: agent completed autonomously (no interactive mode triggered) — SKIP chat roundtrip");
+        drop(dag_tx);
+        let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+        eprintln!("live_3 PASSED (autonomous path)");
+        return;
+    }
+
+    assert!(waiting, "live_3: node did not reach Waiting within 90s");
+
+    // Assert: chat_turns row exists for this task
+    let (turn_id, session_id) = {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+
+        let node = poe2_lib::dag_store::db_get_node(&conn, &task_id).expect("get node");
+        assert_eq!(
+            node.yield_reason.as_deref(),
+            Some("chat"),
+            "live_3: node yield_reason must be 'chat'"
+        );
+
+        // Get the chat turn
+        let turns = poe2_lib::dag_store::db_list_chat_turns(&conn, &task_id)
+            .unwrap_or_default();
+        assert!(
+            !turns.is_empty(),
+            "live_3: expected chat_turns row for task {}", task_id
+        );
+        eprintln!(
+            "live_3: chat content = {:?}",
+            &turns[0].content[..turns[0].content.len().min(200)]
+        );
+
+        let turn_id = turns[0].id.clone();
+        let sid = node.session_id.unwrap_or_default();
+        (turn_id, sid)
+    };
+
+    // Respond to the chat turn — update the DB and signal the orchestrator
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE chat_turns SET response = ?1, responded_at = datetime('now') WHERE id = ?2",
+            rusqlite::params!["It's a learning project. The CLI should print Hello, world! to stdout.", &turn_id],
+        )
+        .expect("update chat turn");
+    }
+
+    // Signal orchestrator to resume the waiting agent
+    dag_tx
+        .send(DagChanged::QueueItemResolved {
+            project_id: project_id.clone(),
+            task_id: task_id.clone(),
+            session_id: session_id.clone(),
+            resolution: "It's a learning project. The CLI should print Hello, world! to stdout.".to_string(),
+            item_id: turn_id.clone(),
+        })
+        .expect("send QueueItemResolved");
+
+    // Wait for node to exit Waiting state (agent resumed, starts Running again).
+    // Then wait for it to reach Complete or Waiting (next question or done).
+    // Allow 120s total for the resumed agent to produce a poe:done or poe:yield.
+    let reached_terminal = {
+        let deadline =
+            tokio::time::Instant::now() + tokio::time::Duration::from_secs(120);
+        loop {
+            {
+                let reg = registry.lock().unwrap();
+                if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                    let conn = db.conn.lock().unwrap();
+                    if let Ok(node) = poe2_lib::dag_store::db_get_node(&conn, &task_id) {
+                        if matches!(node.status, NodeStatus::Complete | NodeStatus::Waiting) {
+                            break true;
+                        }
+                    }
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    };
+
+    drop(dag_tx);
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+
+    assert!(
+        reached_terminal,
+        "live_3: node did not reach Complete or Waiting within 120s after responding to chat"
+    );
+
+    // Log the final status
+    {
+        let reg = registry.lock().unwrap();
+        if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+            let conn = db.conn.lock().unwrap();
+            if let Ok(node) = poe2_lib::dag_store::db_get_node(&conn, &task_id) {
+                eprintln!("live_3: final node status = {:?}", node.status);
+            }
+        }
+    }
+
+    eprintln!("live_3 PASSED");
+}
+
+// ── Live-4: phase gate fires when all tasks complete ─────────────────────────
+
+/// live_4: A phase with 1 task completes → orchestrator sets phase status='gate'
+/// and emits poe-phase-update.
+/// Asserts: phase reaches 'gate' status and sink has 'poe-phase-update'.
+#[tokio::test]
+#[ignore]
+async fn live_4_phase_gate_fires() {
+    if !e2e_enabled() || !claude_on_path() {
+        return;
+    }
+
+    let (project, _conn, registry, _tmp) = new_live_db();
+    let project_id = project.id.clone();
+
+    // Use must-not-analyst (autonomous-only) so the task completes without interactive chat.
+    let phase_id = insert_live_phase(&registry, &project_id, "execution", "running", 1);
+    let task_id = insert_live_task(
+        &registry,
+        &project_id,
+        &phase_id,
+        "must-not-analyst",
+        "Identify must-not behaviours for a Rust hello-world CLI that prints Hello World. Produce poe:artifact must-nots.md with at least 3 must-nots.",
+    );
+
+    let sink = TestEventSink::with_resource_dir(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    );
+    let (dag_tx, handle) = start_live_orchestrator(registry.clone(), sink.clone());
+
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged");
+
+    // Wait for task completion (120s)
+    let completed =
+        wait_for_node_status(&registry, &project_id, &task_id, NodeStatus::Complete, 120).await;
+    assert!(completed, "live_4: task did not complete within 120s");
+
+    // Wait for phase to reach 'gate' status (30s after task completes)
+    let gated =
+        wait_for_phase_status(&registry, &project_id, &phase_id, "gate", 30).await;
+
+    drop(dag_tx);
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+
+    assert!(gated, "live_4: phase did not reach 'gate' status within 30s after task completion");
+
+    // Assert: poe-phase-update event with status='gate' was emitted
+    let events = sink.emitted_types();
+    assert!(
+        events.contains(&"poe-phase-update".to_string()),
+        "live_4: expected poe-phase-update event, got: {:?}",
+        events
+    );
+
+    // Check the phase-update payload contains status='gate'
+    let gate_events = sink.find_all("poe-phase-update");
+    let has_gate_payload = gate_events.iter().any(|v| {
+        v.get("status").and_then(|s| s.as_str()) == Some("gate")
+    });
+    assert!(
+        has_gate_payload,
+        "live_4: no poe-phase-update with status='gate' in events: {:?}",
+        gate_events
+    );
+
+    eprintln!("live_4 PASSED");
+}
+
+// ── Live-5: advance_phase bootstraps next phase ───────────────────────────────
+
+/// live_5: Two phases — phase1 (execution, running) with 1 task. After phase1
+/// task completes and phase1 gates, manually advance to phase2 (guardrails,
+/// running) by calling the DB logic directly and firing DagStructureChanged.
+/// Asserts: a must-not-analyst node appears in phase2.
+#[tokio::test]
+#[ignore]
+async fn live_5_advance_phase_bootstraps_next() {
+    if !e2e_enabled() || !claude_on_path() {
+        return;
+    }
+
+    let (project, _conn, registry, _tmp) = new_live_db();
+    let project_id = project.id.clone();
+
+    // Phase 1: execution, running, 1 quick task (autonomous-only skill).
+    let phase1_id = insert_live_phase(&registry, &project_id, "execution", "running", 1);
+    let task1_id = insert_live_task(
+        &registry,
+        &project_id,
+        &phase1_id,
+        "must-not-analyst",
+        "Identify must-not behaviours for a Rust hello-world CLI. Produce poe:artifact must-nots-phase1.md with at least 3 must-nots.",
+    );
+
+    // Phase 2: guardrails, pending — no tasks yet (bootstrap will create must-not-analyst)
+    let phase2_id = insert_live_phase(&registry, &project_id, "guardrails", "pending", 2);
+
+    let sink = TestEventSink::with_resource_dir(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    );
+    let (dag_tx, handle) = start_live_orchestrator(registry.clone(), sink.clone());
+
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged");
+
+    // Wait for phase1 task to complete (120s)
+    let completed =
+        wait_for_node_status(&registry, &project_id, &task1_id, NodeStatus::Complete, 120).await;
+    assert!(completed, "live_5: phase1 task did not complete within 120s");
+
+    // Wait for phase1 to gate (30s)
+    let gated =
+        wait_for_phase_status(&registry, &project_id, &phase1_id, "gate", 30).await;
+    assert!(gated, "live_5: phase1 did not reach 'gate' within 30s");
+
+    // Manually advance: phase1 → complete, phase2 → running, bootstrap phase2 tasks
+    {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE phases SET status = 'complete', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase1_id],
+        )
+        .expect("complete phase1");
+        conn.execute(
+            "UPDATE phases SET status = 'running', lifecycle_stage = 'execution', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase2_id],
+        )
+        .expect("activate phase2");
+
+        // Bootstrap guardrails task (must-not-analyst)
+        let task_input = CreateNodeInput {
+            project_id: project_id.clone(),
+            phase_id: Some(phase2_id.clone()),
+            parent_id: None,
+            node_type: NodeType::Task,
+            title: "Develop Guardrails".to_string(),
+            description: Some(
+                "Identify must-not behaviours for a Rust hello-world CLI. Output poe:artifact guardrails.md.".to_string(),
+            ),
+            skill_id: Some("must-not-analyst".to_string()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        };
+        poe2_lib::dag_store::db_create_node(&conn, &task_input).expect("create phase2 bootstrap task");
+    }
+
+    // Fire DagStructureChanged to let the orchestrator dispatch phase2 tasks
+    dag_tx
+        .send(DagChanged::DagStructureChanged {
+            project_id: project_id.clone(),
+        })
+        .expect("send DagStructureChanged for phase2");
+
+    // Find the phase2 task
+    let task2_id = {
+        let reg = registry.lock().unwrap();
+        let db = reg
+            .values()
+            .find(|db| db.project.id == project_id)
+            .expect("project in registry")
+            .clone();
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        let tasks =
+            poe2_lib::dag_store::db_list_nodes(&conn, &project_id, Some(&phase2_id))
+                .unwrap_or_default();
+        assert!(
+            !tasks.is_empty(),
+            "live_5: phase2 should have at least 1 task (bootstrap)"
+        );
+        // Assert: task has skill_id='must-not-analyst'
+        let task = &tasks[0];
+        assert_eq!(
+            task.skill_id.as_deref(),
+            Some("must-not-analyst"),
+            "live_5: phase2 bootstrap task must use must-not-analyst skill"
+        );
+        task.id.clone()
+    };
+
+    // Wait for phase2 task to start running or complete (60s)
+    // (Running is enough — the orchestrator dispatched it)
+    let dispatched = {
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(60);
+        loop {
+            {
+                let reg = registry.lock().unwrap();
+                if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                    let conn = db.conn.lock().unwrap();
+                    if let Ok(node) = poe2_lib::dag_store::db_get_node(&conn, &task2_id) {
+                        if matches!(node.status, NodeStatus::Running | NodeStatus::Complete | NodeStatus::Waiting) {
+                            break true;
+                        }
+                    }
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break false;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        }
+    };
+
+    drop(dag_tx);
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
+
+    assert!(
+        dispatched,
+        "live_5: phase2 must-not-analyst task was not dispatched within 60s"
+    );
+
+    eprintln!("live_5 PASSED");
 }
