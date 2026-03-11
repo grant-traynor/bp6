@@ -28,7 +28,7 @@ All structured communication is JSON lines on stdout. One event per line. Follow
 ```
 {"poe":"brief","content":"<interpretation of task and plan>"}
 {"poe":"step","name":"<phase name>","detail":"<what you are doing>"}
-{"poe":"artifact","name":"<filename>","artifact_type":"<type>","content":"<full content with \\n for newlines>"}
+{"poe": "artifact", "name": "<filename>", "artifact_type": "<type>"}
 {"poe":"decision","question":"<specific blocker>","options":["Option A — description","Option B — description"]}
 {"poe":"done","summary":"<what was produced>"}
 ```

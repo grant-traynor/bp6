@@ -88,7 +88,7 @@ Emit these events in order:
 
 **3. Artifact** — after writing the document. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
-{"poe": "artifact", "name": "must-nots.md", "artifact_type": "must-nots", "content": "# Must-Nots\n\n## Overview\n\n..."}
+{"poe": "artifact", "name": "must-nots.md", "artifact_type": "must-nots"}
 ```
 
 **4. Done** — final event, always last:

@@ -45,7 +45,7 @@ Before reviewing, read the following sections of your bundle in order:
 **Artifact naming convention (CRITICAL)**: You MUST emit your review artifact as:
 
 ```json
-{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review","content":"..."}
+{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review"}
 ```
 
 Where `{review_id}` is the `**Review ID**` from the `## Review Request` section. The orchestrator derives the artifact path `docs/review-{review_id}.md` directly from this ID — no table query. If the name does not match, result delivery to the requesting agent will fail.
@@ -153,10 +153,10 @@ Give a call. Do not hedge. If a finding is a blocker, say BLOCKED. If it is a wa
 Emit the review artifact with `name: review-{review_id}.md` where `{review_id}` matches the Review ID from the bundle:
 
 ```json
-{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review","content":"# Plan Review — {requesting-task-title}\n\n**Review ID**: {review_id}\n**Verdict**: APPROVED | APPROVED_WITH_CONDITIONS | BLOCKED\n\n## Summary\n\nOne paragraph summary of findings.\n\n## Findings\n\n### [PASS] Finding title\n\nDetail.\n\n### [WARN] Finding title\n\nDetail. Specific and actionable.\n\n### [BLOCK] Finding title\n\nDetail. Specific and actionable. Reference the task ID and the exact fix required.\n\n## Verdict Rationale\n\nWhy this verdict. One paragraph."}
+{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review"}
 ```
 
-**Review artifact structure** (embed in the `content` field, newlines as `\n`):
+**Review artifact structure** (write to `docs/review-{review_id}.md` before emitting the event):
 
 ```markdown
 # Plan Review — {requesting-task-title}
@@ -225,7 +225,7 @@ Emit in this order:
 {"poe":"step","name":"dependency-completeness","detail":"..."}
 {"poe":"step","name":"skill-assignments","detail":"..."}
 {"poe":"step","name":"coverage","detail":"..."}
-{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review","content":"...full review document..."}
+{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review"}
 {"poe":"done","summary":"Review complete. Verdict: {APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED}. {One sentence on key finding.}"}
 ```
 

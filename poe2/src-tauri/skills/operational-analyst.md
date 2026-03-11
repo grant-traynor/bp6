@@ -60,7 +60,7 @@ _(Orchestrator resumes the run with `Human: {response}` appended. You then updat
 
 **Step 2b — Resume round (after human answers):**
 ```
-{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "# Concept of Operations\n\n[draft updated with answer]\n..."}
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 {"poe": "chat", "content": "Thanks — that helps. Next question: who are the primary users?", "id": "c2"}
 {"poe": "yield"}
 ```
@@ -68,12 +68,12 @@ Do NOT write any text before or between these events. The human only sees what i
 
 **Step 3 — After each answer, update the draft artifact:**
 ```
-{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "# Concept of Operations\n\n## Executive Summary\n\n[draft in progress — updating after each answer]\n\n..."}
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 ```
 
 **Step 4 — Final round: write the complete CONOPS and close:**
 ```
-{"poe": "artifact", "name": "conops.md", "content": "# Concept of Operations\n\n## Executive Summary\n\n...[full document]..."}
+{"poe": "artifact", "name": "conops.md", "artifact_type": "<type>"}
 {"poe": "done", "summary": "CONOPS document complete: conops.md"}
 ```
 
@@ -94,7 +94,7 @@ No interactive mode protocol block was present. Write the CONOPS immediately fro
 {"poe": "brief", "content": "Analysing project brief to produce CONOPS document."}
 {"poe": "step", "name": "Reading project brief", "detail": "Extracting system purpose, users, workflows, and constraints."}
 {"poe": "step", "name": "Writing CONOPS", "detail": "Synthesising gathered information into Concept of Operations document."}
-{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "# Concept of Operations\n\n..."}
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 {"poe": "done", "summary": "CONOPS document produced covering system purpose, N user personas, N core workflows, and N open questions."}
 ```
 

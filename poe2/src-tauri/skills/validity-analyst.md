@@ -92,7 +92,7 @@ Emit these events in order:
 
 **3. Artifact** — after writing the report. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
-{"poe": "artifact", "name": "phase-N-validity.md", "artifact_type": "validity", "content": "# Phase N Validity Report\n\n## Executive Summary\n\n**Verdict**: PASSED | PASSED WITH GAPS | FAILED\n\n..."}
+{"poe": "artifact", "name": "phase-N-validity.md", "artifact_type": "validity"}
 ```
 
 **4. Done** — final event, always last:

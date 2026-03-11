@@ -69,7 +69,8 @@ struct PoeArtifact {
     name: String,
     #[serde(default = "default_artifact_type")]
     artifact_type: String,
-    content: String,
+    // content field intentionally absent — agents write files directly using their own tools
+    // (Write/Edit/Bash). If old agents send content it is silently dropped by serde.
 }
 
 fn default_artifact_type() -> String {
@@ -193,7 +194,7 @@ pub fn ingest_line_with_tracker(
         "task:cancel" => handle_task_cancel(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
         "edge" => handle_edge(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
         "edge:remove" => handle_edge_remove(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink),
-        "artifact" => handle_artifact(trimmed, project_id, task_id, agent_id, registry, sink, project_path),
+        "artifact" => handle_artifact(trimmed, project_id, task_id, agent_id, registry, sink),
         "skill" => handle_skill(trimmed, project_id, task_id, agent_id, registry, sink, project_path),
         "knowledge" => handle_knowledge(trimmed, project_id, task_id, agent_id, registry, sink),
         "brief" => handle_log_only("poe:brief", trimmed, project_id, task_id, agent_id, registry, sink),
@@ -397,16 +398,11 @@ fn handle_artifact(
     agent_id: &str,
     registry: &ProjectRegistry,
     sink: &dyn EventSink,
-    project_path: &Path,
 ) -> Result<Option<DagChanged>> {
     let payload: PoeArtifact = serde_json::from_str(json)?;
 
-    // Write content to {project}/docs/<name>
-    let docs_dir = project_path.join("docs");
-    std::fs::create_dir_all(&docs_dir)?;
-    let artifact_path = docs_dir.join(&payload.name);
-    std::fs::write(&artifact_path, &payload.content)
-        .map_err(|e| anyhow::anyhow!("Failed to write artifact {:?}: {}", artifact_path, e))?;
+    // Agent has already written the file to {project}/docs/<name> using its own tools.
+    // The orchestrator only indexes the path — it does not write file content.
 
     let input = CreateArtifactInput {
         project_id: project_id.to_string(),
@@ -1006,12 +1002,13 @@ mod tests {
     #[test]
     fn full_stack_poe_json_split_across_chunks() {
         // JSON object arrives fragmented across multiple text deltas.
+        // Note: no content field — agents write files directly using their own tools.
         use crate::agent::text_extractor::TextBufExtractor;
         let mut ex = TextBufExtractor::new();
         let chunks = [
             "{\"poe\":\"artifact\",",
             "\"name\":\"out.md\",",
-            "\"artifact_type\":\"doc\",\"content\":\"hello\"}",
+            "\"artifact_type\":\"doc\"}",
             "\n",
         ];
         let events: Vec<String> = chunks
@@ -1040,6 +1037,45 @@ mod tests {
             .filter_map(|line| parse_poe_event(&line).map(|(t, _)| t))
             .collect();
         assert_eq!(events, vec!["brief", "done"]);
+    }
+
+    /// poe:artifact without content field parses and upserts DB correctly.
+    /// The ingester must NOT write any file to disk — that is the agent's job.
+    #[test]
+    fn handle_artifact_no_content_upserts_db() {
+        let conn = make_test_conn();
+        let project_id = insert_project(&conn);
+
+        let input = crate::dag_store::CreateArtifactInput {
+            project_id: project_id.clone(),
+            phase_id: None,
+            artifact_type: "conops".to_string(),
+            filename: "conops.md".to_string(),
+            produced_by_stage: None,
+        };
+        let artifact = crate::dag_store::db_upsert_artifact(&conn, &input).unwrap();
+        assert_eq!(artifact.filename, "conops.md");
+        assert_eq!(artifact.artifact_type, "conops");
+
+        // Verify parse_poe_event handles a content-free artifact line correctly.
+        let line = r#"{"poe":"artifact","name":"conops.md","artifact_type":"conops"}"#;
+        let (event_type, _) = parse_poe_event(line).unwrap();
+        assert_eq!(event_type, "artifact");
+    }
+
+    /// Old agents may still send a content field — it must be silently ignored (not written to disk).
+    /// serde drops unknown fields by default, so this is a no-op at the struct level.
+    #[test]
+    fn handle_artifact_ignores_content_if_present() {
+        let line = r#"{"poe":"artifact","name":"x.md","artifact_type":"doc","content":"should be ignored"}"#;
+        let result = parse_poe_event(line);
+        assert!(result.is_some(), "content-bearing artifact must still parse as a poe: event");
+        let (event_type, _) = result.unwrap();
+        assert_eq!(event_type, "artifact");
+        // Struct deserialization drops unknown fields — content is silently discarded.
+        let parsed: PoeArtifact = serde_json::from_str(line).unwrap();
+        assert_eq!(parsed.name, "x.md");
+        assert_eq!(parsed.artifact_type, "doc");
     }
 
     #[test]

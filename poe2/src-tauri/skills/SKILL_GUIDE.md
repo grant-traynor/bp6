@@ -97,7 +97,7 @@ One event per line. No multi-line JSON. No markdown wrappers. Events are embedde
 ```
 {"poe": "brief",    "content": "..."}
 {"poe": "step",     "name": "...", "detail": "..."}           // detail optional
-{"poe": "artifact", "name": "<filename>", "artifact_type": "<type>", "content": "..."}
+{"poe": "artifact", "name": "<filename>", "artifact_type": "<type>"}  // write file first, then declare
 {"poe": "knowledge","key": "<slug>", "content": "...", "supersedes": "<id>"}  // supersedes optional
 {"poe": "skill",    "name": "<skill-id>", "content": "<full SKILL.md markdown>"}  // NOT automatic — emit only when pattern is worth capturing
 {"poe": "decision", "question": "...", "options": ["A", "B"]}  // options optional
@@ -231,12 +231,15 @@ The ingester logs each `poe:review` / `poe:decision` event as it arrives. When `
 // Process exits. Orchestrator waits for human to respond via respond_to_chat.
 // When human responds, orchestrator resumes via --resume with "Human: {response}".
 // Agent's ENTIRE output on resume: optional poe:artifact, then poe:chat, then poe:yield.
-{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "...draft..."}
+// Write the draft to disk first, then declare it:
+Write("docs/conops.md", "...draft...")
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 {"poe": "chat", "content": "Thanks. Next: who are the primary users?", "id": "c2"}
 {"poe": "yield"}
 
-// After enough rounds, conclude with poe:artifact + poe:done (no poe:chat or poe:yield).
-{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "...final..."}
+// After enough rounds, write final version and conclude:
+Write("docs/conops.md", "...final...")
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 {"poe": "done", "summary": "CONOPS complete."}
 ```
 

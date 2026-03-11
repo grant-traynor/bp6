@@ -57,7 +57,7 @@ A line is a poe: event if and only if it parses as valid JSON and contains a `"p
 ```
 {"poe": "brief", "content": "..."}
 {"poe": "step", "name": "...", "detail": "..."}
-{"poe": "artifact", "name": "<filename>", "artifact_type": "<type>", "content": "..."}
+{"poe": "artifact", "name": "<filename>", "artifact_type": "<type>"}
 {"poe": "knowledge", "key": "<slug>", "content": "...", "supersedes": "<prior-id>"}
 {"poe": "decision", "question": "...", "options": ["Option A", "Option B"]}
 {"poe": "chat", "content": "...", "id": "<turn-id>"}
@@ -78,9 +78,17 @@ A line is a poe: event if and only if it parses as valid JSON and contains a `"p
 
 `detail` in `poe:step` is optional. `summary` in `poe:done` is optional. `options` in `poe:decision` is optional (include when you have identified candidates). `supersedes` in `poe:knowledge` is optional.
 
-### Artifact Content Format
+### Writing Artifacts
 
-The `content` field is the full document as a string. Escape newlines as `\n`. No whitespace between JSON fields. Do not wrap the event line in a code fence. Do not add any text after the artifact line.
+Before emitting `poe:artifact`, write the file to `docs/<name>` using your file-writing tools (Write, Edit, or Bash). The orchestrator reads the file from disk — it does not accept or process inline content. Sending a `content` field has no effect.
+
+```
+# Correct sequence:
+# 1. Write the file
+Write("docs/conops.md", "# CONOPS\n\n...")
+# 2. Declare it
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
+```
 
 ### Artifact-Task Sync Rule
 

@@ -407,6 +407,7 @@ async fn run_pty_handover(session_id: &str, cwd: &std::path::Path, log: Log) -> 
 ///
 /// Run: cargo test --test decision_handoff_harness -- --nocapture
 /// Log: target/decision-handoff.log
+#[ignore = "manual PTY/xterm.js harness — run with --ignored when testing decision handover UX"]
 #[test]
 fn decision_handoff_to_xterm_and_resume() {
     let log = Log::create("decision-handoff");

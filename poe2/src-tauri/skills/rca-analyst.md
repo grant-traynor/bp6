@@ -124,7 +124,7 @@ Emit these events in order:
 
 **4. Artifact** — the RCA document. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
-{"poe": "artifact", "name": "phase-N-rca.md", "artifact_type": "rca", "content": "# Phase N Retrospective — RCA\n\n## Executive Summary\n\n..."}
+{"poe": "artifact", "name": "phase-N-rca.md", "artifact_type": "rca"}
 ```
 
 **5. Done** — final event, always last:
