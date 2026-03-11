@@ -350,7 +350,7 @@ fn e2e_conops_full_round_trip() {
     )
     .expect("upsert draft artifact");
 
-    let artifact_json = "{\"poe\":\"artifact\",\"filename\":\"conops.md\",\"artifact_type\":\"document\",\"content\":\"# Draft CONOPS...\"}";
+    let artifact_json = "{\"poe\":\"artifact\",\"name\":\"conops.md\",\"artifact_type\":\"document\"}";
     db_log_event(
         &conn,
         &project_id,
@@ -452,7 +452,7 @@ fn e2e_conops_full_round_trip() {
         Some(agent_id),
         Some(&task_id),
         "poe:artifact",
-        "{\"poe\":\"artifact\",\"filename\":\"conops.md\",\"artifact_type\":\"document\",\"content\":\"# Final CONOPS...\"}",
+        "{\"poe\":\"artifact\",\"name\":\"conops.md\",\"artifact_type\":\"document\"}",
     )
     .expect("log poe:artifact (final)");
 

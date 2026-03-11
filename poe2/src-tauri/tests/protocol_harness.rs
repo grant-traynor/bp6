@@ -4,9 +4,12 @@
 //! injects a deterministic test skill bundle, and validates that all 11 poe: event
 //! types are correctly transmitted and parsed.
 //!
-//! The long-content artifact test (test-long.txt, 300 A-chars) confirms that the
+//! The long-content knowledge test (300 A-chars in poe:knowledge) confirms that the
 //! stream-json transport does not truncate long lines. There is no PTY in this path;
 //! the bp6-pdr.13 column-wrap bug cannot occur here by construction.
+//!
+//! poe:artifact events are content-free — agents write files using their own tools
+//! and emit poe:artifact as a path declaration only.
 //!
 //! All output is written to `target/protocol-harness.log` regardless of test outcome
 //! or whether --nocapture is used. Monitor with: `tail -f target/protocol-harness.log`
@@ -67,12 +70,11 @@ impl HarnessLog {
 
 // ── Long content constant ─────────────────────────────────────────────────────
 //
-// 300 A-characters. When embedded in the long-artifact JSON line the total line
-// length is ~384 chars — well past the 220-column PTY width.
+// 300 A-characters. Embedded in the poe:knowledge event to produce a JSON line
+// ~370 chars long — well past any 220-column PTY or transport line limit.
 //
-// If the PTY column-wrap bug (bp6-pdr.13) is present, this JSON line is split
-// across two lines at col 220. Neither fragment is valid JSON, so parse_poe_event
-// returns None for both and the test-long.txt artifact event is never seen.
+// If the stream-json transport were to truncate long lines, parse_poe_event
+// would return None and the knowledge event would be missing from the event list.
 
 const LONG_CONTENT: &str = concat!(
     "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", // 50
@@ -128,16 +130,16 @@ Output these lines in this exact order, each on its own line:
 
 {{"poe": "brief", "content": "Protocol harness test: validating all poe event types."}}
 {{"poe": "step", "name": "wire-format-coverage", "detail": "Emitting all poe event types in sequence."}}
-{{"poe": "knowledge", "key": "test-key", "content": "test-value"}}
-{{"poe": "artifact", "name": "test-short.txt", "artifact_type": "test", "content": "Short artifact content for protocol harness validation."}}
+{{"poe": "knowledge", "key": "test-key", "content": "{long_content}"}}
+{{"poe": "artifact", "name": "test-short.txt", "artifact_type": "test"}}
 {{"poe": "task", "id": "test-task-001", "title": "Test subtask alpha", "description": "Harness subtask", "skill": "implementer", "type": "task"}}
 {{"poe": "task:update", "id": "test-task-001", "title": "Updated test subtask alpha"}}
 {{"poe": "task:cancel", "id": "test-task-001", "reason": "cancelled by harness"}}
 {{"poe": "edge", "from": "test-task-001", "to": "test-task-002"}}
 {{"poe": "edge:remove", "from": "test-task-001", "to": "test-task-002"}}
 {{"poe": "decision", "question": "Harness test decision: which option?", "options": ["Option A", "Option B"]}}
-{{"poe": "step", "name": "long-artifact", "detail": "Emitting artifact with content longer than 220 chars to test PTY line wrapping."}}
-{{"poe": "artifact", "name": "test-long.txt", "artifact_type": "test", "content": "{long_content}"}}
+{{"poe": "step", "name": "long-knowledge", "detail": "Long knowledge value above was emitted with 300 A-chars to confirm no line truncation."}}
+{{"poe": "artifact", "name": "test-long.txt", "artifact_type": "test"}}
 {{"poe": "done", "summary": "Protocol harness test complete."}}
 "#
     )
@@ -268,7 +270,7 @@ fn protocol_end_to_end() {
         );
     }
 
-    // Exactly two artifact events (test-short.txt and test-long.txt)
+    // Exactly two artifact events (test-short.txt and test-long.txt); both are content-free.
     let artifacts: Vec<&serde_json::Value> = events
         .iter()
         .filter(|(t, _)| t == "artifact")
@@ -281,33 +283,33 @@ fn protocol_end_to_end() {
         artifacts.len(), log.path().display()
     );
 
-    // Short artifact — name and non-empty content
-    let short = artifacts
-        .iter()
-        .find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-short.txt"));
+    // Verify both artifact names arrived.
+    let short = artifacts.iter().find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-short.txt"));
     assert!(short.is_some(), "test-short.txt artifact not found — see {}", log.path().display());
-    let short_content = short.unwrap().get("content").and_then(|v| v.as_str()).unwrap_or("");
-    log.line(&format!("  test-short.txt content length: {}", short_content.len()));
-    assert!(!short_content.is_empty(), "test-short.txt content is empty — see {}", log.path().display());
+    log.line("  test-short.txt: OK");
 
-    // Long artifact — confirms stream-json transport does not truncate long lines.
-    let long = artifacts
-        .iter()
-        .find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-long.txt"));
+    let long_art = artifacts.iter().find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-long.txt"));
+    assert!(long_art.is_some(), "test-long.txt artifact not found — see {}", log.path().display());
+    log.line("  test-long.txt: OK");
+
+    // Long knowledge value — confirms stream-json transport does not truncate long lines.
+    let knowledge_event = events.iter().find(|(t, v)| {
+        t == "knowledge" && v.get("key").and_then(|k| k.as_str()) == Some("test-key")
+    });
     assert!(
-        long.is_some(),
-        "test-long.txt artifact not found. See {}",
+        knowledge_event.is_some(),
+        "poe:knowledge (test-key) not found — see {}",
         log.path().display()
     );
-    let long_content = long.unwrap().get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let knowledge_content = knowledge_event.unwrap().1.get("content").and_then(|v| v.as_str()).unwrap_or("");
     log.line(&format!(
-        "  test-long.txt content length: {} (expected {})",
-        long_content.len(), LONG_CONTENT.len()
+        "  knowledge content length: {} (expected {})",
+        knowledge_content.len(), LONG_CONTENT.len()
     ));
     assert!(
-        long_content.len() > 220,
-        "test-long.txt content is only {} chars (expected > 220) — see {}",
-        long_content.len(), log.path().display()
+        knowledge_content.len() > 220,
+        "knowledge content is only {} chars (expected > 220) — transport truncated the long line. See {}",
+        knowledge_content.len(), log.path().display()
     );
 
     log.sep();

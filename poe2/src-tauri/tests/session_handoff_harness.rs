@@ -110,16 +110,16 @@ Output these lines in this exact order, each on its own line:
 
 {{"poe": "brief", "content": "Protocol harness test: validating all poe event types."}}
 {{"poe": "step", "name": "wire-format-coverage", "detail": "Emitting all poe event types in sequence."}}
-{{"poe": "knowledge", "key": "test-key", "content": "test-value"}}
-{{"poe": "artifact", "name": "test-short.txt", "artifact_type": "test", "content": "Short artifact content for protocol harness validation."}}
+{{"poe": "knowledge", "key": "test-key", "content": "{long_content}"}}
+{{"poe": "artifact", "name": "test-short.txt", "artifact_type": "test"}}
 {{"poe": "task", "id": "test-task-001", "title": "Test subtask alpha", "description": "Harness subtask", "skill": "implementer", "type": "task"}}
 {{"poe": "task:update", "id": "test-task-001", "title": "Updated test subtask alpha"}}
 {{"poe": "task:cancel", "id": "test-task-001", "reason": "cancelled by harness"}}
 {{"poe": "edge", "from": "test-task-001", "to": "test-task-002"}}
 {{"poe": "edge:remove", "from": "test-task-001", "to": "test-task-002"}}
 {{"poe": "decision", "question": "Harness test decision: which option?", "options": ["Option A", "Option B"]}}
-{{"poe": "step", "name": "long-artifact", "detail": "Emitting artifact with content longer than 220 chars to test line fragmentation."}}
-{{"poe": "artifact", "name": "test-long.txt", "artifact_type": "test", "content": "{long_content}"}}
+{{"poe": "step", "name": "long-knowledge", "detail": "Long knowledge value above was emitted with 300 A-chars to confirm no line truncation."}}
+{{"poe": "artifact", "name": "test-long.txt", "artifact_type": "test"}}
 {{"poe": "done", "summary": "Protocol harness test complete."}}
 "#
     )

@@ -73,9 +73,9 @@ fn claude_on_path() -> bool {
 
 // ── Shared test data ──────────────────────────────────────────────────────────
 
-// 300 A-characters. Used in the long-artifact event to confirm that stream-json
-// transport does not fragment long lines (PTY column-wrap bug bp6-pdr.13 is absent
-// in stream-json because there is no PTY — lines arrive as raw JSON to stdout).
+// 300 A-characters. Embedded in the poe:knowledge event to confirm that stream-json
+// transport does not fragment long lines. poe:artifact events are content-free;
+// the long value is carried by knowledge instead.
 const LONG_CONTENT: &str = concat!(
     "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", // 50
     "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", "AAAAAAAAAA", // 100
@@ -118,16 +118,16 @@ Output these lines in this exact order, each on its own line:
 
 {{"poe": "brief", "content": "Protocol harness test: validating all poe event types."}}
 {{"poe": "step", "name": "wire-format-coverage", "detail": "Emitting all poe event types in sequence."}}
-{{"poe": "knowledge", "key": "test-key", "content": "test-value"}}
-{{"poe": "artifact", "name": "test-short.txt", "artifact_type": "test", "content": "Short artifact content for protocol harness validation."}}
+{{"poe": "knowledge", "key": "test-key", "content": "{long_content}"}}
+{{"poe": "artifact", "name": "test-short.txt", "artifact_type": "test"}}
 {{"poe": "task", "id": "test-task-001", "title": "Test subtask alpha", "description": "Harness subtask", "skill": "implementer", "type": "task"}}
 {{"poe": "task:update", "id": "test-task-001", "title": "Updated test subtask alpha"}}
 {{"poe": "task:cancel", "id": "test-task-001", "reason": "cancelled by harness"}}
 {{"poe": "edge", "from": "test-task-001", "to": "test-task-002"}}
 {{"poe": "edge:remove", "from": "test-task-001", "to": "test-task-002"}}
 {{"poe": "decision", "question": "Harness test decision: which option?", "options": ["Option A", "Option B"]}}
-{{"poe": "step", "name": "long-artifact", "detail": "Emitting artifact with content longer than 220 chars to confirm no line fragmentation."}}
-{{"poe": "artifact", "name": "test-long.txt", "artifact_type": "test", "content": "{long_content}"}}
+{{"poe": "step", "name": "long-knowledge", "detail": "Long knowledge value above was emitted with 300 A-chars to confirm no line truncation."}}
+{{"poe": "artifact", "name": "test-long.txt", "artifact_type": "test"}}
 {{"poe": "done", "summary": "Protocol harness test complete."}}
 "#
     );
@@ -310,9 +310,9 @@ fn session_id_captured_from_real_stream() {
 /// - `on_complete` fires (result event received)
 /// - All 11 event types arrive in the correct order (brief first, done last)
 /// - Specific JSON field values are correct (e.g. poe:task id == "test-task-001")
-/// - The long-content artifact (300 A-chars) arrives untruncated — confirming
-///   that stream-json transport does not fragment long lines (stream-json does not
-///   use a PTY, so the bp6-pdr.13 column-wrap bug cannot occur)
+/// - The long-content knowledge value (300 A-chars) arrives untruncated — confirming
+///   that stream-json transport does not fragment long lines. poe:artifact events are
+///   content-free; artifact names only are verified.
 #[test]
 fn full_protocol_payload_correctness() {
     let log = Log::open("stream-json-protocol");
@@ -414,7 +414,7 @@ fn full_protocol_payload_correctness() {
     );
     log.line("  poe:task id: OK");
 
-    // Exactly two artifact events
+    // Exactly two artifact events (test-short.txt and test-long.txt); both are content-free.
     let artifacts: Vec<&serde_json::Value> = events
         .iter()
         .filter(|(t, _)| t == "artifact")
@@ -424,50 +424,45 @@ fn full_protocol_payload_correctness() {
     assert_eq!(
         artifacts.len(),
         2,
-        "Expected 2 poe:artifact events, got {}. If only 1, the long-artifact JSON \
-         was likely truncated — that would indicate a regression in the transport. \
-         See {}",
+        "Expected 2 poe:artifact events, got {}. See {}",
         artifacts.len(),
         log.path().display()
     );
 
-    // Short artifact must exist with non-empty content
-    let short = artifacts
-        .iter()
-        .find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-short.txt"))
-        .expect(&format!(
-            "test-short.txt artifact not found. See {}",
-            log.path().display()
-        ));
-    let short_content = short.get("content").and_then(|v| v.as_str()).unwrap_or("");
-    log.line(&format!("  test-short.txt content len: {}", short_content.len()));
-    assert!(!short_content.is_empty(), "test-short.txt content is empty. See {}", log.path().display());
+    // Verify both artifact names arrived.
+    let short = artifacts.iter().find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-short.txt"));
+    assert!(short.is_some(), "test-short.txt artifact not found. See {}", log.path().display());
+    log.line("  test-short.txt: OK");
 
-    // Long artifact: stream-json must deliver the full 300-char payload verbatim.
+    let long_art = artifacts.iter().find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-long.txt"));
+    assert!(long_art.is_some(), "test-long.txt artifact not found. See {}", log.path().display());
+    log.line("  test-long.txt: OK");
+
+    // Long knowledge value: stream-json must deliver the full 300-char payload verbatim.
     // If this assertion fails, a transport regression introduced line truncation.
-    let long_artifact = artifacts
-        .iter()
-        .find(|a| a.get("name").and_then(|v| v.as_str()) == Some("test-long.txt"))
-        .expect(&format!(
-            "test-long.txt artifact not found. If only test-short.txt arrived, the \
-             long-artifact JSON line may have been truncated by the transport. See {}",
-            log.path().display()
-        ));
-    let long_content = long_artifact.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let knowledge_event = events.iter().find(|(t, v)| {
+        t == "knowledge" && v.get("key").and_then(|k| k.as_str()) == Some("test-key")
+    });
+    assert!(
+        knowledge_event.is_some(),
+        "poe:knowledge (test-key) not found. See {}",
+        log.path().display()
+    );
+    let knowledge_content = knowledge_event.unwrap().1.get("content").and_then(|v| v.as_str()).unwrap_or("");
     log.line(&format!(
-        "  test-long.txt content len: {} (expected {})",
-        long_content.len(),
+        "  knowledge content len: {} (expected {})",
+        knowledge_content.len(),
         LONG_CONTENT.len()
     ));
     assert_eq!(
-        long_content, LONG_CONTENT,
-        "test-long.txt content does not match expected (len {} vs {}). \
+        knowledge_content, LONG_CONTENT,
+        "knowledge content does not match expected (len {} vs {}). \
          Stream-json transport should not truncate or fragment long JSON lines. See {}",
-        long_content.len(),
+        knowledge_content.len(),
         LONG_CONTENT.len(),
         log.path().display()
     );
-    log.line("  test-long.txt content: OK");
+    log.line("  knowledge long content: OK");
 
     log.sep();
     log.line("=== ALL ASSERTIONS PASSED ===");
