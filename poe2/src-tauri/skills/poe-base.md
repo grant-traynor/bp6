@@ -74,6 +74,8 @@ A line is a poe: event if and only if it parses as valid JSON and contains a `"p
 
 `poe:yield` — suspends the task (status = waiting). The ingester derives the yield reason from the last substantive event emitted before this one (`chat`, `decision`, or `review`). Emit `poe:yield` as the **last** event before the process exits. Do NOT add a `reason` field — it is ignored.
 
+**Critical**: Every poe: event must be emitted as a JSON line — including `poe:done`. Writing `poe:done` as plain text does nothing. The orchestrator only processes lines that parse as valid JSON with a `"poe"` key.
+
 `detail` in `poe:step` is optional. `summary` in `poe:done` is optional. `options` in `poe:decision` is optional (include when you have identified candidates). `supersedes` in `poe:knowledge` is optional.
 
 ### Artifact Content Format
