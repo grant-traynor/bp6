@@ -290,6 +290,10 @@ pub struct AdvisorTurn {
 #[serde(rename_all = "camelCase")]
 pub struct CreateNodeInput {
     pub project_id: String,
+    /// Agent-supplied stable ID (e.g. "task-005"). When present, used as the
+    /// node's primary key so that subsequent poe:task:update and poe:edge events
+    /// can reference it by the same ID. Falls back to a UUID when absent.
+    pub id: Option<String>,
     pub phase_id: Option<String>,
     pub parent_id: Option<String>,
     pub node_type: NodeType,

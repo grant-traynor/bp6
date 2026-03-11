@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS phases (
     title           TEXT NOT NULL,
     lifecycle_stage TEXT NOT NULL DEFAULT 'planning',
     gate_held       INTEGER NOT NULL DEFAULT 0,
+    stage_type      TEXT NOT NULL DEFAULT 'execution',
+    status          TEXT NOT NULL DEFAULT 'pending',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     UNIQUE(project_id, number)
@@ -40,6 +42,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     requesting_task_id  TEXT REFERENCES nodes(id),
     review_id           TEXT,
     retry_count         INTEGER NOT NULL DEFAULT 0,
+    sort_order          INTEGER,
+    skill_modes         TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );

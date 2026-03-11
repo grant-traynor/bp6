@@ -675,6 +675,7 @@ async fn handle_review_yield(
 
             let input = dag_store::CreateNodeInput {
                 project_id: project_id.to_owned(),
+                id: None,
                 phase_id: waiting_task.phase_id.clone(),
                 parent_id: None,
                 node_type: NodeType::PlanReview,

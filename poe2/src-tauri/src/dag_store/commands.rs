@@ -432,6 +432,7 @@ fn maybe_bootstrap_phase(conn: &rusqlite::Connection, project_id: &str, phase_id
         if let Some((skill_id, title)) = bootstrap_skill_for_stage(st) {
             db_create_node(conn, &CreateNodeInput {
                 project_id: project_id.to_string(),
+                id: None,
                 phase_id: Some(phase_id.to_string()),
                 parent_id: None,
                 node_type: NodeType::Task,
@@ -740,6 +741,7 @@ pub async fn start_advisor_session(
     let task_node = with_conn(&registry, &project_id, |conn| {
         let input = CreateNodeInput {
             project_id: project_id.clone(),
+            id: None,
             phase_id: None,
             parent_id: None,
             node_type: NodeType::Advisor,

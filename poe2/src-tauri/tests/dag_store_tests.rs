@@ -106,7 +106,7 @@ fn node_status_transitions_pending_running_waiting_complete() {
 
     let node = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -185,7 +185,7 @@ fn ancestry_three_level_hierarchy_closest_first() {
 
     let grandparent = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -203,7 +203,7 @@ fn ancestry_three_level_hierarchy_closest_first() {
 
     let parent = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: Some(grandparent.id.clone()),
@@ -221,7 +221,7 @@ fn ancestry_three_level_hierarchy_closest_first() {
 
     let child = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: Some(parent.id.clone()),
@@ -252,7 +252,7 @@ fn ancestry_root_node_returns_single_entry() {
 
     let root = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -353,7 +353,7 @@ fn agent_session_retrievable_for_task() {
     // The agents table has a FK on task_id → nodes.id, so we need a real node.
     let node = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -471,7 +471,7 @@ fn setup_execution_db() -> (Connection, String, String) {
 fn add_task(conn: &Connection, project_id: &str, phase_id: &str, title: &str) -> String {
     db_create_node(
         conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.to_owned(),
             phase_id: Some(phase_id.to_owned()),
             parent_id: None,

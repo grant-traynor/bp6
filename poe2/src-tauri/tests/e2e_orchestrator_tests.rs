@@ -233,7 +233,7 @@ async fn e2e_2_dag_structure_changed_no_ready_tasks() {
     // The blocker is in Running status — not pending, so not re-dispatched.
     // The blocked task depends on the Running blocker, so it is also not ready.
     let phase_id = insert_phase(&conn, &project_id);
-    let blocker_input = CreateNodeInput {
+    let blocker_input = CreateNodeInput { id: None,
         project_id: project_id.clone(),
         phase_id: Some(phase_id.clone()),
         parent_id: None,
@@ -246,7 +246,7 @@ async fn e2e_2_dag_structure_changed_no_ready_tasks() {
         review_id: None,
         retry_count: None,
     };
-    let task_input = CreateNodeInput {
+    let task_input = CreateNodeInput { id: None,
         project_id: project_id.clone(),
         phase_id: Some(phase_id.clone()),
         parent_id: None,
@@ -302,7 +302,7 @@ async fn e2e_3_ready_task_with_skill_emits_agent_started() {
     let phase_id = insert_phase(&conn, &project_id);
 
     // A ready task: Pending, has a skill_id, no dependencies.
-    let task_input = CreateNodeInput {
+    let task_input = CreateNodeInput { id: None,
         project_id: project_id.clone(),
         phase_id: Some(phase_id.clone()),
         parent_id: None,
@@ -365,7 +365,7 @@ async fn e2e_4_node_status_changed_waiting_no_panic() {
     let (project_id, conn) = new_e2e_db();
     let phase_id = insert_phase(&conn, &project_id);
 
-    let task_input = CreateNodeInput {
+    let task_input = CreateNodeInput { id: None,
         project_id: project_id.clone(),
         phase_id: Some(phase_id.clone()),
         parent_id: None,
@@ -636,7 +636,7 @@ fn insert_live_task(
         .clone();
     drop(reg);
     let conn = db.conn.lock().unwrap();
-    let task_input = CreateNodeInput {
+    let task_input = CreateNodeInput { id: None,
         project_id: project_id.to_string(),
         phase_id: Some(phase_id.to_string()),
         parent_id: None,
@@ -846,7 +846,7 @@ async fn live_2_activate_phase_bootstraps_and_runs() {
             .clone();
         drop(reg);
         let conn = db.conn.lock().unwrap();
-        let task_input = CreateNodeInput {
+        let task_input = CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: Some(phase_id.clone()),
             parent_id: None,
@@ -968,7 +968,7 @@ async fn live_3_sf3_sf4_chat_roundtrip() {
             .clone();
         drop(reg);
         let conn = db.conn.lock().unwrap();
-        let task_input = CreateNodeInput {
+        let task_input = CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: Some(phase_id.clone()),
             parent_id: None,
@@ -1274,7 +1274,7 @@ async fn live_5_advance_phase_bootstraps_next() {
         .expect("activate phase2");
 
         // Bootstrap guardrails task (must-not-analyst)
-        let task_input = CreateNodeInput {
+        let task_input = CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: Some(phase2_id.clone()),
             parent_id: None,
@@ -1414,7 +1414,7 @@ async fn live_6_activate_phase_bootstraps_task() {
             .unwrap_or(0);
         assert_eq!(existing, 0, "live_6: phase must have 0 tasks before bootstrap");
 
-        let task_input = CreateNodeInput {
+        let task_input = CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: Some(phase_id.clone()),
             parent_id: None,
@@ -1600,7 +1600,7 @@ async fn live_7_advance_phase_bootstraps_next() {
             .unwrap_or(0);
         assert_eq!(existing, 0, "live_7: phase2 must have 0 tasks before bootstrap");
 
-        let task_input = CreateNodeInput {
+        let task_input = CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: Some(phase2_id.clone()),
             parent_id: None,

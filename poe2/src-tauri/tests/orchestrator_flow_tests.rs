@@ -102,7 +102,7 @@ fn create_pending_task(
 ) -> String {
     let node = db_create_node(
         conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.to_owned(),
             phase_id: phase_id.map(str::to_owned),
             parent_id: None,
@@ -604,7 +604,7 @@ fn sf3_review_yield_sets_waiting_and_reviewer_task_created() {
     // Step 3: orchestrator creates reviewer node (simulating handle_review_yield).
     let reviewer_node = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -864,7 +864,7 @@ fn watchdog_retry_path_increments_retry_count_and_requeues() {
     // Create reviewer node with retry_count=0.
     let reviewer = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -920,7 +920,7 @@ fn watchdog_max_retry_cancels_reviewer() {
     // Create reviewer with retry_count already at REVIEWER_MAX_RETRY (2).
     let reviewer = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -969,7 +969,7 @@ fn watchdog_no_op_if_reviewer_already_complete() {
 
     let reviewer = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -1021,7 +1021,7 @@ fn review_completion_all_done_enables_resume() {
     // Create two reviewer nodes.
     let r1 = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -1039,7 +1039,7 @@ fn review_completion_all_done_enables_resume() {
 
     let r2 = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -1084,7 +1084,7 @@ fn review_completion_not_all_done_blocks_resume() {
     // reviewer 1: complete; reviewer 2: still running.
     db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -1102,7 +1102,7 @@ fn review_completion_not_all_done_blocks_resume() {
 
     db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,
@@ -1496,7 +1496,7 @@ fn sf1_plan_review_node_is_dispatchable() {
 
     let reviewer = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,

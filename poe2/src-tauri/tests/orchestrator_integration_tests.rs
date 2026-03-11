@@ -114,7 +114,7 @@ fn create_pending_task(
 ) -> String {
     let node = db_create_node(
         conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.to_owned(),
             phase_id: phase_id.map(str::to_owned),
             parent_id: None,
@@ -407,7 +407,7 @@ fn tc3_review_yield_creates_reviewer_node_and_sets_waiting() {
     // Orchestrator creates the reviewer node (mirrors orchestrator::handle_review_yield).
     let reviewer = db_create_node(
         &conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.clone(),
             phase_id: None,
             parent_id: None,

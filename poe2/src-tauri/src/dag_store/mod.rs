@@ -153,7 +153,7 @@ fn parse_lifecycle_stage(s: String) -> rusqlite::Result<PhaseLifecycleStage> {
 // ── Node helpers ──────────────────────────────────────────────────────────────
 
 pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node> {
-    let id = uuid::Uuid::new_v4().to_string();
+    let id = input.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let now = chrono::Utc::now().to_rfc3339();
     let status = input.initial_status.as_ref()
         .map(|s| s.to_string())

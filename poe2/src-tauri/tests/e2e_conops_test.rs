@@ -86,7 +86,7 @@ fn insert_project(conn: &Connection) -> String {
 fn create_pending_task(conn: &Connection, project_id: &str, skill_id: &str) -> String {
     let node = db_create_node(
         conn,
-        &CreateNodeInput {
+        &CreateNodeInput { id: None,
             project_id: project_id.to_owned(),
             phase_id: None,
             parent_id: None,

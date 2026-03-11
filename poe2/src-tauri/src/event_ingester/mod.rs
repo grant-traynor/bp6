@@ -255,6 +255,7 @@ fn handle_task(
 
     let input = CreateNodeInput {
         project_id: project_id.to_string(),
+        id: Some(payload.id.clone()),
         phase_id: None,
         parent_id: payload.parent_id.clone(),
         node_type,
