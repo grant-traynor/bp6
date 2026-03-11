@@ -1189,7 +1189,7 @@ async fn live_4_phase_gate_fires() {
 
     // Check the phase-update payload contains status='gate'
     let gate_events = sink.find_all("poe-phase-update");
-    let has_gate_payload = gate_events.iter().any(|v| {
+    let has_gate_payload = gate_events.iter().any(|v: &serde_json::Value| {
         v.get("status").and_then(|s| s.as_str()) == Some("gate")
     });
     assert!(

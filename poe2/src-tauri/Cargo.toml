@@ -35,5 +35,9 @@ futures-util = "0.3"
 # Expose TestEventSink and test helpers to integration tests.
 test-utils = []
 
+[[test]]
+name = "e2e_orchestrator_tests"
+required-features = ["test-utils"]
+
 [dev-dependencies]
 tempfile = "3"
