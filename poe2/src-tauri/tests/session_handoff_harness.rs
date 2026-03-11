@@ -591,9 +591,15 @@ async fn run_ws_pty_bridge(session_id: &str, log: HarnessLog) -> Result<(), Stri
 /// been run first (writes target/stdio-json-session-id.txt). If the file is
 /// absent this test will run the stream-json flow inline.
 ///
-/// Run: cargo test --test session_handoff_harness -- --nocapture
+/// Run: cargo test --test session_handoff_harness -- --nocapture --ignored
 /// Log: target/session-handoff.log
+///
+/// This test is #[ignore]d by default — it is a manual exploratory harness that
+/// opens a browser window and waits for human input. PTY / --resume correctness
+/// is validated automatically by stream_json_integration.rs. Run this harness
+/// only when you want to interactively verify the xterm.js session handover UX.
 #[test]
+#[ignore = "manual xterm.js harness — run with --ignored when testing session handover UX"]
 fn session_handoff_to_xterm() {
     let log = HarnessLog::create("session-handoff");
     log.line(&format!("log: {}", log.path().display()));

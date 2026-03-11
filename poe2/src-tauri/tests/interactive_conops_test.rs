@@ -200,6 +200,7 @@ fn operational_analyst() -> poe2_lib::skills::ResolvedSkill {
 ///   SC-2  poe:chat content is clean prose, not raw JSON protocol output
 ///   SC-3  poe:yield follows poe:chat in emission order
 #[test]
+#[ignore = "real Claude API test — run explicitly: cargo test --test interactive_conops_test -- --ignored --test-threads=1 --nocapture"]
 fn interactive_mode_emits_chat_then_yields_not_done() {
     if !claude_on_path() {
         eprintln!("SKIP: claude not on PATH");
@@ -322,6 +323,7 @@ fn interactive_mode_emits_chat_then_yields_not_done() {
 ///   Phase 2: --resume with "Human: <response>" → poe:chat (next question)
 ///            OR poe:artifact + poe:done (CONOPS complete in 2 rounds)
 #[test]
+#[ignore = "real Claude API test — run explicitly: cargo test --test interactive_conops_test -- --ignored --test-threads=1 --nocapture"]
 fn resume_after_human_response_continues_or_completes() {
     if !claude_on_path() {
         eprintln!("SKIP: claude not on PATH");
@@ -437,6 +439,7 @@ fn resume_after_human_response_continues_or_completes() {
 /// SC-5: operational-analyst WITHOUT interactive mode block runs autonomously —
 /// emits poe:artifact + poe:done without any poe:chat turns.
 #[test]
+#[ignore = "real Claude API test — run explicitly: cargo test --test interactive_conops_test -- --ignored --test-threads=1 --nocapture"]
 fn autonomous_mode_completes_without_chat() {
     if !claude_on_path() {
         eprintln!("SKIP: claude not on PATH");

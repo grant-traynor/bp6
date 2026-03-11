@@ -39,5 +39,11 @@ test-utils = []
 name = "e2e_orchestrator_tests"
 required-features = ["test-utils"]
 
+# Real-Claude API integration tests — excluded from the default cargo test run.
+# Run explicitly: cargo test --test interactive_conops_test -- --ignored --test-threads=1 --nocapture
+[[test]]
+name = "interactive_conops_test"
+harness = true
+
 [dev-dependencies]
 tempfile = "3"
