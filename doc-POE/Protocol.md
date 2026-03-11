@@ -514,6 +514,8 @@ All events use `app_handle.emit(event_name, payload)`. Event names use hyphen no
 | `poe-chat-responded` | `{turnId, projectId, taskId}` | Frontend scrolls, awaits next agent turn |
 | `poe-advisor-turn` | `{turnId, taskId, content}` | Display advisor message in Pane 3 advisor panel |
 | `poe-advisor-responded` | `{turnId, projectId, taskId}` | Frontend scrolls, awaits next advisor turn |
+| `poe-agent-stream` | `{agentId, taskId, projectId, event}` | Raw stream-json event from agent stdout — used by DebugPanel for live output display |
+| `poe-agent-exited` | `{agentId, taskId, projectId, success}` | Agent process exited; `success=false` if poe:done was never received |
 | `poe-phase-update` | `{phaseId, status, projectId}` | Update phase lifecycle state in Phase × Scope Matrix header |
 
 ### Decision resolution (Frontend → Rust)
