@@ -102,7 +102,11 @@ export default function App() {
   }
 
   // Derived state
-  const activePhase = phases.find(p => p.lifecycleStage !== 'complete') ?? null;
+  // Prioritise: gated phase first (needs human action), then any non-complete
+  const activePhase =
+    phases.find(p => p.gateHeld) ??
+    phases.find(p => p.lifecycleStage !== 'complete') ??
+    null;
   const runningAgentCount = nodes.filter(n => n.status === 'running').length;
   const pendingQueueCount = queueItems.filter(q => q.resolvedAt === null).length;
   const handoverNode = handoverNodeId ? (nodes.find(n => n.id === handoverNodeId) ?? null) : null;
