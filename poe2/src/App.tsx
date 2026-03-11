@@ -63,9 +63,9 @@ export default function App() {
       .catch(console.error);
   }, [selectedId]);
 
-  // Listen for advisor-turn-added to know the active advisor task ID
+  // Listen for poe-advisor-turn to know the active advisor task ID
   useEffect(() => {
-    const unlisten = listen<AdvisorTurn>('advisor-turn-added', ({ payload }) => {
+    const unlisten = listen<{ turnId: string; taskId: string; content: string }>('poe-advisor-turn', ({ payload }) => {
       setAdvisorTaskId(payload.taskId);
     });
     return () => { void unlisten.then(u => u()); };
