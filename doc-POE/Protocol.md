@@ -1,7 +1,7 @@
 # POE — Protocol Specification
 
 **Status**: Draft
-**Last updated**: 2026-03-08
+**Last updated**: 2026-03-11
 
 **Artifact classification**: This document serves as both:
 - `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), and the frontend update mechanism (§4).
@@ -173,9 +173,11 @@ One event per line. No multi-line JSON.
 #### Artifacts and knowledge
 
 ```jsonc
-// Produce or revise an artifact. Orchestrator writes content to docs/<name>,
-// upserts artifacts table, emits Tauri poe://task-update.
-{"poe": "artifact", "name": "conops.md", "artifact_type": "conops", "content": "..."}
+// Declare an artifact the agent has already written to docs/<name> using its own tools
+// (e.g. Claude's Write / Edit / Bash). Orchestrator indexes the path in the artifacts table
+// and emits poe-artifact-created. No content field — the file is already on disk.
+// Downstream agents read the file directly; the orchestrator injects the path, not the content.
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 
 // Write a knowledge register entry. key must be unique per project;
 // supersedes retires the prior entry (not deleted, linked).
@@ -265,7 +267,7 @@ One event per line. No multi-line JSON.
 | `poe:task:cancel` | UPDATE tasks.status | yes | `poe-node-updated` |
 | `poe:edge` | INSERT edges | yes | `poe-edge-created` |
 | `poe:edge:remove` | DELETE edges | yes | `poe-edge-removed` |
-| `poe:artifact` | UPSERT artifacts, write file | yes | `poe-artifact-created` |
+| `poe:artifact` | UPSERT artifacts (file already on disk — agent wrote it) | yes | `poe-artifact-created` |
 | `poe:knowledge` | INSERT knowledge | yes | `poe-knowledge-created` |
 | `poe:skill` | write `{project}/.poe/skills/{name}.md` | yes | `poe-event` |
 | `poe:brief` | — | yes | `poe-event` |
@@ -395,11 +397,7 @@ Use this to direct high-stakes analysis skills (e.g. `operational-analyst`) at a
 # Artifacts
 
 {for artifact in declared_inputs}
-## {artifact.name} ({artifact.artifact_type})
-
-{artifact content, read from docs/{artifact.name}}
-
----
+- **{artifact.artifact_type}**: `{project.path}/docs/{artifact.name}` — read this file for context.
 {end}
 
 # Knowledge Register
@@ -417,6 +415,8 @@ Use this to direct high-stakes analysis skills (e.g. `operational-analyst`) at a
 
 - If no artifacts are declared for this stage type, the Artifacts section is omitted entirely.
 - Knowledge register is always injected in full (entries are expected to stay small).
+- **Artifact injection is path-only.** The orchestrator does NOT embed file content in the bundle. It injects the absolute path to each artifact and instructs the agent to read it. The agent reads files directly using its own tools. This keeps bundles small, avoids double-encoding large files, and lets agents like Claude Code use their native file-reading capabilities.
+- **Artifact writing is agent-owned.** When an agent produces a document (conops.md, a phase plan, implementation code), it writes the file directly using its tools, then emits `poe:artifact` to declare the path. The orchestrator indexes the path; it does not write the file.
 - If a task has no declared skill, the `# Skill` section is omitted and the agent runs with no persona constraint.
 - **Decision resolution delivery**: when the human resolves a `poe:decision`, the orchestrator spawns a new stream-json session with `--resume <session_id>` and writes the resolution as the bundle content:
 
@@ -446,7 +446,7 @@ When the orchestrator spawns a reviewer agent in response to a `poe:review` even
 
 {content from poe:review event — the plan summary or artifact under review}
 
-> **Naming convention**: The reviewer MUST emit its artifact as `{"poe":"artifact","name":"review-{review_id}.md",...}` where `{review_id}` is the Review ID above. This makes the artifact path deterministic — the orchestrator derives `docs/review-{review_id}.md` directly without an artifacts table query.
+> **Naming convention**: The reviewer MUST write its findings to `docs/review-{review_id}.md` (using its own file-writing tools) and then emit `{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review"}` where `{review_id}` is the Review ID above. This makes the artifact path deterministic — the orchestrator derives `docs/review-{review_id}.md` directly without an artifacts table query.
 
 ---
 
@@ -506,7 +506,7 @@ All events use `app_handle.emit(event_name, payload)`. Event names use hyphen no
 | `poe-task-done` | `{id, status: "complete", ...node fields}` | Mark task complete in task tree; triggers orchestrator scheduling loop |
 | `poe-edge-created` | `{fromId, toId, edgeType}` | Add dependency edge to DAG view |
 | `poe-edge-removed` | `{fromId, toId}` | Remove dependency edge from DAG view |
-| `poe-artifact-created` | `{id, filename, artifactType, projectId, ...}` | Add artifact to Artifact Viewer |
+| `poe-artifact-created` | `{id, filename, artifactType, projectId, ...}` | Add artifact to Artifact Viewer; frontend reads content from `{project.path}/docs/{filename}` |
 | `poe-knowledge-created` | `{id, key, value, projectId, ...}` | Add entry to Knowledge Register panel |
 | `poe-decision-queued` | `{id, taskId, question, options, resolvedAt}` | Add item to queue panel, increment badge |
 | `poe-decision-resolved` | `{itemId, projectId, taskId}` | Remove item from queue panel, decrement badge |

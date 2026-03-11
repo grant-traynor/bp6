@@ -1,7 +1,7 @@
 # POE — Pairti Orchestration Engine: Architect
 
 **Status**: Draft
-**Last updated**: 2026-03-08
+**Last updated**: 2026-03-11
 
 ---
 
@@ -233,7 +233,11 @@ Artifacts flow forward through the lifecycle. Each stage receives all artifacts 
 
 ### Storage
 
-Artifact content lives in `{project}/docs/`. The project database tracks metadata: artifact type, producing stage, phase number, and timestamp. The database is the index; the filesystem holds the content.
+Artifact files live in `{project}/docs/`. The project database tracks metadata only: artifact type, filename, producing stage, phase number, and timestamp. **The database is the index; the filesystem holds the content.**
+
+Agents write artifact files directly using their own tools (e.g. Claude's Write / Edit / Bash). The orchestrator never writes artifact content — it only records the path when `poe:artifact` arrives. This keeps the orchestrator thin and lets agents like Claude Code use their native file capabilities without the orchestrator reimplementing them.
+
+**Input bundle assembly**: the orchestrator injects artifact paths into the T+S+K bundle as a list of filenames. Downstream agents read the files themselves. Content is never embedded in the bundle. See Protocol.md §3.
 
 ---
 
@@ -245,7 +249,7 @@ The knowledge register is the project's institutional memory. It is distinct fro
 |---|---|---|
 | **Purpose** | Defines the product | Guides execution |
 | **Lifecycle** | Phase outputs; superseded by later versions | Persistent; accumulates across all phases |
-| **Writable by** | Agents (via `poe:artifact`) | Agents and humans |
+| **Writable by** | Agents (write file directly, declare via `poe:artifact`) | Agents and humans |
 | **Examples** | CONOPS, architecture doc, phase review | Architectural decisions, domain glossary, failed approaches, discovered constraints, integration notes |
 
 ### What belongs in the Knowledge Register
@@ -294,7 +298,7 @@ Agents communicate with POE via structured JSON events embedded in the `--output
 |---|---|
 | `poe:brief` | Agent's interpretation of its task, written before execution begins. Drives the glass-box interpretation view. |
 | `poe:step` | Named progress milestone during execution. |
-| `poe:artifact` | Produce a named artifact. Written to `docs/`, indexed in the database. |
+| `poe:artifact` | Declare a file the agent has already written to `docs/` using its own tools. Orchestrator indexes the path; downstream agents read the file directly. No content is embedded in the event. |
 | `poe:task` | Create a WBS node (used by planning specialist to populate the task graph). |
 | `poe:edge` | Create a dependency edge between two nodes. |
 | `poe:knowledge` | Write an entry to the knowledge register. |
@@ -451,7 +455,7 @@ Before spawning an agent, the orchestrator assembles the context it needs:
 | **C** (codebase) | Implicit — agent runs in the project directory |
 | **T** (task) | Node record from SQLite — title, description, type, plus full WBS ancestry (task → feature → epic → phase) |
 | **S** (skill) | Loaded from skill file priority chain (bundle → user → project-local) |
-| **K** (knowledge) | Artifacts declared as inputs for this stage type (selective, not full corpus) + all knowledge register entries |
+| **K** (knowledge) | Artifact paths declared as inputs for this stage type (injected as filenames to read, not inline content) + all knowledge register entries |
 | **H** (human input) | Not assembled upfront — arrives during execution via `write_to_agent` if needed |
 
 **WBS ancestry** is always injected. Knowing that a task belongs to feature X, epic Y, phase Z gives the agent the "why" chain that informs every decision it makes.

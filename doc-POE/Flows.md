@@ -1,7 +1,7 @@
 # POE — Runtime Flows
 
 **Status**: Draft
-**Last updated**: 2026-03-10
+**Last updated**: 2026-03-11
 
 **Artifact classification**: `flows.md` — the authoritative Runtime Flows document for POE v2. Specifies the dynamic execution model: what happens in what order, who is responsible at each step, and the invariants that must hold across orchestrator, ingester, agent, and frontend. Injected into every implementation task's input bundle alongside `interface-control.md` and `data-model.md`.
 
@@ -253,9 +253,10 @@ sequenceDiagram
     Ing->>DB: INSERT event_log
     Ing-->>FE: emit poe://event
 
-    B-->>Ing: {"poe":"artifact","name":"review-r1.md",<br/>"artifact_type":"plan_review","content":"..."}
-    Note over B: name = "review-{review_id}.md" — mandatory convention
-    Ing->>DB: UPSERT artifacts, write docs/review-r1.md
+    Note over B: Writes docs/review-r1.md directly using own tools
+    B-->>Ing: {"poe":"artifact","name":"review-r1.md",<br/>"artifact_type":"plan_review"}
+    Note over B: name = "review-{review_id}.md" — mandatory convention<br/>No content field — file already on disk
+    Ing->>DB: UPSERT artifacts (path indexed, file already written)
     Ing-->>FE: emit poe://event
 
     B-->>Ing: {"poe":"done"}
@@ -369,7 +370,7 @@ When `answered_ids = expected_ids`, all reviews are accounted for — the reques
 
 5. **Reviewer tasks are not WBS nodes**: Reviewer tasks are system-generated and are excluded from the Phase × Scope Matrix. They appear in the activity feed only.
 
-6. **Reviewer artifact is stored and delivered**: The reviewer's `poe:artifact` is written to `docs/` and indexed in SQLite (permanent record). Its content is also extracted and inlined into the resume bundle (ephemeral delivery). Both happen; neither substitutes for the other.
+6. **Reviewer artifact is stored and delivered**: The reviewer writes its findings to `docs/review-{review_id}.md` directly using its own file tools, then emits `poe:artifact` to declare the path. The orchestrator indexes the path in SQLite (permanent record) and reads the file from disk when assembling the `ReviewResult` resume bundle (ephemeral delivery). Both happen; neither substitutes for the other.
 
 ---
 
@@ -552,8 +553,10 @@ sequenceDiagram
         Ing-->>FE: emit poe://event (activity feed: step milestone)
 
         opt Artifact produced
-            A-->>Ing: {"poe":"artifact","name":"...","content":"..."}
-            Ing->>DB: UPSERT artifacts, write docs/<name>
+            Note over A: Agent writes file to docs/<name> using own tools
+            A-->>Ing: {"poe":"artifact","name":"...","artifact_type":"..."}
+            Note over A: No content field — file already on disk
+            Ing->>DB: UPSERT artifacts (path indexed)
             Ing-->>FE: emit poe://event (activity feed: artifact produced)
         end
 
@@ -1209,10 +1212,11 @@ sequenceDiagram
     Note over A: Agent reads prior session + human response<br/>May draft artifact section before next question
 
     opt Artifact draft updated
-        A-->>Ing: {"poe":"artifact","name":"conops.md","content":"..."}
-        Ing->>DB: UPSERT artifacts, write docs/conops.md
+        Note over A: Agent writes docs/conops.md using own tools
+        A-->>Ing: {"poe":"artifact","name":"conops.md","artifact_type":"conops"}
+        Ing->>DB: UPSERT artifacts (path indexed)
         Ing-->>FE: emit poe://event (artifact updated)
-        Note over FE: Left panel updates with new content
+        Note over FE: Left panel reads file from disk and displays content
     end
 
     A-->>Ing: {"poe":"chat","content":"Who are the primary users?","id":"c2"}
@@ -1222,12 +1226,12 @@ sequenceDiagram
     A-->>Ing: {"poe":"yield","reason":"chat"}
     Note over Ing,DB: status=waiting — next turn begins<br/>Human responds — cycle repeats
 
-    Note over A: Final round: sufficient context gathered<br/>Agent writes complete artifact
+    Note over A: Final round: sufficient context gathered<br/>Agent writes complete artifact to docs/conops.md
 
-    A-->>Ing: {"poe":"artifact","name":"conops.md","content":"<final>"}
-    Ing->>DB: UPSERT artifacts, write docs/conops.md
+    A-->>Ing: {"poe":"artifact","name":"conops.md","artifact_type":"conops"}
+    Ing->>DB: UPSERT artifacts (path indexed)
     Ing-->>FE: emit poe://event (artifact: conops.md — final)
-    Note over FE: Left panel shows complete artifact
+    Note over FE: Left panel reads file from disk — shows complete artifact
 
     A-->>Ing: {"poe":"done","summary":"CONOPS complete."}
     Note over Ing,DB: SF-2: task marked done
@@ -1248,7 +1252,7 @@ The orchestrator dispatches the task via SF-1 with the **interactive mode protoc
 
 The agent emits `poe:chat` with its first question or proposal, immediately followed by `poe:yield reason=chat`. The ingester inserts the turn into `chat_turns` and marks the task `waiting`. The conversation panel displays the agent's message.
 
-The agent may emit `poe:artifact` before yielding — a draft of the document in its current state. The artifact panel on the left updates immediately. On the first turn the artifact may be empty or skeletal; it fills over the course of the session.
+The agent may write a draft of the document to disk and emit `poe:artifact` before yielding. The orchestrator indexes the path; the frontend reads the file from disk and displays it in the left panel. On the first turn the artifact may be skeletal; it fills over the course of the session.
 
 **Phase 3 — Human response**
 
@@ -1260,7 +1264,7 @@ SF-4 resumes the agent via `--resume`. The agent reads its full session history 
 
 **Phase 5 — Completion**
 
-When the agent has sufficient context it writes the final `poe:artifact` and emits `poe:done`. The view shows a completion banner. The artifact is now in the project corpus — accessible from the artifact browser and injectable into subsequent task bundles via the normal knowledge assembly.
+When the agent has sufficient context it writes the final document to disk and emits `poe:artifact` (path declaration only) followed by `poe:done`. The view shows a completion banner. The artifact is now in the project corpus — accessible from the artifact browser and injectable as a path into subsequent task bundles via the normal knowledge assembly.
 
 ---
 
@@ -1270,7 +1274,7 @@ When the agent has sufficient context it writes the final `poe:artifact` and emi
 
 2. **Routing is exclusive**: `poe:chat` → Artifact Viewer chat panel. `poe:decision` → Decision Queue. These surfaces are independent. A collaborative agent may still emit `poe:decision` for genuine structural calls that require explicit arbitration — these appear in the queue normally, in addition to the chat session.
 
-3. **Artifact is the primary object**: The conversation exists to build the artifact. The agent is expected to emit `poe:artifact` progressively as the session develops, not only at the end. Intermediate emissions give the human continuous visibility of what is being built.
+3. **Artifact is the primary object**: The conversation exists to build the artifact. The agent is expected to write the file and emit `poe:artifact` (path declaration) progressively as the session develops, not only at the end. Intermediate emissions let the frontend read the latest version from disk and give the human continuous visibility of what is being built.
 
 4. **SF-4 is identical for chat, decision, and review**: The continuation mechanism is the same `--resume` + `Human: {text}` bundle regardless of yield reason. The difference is in routing (which surface captures the input) and semantics.
 
@@ -1278,7 +1282,7 @@ When the agent has sufficient context it writes the final `poe:artifact` and emi
 
 6. **Session is resumable**: The Artifact Viewer chat panel can be closed and re-opened. The `session_id`, `chat_turns` history, and artifact content all persist in SQLite. Re-opening resumes from the last turn without loss.
 
-7. **`poe:artifact` emissions are idempotent**: The agent may emit `poe:artifact` for the same document multiple times as sections develop. Each emission replaces prior content (UPSERT). The artifact viewer shows the latest version; prior versions are accessible via artifact history.
+7. **`poe:artifact` emissions are idempotent**: The agent may write and re-emit `poe:artifact` for the same document multiple times as sections develop. Each emission UPSERTs the artifacts table entry; the file on disk is the ground truth. The artifact viewer reads the latest version from disk; prior versions are accessible via artifact history (if the agent uses git or versioned filenames).
 
 ---
 
