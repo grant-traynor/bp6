@@ -1,36 +1,29 @@
-//! Decision → PTY handoff → stream-json resume integration test.
+//! Decision → scripted resume integration test.
 //!
-//! ┌─────────────────────────────────────────────────────────────────────────┐
-//! │  HUMAN-RUNNABLE TEST  — opens a browser window                         │
-//! │                                                                         │
-//! │  Run:  cargo test --test decision_handoff_harness -- --nocapture        │
-//! │  Log:  target/decision-handoff.log                                      │
-//! └─────────────────────────────────────────────────────────────────────────┘
+//! Run:  cargo test --test decision_handoff_harness -- --nocapture
+//! Log:  target/decision-handoff.log
 //!
 //! Flow:
 //!   1. Stream-json session 1: Claude emits poe:brief + poe:decision + poe:done.
 //!      The session_id is captured from the init event.
-//!   2. PTY handover: claude --resume <session_id> opens in an xterm.js browser
-//!      window. You can read Claude's decision question and type any response.
-//!      Close the browser tab when you are satisfied.
-//!   3. Stream-json session 2: resumes with --resume <session_id> and instructs
-//!      Claude to emit poe:done, confirming the continuation path works.
+//!   2. Scripted resume: stream-json --resume <session_id> injects the human
+//!      response as bundle text (no PTY, no browser, no human required).
+//!   3. Session 2 asserts poe:done received and on_complete fired.
 //!
 //! What the test asserts:
 //!   - Session 1: on_session_id fires, poe:decision received, poe:done received.
-//!   - PTY: browser connection established (xterm.js loaded, WS handshake done).
 //!   - Session 2: on_session_id fires, poe:done received, on_complete fires.
+//!
+//! NOTE — manual xterm.js UX test:
+//!   The PTY + WebSocket + browser handoff path is tested in session_handoff_harness,
+//!   which is correctly marked #[ignore] (manual). This test proves protocol
+//!   correctness only and runs in CI without --ignored.
 
-use futures_util::{SinkExt, StreamExt};
 use poe2_lib::agent::text_extractor::TextBufExtractor;
 use poe2_lib::agent::transport::{JsonStreamTransport, StreamCallbacks};
 use poe2_lib::event_ingester::parse_poe_event;
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use std::io::{Read, Write};
-use std::net::TcpListener as StdTcpListener;
+use std::io::Write;
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
 
 
 // ── Logger ────────────────────────────────────────────────────────────────────
@@ -152,274 +145,27 @@ fn run_transport(
     Ok(RunResult { session_ids: out_session_ids, poe_events: out_poe_events, completed: out_completed })
 }
 
-// ── xterm.js HTML page ────────────────────────────────────────────────────────
-
-fn html_page(session_id: &str, ws_port: u16) -> String {
-    format!(r#"<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>POE — decision handoff — {sid}</title>
-  <link rel="stylesheet" href="https://unpkg.com/@xterm/xterm@5.5.0/css/xterm.css">
-  <style>
-    * {{ margin:0; padding:0; box-sizing:border-box }}
-    body {{ background:#1a1a1a; display:flex; flex-direction:column; height:100vh; font-family:monospace }}
-    #header {{ padding:6px 12px; background:#111; color:#888; font-size:12px;
-               border-bottom:1px solid #2a2a2a; display:flex; justify-content:space-between }}
-    #header b {{ color:#3a8 }}
-    #banner {{ padding:8px 12px; background:#1e2a1e; color:#8c8; font-size:12px; border-bottom:1px solid #2a4a2a }}
-    #terminal {{ flex:1; overflow:hidden; padding:4px }}
-  </style>
-</head>
-<body>
-  <div id="header">
-    <span>claude --resume <b>{sid}</b></span>
-    <span id="status">connecting…</span>
-  </div>
-  <div id="banner">
-    ✦ Decision handoff harness — read Claude's question, type your response, then <b>close this tab</b> to resume the test.
-  </div>
-  <div id="terminal"></div>
-  <script src="https://unpkg.com/@xterm/xterm@5.5.0/lib/xterm.js"></script>
-  <script src="https://unpkg.com/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
-  <script>
-    const term = new Terminal({{
-      cursorBlink:true, fontFamily:'"Fira Code","SF Mono","Menlo",monospace',
-      fontSize:14, theme:{{ background:'#1a1a1a', foreground:'#e0e0e0', cursor:'#e0e0e0' }}
-    }});
-    const fit = new FitAddon.FitAddon();
-    term.loadAddon(fit); term.open(document.getElementById('terminal')); fit.fit();
-    const status = document.getElementById('status');
-    const ws = new WebSocket('ws://127.0.0.1:{ws_port}');
-    ws.binaryType = 'arraybuffer';
-    ws.onopen = () => {{
-      status.textContent = 'connected'; status.style.color = '#3a8';
-      ws.send(JSON.stringify({{type:'resize', cols:term.cols, rows:term.rows}}));
-    }};
-    ws.onmessage = e => {{
-      if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
-      else term.write(e.data);
-    }};
-    term.onData(d => {{ if (ws.readyState === WebSocket.OPEN) ws.send(d); }});
-    term.onResize(({{cols,rows}}) => {{
-      if (ws.readyState === WebSocket.OPEN)
-        ws.send(JSON.stringify({{type:'resize', cols, rows}}));
-    }});
-    window.addEventListener('resize', () => fit.fit());
-    ws.onclose = () => {{
-      status.textContent = 'disconnected'; status.style.color = '#a44';
-      term.write('\r\n\x1b[2m[disconnected — you may close this tab]\x1b[0m\r\n');
-    }};
-  </script>
-</body>
-</html>"#, sid = session_id, ws_port = ws_port)
-}
-
-// ── Minimal one-shot HTTP server ──────────────────────────────────────────────
-
-fn serve_html_once(html: String, log: Log) -> u16 {
-    let listener = StdTcpListener::bind("127.0.0.1:0").expect("http bind failed");
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(mut s) = stream {
-                let mut buf = [0u8; 4096];
-                s.read(&mut buf).ok();
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\
-                     Content-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    html.len(), html
-                );
-                if s.write_all(response.as_bytes()).is_ok() {
-                    log.line(&format!("[http] served HTML on port {port}"));
-                    break;
-                }
-            }
-        }
-    });
-    port
-}
-
-fn open_browser(url: &str) {
-    #[cfg(target_os = "macos")]
-    { std::process::Command::new("open").arg(url).spawn().ok(); }
-    #[cfg(target_os = "linux")]
-    { std::process::Command::new("xdg-open").arg(url).spawn().ok(); }
-    #[cfg(target_os = "windows")]
-    { std::process::Command::new("cmd").args(["/c", "start", url]).spawn().ok(); }
-}
-
-// ── PTY + WebSocket bridge ────────────────────────────────────────────────────
-
-async fn run_pty_handover(session_id: &str, cwd: &std::path::Path, log: Log) -> Result<(), String> {
-    let pty_system = NativePtySystem::default();
-    let pair = pty_system
-        .openpty(PtySize { rows: 40, cols: 200, pixel_width: 0, pixel_height: 0 })
-        .map_err(|e| format!("openpty: {e}"))?;
-
-    let mut cmd = CommandBuilder::new("claude");
-    cmd.arg("--resume");
-    cmd.arg(session_id);
-    cmd.arg("--dangerously-skip-permissions");
-    cmd.env_remove("CLAUDECODE");
-    cmd.cwd(&cwd);
-
-    let pty_writer: Arc<Mutex<Box<dyn Write + Send>>> =
-        Arc::new(Mutex::new(pair.master.take_writer().map_err(|e| format!("take_writer: {e}"))?));
-    let pty_reader = pair.master.try_clone_reader().map_err(|e| format!("clone_reader: {e}"))?;
-    let master = Arc::new(Mutex::new(pair.master));
-    let mut child = pair.slave.spawn_command(cmd).map_err(|e| format!("spawn: {e}"))?;
-    let child_pid = child.process_id();
-    log.line(&format!("[pty] spawned claude --resume {session_id} (pid={child_pid:?})"));
-
-    // PTY reader → mpsc channel
-    let (pty_tx, pty_rx) = mpsc::channel::<Vec<u8>>(512);
-    let log_reader = log.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut buf = [0u8; 4096];
-        let mut reader = pty_reader;
-        let mut total = 0usize;
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    total += n;
-                    if pty_tx.blocking_send(buf[..n].to_vec()).is_err() { break; }
-                }
-            }
-        }
-        log_reader.line(&format!("[pty] reader EOF ({total} bytes)"));
-    });
-
-    // WebSocket listener
-    let ws_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await.map_err(|e| format!("ws bind: {e}"))?;
-    let ws_port = ws_listener.local_addr().unwrap().port();
-    log.line(&format!("[ws] listening on port {ws_port}"));
-
-    // HTTP server + browser launch
-    let html = html_page(session_id, ws_port);
-    let http_port = serve_html_once(html, log.clone());
-    let url = format!("http://127.0.0.1:{http_port}");
-    log.sep();
-    log.line("╔══════════════════════════════════════════════════════════════╗");
-    log.line("║  HUMAN ACTION REQUIRED                                       ║");
-    log.line(&format!("║  URL: {url:<56}║"));
-    log.line("║  1. Read Claude's decision question in the terminal.         ║");
-    log.line("║  2. Type any response and press Enter (or just observe).     ║");
-    log.line("║  3. Close the browser tab when done.                         ║");
-    log.line("╚══════════════════════════════════════════════════════════════╝");
-    log.sep();
-    open_browser(&url);
-
-    // Wait for browser WebSocket (up to 60 s)
-    log.line("[ws] waiting for browser connection (60 s timeout)…");
-    let (tcp_stream, peer) = tokio::time::timeout(
-        std::time::Duration::from_secs(60),
-        ws_listener.accept(),
-    ).await
-    .map_err(|_| "timed out waiting for browser WebSocket connection (60 s)".to_string())?
-    .map_err(|e| format!("ws accept: {e}"))?;
-    log.line(&format!("[ws] TCP from {peer}"));
-
-    let ws_stream = tokio_tungstenite::accept_async(tcp_stream)
-        .await.map_err(|e| format!("ws handshake: {e}"))?;
-    log.line("[ws] handshake complete — bridging PTY ↔ xterm.js");
-
-    let (mut ws_tx, mut ws_rx) = ws_stream.split();
-    let pty_writer_for_ws = pty_writer.clone();
-    let master_for_resize = master.clone();
-
-    let log_in = log.clone();
-    let ws_in = tokio::spawn(async move {
-        while let Some(Ok(msg)) = ws_rx.next().await {
-            match msg {
-                Message::Text(s) => {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&s) {
-                        if json.get("type").and_then(|v| v.as_str()) == Some("resize") {
-                            let cols = json.get("cols").and_then(|v| v.as_u64()).unwrap_or(200) as u16;
-                            let rows = json.get("rows").and_then(|v| v.as_u64()).unwrap_or(40) as u16;
-                            master_for_resize.lock().unwrap()
-                                .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 }).ok();
-                            continue;
-                        }
-                    }
-                    pty_writer_for_ws.lock().unwrap().write_all(s.as_bytes()).ok();
-                }
-                Message::Binary(b) => { pty_writer_for_ws.lock().unwrap().write_all(&b).ok(); }
-                Message::Close(_) => { log_in.line("[ws] client closed"); break; }
-                _ => {}
-            }
-        }
-    });
-
-    let log_out = log.clone();
-    let mut pty_rx = pty_rx;
-    let ws_out = tokio::spawn(async move {
-        while let Some(data) = pty_rx.recv().await {
-            if ws_tx.send(Message::Binary(data.into())).await.is_err() {
-                log_out.line("[ws] send failed");
-                break;
-            }
-        }
-    });
-
-    log.line("[bridge] active — waiting for browser tab to close (10 min timeout)");
-    tokio::select! {
-        _ = ws_in  => { log.line("[bridge] input closed"); }
-        _ = ws_out => { log.line("[bridge] output closed"); }
-        _ = tokio::time::sleep(std::time::Duration::from_secs(600)) => {
-            log.line("[bridge] 10-minute timeout");
-        }
-    }
-
-    // Shutdown
-    pty_writer.lock().unwrap().write_all(&[3u8]).ok(); // Ctrl-C
-    drop(pty_writer);
-    drop(master);
-    if let Some(pid) = child_pid {
-        log.line(&format!("[pty] SIGTERM pid={pid}"));
-        std::process::Command::new("kill").arg(pid.to_string()).status().ok();
-    }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        if child.try_wait().ok().flatten().is_some() { log.line("[pty] exited"); break; }
-        if std::time::Instant::now() >= deadline {
-            if let Some(pid) = child_pid {
-                std::process::Command::new("kill").args(["-9", &pid.to_string()]).status().ok();
-            }
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    let reap = tokio::task::spawn_blocking(move || { let _ = child.wait(); });
-    tokio::time::timeout(std::time::Duration::from_secs(3), reap).await.ok();
-
-    Ok(())
-}
-
 // ── Test ──────────────────────────────────────────────────────────────────────
 
-/// End-to-end decision → PTY handoff → stream-json resume test.
+/// End-to-end decision → scripted resume protocol test.
 ///
-/// HUMAN-RUNNABLE: a browser window opens automatically. Follow the on-screen
-/// instructions, then close the tab to let the test continue.
+/// CI-safe: runs without human interaction. Session 1 raises poe:decision;
+/// Session 2 injects the human response as a bundle and asserts poe:done.
 ///
 /// Run: cargo test --test decision_handoff_harness -- --nocapture
 /// Log: target/decision-handoff.log
-#[ignore = "manual PTY/xterm.js harness — run with --ignored when testing decision handover UX"]
 #[test]
-fn decision_handoff_to_xterm_and_resume() {
+fn decision_handoff_scripted_resume() {
     let log = Log::create("decision-handoff");
     log.line(&format!("log: {}", log.path().display()));
 
     if !claude_on_path() {
-        log.line("SKIP: claude not on PATH — skipping decision_handoff_to_xterm_and_resume");
+        log.line("SKIP: claude not on PATH — skipping decision_handoff_scripted_resume");
         return;
     }
 
-    // Use the same cwd for all three steps so Claude's session scoping (by project
-    // directory) can find the session when resuming. Matches session_handoff_harness.
+    // Use the same cwd for both sessions so Claude's session scoping (by project
+    // directory) can find the session when resuming.
     let cwd = std::env::current_dir().expect("current_dir");
 
     // ── Session 1: emit poe:decision then poe:done ────────────────────────────
@@ -461,26 +207,13 @@ fn decision_handoff_to_xterm_and_resume() {
     );
     log.line("Session 1 poe:done: OK");
 
-    // ── PTY handover: open xterm.js browser window ────────────────────────────
+    // ── Session 2: scripted resume — inject human response as bundle ──────────
     log.sep();
-    log.line("=== PTY HANDOVER ===");
-    log.line(&format!("Resuming session {session_id} in xterm.js…"));
-
-    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-    rt.block_on(async {
-        run_pty_handover(&session_id, &cwd, log.clone())
-            .await
-            .unwrap_or_else(|e| log.line(&format!("[pty handover error] {e}")));
-    });
-
-    log.line("PTY handover complete.");
-
-    // ── Session 2: resume via stream-json, assert poe:done ────────────────────
-    log.sep();
-    log.line("=== SESSION 2: resume via stream-json ===");
+    log.line("=== SESSION 2: scripted resume (no PTY, no browser) ===");
+    log.line(&format!("Resuming session {session_id} via stream-json…"));
 
     let bundle_2 = concat!(
-        "The human has reviewed the decision and responded interactively.\n\n",
+        "Human: My scripted response to the decision — Continue.\n\n",
         "Emit this line and nothing else:\n",
         r#"{"poe":"done","summary":"Decision acknowledged — task resumed and complete."}"#, "\n",
     );
