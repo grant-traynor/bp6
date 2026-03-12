@@ -1233,3 +1233,64 @@ pub fn db_count_active_tasks_in_phase(conn: &Connection, phase_id: &str) -> Resu
     ).unwrap_or(0);
     Ok((total as usize, done as usize))
 }
+
+/// u7s.1 — Atomically claim a waiting node for resume by transitioning it from
+/// `waiting` → `resuming`. Returns `Ok(true)` if this caller won the claim
+/// (rows_changed == 1), `Ok(false)` if another caller already claimed it
+/// (rows_changed == 0 means the node was not in `waiting` status).
+pub fn db_claim_node_resuming(conn: &Connection, node_id: &str) -> Result<bool> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = conn.execute(
+        "UPDATE nodes SET status = 'resuming', updated_at = ?1 WHERE id = ?2 AND status = 'waiting'",
+        rusqlite::params![now, node_id],
+    )?;
+    Ok(rows == 1)
+}
+
+/// u7s.2 — Atomically claim a running node for retry by transitioning it from
+/// `running` → `pending` and incrementing retry_count. Returns `Ok(true)` if
+/// this caller won (rows_changed == 1), `Ok(false)` if another path already
+/// handled it (node was not in `running` status).
+pub fn db_claim_node_retry(conn: &Connection, node_id: &str) -> Result<bool> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = conn.execute(
+        "UPDATE nodes SET status = 'pending', retry_count = retry_count + 1, updated_at = ?1 WHERE id = ?2 AND status = 'running'",
+        rusqlite::params![now, node_id],
+    )?;
+    Ok(rows == 1)
+}
+
+/// u7s.5 — Returns the parent_id of a node, or None if the node has no parent
+/// or the node does not exist.
+pub fn db_get_node_parent(conn: &Connection, node_id: &str) -> Result<Option<String>> {
+    let result: rusqlite::Result<Option<String>> = conn.query_row(
+        "SELECT parent_id FROM nodes WHERE id = ?1",
+        [node_id],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(v) => Ok(v),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// u7s.5 — Returns true if all children of `parent_id` are in a terminal state
+/// (`complete` or `cancelled`). Returns false if any child is non-terminal,
+/// or if there are no children at all (empty container does not auto-close).
+pub fn db_all_children_terminal(conn: &Connection, parent_id: &str) -> Result<bool> {
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM nodes WHERE parent_id = ?1",
+        [parent_id],
+        |row| row.get(0),
+    )?;
+    if total == 0 {
+        return Ok(false); // no children → do not auto-close
+    }
+    let non_terminal: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM nodes WHERE parent_id = ?1 AND status NOT IN ('complete', 'cancelled')",
+        [parent_id],
+        |row| row.get(0),
+    )?;
+    Ok(non_terminal == 0)
+}

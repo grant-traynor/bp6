@@ -341,16 +341,19 @@ pub async fn spawn_agent(
                         dag_store::NodeStatus::Waiting => "yielded",
                         dag_store::NodeStatus::Running => {
                             // Crashed — poe:done and poe:yield never received.
-                            // Re-queue to Pending so the orchestrator can retry.
-                            let update = UpdateNodeInput {
-                                status: Some(dag_store::NodeStatus::Pending),
-                                title: None,
-                                description: None,
-                                skill_id: None,
-                                assignee: None,
-                                ..Default::default()
-                            };
-                            let _ = dag_store::db_update_node(&conn, &task_id, &update);
+                            // u7s.2: Use atomic DB claim to prevent double-retry when both
+                            // this exit handler and the watchdog timer fire near-simultaneously.
+                            // db_claim_node_retry transitions running → pending + increments
+                            // retry_count in one atomic UPDATE. rows_changed==0 means the
+                            // watchdog already handled it — stand down (do not re-queue again).
+                            let retry_claimed = dag_store::db_claim_node_retry(&conn, &task_id)
+                                .unwrap_or(false);
+                            if !retry_claimed {
+                                eprintln!(
+                                    "[agent_lifecycle] agent={} exit handler: retry claim lost for task={} — watchdog already handled it",
+                                    agent_id_clone, task_id
+                                );
+                            }
                             "failed"
                         }
                         _ => "failed",

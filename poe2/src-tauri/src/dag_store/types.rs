@@ -62,6 +62,11 @@ pub enum NodeStatus {
     Pending,
     Running,
     Waiting,
+    /// Transient lock status: a resume agent has been claimed for this node.
+    /// Used as a DB-level distributed lock to prevent double-resume when two
+    /// reviewer completions race. Ghost-claim recovery resets this to Waiting
+    /// on ProjectOpened (recover_interrupted). See u7s.1.
+    Resuming,
     Blocked,
     Complete,
     Cancelled,
@@ -73,6 +78,7 @@ impl std::fmt::Display for NodeStatus {
             NodeStatus::Pending => write!(f, "pending"),
             NodeStatus::Running => write!(f, "running"),
             NodeStatus::Waiting => write!(f, "waiting"),
+            NodeStatus::Resuming => write!(f, "resuming"),
             NodeStatus::Blocked => write!(f, "blocked"),
             NodeStatus::Complete => write!(f, "complete"),
             NodeStatus::Cancelled => write!(f, "cancelled"),
@@ -87,6 +93,7 @@ impl std::str::FromStr for NodeStatus {
             "pending" => Ok(NodeStatus::Pending),
             "running" => Ok(NodeStatus::Running),
             "waiting" => Ok(NodeStatus::Waiting),
+            "resuming" => Ok(NodeStatus::Resuming),
             "blocked" => Ok(NodeStatus::Blocked),
             "complete" => Ok(NodeStatus::Complete),
             "cancelled" => Ok(NodeStatus::Cancelled),

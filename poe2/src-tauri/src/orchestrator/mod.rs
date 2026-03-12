@@ -559,6 +559,12 @@ async fn handle_node_status_changed(
             if let Some(ref phase_id) = node.phase_id {
                 check_phase_completion(phase_id, project_id, registry, sink.as_ref()).await;
             }
+
+            // u7s.5: Hierarchy sweep — walk parent_id upward, closing container nodes
+            // (feature, epic, etc.) whose children are all terminal. This is the primary
+            // close path for container nodes which are never dispatched by db_find_ready_tasks.
+            // Only parent_id (organisational hierarchy) is walked — never edges (dependencies).
+            close_completed_ancestors(&node.id, project_id, registry, sink.as_ref()).await;
         }
         _ => {
             // Running, Pending, Blocked — no SF-4 action needed
@@ -931,6 +937,37 @@ async fn check_review_completion(
         }
     };
 
+    // u7s.1: DB-arbitrated single-dispatch claim. Transition waiting → resuming so
+    // only the first concurrent caller wins. Concurrent callers see rows_changed==0
+    // and abort, preventing duplicate resume spawns when reviewers complete near-simultaneously.
+    let claimed = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        match dag_store::db_claim_node_resuming(&conn, requesting_task_id) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] check_review_completion: claim failed for task={}: {}",
+                    requesting_task_id, e
+                );
+                return;
+            }
+        }
+    };
+
+    if !claimed {
+        eprintln!(
+            "[orchestrator] check_review_completion: claim lost — another caller is already resuming task={}",
+            requesting_task_id
+        );
+        return;
+    }
+
     let (skill_id, model) = {
         let skill_id = requesting_task.skill_id.clone().unwrap_or_else(|| "implementer".to_owned());
         let resource_dir = sink.resource_dir();
@@ -1030,13 +1067,10 @@ fn spawn_reviewer_watchdog(
         }
 
         if (current_retry as u32) < max_retry {
-            // Retry path: increment retry_count, requeue to pending
-            eprintln!(
-                "[orchestrator] watchdog: reviewer={} retry {}/{} — requeueing to pending",
-                reviewer_task_id, current_retry + 1, max_retry
-            );
-
-            let requeued = {
+            // u7s.2: Retry path — use atomic DB claim to prevent double-retry
+            // when both the watchdog and the exit handler fire near-simultaneously.
+            // rows_changed==1 means this caller won; rows_changed==0 means stand down.
+            let retry_claimed = {
                 let reg = registry.lock().unwrap();
                 let db = match reg.get(&project_id) {
                     Some(db) => db.clone(),
@@ -1044,36 +1078,27 @@ fn spawn_reviewer_watchdog(
                 };
                 drop(reg);
                 let conn = db.conn.lock().unwrap();
-                let new_retry = match dag_store::db_increment_retry_count(&conn, &reviewer_task_id) {
-                    Ok(n) => n,
+                match dag_store::db_claim_node_retry(&conn, &reviewer_task_id) {
+                    Ok(c) => c,
                     Err(e) => {
-                        eprintln!("[orchestrator] watchdog: increment retry failed: {}", e);
-                        return;
-                    }
-                };
-                let update = dag_store::UpdateNodeInput {
-                    status: Some(NodeStatus::Pending),
-                    title: None,
-                    description: None,
-                    skill_id: None,
-                    assignee: None,
-                    ..Default::default()
-                };
-                match dag_store::db_update_node(&conn, &reviewer_task_id, &update) {
-                    Ok(n) => {
-                        eprintln!(
-                            "[orchestrator] watchdog: reviewer={} requeued, retry_count now {}",
-                            reviewer_task_id, new_retry
-                        );
-                        n
-                    }
-                    Err(e) => {
-                        eprintln!("[orchestrator] watchdog: requeue update failed: {}", e);
+                        eprintln!("[orchestrator] watchdog: db_claim_node_retry failed: {}", e);
                         return;
                     }
                 }
             };
-            let _ = requeued; // status change will trigger run_loop via DagChanged
+
+            if !retry_claimed {
+                eprintln!(
+                    "[orchestrator] watchdog: reviewer={} retry claim lost — another path already handled it, standing down",
+                    reviewer_task_id
+                );
+                return;
+            }
+
+            eprintln!(
+                "[orchestrator] watchdog: reviewer={} retry claimed — requeueing to pending",
+                reviewer_task_id
+            );
 
             // Signal the run_loop to re-dispatch the pending reviewer (SF-1)
             let _ = dag_tx.send(DagChanged::DagStructureChanged {
@@ -1196,6 +1221,123 @@ async fn check_phase_completion(
             "status": "gate",
             "projectId": project_id,
         }));
+    }
+}
+
+// ── u7s.5: Hierarchy sweep ────────────────────────────────────────────────────
+
+/// Walk parent_id upward from `node_id`, closing container nodes (feature, epic,
+/// project, etc.) whose children are all in terminal state (complete or cancelled).
+///
+/// Design invariants:
+/// - Walks parent_id only (organisational hierarchy). NEVER walks edges (technical deps).
+/// - Calls check_phase_completion at each level — cheap and idempotent.
+/// - Only closes containers that have at least one child (empty containers stay open).
+async fn close_completed_ancestors(
+    node_id: &str,
+    project_id: &str,
+    registry: &ProjectRegistry,
+    sink: &dyn EventSink,
+) {
+    let mut current_id = node_id.to_owned();
+
+    loop {
+        // Get the parent of the current node
+        let parent_id_opt = {
+            let reg = registry.lock().unwrap();
+            let db = match reg.get(project_id) {
+                Some(db) => db.clone(),
+                None => return,
+            };
+            drop(reg);
+            let conn = db.conn.lock().unwrap();
+            match dag_store::db_get_node_parent(&conn, &current_id) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!(
+                        "[orchestrator] close_completed_ancestors: db_get_node_parent failed for node={}: {}",
+                        current_id, e
+                    );
+                    return;
+                }
+            }
+        };
+
+        let parent_id = match parent_id_opt {
+            Some(p) => p,
+            None => {
+                // Reached top-level node (no parent) — sweep complete
+                return;
+            }
+        };
+
+        // Check if all children of the parent are terminal
+        let all_terminal = {
+            let reg = registry.lock().unwrap();
+            let db = match reg.get(project_id) {
+                Some(db) => db.clone(),
+                None => return,
+            };
+            drop(reg);
+            let conn = db.conn.lock().unwrap();
+            match dag_store::db_all_children_terminal(&conn, &parent_id) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "[orchestrator] close_completed_ancestors: db_all_children_terminal failed for parent={}: {}",
+                        parent_id, e
+                    );
+                    return;
+                }
+            }
+        };
+
+        if !all_terminal {
+            // Siblings are still pending/running/waiting — do not close this container yet
+            return;
+        }
+
+        // Close the parent container
+        eprintln!(
+            "[orchestrator] close_completed_ancestors: all children of parent={} are terminal — closing container",
+            parent_id
+        );
+
+        let parent_phase_id = {
+            let reg = registry.lock().unwrap();
+            let db = match reg.get(project_id) {
+                Some(db) => db.clone(),
+                None => return,
+            };
+            drop(reg);
+            let conn = db.conn.lock().unwrap();
+            let now = chrono::Utc::now().to_rfc3339();
+            // Only close if not already terminal (idempotent)
+            let _ = conn.execute(
+                "UPDATE nodes SET status = 'complete', updated_at = ?1 WHERE id = ?2 AND status NOT IN ('complete', 'cancelled')",
+                rusqlite::params![now, &parent_id],
+            );
+            // Return the phase_id for check_phase_completion
+            match dag_store::db_get_node(&conn, &parent_id) {
+                Ok(n) => n.phase_id,
+                Err(_) => None,
+            }
+        };
+
+        // Notify frontend of container closure
+        sink.emit("poe-dag-node-status", &serde_json::json!({
+            "nodeId": parent_id,
+            "status": "complete",
+            "projectId": project_id,
+        }));
+
+        // Check phase completion at this level (cheap, idempotent)
+        if let Some(ref phase_id) = parent_phase_id {
+            check_phase_completion(phase_id, project_id, registry, sink).await;
+        }
+
+        // Ascend to the next level
+        current_id = parent_id;
     }
 }
 
@@ -1643,6 +1785,23 @@ pub async fn recover_interrupted(
         let conn = db.conn.lock().unwrap();
         let agents = dag_store::db_list_agents_by_status(&conn, project_id, "running")
             .unwrap_or_default();
+
+        // u7s.1: Ghost-claim recovery — reset any nodes stuck in `resuming` back to
+        // `waiting` so they can re-enter the SF-3 resume path on the next completion
+        // signal. These are nodes where the resume spawn was claimed but the app
+        // crashed before spawn_agent completed.
+        let now = chrono::Utc::now().to_rfc3339();
+        let ghost_count = conn.execute(
+            "UPDATE nodes SET status = 'waiting', updated_at = ?1 WHERE project_id = ?2 AND status = 'resuming'",
+            rusqlite::params![now, project_id],
+        ).unwrap_or(0);
+        if ghost_count > 0 {
+            eprintln!(
+                "[orchestrator] recover_interrupted: reset {} ghost-claim resuming node(s) back to waiting for project={}",
+                ghost_count, project_id
+            );
+        }
+
         let waiting = dag_store::db_list_nodes_by_status(&conn, project_id, "waiting")
             .unwrap_or_default();
         let path = PathBuf::from(&db.project.path);

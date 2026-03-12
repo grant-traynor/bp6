@@ -101,14 +101,20 @@ The yield event is the handoff point — the agent process is about to exit and 
    Completion check (fires on reviewer status=done via SF-2, OR on watchdog cancellation):
      → answered_ids = {nodes.review_id WHERE requesting_task_id=task.id
                                          AND status IN ('done', 'cancelled')}
-     → If answered_ids = expected_ids → all reviews accounted for; trigger SF-4
+     → If answered_ids = expected_ids → all reviews accounted for:
+         DB-arbitrated claim (u7s.1):
+           UPDATE nodes SET status='resuming' WHERE id=requesting_task.id AND status='waiting'
+           rows_changed == 1 → this caller won the claim; proceed with SF-4 resume spawn
+           rows_changed == 0 → another concurrent caller already claimed it; abort silently
+         (Prevents duplicate resume spawns when two reviewers complete near-simultaneously)
 
    Watchdog timer fires for reviewer task R:
      → R.status = done → no action (already complete)
      → R.status ≠ done AND R.retry_count < max_retry (default 2):
-         UPDATE nodes SET retry_count = retry_count + 1, status = pending
-         Dispatch via SF-1 (re-spawn fresh)
-         Spawn new watchdog timer
+         DB-arbitrated retry claim (u7s.2):
+           UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=R.id AND status='running'
+           rows_changed == 1 → this caller won; dispatch via SF-1 (re-spawn fresh), spawn new watchdog
+           rows_changed == 0 → exit handler already handled it; stand down
      → R.status ≠ done AND R.retry_count >= max_retry:
          UPDATE nodes SET status = cancelled
          Run completion check (above) — if answered_ids = expected_ids:
@@ -116,6 +122,12 @@ The yield event is the handoff point — the agent process is about to exit and 
              ReviewResult id={R.review_id} skill={skill} verdict=FAILED
              {Reviewer failed to respond after max retries. Escalate via poe:decision if required.}
          Else: await remaining reviewers (they may still complete)
+
+   Exit handler fires for reviewer crash (agent exits without poe:done):
+     → DB-arbitrated retry claim (u7s.2):
+         UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=R.id AND status='running'
+         rows_changed == 1 → this caller won; node is now pending; run_loop re-dispatches via SF-1
+         rows_changed == 0 → watchdog already handled it; stand down (do not re-queue again)
 
    yield_reason = 'decision':
      → No immediate action — orchestrator waits for human resolution
@@ -384,7 +396,9 @@ The reviewer does not emit `poe:task` or `poe:edge` events — it is not plannin
 
 **Phase 4 — Result delivery**
 
-When all reviewer tasks are accounted for (`answered_ids = expected_ids`), the orchestrator reads each reviewer's artifact content from disk and formats it as a `ReviewResult` block (Protocol.md §5). It then resumes the requesting agent via **SF-4: Agent Continuation**, with a bundle containing all `ReviewResult` blocks in sequence.
+When all reviewer tasks are accounted for (`answered_ids = expected_ids`), the orchestrator performs a **DB-arbitrated claim** (u7s.1): it executes `UPDATE nodes SET status='resuming' WHERE id=requesting_task.id AND status='waiting'`. If `rows_changed == 1`, this caller won and proceeds to build the resume bundle. If `rows_changed == 0`, another concurrent caller already claimed the node (e.g., two reviewers completed simultaneously); this caller aborts silently.
+
+The winning caller reads each reviewer's artifact content from disk and formats it as a `ReviewResult` block (Protocol.md §5). It then resumes the requesting agent via **SF-4: Agent Continuation**, with a bundle containing all `ReviewResult` blocks in sequence.
 
 The requesting agent resumes with its full prior session history plus the review results. It processes the findings and continues — creating tasks, revising its plan, or escalating if the review blocked.
 
@@ -424,7 +438,7 @@ When `answered_ids = expected_ids`, all reviews are accounted for — the reques
 
 2. **Batch collection**: The orchestrator collects all `poe:review` events logged since the task last ran before dispatching reviewers. An agent that emits three `poe:review` events before `poe:yield` produces three reviewers, all dispatched in parallel.
 
-3. **Single resume**: Regardless of how many reviewers ran, the requesting agent is resumed exactly once, with all results in a single bundle. Partial delivery is not permitted.
+3. **Single resume**: Regardless of how many reviewers ran, the requesting agent is resumed exactly once, with all results in a single bundle. Partial delivery is not permitted. The DB-arbitrated `waiting → resuming` claim (u7s.1) enforces this: only one concurrent caller can win the `UPDATE ... WHERE status='waiting'`; all others abort silently.
 
 4. **Resume mechanics via SF-4**: Result delivery uses SF-4: Agent Continuation. cwd must match the original session's cwd; the new session_id overwrites the prior one immediately. If resume fails, SF-4 falls back to SF-1 (fresh spawn). See SF-4 for the full failure mode.
 
@@ -1162,6 +1176,30 @@ sequenceDiagram
 ---
 
 #### Walkthrough
+
+**Container node auto-close (hierarchy sweep, u7s.5)**
+
+Feature, epic, and other container nodes are never dispatched by the scheduler — they have no `skill_id` and no executable work. They are closed automatically by a post-completion hierarchy sweep.
+
+Whenever any node reaches a terminal state (complete or cancelled), the orchestrator walks upward via `parent_id`:
+
+```
+for node in terminal:
+    parent = node.parent_id
+    while parent exists:
+        if all children of parent are terminal (complete or cancelled):
+            UPDATE parent SET status='complete'
+            emit poe-dag-node-status for parent
+            call check_phase_completion for parent's phase
+            parent = parent.parent_id   ← ascend one level
+        else:
+            break  ← sibling still pending/running/waiting → stop
+```
+
+Key invariants:
+- `parent_id` is walked (organisational hierarchy). `edges` are NEVER walked here — they encode technical dependencies, not containment.
+- Empty containers (no children) do NOT auto-close.
+- `check_phase_completion` is called at each level — cheap and idempotent.
 
 **Phase completion detection**
 

@@ -733,6 +733,43 @@ Rust struct: `PoeAgentActivity` in `src-tauri/src/event_ingester/mod.rs`, annota
 
 ---
 
+## Orchestrator Concurrency Patterns (u7s)
+
+### DB-Arbitrated Single-Dispatch Claim
+
+Any code path that wants to act on a node (resume it, retry it, close it) must first win an atomic `UPDATE ... WHERE ... AND status = '<expected>'`. The SQLite return value `rows_changed` is the arbiter:
+
+- `rows_changed == 1` → this caller won; proceed with the action.
+- `rows_changed == 0` → another path already moved the node out of the expected status; stand down silently.
+
+This pattern eliminates duplicate dispatches that arise when two concurrent code paths (e.g., two reviewer completion callbacks, or an exit handler + a watchdog timer) both observe the same precondition and both attempt to act.
+
+Two claims are used in the orchestrator:
+
+| Function | SQL | Use case |
+|---|---|---|
+| `db_claim_node_resuming` | `UPDATE nodes SET status='resuming' WHERE id=? AND status='waiting'` | u7s.1 — resume race prevention |
+| `db_claim_node_retry` | `UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=? AND status='running'` | u7s.2 — retry race prevention |
+
+### `NodeStatus::Resuming`
+
+`Resuming` is a transient lock status introduced for u7s.1. When `check_review_completion` confirms all reviewers are done, it atomically claims the requesting task node via `db_claim_node_resuming` (waiting → resuming) before spawning the resume agent. Any concurrent caller that loses the claim sees `rows_changed == 0` and aborts.
+
+On app restart, `recover_interrupted` resets all nodes in `resuming` status back to `waiting` (ghost-claim recovery). This handles the case where the app crashed after the claim was made but before `spawn_agent` completed. The node then re-enters the normal review-completion path on the next reviewer signal.
+
+### Parent-ID Hierarchy Sweep
+
+When any node reaches a terminal state (complete or cancelled), the orchestrator walks upward via `parent_id` to automatically close container nodes (feature, epic, project) whose children are all terminal. This is the primary close path for container nodes, which are never dispatched by `db_find_ready_tasks`.
+
+Key design invariants:
+
+- **Walk `parent_id` only** (organisational hierarchy). NEVER walk `edges` (technical dependencies). `parent_id` encodes "this node belongs to this container". `edges` encode "this node must complete before that node can start". These are intentionally separate axes.
+- **`check_phase_completion` is called at each level** of the sweep — it is cheap and idempotent.
+- **Empty containers do not auto-close** — `db_all_children_terminal` returns false when the parent has no children.
+- The sweep is triggered in `handle_node_status_changed` in the `Complete | Cancelled` arm, after the existing review-completion and phase-completion checks.
+
+---
+
 ## Invariants
 
 1. **One project per directory.** Project state is co-located with the project. No central store.
@@ -741,3 +778,4 @@ Rust struct: `PoeAgentActivity` in `src-tauri/src/event_ingester/mod.rs`, annota
 4. **The event log is the audit trail.** Every agent action that matters is recorded as a structured event.
 5. **Human gates are explicit.** No phase advances without a human decision. The human can choose to skip a gate, but the skip is recorded.
 6. **The queue should be sparse.** Frequent agent questions indicate insufficient preconditions, not a healthy workflow.
+7. **DB is the concurrency arbiter.** Any multi-path dispatch (resume, retry, container close) uses an atomic `UPDATE ... WHERE status=<expected>` claim. `rows_changed==0` means stand down.
