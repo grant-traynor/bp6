@@ -16,10 +16,11 @@ id: <skill-id>               # REQUIRED. Kebab-case. Must match the filename ste
 name: <Human Readable Name>  # REQUIRED. Displayed in the UI.
 description: <one sentence>  # REQUIRED. What this specialist does. Used by the orchestrator
                              #   to surface the skill in the UI and log it in the event trail.
-modes: [autonomous]          # REQUIRED. One or more of: autonomous, interactive.
+modes: [autonomous]          # Optional. One or more of: autonomous, interactive.
                              #   autonomous  — run via stream-json -p (no keyboard, poe: events expected)
                              #   interactive — run in a human conversation (poe: events only on concrete output)
-                             #   If omitted, orchestrator assumes [autonomous] only.
+                             #   Omitting modes: OR using modes: [] safely defaults to [autonomous].
+                             #   Declare explicitly for clarity; the parser is lenient with absent or empty values.
                              #   The UI blocks interactive sessions for autonomous-only skills.
 model: claude-opus-4-6       # Optional. Claude model ID for this skill's agent spawn.
                              #   When present, the orchestrator passes --model <value> to claude.
@@ -38,13 +39,13 @@ protocol_version: v2         # Optional. Convention — include for new skills t
 | `id` | Yes | Must match filename stem exactly |
 | `name` | Yes | Human-readable display name |
 | `description` | Yes | One sentence — what this specialist does |
-| `modes` | Yes | Declare explicitly — do not rely on the autonomous default |
+| `modes` | No | Omitting or empty `[]` defaults to `["autonomous"]`; declare explicitly for clarity |
 | `model` | No | Claude model ID; passes `--model` to claude spawn when present |
 | `tags` | No | Informational only |
 | `applies_to` | No | Informational only |
 | `protocol_version` | No | Convention — include `v2` for new skills |
 
-> **Note — existing skills**: All current skills (`implementer.md`, `planner.md`, etc.) include `modes:` and `protocol_version: v2`. New skills must include both explicitly.
+> **Note — existing skills**: All current skills (`implementer.md`, `planner.md`, etc.) include `modes:` and `protocol_version: v2`. New skills should include both for clarity, but omitting `modes:` or using `modes: []` is safe — the parser defaults to `["autonomous"]`.
 
 ---
 
@@ -348,3 +349,4 @@ Every skill should include a quality checklist before `poe:done`. See `validity-
 | `rca-analyst` | Retrospective | autonomous | None |
 | `implementer` | Execution | autonomous | None |
 | `planner` | Execution | autonomous | None |
+| `test` | Execution | autonomous | Detects project type and runs the appropriate test suite (cargo test, npm test, pytest, etc.). Emits poe:done on pass, poe:decision on failure. |

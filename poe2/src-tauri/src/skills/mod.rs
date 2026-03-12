@@ -145,10 +145,11 @@ fn extract_frontmatter_value(frontmatter: &str, key: &str) -> Option<Vec<String>
                     .collect();
                 return Some(values);
             } else if rest.is_empty() {
-                // Block-list form: subsequent lines starting with `  - `
+                // Block-list form: subsequent lines starting with `- ` (after trimming leading whitespace).
+                // Accepts any consistent indentation (2-space, 4-space, tab, etc.).
                 let mut values = Vec::new();
                 for next_line in lines[i + 1..].iter() {
-                    if let Some(item) = next_line.strip_prefix("  - ") {
+                    if let Some(item) = next_line.trim_start().strip_prefix("- ") {
                         values.push(item.trim().to_string());
                     } else {
                         break;
