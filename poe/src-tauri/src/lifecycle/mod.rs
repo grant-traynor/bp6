@@ -743,7 +743,13 @@ pub async fn spawn_execution_workflow(
         match spawn_agent_internal(
             SpawnAgentParams {
                 cmd: "claude".to_string(),
-                args: vec![prompt],
+                args: vec![
+                    "-p".to_string(),
+                    prompt,
+                    "--output-format".to_string(),
+                    "stream-json".to_string(),
+                    "--dangerously-skip-permissions".to_string(),
+                ],
                 env: None,
                 agent_id: None,
                 workflow_id: Some(project_id.to_string()),
@@ -752,7 +758,7 @@ pub async fn spawn_execution_workflow(
                 session_id: Some(Uuid::new_v4().to_string()),
                 resume: false,
                 cwd: project_dir.clone(),
-                use_pty: true,
+                use_pty: false,
             },
             app_handle,
             agent_state,
@@ -816,7 +822,13 @@ pub fn spawn_step_agent(
     let spawned = spawn_agent_internal(
         SpawnAgentParams {
             cmd: "claude".to_string(),
-            args: vec![prompt],
+            args: vec![
+                "-p".to_string(),
+                prompt,
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+            ],
             env: None,
             agent_id: None,
             workflow_id: Some(project_id.to_string()),
@@ -825,7 +837,7 @@ pub fn spawn_step_agent(
             session_id: Some(Uuid::new_v4().to_string()),
             resume: false,
             cwd: project_dir.map(|s| s.to_string()),
-            use_pty: true,
+            use_pty: false,
         },
         app,
         agent_state,
@@ -862,7 +874,13 @@ pub fn spawn_step_agent_with_prompt(
     let spawned = spawn_agent_internal(
         SpawnAgentParams {
             cmd: "claude".to_string(),
-            args: vec![full_prompt],
+            args: vec![
+                "-p".to_string(),
+                full_prompt,
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+            ],
             env: None,
             agent_id: None,
             workflow_id: Some(project_id.to_string()),
@@ -871,7 +889,7 @@ pub fn spawn_step_agent_with_prompt(
             session_id: Some(Uuid::new_v4().to_string()),
             resume: false,
             cwd: project_dir.map(|s| s.to_string()),
-            use_pty: true,
+            use_pty: false,
         },
         app,
         agent_state,
