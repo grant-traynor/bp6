@@ -320,6 +320,27 @@ fn handle_task(
                 }
             }
         }
+        // Auto-block: if the creating task is a planning skill, gate the new node on the
+        // creating task completing. This prevents execution tasks from being dispatched while
+        // the planning agent that created them is still running.
+        // Best-effort — a failure here must not prevent node registration.
+        const PLANNING_SKILLS: &[&str] = &["product-manager", "planner"];
+        let creator_skill: Option<String> = conn
+            .query_row(
+                "SELECT skill_id FROM nodes WHERE id = ?1",
+                rusqlite::params![task_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+        if creator_skill.as_deref().map_or(false, |s| PLANNING_SKILLS.contains(&s)) {
+            if let Err(e) = dag_store::db_create_edge(conn, task_id, &node.id, EdgeType::DependsOn) {
+                eprintln!(
+                    "[event_ingester] handle_task: auto-block edge {} → {} skipped: {e}",
+                    task_id, node.id
+                );
+            }
+        }
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:task", json)?;
         pending_events.push(("poe-task-created".to_string(), serde_json::to_value(&node)?));
         let change = DagChanged::DagStructureChanged {
@@ -1191,6 +1212,129 @@ mod tests {
         let parsed: PoeArtifact = serde_json::from_str(line).unwrap();
         assert_eq!(parsed.name, "x.md");
         assert_eq!(parsed.artifact_type, "doc");
+    }
+
+    // ── handle_task auto-block edge tests (bp6-13z.17) ───────────────────────
+
+    /// Build a minimal ProjectRegistry backed by an in-memory DB with schema.
+    fn make_registry_with_project(project_id: &str) -> (crate::dag_store::ProjectRegistry, String) {
+        use crate::dag_store::{new_registry, ProjectDb, Project};
+        use std::sync::{Arc, Mutex};
+        let conn = make_test_conn();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![project_id, "Test", "/tmp/test", now, now],
+        ).unwrap();
+        let project = Project {
+            id: project_id.to_string(),
+            name: "Test".to_string(),
+            path: "/tmp/test".to_string(),
+            conops_ref: None,
+            active_phase_id: None,
+            created_at: now.clone(),
+            updated_at: now,
+        };
+        let db = Arc::new(ProjectDb { project, conn: Mutex::new(conn) });
+        let registry = new_registry();
+        registry.lock().unwrap().insert(project_id.to_string(), db);
+        (registry, project_id.to_string())
+    }
+
+    /// Insert a task node with the given skill_id into the conn inside the registry.
+    fn insert_task_with_skill(registry: &crate::dag_store::ProjectRegistry, project_id: &str, skill_id: Option<&str>) -> String {
+        let task_id = uuid::Uuid::new_v4().to_string();
+        let reg = registry.lock().unwrap();
+        let db = reg.get(project_id).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO nodes (id, project_id, node_type, title, status, skill_id, created_at, updated_at)
+             VALUES (?1, ?2, 'task', 'Creating Task', 'running', ?3, ?4, ?5)",
+            rusqlite::params![task_id, project_id, skill_id, now, now],
+        ).unwrap();
+        task_id
+    }
+
+    /// Count depends_on edges with a specific from_id and to_id.
+    fn count_edge(registry: &crate::dag_store::ProjectRegistry, project_id: &str, from_id: &str, to_id: &str) -> i64 {
+        let reg = registry.lock().unwrap();
+        let db = reg.get(project_id).unwrap();
+        let conn = db.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM edges WHERE from_id = ?1 AND to_id = ?2 AND edge_type = 'depends_on'",
+            rusqlite::params![from_id, to_id],
+            |r| r.get(0),
+        ).unwrap()
+    }
+
+    /// poe:task from a product-manager creating task → auto-block edge added.
+    #[test]
+    fn handle_task_planning_skill_adds_auto_block_edge() {
+        let project_id = "proj-auto-block";
+        let (registry, _) = make_registry_with_project(project_id);
+        let creating_task_id = insert_task_with_skill(&registry, project_id, Some("product-manager"));
+        let (dag_tx, _dag_rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = crate::event_sink::test_helpers::TestEventSink::default();
+
+        let new_task_id = uuid::Uuid::new_v4().to_string();
+        let task_json = format!(
+            r#"{{"poe":"task","id":"{new_task_id}","title":"Impl task","skill":"implementer","type":"task"}}"#
+        );
+        handle_task(&task_json, project_id, &creating_task_id, "agent-1", &registry, &dag_tx, &sink)
+            .expect("handle_task");
+
+        assert_eq!(
+            count_edge(&registry, project_id, &creating_task_id, &new_task_id),
+            1,
+            "product-manager creating task must produce auto-block edge to new node"
+        );
+    }
+
+    /// poe:task from a planner creating task → auto-block edge added.
+    #[test]
+    fn handle_task_planner_skill_adds_auto_block_edge() {
+        let project_id = "proj-planner-block";
+        let (registry, _) = make_registry_with_project(project_id);
+        let creating_task_id = insert_task_with_skill(&registry, project_id, Some("planner"));
+        let (dag_tx, _dag_rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = crate::event_sink::test_helpers::TestEventSink::default();
+
+        let new_task_id = uuid::Uuid::new_v4().to_string();
+        let task_json = format!(
+            r#"{{"poe":"task","id":"{new_task_id}","title":"Exec task","skill":"implementer","type":"task"}}"#
+        );
+        handle_task(&task_json, project_id, &creating_task_id, "agent-1", &registry, &dag_tx, &sink)
+            .expect("handle_task");
+
+        assert_eq!(
+            count_edge(&registry, project_id, &creating_task_id, &new_task_id),
+            1,
+            "planner creating task must produce auto-block edge to new node"
+        );
+    }
+
+    /// poe:task from an implementer creating task → NO auto-block edge.
+    #[test]
+    fn handle_task_non_planning_skill_no_auto_block_edge() {
+        let project_id = "proj-no-block";
+        let (registry, _) = make_registry_with_project(project_id);
+        let creating_task_id = insert_task_with_skill(&registry, project_id, Some("implementer"));
+        let (dag_tx, _dag_rx) = tokio::sync::mpsc::unbounded_channel();
+        let sink = crate::event_sink::test_helpers::TestEventSink::default();
+
+        let new_task_id = uuid::Uuid::new_v4().to_string();
+        let task_json = format!(
+            r#"{{"poe":"task","id":"{new_task_id}","title":"Sub task","skill":"implementer","type":"task"}}"#
+        );
+        handle_task(&task_json, project_id, &creating_task_id, "agent-1", &registry, &dag_tx, &sink)
+            .expect("handle_task");
+
+        assert_eq!(
+            count_edge(&registry, project_id, &creating_task_id, &new_task_id),
+            0,
+            "implementer creating task must NOT produce auto-block edge"
+        );
     }
 
     #[test]
