@@ -26,7 +26,6 @@ const REVIEWER_MAX_RETRY: u32 = 2;
 
 pub struct ConcurrencyLimits {
     pub per_project: Mutex<HashMap<String, usize>>,
-    pub global_running: AtomicUsize,
     pub global_limit: AtomicUsize,
     pub default_per_project: usize,
 }
@@ -35,7 +34,6 @@ impl ConcurrencyLimits {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             per_project: Mutex::new(HashMap::new()),
-            global_running: AtomicUsize::new(0),
             global_limit: AtomicUsize::new(15),
             default_per_project: 5,
         })
@@ -78,7 +76,7 @@ pub async fn start(
         eprintln!("[orchestrator] start: received signal {:?}", signal);
 
         // Drain all pending signals — categorise into buckets
-        let mut resume_requests: Vec<(String, String, String, String, String)> = Vec::new(); // (project_id, task_id, session_id, resolution, item_id)
+        let mut resume_requests: Vec<(String, String, String, String, String, String)> = Vec::new(); // (project_id, task_id, session_id, resolution, item_id, turn_type)
         let mut opened_projects: Vec<String> = Vec::new(); // projects needing ghost-agent recovery
         let mut node_status_changed: Vec<(String, String)> = Vec::new(); // (project_id, node_id) for NodeStatusChanged
         let mut project_ids = std::collections::HashSet::new();
@@ -91,14 +89,23 @@ pub async fn start(
         }
 
         // Recover ghost agents from previously-interrupted sessions before scheduling.
-        for project_id in &opened_projects {
-            eprintln!("[orchestrator] project opened — running ghost-agent recovery for {}", project_id);
-            recover_interrupted(project_id, &registry, &dag_tx, &agent_map, Arc::clone(&sink)).await;
+        // Recovery runs concurrently per project so it does not block signal processing.
+        for project_id in opened_projects.iter().cloned() {
+            eprintln!("[orchestrator] project opened — spawning concurrent ghost-agent recovery for {}", project_id);
+            let registry_c = registry.clone();
+            let dag_tx_c = dag_tx.clone();
+            let agent_map_c = agent_map.clone();
+            let sink_c = Arc::clone(&sink);
+            tokio::spawn(async move {
+                recover_interrupted(&project_id, &registry_c, &dag_tx_c, &agent_map_c, sink_c).await;
+                // Re-signal the orchestrator so run_loop resumes normal scheduling after recovery.
+                let _ = dag_tx_c.send(DagChanged::DagStructureChanged { project_id });
+            });
         }
 
         // Handle resume continuations for resolved decisions and chat responses
-        for (project_id, task_id, session_id, resolution, item_id) in resume_requests {
-            resume_waiting_agent(&project_id, &task_id, &session_id, &resolution, &item_id, &registry, &dag_tx, &agent_map, Arc::clone(&sink)).await;
+        for (project_id, task_id, session_id, resolution, item_id, turn_type) in resume_requests {
+            resume_waiting_agent(&project_id, &task_id, &session_id, &resolution, &item_id, &turn_type, &registry, &dag_tx, &agent_map, Arc::clone(&sink)).await;
         }
 
         // SF-4: handle NodeStatusChanged signals — yield-handling and completion checks
@@ -116,14 +123,14 @@ pub async fn start(
 /// Route a single DagChanged signal into the appropriate processing bucket.
 fn categorise_signal(
     signal: DagChanged,
-    resume_requests: &mut Vec<(String, String, String, String, String)>,
+    resume_requests: &mut Vec<(String, String, String, String, String, String)>,
     opened_projects: &mut Vec<String>,
     node_status_changed: &mut Vec<(String, String)>,
     project_ids: &mut std::collections::HashSet<String>,
 ) {
     match signal {
-        DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, item_id } => {
-            resume_requests.push((project_id, task_id, session_id, resolution, item_id));
+        DagChanged::QueueItemResolved { project_id, task_id, session_id, resolution, item_id, turn_type } => {
+            resume_requests.push((project_id, task_id, session_id, resolution, item_id, turn_type));
         }
         DagChanged::ProjectOpened { project_id } => {
             opened_projects.push(project_id.clone());
@@ -141,69 +148,33 @@ fn categorise_signal(
 
 /// Resume an agent that was waiting for a human decision or a chat response.
 ///
-/// The `item_id` field distinguishes the two cases:
-/// - If `item_id` is present in `chat_turns`, this is a chat continuation (SF-4 chat arm).
-/// - Otherwise, it is a decision resolution (SF-4 decision arm).
+/// Routes directly via `turn_type` ("decision", "chat", or "advisor") carried in
+/// QueueItemResolved — no DB COUNT(*) probes required.
 async fn resume_waiting_agent(
     project_id: &str,
     task_id: &str,
     session_id: &str,
     resolution: &str,
     item_id: &str,
+    turn_type: &str,
     registry: &ProjectRegistry,
     dag_tx: &mpsc::UnboundedSender<DagChanged>,
     agent_map: &AgentMap,
     sink: Arc<dyn EventSink>,
 ) {
-    // Check whether item_id references a chat_turns row (SF-4 chat arm) or a
-    // queue_items row (SF-4 decision arm).
-    let is_chat_turn = {
-        let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
-            Some(db) => db.clone(),
-            None => {
-                eprintln!("[orchestrator] resume_waiting_agent: project not open {}", project_id);
-                return;
-            }
-        };
-        drop(reg);
-        let conn = db.conn.lock().unwrap();
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM chat_turns WHERE id = ?1",
-                rusqlite::params![item_id],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
-        count > 0
-    };
-
-    // Check whether item_id references an advisor_turns row (SF-4 advisor arm)
-    let is_advisor_turn = if !is_chat_turn {
-        let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
-            Some(db) => db.clone(),
-            None => {
-                eprintln!("[orchestrator] resume_waiting_agent: project not open {}", project_id);
-                return;
-            }
-        };
-        drop(reg);
-        let conn = db.conn.lock().unwrap();
-        dag_store::db_advisor_turn_exists(&conn, item_id)
-    } else {
-        false
-    };
-
-    if is_chat_turn {
-        resume_chat_agent(project_id, task_id, session_id, item_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
-    } else if is_advisor_turn {
-        resume_advisor_agent(project_id, task_id, session_id, item_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
-    } else {
-        resume_decision_agent(project_id, task_id, session_id, resolution, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
+    match turn_type {
+        "chat" => {
+            resume_chat_agent(project_id, task_id, session_id, item_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
+        }
+        "advisor" => {
+            resume_advisor_agent(project_id, task_id, session_id, item_id, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
+        }
+        _ => {
+            // "decision" or any unrecognised value — fall through to decision arm
+            resume_decision_agent(project_id, task_id, session_id, resolution, registry, dag_tx, agent_map, Arc::clone(&sink)).await;
+        }
     }
 }
-
 /// SF-4 decision arm: resume an agent that was waiting for a human decision.
 /// Spawns a new stream-json session with --resume and the human's resolution as the bundle.
 async fn resume_decision_agent(
@@ -780,41 +751,38 @@ async fn dispatch_reviewer_task(
         }
     };
 
-    // Build ReviewRequest bundle per Protocol.md §3
+    // Build ReviewRequest bundle per Protocol.md §3, routed through assemble_input_bundle()
+    // so the reviewer receives the autonomous mode execution protocol block.
     let review_id = reviewer.review_id.as_deref().unwrap_or("unknown");
     let review_content = reviewer.description.as_deref().unwrap_or("");
 
-    let knowledge_section = if knowledge.is_empty() {
-        String::new()
-    } else {
-        let entries: String = knowledge
-            .iter()
-            .map(|(k, v)| format!("## {}\n\n{}\n\n---\n", k, v))
-            .collect();
-        format!("# Knowledge Register\n\n{}", entries)
-    };
-
-    let artifacts_section = if artifacts.is_empty() {
-        String::new()
-    } else {
-        let entries: String = artifacts
-            .iter()
-            .map(|(t, f)| format!("## {} ({})\n\n---\n", f, t))
-            .collect();
-        format!("# Artifacts\n\n{}", entries)
-    };
-
-    let input_bundle = format!(
-        "# Task\n\n**ID**: {reviewer_id}\n**Title**: Plan Review — {requesting_title}\n**Type**: plan_review\n**Skill**: {skill_id}\n\n## Review Request\n\n**Requested by**: {requesting_id} ({requesting_title})\n**Review ID**: {review_id}\n\n{review_content}\n\n> **Naming convention**: The reviewer MUST emit its artifact as {{\"poe\":\"artifact\",\"name\":\"review-{review_id}.md\",...}} where `{review_id}` is the Review ID above.\n\n---\n\n# Skill\n\n{skill_prompt}\n\n---\n\n{artifacts_section}{knowledge_section}",
-        reviewer_id = reviewer.id,
-        requesting_title = requesting_task.title,
-        skill_id = skill_id,
+    // Compose the reviewer task description to pass as task_description to assemble_input_bundle.
+    let reviewer_description = format!(
+        "## Review Request\n\n**Requested by**: {requesting_id} ({requesting_title})\n**Review ID**: {review_id}\n\n{review_content}\n\n> **Naming convention**: The reviewer MUST emit its artifact as {{\"poe\":\"artifact\",\"name\":\"review-{review_id}.md\",...}} where `{review_id}` is the Review ID above.",
         requesting_id = requesting_task.id,
+        requesting_title = requesting_task.title,
         review_id = review_id,
         review_content = review_content,
-        skill_prompt = skill.prompt,
-        artifacts_section = artifacts_section,
-        knowledge_section = knowledge_section,
+    );
+
+    let knowledge_refs: Vec<(&str, &str)> = knowledge
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let artifact_refs: Vec<(&str, &str)> = artifacts
+        .iter()
+        .map(|(t, f)| (t.as_str(), f.as_str()))
+        .collect();
+
+    let reviewer_title = format!("Plan Review — {}", requesting_task.title);
+    let input_bundle = skills::assemble_input_bundle(
+        &skills::SpawnMode::Autonomous,
+        &skill,
+        &reviewer_title,
+        Some(&reviewer_description),
+        &[], // reviewer has no WBS ancestry to inject
+        &knowledge_refs,
+        &artifact_refs,
     );
 
     let spawn_req = SpawnRequest {
@@ -1372,6 +1340,21 @@ async fn dispatch_task(
         }
         Err(e) => {
             eprintln!("[orchestrator] Failed to load skill '{}': {}", skill_id, e);
+            // Mark the task cancelled so the run_loop does not retry it endlessly.
+            let reg = registry.lock().unwrap();
+            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                let conn = db.conn.lock().unwrap();
+                let update = dag_store::UpdateNodeInput {
+                    status: Some(dag_store::NodeStatus::Cancelled),
+                    description: Some(format!("Cancelled: skill '{}' could not be loaded: {}", skill_id, e)),
+                    ..Default::default()
+                };
+                if let Err(ue) = dag_store::db_update_node(&conn, &task.id, &update) {
+                    eprintln!("[orchestrator] dispatch_task: failed to cancel task {}: {}", task.id, ue);
+                } else {
+                    eprintln!("[orchestrator] dispatch_task: task {} marked cancelled (skill load failure)", task.id);
+                }
+            }
             return;
         }
     };

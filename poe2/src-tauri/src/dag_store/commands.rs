@@ -220,6 +220,7 @@ pub async fn resolve_queue_item(
             task_id: task_id.clone(),
             session_id: session_id.clone(),
             resolution: resolution.clone(),
+            turn_type: "decision".to_owned(),
         });
     }
 
@@ -248,9 +249,22 @@ pub async fn read_artifact_content(
             |row| row.get(0),
         ).map_err(|e| anyhow::anyhow!("Project not found {}: {}", project_id, e))?;
 
-        let path = std::path::Path::new(&project_path).join("docs").join(&filename);
-        std::fs::read_to_string(&path)
-            .map_err(|e| anyhow::anyhow!("Failed to read artifact {:?}: {}", path, e))
+        // Try docs/ first (canonical location), fall back to project root for
+        // files written before the docs/ convention was established.
+        let docs_path = std::path::Path::new(&project_path).join("docs").join(&filename);
+        if docs_path.exists() {
+            return std::fs::read_to_string(&docs_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read artifact {:?}: {}", docs_path, e));
+        }
+        let root_path = std::path::Path::new(&project_path).join(&filename);
+        if root_path.exists() {
+            return std::fs::read_to_string(&root_path)
+                .map_err(|e| anyhow::anyhow!("Failed to read artifact {:?}: {}", root_path, e));
+        }
+        Err(anyhow::anyhow!(
+            "Artifact file '{}' not found at {:?} or {:?}",
+            filename, docs_path, root_path
+        ))
     })
 }
 
@@ -338,6 +352,7 @@ pub async fn respond_to_chat(
             task_id: task_id.clone(),
             session_id: session_id.clone(),
             resolution: response.clone(),
+            turn_type: "chat".to_owned(),
         });
     }
 
@@ -874,6 +889,7 @@ pub async fn respond_to_advisor(
             task_id: task_id.clone(),
             session_id: session_id.clone(),
             resolution: response.clone(),
+            turn_type: "advisor".to_owned(),
         });
     }
 
