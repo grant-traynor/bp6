@@ -175,19 +175,22 @@
 
     /* ── Color States ─────────────────────────────────────── */
     /* Correct position — green */
-    .tile[data-state="correct"] {
+    .tile[data-state="correct"],
+    .tile.correct {
       background-color: #6aaa64;
       color: #ffffff;
     }
 
     /* Present (wrong position) — yellow */
-    .tile[data-state="present"] {
+    .tile[data-state="present"],
+    .tile.present {
       background-color: #c9b458;
       color: #ffffff;
     }
 
     /* Absent (not in word) — dark gray */
-    .tile[data-state="absent"] {
+    .tile[data-state="absent"],
+    .tile.absent {
       background-color: #787c7e;
       color: #ffffff;
     }
@@ -388,5 +391,262 @@
       <button class="key" data-key="Backspace">⌫</button>
     </div>
   </div>
+  <script>
+    /**
+     * scoreGuess(guess, target)
+     *
+     * Scores a 5-letter guess against the target word using standard Wordle rules.
+     *
+     * Algorithm (two-pass, duplicate-safe):
+     *   Pass 1 — exact matches: mark position 'correct', exclude that target letter
+     *            from the unmatched pool so it cannot be matched again.
+     *   Pass 2 — remaining positions: if the guess letter appears in the unmatched
+     *            pool, mark 'present' and consume that pool entry; otherwise 'absent'.
+     *
+     * @param {string} guess  - 5-letter guess (lowercase)
+     * @param {string} target - 5-letter target word (lowercase)
+     * @returns {{ letter: string, result: 'correct'|'present'|'absent' }[]}
+     */
+    function scoreGuess(guess, target) {
+      const result = [];
+      for (let i = 0; i < 5; i++) {
+        result.push({ letter: guess[i], result: 'absent' });
+      }
+
+      // Build the unmatched pool from target letters that are NOT exact matches.
+      const unmatched = [];
+      for (let i = 0; i < 5; i++) {
+        if (guess[i] === target[i]) {
+          result[i].result = 'correct';
+        } else {
+          unmatched.push(target[i]);
+        }
+      }
+
+      // Second pass: check non-correct positions against the unmatched pool.
+      for (let i = 0; i < 5; i++) {
+        if (result[i].result === 'correct') continue;
+        const idx = unmatched.indexOf(guess[i]);
+        if (idx !== -1) {
+          result[i].result = 'present';
+          unmatched.splice(idx, 1); // consume so duplicates in guess are not over-counted
+        }
+      }
+
+      return result;
+    }
+  </script>
+  <script src="src/words.js"></script>
+  <script>
+    // ── Game constants ──────────────────────────────────────────
+    var MAX_ATTEMPTS = 6;
+    var WORD_LENGTH = 5;
+
+    // TARGET is frozen at page load — MN-TRUST-03
+    var TARGET = getRandomAnswer();
+
+    // ── Game state ──────────────────────────────────────────────
+    var currentRow = 0;
+    var currentCol = 0;
+    var gameOver = false;
+
+    // boardState[row][col] = { letter: string, state: string }
+    var boardState = [];
+    for (var r = 0; r < MAX_ATTEMPTS; r++) {
+      var rowArr = [];
+      for (var c = 0; c < WORD_LENGTH; c++) {
+        rowArr.push({ letter: '', state: 'empty' });
+      }
+      boardState.push(rowArr);
+    }
+
+    // ── DOM references ──────────────────────────────────────────
+    var boardEl = document.getElementById('board');
+    var rowEls = boardEl.querySelectorAll('.row');
+    var messageEl = document.getElementById('message');
+
+    function getTiles(rowIndex) {
+      return rowEls[rowIndex].querySelectorAll('.tile');
+    }
+
+    // ── UI helpers ──────────────────────────────────────────────
+
+    function showMessage(text, type, duration) {
+      messageEl.textContent = text;
+      messageEl.className = 'visible ' + type;
+      if (duration) {
+        setTimeout(function() {
+          messageEl.className = '';
+        }, duration);
+      }
+    }
+
+    function shakeRow(rowIndex) {
+      var row = rowEls[rowIndex];
+      row.classList.add('shake');
+      row.addEventListener('animationend', function handler() {
+        row.classList.remove('shake');
+        row.removeEventListener('animationend', handler);
+      });
+    }
+
+    function renderRow(rowIndex, scored) {
+      var tiles = getTiles(rowIndex);
+      for (var i = 0; i < scored.length; i++) {
+        var tile = tiles[i];
+        tile.style.setProperty('--flip-delay', (i * 150) + 'ms');
+        // Keep data-state for flip animation trigger
+        tile.dataset.state = scored[i].result;
+        // Set letter via textContent — MN-SEC-03 (no innerHTML)
+        tile.textContent = scored[i].letter.toUpperCase();
+        // Apply color class: 'correct' (#6aaa64), 'present' (#c9b458), 'absent' (#787c7e)
+        tile.classList.add(scored[i].result);
+      }
+    }
+
+    function updateKeyboard(scored) {
+      var priority = { correct: 3, present: 2, absent: 1 };
+      for (var i = 0; i < scored.length; i++) {
+        var letter = scored[i].letter;
+        var result = scored[i].result;
+        var keyEl = document.querySelector('.key[data-key="' + letter + '"]');
+        if (!keyEl) continue;
+        var cur = keyEl.dataset.state;
+        if (!cur || (priority[result] || 0) > (priority[cur] || 0)) {
+          keyEl.dataset.state = result;
+        }
+      }
+    }
+
+    function triggerWinBounce(rowIndex) {
+      var tiles = getTiles(rowIndex);
+      for (var i = 0; i < tiles.length; i++) {
+        tiles[i].style.setProperty('--bounce-delay', (i * 100) + 'ms');
+      }
+      setTimeout(function() {
+        rowEls[rowIndex].classList.add('win-bounce');
+      }, WORD_LENGTH * 150 + 500);
+    }
+
+    // ── checkGameOver ───────────────────────────────────────────
+
+    function checkGameOver(rowIndex, scored) {
+      var isWin = scored.every(function(s) { return s.result === 'correct'; });
+      var revealDelay = WORD_LENGTH * 150 + 600;
+
+      if (isWin) {
+        var winMessages = ['Genius!', 'Magnificent!', 'Impressive!', 'Splendid!', 'Great!', 'Phew!'];
+        var msg = winMessages[rowIndex] || 'Nice!';
+        setTimeout(function() {
+          showMessage(msg, 'win');
+        }, revealDelay);
+        triggerWinBounce(rowIndex);
+        gameOver = true;
+        return;
+      }
+
+      if (rowIndex === MAX_ATTEMPTS - 1) {
+        setTimeout(function() {
+          showMessage(TARGET.toUpperCase(), 'loss');
+        }, revealDelay);
+        gameOver = true;
+      }
+    }
+
+    // ── submitGuess ─────────────────────────────────────────────
+
+    function submitGuess() {
+      if (gameOver) return;
+
+      // 1. Read current row letters
+      var letters = boardState[currentRow].map(function(c) { return c.letter; });
+      var guess = letters.join('');
+
+      // 2. Reject incomplete rows (not enough letters)
+      if (guess.length < WORD_LENGTH) {
+        showMessage('Not enough letters', 'invalid', 1200);
+        shakeRow(currentRow);
+        return; // MN-TRUST-01: attempt counter NOT incremented
+      }
+
+      // 3. Reject words not in the corpus
+      if (!isValidGuess(guess)) {
+        showMessage('Not in word list', 'invalid', 1200);
+        shakeRow(currentRow);
+        return; // MN-TRUST-01: attempt counter NOT incremented
+      }
+
+      // 4. Score the guess against the frozen TARGET
+      var scored = scoreGuess(guess, TARGET);
+
+      // 5. Update board state array
+      for (var i = 0; i < scored.length; i++) {
+        boardState[currentRow][i].state = scored[i].result;
+      }
+
+      // 6. Render the row with flip animations
+      renderRow(currentRow, scored);
+
+      // 7. Update on-screen keyboard key colours
+      updateKeyboard(scored);
+
+      // 8. Increment attempt counter — only after a valid, accepted guess
+      var completedRow = currentRow;
+      currentRow++;
+      currentCol = 0;
+
+      // 9. Check win / loss
+      checkGameOver(completedRow, scored);
+    }
+
+    // ── Letter input ────────────────────────────────────────────
+
+    function addLetter(letter) {
+      if (gameOver || currentCol >= WORD_LENGTH) return;
+      boardState[currentRow][currentCol].letter = letter;
+      var tile = getTiles(currentRow)[currentCol];
+      tile.textContent = letter.toUpperCase();
+      tile.dataset.state = 'tbd';
+      currentCol++;
+    }
+
+    function deleteLetter() {
+      if (gameOver || currentCol <= 0) return;
+      currentCol--;
+      boardState[currentRow][currentCol].letter = '';
+      var tile = getTiles(currentRow)[currentCol];
+      tile.textContent = '';
+      tile.dataset.state = '';
+    }
+
+    // ── Physical keyboard ───────────────────────────────────────
+
+    document.addEventListener('keydown', function(e) {
+      if (gameOver) return;
+      if (e.key === 'Enter') {
+        submitGuess();
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        deleteLetter();
+      } else if (/^[a-zA-Z]$/.test(e.key)) {
+        addLetter(e.key.toLowerCase());
+      }
+    });
+
+    // ── On-screen keyboard ──────────────────────────────────────
+
+    document.getElementById('keyboard').addEventListener('click', function(e) {
+      var keyEl = e.target.closest('.key');
+      if (!keyEl) return;
+      var k = keyEl.dataset.key;
+      if (k === 'Enter') {
+        submitGuess();
+      } else if (k === 'Backspace') {
+        deleteLetter();
+      } else if (/^[a-z]$/.test(k)) {
+        addLetter(k);
+      }
+    });
+  </script>
 </body>
 </html>
