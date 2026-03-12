@@ -96,69 +96,98 @@ pub fn load_skill(skill_id: &str, project_path: &Path, resource_dir: &Path) -> R
     })
 }
 
-/// Parse the `modes:` field from YAML frontmatter at the top of a skill file.
-/// Returns `["autonomous"]` if the file has no frontmatter or no modes field.
-fn parse_modes_from_frontmatter(content: &str) -> Vec<String> {
+/// Extract the YAML frontmatter block from `content`, returning the raw frontmatter string.
+/// Returns `None` if the file does not start with a `---` fence or has no closing `---`.
+fn extract_frontmatter(content: &str) -> Option<&str> {
     if !content.starts_with("---\n") && !content.starts_with("---\r\n") {
-        return vec!["autonomous".to_string()];
+        return None;
     }
-    // Find end of frontmatter block.
     let after_start = if content.starts_with("---\r\n") { 5 } else { 4 };
     let end_marker = if content[after_start..].contains("\n---\n") {
         "\n---\n"
     } else if content[after_start..].contains("\n---\r\n") {
         "\n---\r\n"
     } else {
-        return vec!["autonomous".to_string()];
+        return None;
     };
-    let end_idx = content[after_start..].find(end_marker).unwrap_or(0);
-    let frontmatter = &content[after_start..after_start + end_idx];
+    let end_idx = content[after_start..].find(end_marker)?;
+    Some(&content[after_start..after_start + end_idx])
+}
 
-    for line in frontmatter.lines() {
+/// Extract the value(s) for `key` from a YAML frontmatter string.
+///
+/// Handles two YAML forms:
+/// - Inline array:  `modes: [autonomous, interactive]`
+/// - Block list:
+///   ```yaml
+///   modes:
+///     - autonomous
+///     - interactive
+///   ```
+///
+/// Returns `None` if the key is not present.
+/// Returns `Some(vec![])` if the key is present but has no values (empty array or blank inline).
+fn extract_frontmatter_value(frontmatter: &str, key: &str) -> Option<Vec<String>> {
+    let prefix = format!("{}:", key);
+    let lines: Vec<&str> = frontmatter.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("modes:") {
+        if let Some(rest) = trimmed.strip_prefix(&prefix) {
             let rest = rest.trim();
-            // Handle: modes: [autonomous, interactive]
-            if rest.starts_with('[') && rest.ends_with(']') {
-                let inner = &rest[1..rest.len() - 1];
-                return inner
+            if rest.starts_with('[') {
+                // Inline-array form: `key: [a, b, c]`
+                // Strip brackets, split on commas, trim each element, strip trailing commas.
+                let inner = rest.trim_start_matches('[').trim_end_matches(']');
+                let values: Vec<String> = inner
                     .split(',')
-                    .map(|s| s.trim().to_string())
+                    .map(|s| s.trim().trim_end_matches(',').trim().to_string())
                     .filter(|s| !s.is_empty())
                     .collect();
+                return Some(values);
+            } else if rest.is_empty() {
+                // Block-list form: subsequent lines starting with `  - `
+                let mut values = Vec::new();
+                for next_line in lines[i + 1..].iter() {
+                    if let Some(item) = next_line.strip_prefix("  - ") {
+                        values.push(item.trim().to_string());
+                    } else {
+                        break;
+                    }
+                }
+                return Some(values);
+            } else {
+                // Scalar value (used for `model:`, etc.)
+                return Some(vec![rest.to_string()]);
             }
         }
     }
-    vec!["autonomous".to_string()]
+    None
+}
+
+/// Parse the `modes:` field from YAML frontmatter at the top of a skill file.
+/// Returns `["autonomous"]` if:
+///   - the file has no frontmatter,
+///   - there is no `modes:` key, or
+///   - the parsed array is empty.
+fn parse_modes_from_frontmatter(content: &str) -> Vec<String> {
+    let Some(frontmatter) = extract_frontmatter(content) else {
+        return vec!["autonomous".to_string()];
+    };
+    match extract_frontmatter_value(frontmatter, "modes") {
+        Some(values) if !values.is_empty() => values,
+        _ => vec!["autonomous".to_string()],
+    }
 }
 
 /// Parse the `model:` field from YAML frontmatter at the top of a skill file.
 /// Returns `None` if the file has no frontmatter or no model field.
 fn parse_model_from_frontmatter(content: &str) -> Option<String> {
-    if !content.starts_with("---\n") && !content.starts_with("---\r\n") {
-        return None;
-    }
-    let after_start = if content.starts_with("---\r\n") { 5 } else { 4 };
-    let end_marker = if content[after_start..].contains("\n---\n") {
-        "\n---\n"
-    } else if content[after_start..].contains("\n---\r\n") {
-        "\n---\r\n"
-    } else {
-        return None;
-    };
-    let end_idx = content[after_start..].find(end_marker).unwrap_or(0);
-    let frontmatter = &content[after_start..after_start + end_idx];
-
-    for line in frontmatter.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("model:") {
-            let value = rest.trim().to_string();
-            if !value.is_empty() {
-                return Some(value);
-            }
-        }
-    }
-    None
+    let frontmatter = extract_frontmatter(content)?;
+    // extract_frontmatter_value returns a vec; for scalar keys like `model:` it returns
+    // a single-element vec with the value, or an empty vec if the key is blank.
+    let values = extract_frontmatter_value(frontmatter, "model")?;
+    // Scalar form stores the value as the sole element; ignore if empty.
+    values.into_iter().next().filter(|v| !v.is_empty())
 }
 
 /// Check that a skill supports the requested spawn mode.
@@ -471,5 +500,33 @@ mod tests {
         write_skill(&bundle_dir, "nofm.md", content);
         let skill = load_skill("nofm", proj_dir.path(), skill_dir.path()).unwrap();
         assert_eq!(skill.model, None);
+    }
+
+    #[test]
+    fn parse_modes_block_list_form() {
+        let content = "---\nid: test\nmodes:\n  - autonomous\n  - interactive\n---\n# Skill\nContent.";
+        let modes = parse_modes_from_frontmatter(content);
+        assert_eq!(modes, vec!["autonomous", "interactive"]);
+    }
+
+    #[test]
+    fn parse_modes_empty_array_returns_default() {
+        let content = "---\nid: test\nmodes: []\n---\n# Skill\nContent.";
+        let modes = parse_modes_from_frontmatter(content);
+        assert_eq!(modes, vec!["autonomous"]);
+    }
+
+    #[test]
+    fn parse_modes_trailing_comma_stripped() {
+        let content = "---\nid: test\nmodes: [autonomous,]\n---\n# Skill\nContent.";
+        let modes = parse_modes_from_frontmatter(content);
+        assert_eq!(modes, vec!["autonomous"]);
+    }
+
+    #[test]
+    fn parse_modes_block_list_single_item() {
+        let content = "---\nid: test\nmodes:\n  - autonomous\n---\n# Skill\nContent.";
+        let modes = parse_modes_from_frontmatter(content);
+        assert_eq!(modes, vec!["autonomous"]);
     }
 }

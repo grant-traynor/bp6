@@ -122,7 +122,7 @@ Emit these events in order:
 {"poe": "knowledge", "key": "planning-guidance", "content": "Database migration tasks must always be created before backend implementation tasks that consume the new schema. The Phase 1 plan omitted this dependency, causing three blocked tasks mid-execution."}
 ```
 
-**4. Artifact** — the RCA document. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
+**4. Artifact** — the RCA document. Before emitting `poe:artifact`, write the file to `docs/phase-N-rca.md` (substituting the actual phase number) in the project directory using your Write tool with the relative path `docs/phase-N-rca.md`. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
 {"poe": "artifact", "name": "phase-N-rca.md", "artifact_type": "rca"}
 ```

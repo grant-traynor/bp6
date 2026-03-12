@@ -90,7 +90,7 @@ Emit these events in order:
 {"poe": "step", "name": "Writing validity report", "detail": "Producing structured gap registry and recommended investigation targets."}
 ```
 
-**3. Artifact** — after writing the report. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
+**3. Artifact** — after writing the report. Before emitting `poe:artifact`, write the file to `docs/phase-N-validity.md` (substituting the actual phase number) in the project directory using your Write tool with the relative path `docs/phase-N-validity.md`. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
 {"poe": "artifact", "name": "phase-N-validity.md", "artifact_type": "validity"}
 ```

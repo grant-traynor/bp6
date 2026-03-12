@@ -75,7 +75,7 @@ Emit these events in order:
 {"poe": "step", "name": "Writing interface-control.md", "detail": "Specifying wire formats, event catalogues, and API contracts."}
 ```
 
-**3. Artifact** — after writing the document. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
+**3. Artifact** — after writing the document. Before emitting `poe:artifact`, write the file to `docs/interface-control.md` in the project directory using your Write tool with the relative path `docs/interface-control.md`. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
 {"poe": "artifact", "name": "interface-control.md", "artifact_type": "interface-control"}
 ```

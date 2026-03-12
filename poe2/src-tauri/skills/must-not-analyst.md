@@ -86,7 +86,7 @@ Emit these events in order:
 {"poe": "step", "name": "Writing must-nots.md", "detail": "Producing hard constraints with rationale and verification criteria."}
 ```
 
-**3. Artifact** — after writing the document. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
+**3. Artifact** — after writing the document. Before emitting `poe:artifact`, write the file to `docs/must-nots.md` in the project directory using your Write tool with the relative path `docs/must-nots.md`. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
 {"poe": "artifact", "name": "must-nots.md", "artifact_type": "must-nots"}
 ```

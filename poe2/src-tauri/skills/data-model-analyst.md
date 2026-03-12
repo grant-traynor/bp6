@@ -79,7 +79,7 @@ Emit these events in order:
 {"poe": "step", "name": "Writing data-model.md", "detail": "Producing complete schema definitions, relationships, indexes, and enums."}
 ```
 
-**3. Artifact** — after writing the document. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
+**3. Artifact** — after writing the document. Before emitting `poe:artifact`, write the file to `docs/data-model.md` in the project directory using your Write tool with the relative path `docs/data-model.md`. One compact JSON object on its own line. Escape newlines as `\n`. No whitespace between fields. Do not wrap in a code fence.
 ```
 {"poe": "artifact", "name": "data-model.md", "artifact_type": "data-model"}
 ```

@@ -79,7 +79,7 @@ Emit these events in order:
 {"poe": "step", "name": "Writing architecture constraints", "detail": "Producing architecture-constraints.md with technology decisions and guardrail patterns."}
 ```
 
-**3. Artifact** — after writing the document. One compact JSON object on its own line. No whitespace between fields. Escape newlines as `\n`. Do not wrap in a code fence.
+**3. Artifact** — after writing the document. Before emitting `poe:artifact`, write the file to `docs/architecture-constraints.md` in the project directory using your Write tool with the relative path `docs/architecture-constraints.md`. One compact JSON object on its own line. No whitespace between fields. Escape newlines as `\n`. Do not wrap in a code fence.
 ```
 {"poe": "artifact", "name": "architecture-constraints.md", "artifact_type": "architecture-constraints"}
 ```

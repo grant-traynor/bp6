@@ -67,11 +67,15 @@ _(Orchestrator resumes the run with `Human: {response}` appended. You then updat
 Do NOT write any text before or between these events. The human only sees what is inside `poe:chat`.
 
 **Step 3 — After each answer, update the draft artifact:**
+
+Before emitting `poe:artifact`, write the file to `docs/conops.md` in the project directory using your Write tool with the relative path `docs/conops.md`.
 ```
 {"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 ```
 
 **Step 4 — Final round: write the complete CONOPS and close:**
+
+Before emitting `poe:artifact`, write the file to `docs/conops.md` in the project directory using your Write tool with the relative path `docs/conops.md`.
 ```
 {"poe": "artifact", "name": "conops.md", "artifact_type": "<type>"}
 {"poe": "done", "summary": "CONOPS document complete: conops.md"}
@@ -94,6 +98,9 @@ No interactive mode protocol block was present. Write the CONOPS immediately fro
 {"poe": "brief", "content": "Analysing project brief to produce CONOPS document."}
 {"poe": "step", "name": "Reading project brief", "detail": "Extracting system purpose, users, workflows, and constraints."}
 {"poe": "step", "name": "Writing CONOPS", "detail": "Synthesising gathered information into Concept of Operations document."}
+```
+Before emitting `poe:artifact`, write the file to `docs/conops.md` in the project directory using your Write tool with the relative path `docs/conops.md`.
+```
 {"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 {"poe": "done", "summary": "CONOPS document produced covering system purpose, N user personas, N core workflows, and N open questions."}
 ```
