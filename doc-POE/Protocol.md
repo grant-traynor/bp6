@@ -1,7 +1,7 @@
 # POE — Protocol Specification
 
 **Status**: Draft
-**Last updated**: 2026-03-11
+**Last updated**: 2026-03-12
 
 **Artifact classification**: This document serves as both:
 - `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), and the frontend update mechanism (§4).
@@ -84,7 +84,7 @@ CREATE TABLE decisions (
 
 CREATE TABLE chat_turns (
   id           TEXT    PRIMARY KEY,
-  task_id      TEXT    NOT NULL REFERENCES tasks(id),
+  task_id      TEXT    NOT NULL REFERENCES nodes(id),
   content      TEXT    NOT NULL,   -- agent's message or question during co-authoring session
   response     TEXT,               -- null until human responds via respond_to_chat
   created_at   TEXT    NOT NULL,
@@ -303,6 +303,8 @@ The skill's `modes:` frontmatter field declares which modes it supports. If a hu
 > **Mode invariant**: The orchestrator ALWAYS injects the autonomous mode block for tasks it schedules. Interactive mode is exclusively for human-initiated sessions (node-scoped conversations or advisor). An agent dispatched by the orchestrator cannot yield with `poe:chat` — it must use `poe:decision` for blockers.
 >
 > **`respond_to_chat` signal**: The `respond_to_chat` Tauri command writes the response to `chat_turns` and signals the orchestrator via `DagChanged::QueueItemResolved` (the same variant as decision resolution — the orchestrator routes by `node.yield_reason`, not by signal variant). This means the orchestrator's wake-up path is identical for both `poe:decision` and `poe:chat` continuations; only the yield_reason field differentiates them.
+>
+> **`DagChanged::QueueItemResolved` — `turn_type` field (bp6-17k.7)**: The signal carries a `turn_type: String` field with one of three values: `'decision'` | `'chat'` | `'advisor'`. This field allows `resume_waiting_agent()` to route directly to the correct continuation path without performing a DB existence probe on `decisions`, `chat_turns`, or `advisor_turns` — the type is embedded in the signal itself. Callers must set this field: `resolve_decision` passes `'decision'`, `respond_to_chat` passes `'chat'`, `respond_to_advisor` passes `'advisor'`.
 
 **Autonomous mode block** (prepended for orchestrator-initiated tasks):
 
@@ -469,6 +471,8 @@ When the orchestrator spawns a reviewer agent in response to a `poe:review` even
 
 Skills detect plan-review mode by the presence of `**Type**: plan_review` in the T section. All other bundle sections are identical to a standard task bundle.
 
+> **Autonomous mode block in reviewer bundles (bp6-17k.6)**: The orchestrator prepends the same autonomous mode protocol block (the `## Execution Protocol` block described above) before the `# Task` section in the reviewer stdin bundle — identical to regular task dispatch. Without this block the reviewer agent receives no execution protocol instruction and may behave incorrectly (prompting for input, failing to emit `poe:done`). The reviewer skill file is read-only and must not contain the execution protocol itself; it is always injected by the orchestrator at bundle assembly time.
+
 ### Skill priority chain
 
 The skill file for `{skill-id}` is resolved as follows (first match wins):
@@ -478,6 +482,8 @@ The skill file for `{skill-id}` is resolved as follows (first match wins):
 3. App bundle `skills/{skill-id}.md`
 
 If no file is found, abort the task with an error — do not spawn the agent with no skill.
+
+> **Skill-load failure (bp6-17k.17)**: When the skill file cannot be resolved through the priority chain, the orchestrator sets `tasks.status = 'cancelled'` and logs an error to `event_log`. The task does **not** retry. Recovery requires human intervention: either add the missing skill file (which makes the task eligible for re-dispatch on the next scheduling loop pass) or cancel and replace the task with a corrected one.
 
 The **mode protocol block** is prepended to the bundle before the `# Skill` section — not inserted into the skill file itself. The skill file is read-only from the orchestrator's perspective; it is never modified at runtime.
 
@@ -798,7 +804,13 @@ get_node_ancestry(node_id: String) → Vec<Node>                          // wal
 read_artifact_content(artifact_id: String, project_id: String) → String // reads file from disk
 ```
 
-`read_artifact_content` path formula: look up `artifact.filename` from the artifacts table, look up `project.path` from the project registry by `project_id`, construct `{project.path}/docs/{artifact.filename}`. The `Artifact` struct has `filename: String`; there is no stored `path` field.
+`read_artifact_content` path formula (bp6-17k.16): look up `artifact.filename` from the artifacts table, look up `project.path` from the project registry by `project_id`. Path resolution uses a two-step fallback:
+
+1. Try `{project.path}/docs/{artifact.filename}` — the canonical location for declared artifacts.
+2. If not found, fall back to `{project.path}/{artifact.filename}` — covers artifacts written directly to the project root.
+3. If neither path exists, return an error.
+
+The `Artifact` struct has `filename: String`; there is no stored `path` field.
 
 ### Knowledge (7ct.6)
 
