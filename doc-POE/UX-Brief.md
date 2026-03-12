@@ -125,8 +125,8 @@ Clicking an entry opens the **agent session handover** — an xterm.js panel tha
 | `poe:brief` | Agent interpretation of its task |
 | `poe:step` | Named progress milestone |
 | `poe:artifact` | Artifact produced: `{name}` |
-| `poe:yield reason=review` | Yielded — awaiting review from `{reviewer_skill}` |
-| `poe:yield reason=decision` | Yielded — awaiting human decision |
+| `poe:yield` (yield_reason=review) | Yielded — awaiting review from `{reviewer_skill}` |
+| `poe:yield` (yield_reason=decision) | Yielded — awaiting human decision |
 | `poe:done` | Task complete |
 
 `poe:yield` must produce an activity feed entry. Without it, the human sees a task go from `running` to `waiting` with no explanation. The feed entry closes the glass-box gap.
@@ -157,21 +157,18 @@ The human can resolve directly (select an option or type a response), or engage 
 
 ### Conversational Queue Items
 
-Some agents (specifically the operational-analyst during CONOPS elicitation) conduct a multi-round conversation via sequential `poe:decision` events. Each round builds on the previous answers — the human needs the full exchange in view to answer round 3 coherently.
+An autonomous agent may raise a series of sequential `poe:decision` events before it has enough context to proceed — each round building on the human's previous answer. This is rare but valid: a planning specialist might ask one structural question, receive an answer, discover a dependent question, and yield again. Each round is a separate yield/resume cycle; the agent sees the full session history each time.
 
 When a task has prior resolved decisions AND a current pending decision, the queue item renders in **conversation thread mode**:
 
 ```
-┌─ CONOPS Elicitation — operational-analyst ──────────────┐
+┌─ Plan Scope Clarification — product-manager ────────────┐
 │                                                          │
-│  ● Q1: What problem does this system solve?              │
-│    A: It's a tool for managing agentic workflows...      │
+│  ● Q1: Should Phase 2 include the admin portal?          │
+│    A: No — defer to Phase 3.                             │
 │                                                          │
-│  ● Q2: Who are the primary users?                        │
-│    A: Software engineers coordinating multi-agent...     │
-│                                                          │
-│  ● Q3 (pending): What are the 3 most important           │
-│    workflows the system must support?                    │
+│  ● Q2 (pending): Does the deferral affect the           │
+│    auth model planned for Phase 2?                       │
 │                                                          │
 │  [ type your response...                              ]  │
 │                                              [ Send ↵ ]  │
@@ -180,7 +177,9 @@ When a task has prior resolved decisions AND a current pending decision, the que
 
 Prior Q+A pairs are shown read-only above the current question. The current pending question is highlighted. The input is a free-text field (no option buttons — conversational questions rarely have enumerable options).
 
-Detection: if `decisions` table has > 0 resolved rows for this `task_id` AND 1 pending row, render in thread mode. Otherwise render as standard queue item.
+Detection: if `queue_items` table has > 0 resolved rows for this `task_id` AND 1 pending row, render in thread mode. Otherwise render as standard queue item.
+
+> **Distinct from collaborative artifact building**: multi-round `poe:decision` in the Decision Queue is for autonomous agents encountering sequential structural blockers. CONOPS elicitation and other co-authoring sessions use `poe:chat` and appear in the Artifact Viewer — not here. See §Artifact Viewer and Flows.md §3.8.
 
 ### Queue Advisor Chatbot
 

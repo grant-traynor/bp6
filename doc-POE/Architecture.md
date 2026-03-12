@@ -195,7 +195,7 @@ Dependencies are horizontal linkages between tasks (and optionally features) wit
 
 ---
 
-       
+## Artifact Corpus
 
 Artifacts are the structured documents that define the product. They are phase outputs — produced by a lifecycle stage and injected as context into subsequent stages.
 
@@ -277,16 +277,16 @@ All project state is local-first, stored in `{project}/.poe/poe.db` (SQLite, WAL
 
 See `doc-POE/Protocol.md §1` for the complete CREATE TABLE schema. Key tables:
 
-- `tasks` — WBS nodes (title, description, type, skill, status, parent\_id, phase\_id, session\_id)
+- `nodes` — WBS nodes (title, description, type, skill, status, parent\_id, phase\_id, session\_id)
 - `edges` — directed dependency edges (from\_id, to\_id)
-- `event_log` — append-only structured agent event log (never updated or deleted)
-- `decisions` — human decision queue items (question, options, resolution)
+- `events` — append-only structured agent event log (never updated or deleted)
+- `queue_items` — human decision queue items (question, options, resolution)
 - `artifacts` — artifact index (name, type, path, producing\_task\_id)
-- `knowledge` — knowledge register entries (key, content, supersedes\_id)
+- `knowledge` — knowledge register entries (key, value, supersedes\_id)
 - `phases` — phase definitions, stage type, PDCA state
 - `projects` — project metadata
 
-Every `tasks` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_id`. Decision queue items reference the task that raised the question. The event log is the audit trail — every poe: event lands here in full.
+Every `nodes` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_id`. Queue items reference the task that raised the question. The events table is the audit trail — every poe: event lands here in full.
 
 ---
 
@@ -370,7 +370,7 @@ POE has two distinct models for human-agent interaction. They are not interchang
 | **Agent mode** | Autonomous — hit a blocker | Interactive — co-authoring |
 | **Human role** | Arbitrator | Co-author |
 | **Protocol event** | `poe:decision` | `poe:chat` |
-| **Yield reason** | `reason=decision` | `reason=chat` |
+| **Yield reason** | `yield_reason='decision'` | `yield_reason='chat'` |
 | **Surface** | Decision Queue (Pane 3) | Artifact Viewer — "Chat about this" activates chat panel |
 | **Artifact visible** | No | Yes — live on the left |
 | **Expected frequency** | Sparse — signals insufficient preconditions | Normal — the primary work mode for elicitation and planning stages |

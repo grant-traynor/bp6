@@ -84,7 +84,7 @@ CREATE TABLE decisions (
 
 CREATE TABLE chat_turns (
   id           TEXT    PRIMARY KEY,
-  task_id      TEXT    NOT NULL REFERENCES nodes(id),
+  task_id      TEXT    NOT NULL REFERENCES tasks(id),
   content      TEXT    NOT NULL,   -- agent's message or question during co-authoring session
   response     TEXT,               -- null until human responds via respond_to_chat
   created_at   TEXT    NOT NULL,
@@ -262,9 +262,9 @@ One event per line. No multi-line JSON.
 
 | Event | DAG write | event_log | Tauri emit |
 |---|---|---|---|
-| `poe:task` | INSERT tasks + edges | yes | `poe-task-created` |
-| `poe:task:update` | UPDATE tasks | yes | `poe-node-updated` |
-| `poe:task:cancel` | UPDATE tasks.status | yes | `poe-node-updated` |
+| `poe:task` | INSERT nodes + edges | yes | `poe-task-created` |
+| `poe:task:update` | UPDATE nodes | yes | `poe-node-updated` |
+| `poe:task:cancel` | UPDATE nodes.status | yes | `poe-node-updated` |
 | `poe:edge` | INSERT edges | yes | `poe-edge-created` |
 | `poe:edge:remove` | DELETE edges | yes | `poe-edge-removed` |
 | `poe:artifact` | UPSERT artifacts (file already on disk — agent wrote it) | yes | `poe-artifact-created` |
@@ -703,7 +703,7 @@ process exits (result event received)
 
 ### Decision resolution via --resume
 
-When an agent emits `poe:decision` followed by `poe:yield reason=decision`, the orchestrator marks the task `waiting` and holds until the human resolves via `invoke("resolve_decision")`. On resolution, the orchestrator triggers SF-4 with the continuation bundle `Human: {resolution text}`. See Flows.md §3.2 for the full sequence.
+When an agent emits `poe:decision` followed by `poe:yield`, the orchestrator marks the task `waiting` and holds until the human resolves via `invoke("resolve_decision")`. On resolution, the orchestrator triggers SF-4 with the continuation bundle `Human: {resolution text}`. See Flows.md §3.2 for the full sequence.
 
 The continuation bundle format:
 

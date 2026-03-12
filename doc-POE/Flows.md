@@ -9,6 +9,8 @@
 >
 > Static definitions — wire format, schema, event catalogue, orchestrator structure — live in `Protocol.md` and `Architecture.md`. This document references them; it does not duplicate them.
 
+> **Note on table names**: Sequence diagrams in this document use the design schema names from Protocol.md §1 (`event_log`, `tasks`, `decisions`). The poe2 implementation uses different names: `events`, `nodes`, `queue_items`. See Protocol.md §1 note.
+
 ---
 
 ## 1. Overview
@@ -237,12 +239,12 @@ sequenceDiagram
     Ing->>Orch: DagChanged signal
     Ing-->>FE: emit poe://event
 
-    A-->>Ing: {"poe":"yield","reason":"review"}
+    A-->>Ing: {"poe":"yield"}
     Ing->>DB: UPDATE nodes SET status='waiting'
     Ing->>Orch: DagChanged signal (SF-4)
     Ing-->>FE: emit poe://task-update
 
-    Note over Orch: SF-4: yield reason=review —<br/>collect poe:review events, dispatch reviewers
+    Note over Orch: SF-4: yield_reason='review' —<br/>collect poe:review events, dispatch reviewers
 
     Orch->>DB: INSERT reviewer task<br/>(type=plan_review, skill=senior-engineer,<br/>review_id=r1, retry_count=0,<br/>requesting_task_id=A.id)
     Note over Orch: SF-1: dispatch reviewer task
@@ -294,7 +296,7 @@ sequenceDiagram
 
 **Phase 1 — Review request**
 
-Agent A is running autonomously. At some point during execution it determines it needs specialist input before proceeding. It emits one `poe:review` event per reviewer required (see multi-reviewer variant below), then emits `poe:yield` with `reason: "review"`.
+Agent A is running autonomously. At some point during execution it determines it needs specialist input before proceeding. It emits one `poe:review` event per reviewer required (see multi-reviewer variant below), then emits `poe:yield`.
 
 `poe:yield` hands control back to the orchestrator — *"I have emitted all my review requests and am now yielding. Resume me when results are available."* The ingester marks the task `waiting` and triggers SF-4.
 
@@ -362,7 +364,7 @@ When `answered_ids = expected_ids`, all reviews are accounted for — the reques
 
 #### Key Invariants
 
-1. **poe:yield is unambiguous**: `poe:yield` always means waiting; `poe:done` always means complete. No conditional logic required in the ingester or orchestrator. The `reason` field (`"review"` | `"decision"`) tells the orchestrator which SF-4 path to take.
+1. **poe:yield is unambiguous**: `poe:yield` always means waiting; `poe:done` always means complete. The ingester derives `yield_reason` from the last substantive `poe:` event before the yield (see SF-3 note) and stores it in `nodes.yield_reason`. The orchestrator reads that column directly when it wakes — no `event_log` join required.
 
 2. **Batch collection**: The orchestrator collects all `poe:review` events logged since the task last ran before dispatching reviewers. An agent that emits three `poe:review` events before `poe:yield` produces three reviewers, all dispatched in parallel.
 
@@ -384,7 +386,7 @@ When `answered_ids = expected_ids`, all reviews are accounted for — the reques
 
 **Wire format reference**: Protocol.md §2 (`poe:decision`, `poe:yield`), Protocol.md §5 ("Decision resolution via --resume").
 
-> **Implementation note**: `resolve_decision` Tauri command currently writes directly to a process stdin. After the poe:yield refactor, there is no live process to write to — the agent has exited. `resolve_decision` must instead update the `decisions` table to `resolved` and signal the orchestrator (DagChanged), which then triggers SF-4. This is the primary regression introduced by the yield change.
+> **Note**: `resolve_decision` does not write to any process stdin — the agent has already exited after emitting `poe:yield`. It updates the `queue_items` table to resolved and signals the orchestrator (DagChanged), which triggers SF-4.
 
 #### Sequence Diagram
 
@@ -403,13 +405,13 @@ sequenceDiagram
     Ing->>DB: INSERT decisions (id=d1, task_id=A.id, status=pending, question, options)
     Ing-->>FE: emit poe://decision (queue panel update)
 
-    A-->>Ing: {"poe":"yield","reason":"decision"}
+    A-->>Ing: {"poe":"yield"}
     Ing->>DB: UPDATE nodes SET status='waiting', yield_reason='decision'
     Ing->>Orch: DagChanged signal
     Ing-->>FE: emit poe://task-update (status: waiting)
     Ing-->>FE: emit poe://event (activity feed: "Yielded — awaiting human decision")
 
-    Note over Orch: SF-3: yield reason=decision<br/>No action — wait for resolve_decision
+    Note over Orch: SF-3: yield_reason='decision'<br/>No action — wait for resolve_decision
 
     Note over FE: Queue panel shows d1<br/>Human reads question and options
 
@@ -449,13 +451,13 @@ Agent A is running autonomously. It encounters an ambiguity or structural fork i
 - `question`: the question text displayed to the human
 - `options`: candidate options if enumerable (may be empty for open-ended questions)
 
-The ingester writes the decision to the `decisions` table and emits `poe://decision` to update the queue panel immediately. The agent then emits `poe:yield reason=decision`.
+The ingester writes the decision to the `decisions` table and emits `poe://decision` to update the queue panel immediately. The agent then emits `poe:yield`.
 
 **Note**: `poe:decision` is emitted *before* `poe:yield`. The ingester processes them as separate events in stream order. When the orchestrator wakes on the `DagChanged` from the yield, it reads `nodes.yield_reason` directly — no event log join required.
 
 **Phase 2 — Orchestrator waits**
 
-On `yield reason=decision`, the orchestrator takes no immediate action beyond confirming the waiting state. The task is removed from concurrency accounting (`waiting` tasks do not count against the concurrency limit). The orchestrator goes back to sleep.
+On `yield_reason='decision'`, the orchestrator takes no immediate action beyond confirming the waiting state. The task is removed from concurrency accounting (`waiting` tasks do not count against the concurrency limit). The orchestrator goes back to sleep.
 
 **Phase 3 — Human resolution**
 
@@ -481,7 +483,7 @@ Agent A continues from the resolved decision point and eventually emits `poe:don
 
 The CONOPS elicitation agent conducts multiple sequential rounds. Each round:
 1. Agent emits `poe:decision` (new id, question builds on prior answers)
-2. Agent emits `poe:yield reason=decision`
+2. Agent emits `poe:yield`
 3. Human resolves
 4. Agent resumes via SF-4 with continuation bundle containing the resolution
 5. Agent reads the answer, formulates next question, repeats
@@ -930,7 +932,7 @@ When the human resumes a paused stage or project, the orchestrator:
 
 **Wire format reference**: UX-Brief.md §Activity Feed, UX-Brief.md §Project Terminal, Protocol.md §5 (session_id on nodes table).
 
-> **Implementation note**: After the m2f.12 schema migration, `session_id` moves from the `agents` table to the `nodes` table. The session handover lookup must query `nodes.session_id` for the clicked task_id, not `agents.session_id`. Verify this after m2f.12 lands.
+> **Note**: `session_id` is stored in `nodes.session_id`. The session handover lookup must query `nodes.session_id` for the clicked task_id.
 
 #### Sequence Diagram
 
@@ -981,7 +983,7 @@ sequenceDiagram
 **Opening the handover**
 
 Any activity feed entry is clickable. Clicking opens the session handover panel, which:
-1. Calls `get_task_session` to retrieve the `session_id` from `nodes` (after m2f.12: `nodes.session_id`, not `agents.session_id`)
+1. Calls `get_task_session` to retrieve `nodes.session_id`
 2. Opens a WebSocket connection for PTY bridging
 3. Spawns `claude --resume <session_id>` in a PTY — **without `-p`** (interactive mode, not autonomous)
 4. Bridges stdin/stdout between the PTY and xterm.js in the browser
@@ -1011,7 +1013,7 @@ The project terminal (tmux) is a general-purpose shell. The session handover is 
 
 #### Key Invariants
 
-1. **`session_id` comes from `nodes` table**: After m2f.12, the canonical location is `nodes.session_id`. Handover lookup must use this column.
+1. **`session_id` comes from `nodes` table**: The canonical location is `nodes.session_id`. Handover lookup must use this column.
 
 2. **No `-p` flag on handover spawn**: The handover is interactive. The `-p` flag (print/autonomous) suppresses the interactive REPL. The handover spawn must not include it.
 
@@ -1189,7 +1191,7 @@ sequenceDiagram
     Ing->>DB: INSERT chat_turns (id=c1, task_id=A.id, content=...)
     Ing-->>FE: emit poe://chat-turn (turn_id=c1, content)
 
-    A-->>Ing: {"poe":"yield","reason":"chat"}
+    A-->>Ing: {"poe":"yield"}
     Ing->>DB: UPDATE nodes SET status='waiting', yield_reason='chat'
     Ing->>Orch: DagChanged signal
     Ing-->>FE: emit poe://task-update (status: waiting)
@@ -1225,7 +1227,7 @@ sequenceDiagram
     Ing->>DB: INSERT chat_turns (id=c2, ...)
     Ing-->>FE: emit poe://chat-turn (turn_id=c2)
 
-    A-->>Ing: {"poe":"yield","reason":"chat"}
+    A-->>Ing: {"poe":"yield"}
     Note over Ing,DB: status=waiting — next turn begins<br/>Human responds — cycle repeats
 
     Note over A: Final round: sufficient context gathered<br/>Agent writes complete artifact to docs/conops.md
@@ -1252,7 +1254,7 @@ The orchestrator dispatches the task via SF-1 with the **interactive mode protoc
 
 **Phase 2 — Agent turn**
 
-The agent emits `poe:chat` with its first question or proposal, immediately followed by `poe:yield reason=chat`. The ingester inserts the turn into `chat_turns` and marks the task `waiting`. The conversation panel displays the agent's message.
+The agent emits `poe:chat` with its first question or proposal, immediately followed by `poe:yield`. The ingester inserts the turn into `chat_turns` and marks the task `waiting`. The conversation panel displays the agent's message.
 
 The agent may write a draft of the document to disk and emit `poe:artifact` before yielding. The orchestrator indexes the path; the frontend reads the file from disk and displays it in the left panel. On the first turn the artifact may be skeletal; it fills over the course of the session.
 
