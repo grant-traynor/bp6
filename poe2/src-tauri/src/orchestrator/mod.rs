@@ -1356,7 +1356,7 @@ async fn dispatch_task(
             let conn = db.conn.lock().unwrap();
 
             // ── Dedup check ───────────────────────────────────────────────────
-            // Look for an existing pending/running skill-author task for this skill.
+            // 1. Look for an existing pending/running skill-author task for this skill.
             let existing_author: Option<String> = {
                 let mut found = None;
                 for status_str in &["pending", "running"] {
@@ -1374,6 +1374,47 @@ async fn dispatch_task(
                 }
                 found
             };
+
+            // 2. If no active skill-author exists, check for a *completed* one whose
+            //    skill file is still missing (i.e., the agent finished but wrote nothing).
+            //    Retrying would loop forever — cancel the failing task instead.
+            if existing_author.is_none() {
+                let completed_author_exists = dag_store::db_list_nodes_by_status(&conn, project_id, "complete")
+                    .unwrap_or_default()
+                    .into_iter()
+                    .any(|n| n.skill_id.as_deref() == Some("skill-author") && n.title == synth_title);
+
+                if completed_author_exists {
+                    eprintln!(
+                        "[orchestrator] dispatch_task: skill-author already completed for '{}' but skill file is still missing — \
+                         agent produced no output. Cancelling task '{}' to prevent infinite retry loop.",
+                        skill_id, task.id
+                    );
+                    let cancel_input = dag_store::UpdateNodeInput {
+                        title: None,
+                        description: Some(format!(
+                            "Skill synthesis failed: skill-author completed without producing '{}'. Manual intervention required.",
+                            skill_id
+                        )),
+                        status: Some(NodeStatus::Cancelled),
+                        skill_id: None,
+                        assignee: None,
+                        yield_reason: None,
+                        session_id: None,
+                    };
+                    if let Err(ue) = dag_store::db_update_node(&conn, &task.id, &cancel_input) {
+                        eprintln!(
+                            "[orchestrator] dispatch_task: failed to cancel task '{}': {}",
+                            task.id, ue
+                        );
+                    }
+                    drop(conn);
+                    let _ = dag_tx.send(DagChanged::DagStructureChanged {
+                        project_id: project_id.to_string(),
+                    });
+                    return;
+                }
+            }
 
             let author_id = if let Some(id) = existing_author {
                 eprintln!(
