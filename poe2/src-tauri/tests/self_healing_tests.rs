@@ -126,18 +126,12 @@ fn create_pending_task(conn: &Connection, project_id: &str, skill_id: &str) -> S
 ///      (i.e. the skill-author is the prerequisite; the failing task is unblocked only
 ///       once the skill-author is complete).
 ///
-/// ## Note on orchestrator/mod.rs edge direction
-/// The live orchestrator currently wires the edge in the **reverse** direction:
-/// `db_create_edge(&conn, &task.id, &author_id, ...)` — `from_id = task, to_id = author`.
-/// In the `db_find_ready_tasks` SQL, a node `n` is blocked when an edge exists with
-/// `e.to_id = n.id AND dep.status != 'complete'`.  With the reversed direction,
-/// `to_id = author_id`, so the *skill-author* node is blocked by the failing task — the
-/// exact opposite of the intended semantics.  The failing task itself is never blocked
-/// and therefore never "unblocks" in the db_find_ready_tasks sense; instead the
-/// orchestrator relies on the skill being present at the next dispatch attempt.
-///
-/// These tests validate the **intended** data-model invariants (correct edge direction).
-/// A separate issue should track fixing the live orchestrator's edge direction.
+/// The edge is wired as `from_id = author_id, to_id = failing_task_id`.  In the
+/// `db_find_ready_tasks` SQL, a node `n` is blocked when an edge exists with
+/// `e.to_id = n.id AND dep.status != 'complete'`.  With this direction, the failing
+/// task (`to_id`) is blocked until the skill-author node (`from_id`) reaches `complete`
+/// status — which is the correct semantics: the author must finish before the original
+/// task can be re-dispatched.
 fn simulate_skill_load_failure(
     conn: &Connection,
     project_id: &str,
