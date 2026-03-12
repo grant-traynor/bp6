@@ -125,8 +125,8 @@ Clicking an entry opens the **agent session handover** — an xterm.js panel tha
 | `poe:brief` | Agent interpretation of its task |
 | `poe:step` | Named progress milestone |
 | `poe:artifact` | Artifact produced: `{name}` |
-| `poe:yield reason=review` | Yielded — awaiting review from `{reviewer_skill}` |
-| `poe:yield reason=decision` | Yielded — awaiting human decision |
+| `poe:yield` (after `poe:review`) | Yielded — awaiting review from `{reviewer_skill}` |
+| `poe:yield` (after `poe:decision`) | Yielded — awaiting human decision |
 | `poe:done` | Task complete |
 
 `poe:yield` must produce an activity feed entry. Without it, the human sees a task go from `running` to `waiting` with no explanation. The feed entry closes the glass-box gap.
@@ -180,7 +180,7 @@ When a task has prior resolved decisions AND a current pending decision, the que
 
 Prior Q+A pairs are shown read-only above the current question. The current pending question is highlighted. The input is a free-text field (no option buttons — conversational questions rarely have enumerable options).
 
-Detection: if `decisions` table has > 0 resolved rows for this `task_id` AND 1 pending row, render in thread mode. Otherwise render as standard queue item.
+Detection: if `queue_items` table has > 0 resolved rows for this `task_id` AND 1 pending row, render in thread mode. Otherwise render as standard queue item.
 
 ### Queue Advisor Chatbot
 
