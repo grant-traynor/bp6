@@ -23,10 +23,11 @@ use poe2_lib::dag_store::{
     types::{
         CreateNodeInput, EdgeType, NodeStatus, NodeType, UpdateNodeInput,
     },
+    db_claim_node_resuming, db_claim_node_retry,
     db_create_agent, db_create_edge, db_create_node, db_find_ready_tasks,
-    db_get_node, db_increment_retry_count, db_insert_chat_turn, db_list_agents_by_status,
-    db_list_chat_turns, db_list_nodes_by_status, db_log_event, db_reviewer_completion_status,
-    db_update_node, db_update_node_session,
+    db_get_node, db_get_node_verdict, db_increment_retry_count, db_insert_chat_turn,
+    db_list_agents_by_status, db_list_chat_turns, db_list_nodes_by_status, db_log_event,
+    db_reviewer_completion_status, db_set_node_verdict, db_update_node, db_update_node_session,
 };
 use poe2_lib::event_ingester::{db_handle_decision, db_handle_done, parse_poe_event};
 use rusqlite::Connection;
@@ -65,6 +66,8 @@ fn new_mem_db() -> Connection {
     let _ = conn.execute_batch("ALTER TABLE phases ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN sort_order INTEGER");
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN skill_modes TEXT");
+    // u7s.4: verdict column — required for db_get_node to map the Node struct correctly.
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN verdict TEXT");
     conn
 }
 
@@ -1518,5 +1521,226 @@ fn sf1_plan_review_node_is_dispatchable() {
     assert!(
         ready_ids.contains(&reviewer.id.as_str()),
         "plan_review node must appear in ready tasks for SF-1 dispatch"
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// u7s.1 — db_claim_node_resuming arbitration (resume race prevention)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// AC: u7s.1 — only the first caller to db_claim_node_resuming on a Waiting
+/// node transitions it to Resuming and receives Ok(true). A subsequent caller
+/// finds the node already in Resuming (not Waiting) and receives Ok(false).
+///
+/// In production, two reviewer-completion handlers may race to resume the same
+/// waiting task. The atomic `UPDATE WHERE status='waiting'` ensures exactly one
+/// wins — simulated here sequentially because SQLite in-memory is single-
+/// threaded: the second call on a non-Waiting node is semantically identical to
+/// a concurrent loser that arrives after the first UPDATE has committed.
+#[test]
+fn claim_node_resuming_only_one_caller_wins() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+
+    // Create a task node with status=Waiting to simulate a yielded task.
+    let task_id = {
+        let node = db_create_node(
+            &conn,
+            &CreateNodeInput {
+                id: None,
+                project_id: project_id.clone(),
+                phase_id: None,
+                parent_id: None,
+                node_type: NodeType::Task,
+                title: "Waiting task".to_owned(),
+                description: None,
+                skill_id: Some("implementer".to_owned()),
+                initial_status: Some(NodeStatus::Waiting),
+                requesting_task_id: None,
+                review_id: None,
+                retry_count: None,
+            },
+        )
+        .expect("create waiting task");
+        node.id
+    };
+
+    // First caller: node is Waiting → claim succeeds.
+    let first = db_claim_node_resuming(&conn, &task_id)
+        .expect("db_claim_node_resuming first call");
+    assert!(first, "first claim on a Waiting node must return true");
+
+    // Node must now be Resuming.
+    let status_after_first = read_status(&conn, &task_id);
+    assert_eq!(
+        status_after_first,
+        NodeStatus::Resuming,
+        "node must be Resuming after first claim"
+    );
+
+    // Second caller: node is already Resuming (not Waiting) → claim fails.
+    let second = db_claim_node_resuming(&conn, &task_id)
+        .expect("db_claim_node_resuming second call");
+    assert!(
+        !second,
+        "second claim on a Resuming node must return false (node no longer Waiting)"
+    );
+
+    // Status must remain Resuming — second call must not change it.
+    let status_after_second = read_status(&conn, &task_id);
+    assert_eq!(
+        status_after_second,
+        NodeStatus::Resuming,
+        "node status must still be Resuming after failed second claim"
+    );
+}
+
+/// AC: u7s.1 — db_claim_node_resuming returns Ok(false) when the node is in a
+/// status other than Waiting (e.g. Running). No status mutation occurs.
+#[test]
+fn claim_node_resuming_on_wrong_status_returns_false() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+
+    // Create a task with status=Running (not Waiting).
+    let task_id = create_pending_task(&conn, &project_id, None, Some("implementer"));
+    force_status(&conn, &task_id, "running");
+
+    let result = db_claim_node_resuming(&conn, &task_id)
+        .expect("db_claim_node_resuming on running node");
+    assert!(
+        !result,
+        "claim on a Running node must return false — only Waiting nodes can be claimed for resume"
+    );
+
+    // Status must remain Running.
+    let status = read_status(&conn, &task_id);
+    assert_eq!(
+        status,
+        NodeStatus::Running,
+        "node status must be unchanged after failed resuming claim"
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// u7s.2 — db_claim_node_retry arbitration (double-retry race prevention)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// AC: u7s.2 — only the first caller to db_claim_node_retry on a Running node
+/// transitions it to Pending (incrementing retry_count) and receives Ok(true).
+/// A subsequent caller finds the node already Pending and receives Ok(false),
+/// leaving retry_count unchanged at 1.
+///
+/// In production the watchdog timer and a manual retry signal may both fire for
+/// the same reviewer node. The atomic `UPDATE WHERE status='running'` ensures
+/// only one path advances the retry counter — simulated sequentially here.
+#[test]
+fn claim_node_retry_only_one_caller_wins() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+
+    // Create a reviewer node with status=Running, retry_count=0.
+    let node_id = {
+        let node = db_create_node(
+            &conn,
+            &CreateNodeInput {
+                id: None,
+                project_id: project_id.clone(),
+                phase_id: None,
+                parent_id: None,
+                node_type: NodeType::PlanReview,
+                title: "Running reviewer".to_owned(),
+                description: None,
+                skill_id: Some("senior-engineer".to_owned()),
+                initial_status: Some(NodeStatus::Running),
+                requesting_task_id: None,
+                review_id: Some("rev-1".to_owned()),
+                retry_count: Some(0),
+            },
+        )
+        .expect("create running reviewer node");
+        node.id
+    };
+
+    // First caller: node is Running → retry claim succeeds.
+    let first = db_claim_node_retry(&conn, &node_id)
+        .expect("db_claim_node_retry first call");
+    assert!(first, "first retry claim on a Running node must return true");
+
+    // Node must now be Pending with retry_count incremented to 1.
+    let node_after_first = db_get_node(&conn, &node_id).expect("get node after first retry");
+    assert_eq!(
+        node_after_first.status,
+        NodeStatus::Pending,
+        "node must be Pending after first retry claim"
+    );
+    assert_eq!(
+        node_after_first.retry_count, 1,
+        "retry_count must be 1 after first retry claim"
+    );
+
+    // Second caller: node is now Pending (not Running) → retry claim fails.
+    let second = db_claim_node_retry(&conn, &node_id)
+        .expect("db_claim_node_retry second call");
+    assert!(
+        !second,
+        "second retry claim on a Pending node must return false (node no longer Running)"
+    );
+
+    // retry_count must remain 1 — the second call must not increment it.
+    let node_after_second = db_get_node(&conn, &node_id).expect("get node after second retry");
+    assert_eq!(
+        node_after_second.retry_count, 1,
+        "retry_count must still be 1 — second failed claim must not increment it"
+    );
+}
+
+/// AC: u7s.2 — db_claim_node_retry returns Ok(false) when the node is in a
+/// status other than Running (e.g. Complete). No mutation occurs.
+#[test]
+fn claim_node_retry_on_non_running_status_returns_false() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+
+    // Create a reviewer node with status=Complete, retry_count=0.
+    let node_id = {
+        let node = db_create_node(
+            &conn,
+            &CreateNodeInput {
+                id: None,
+                project_id: project_id.clone(),
+                phase_id: None,
+                parent_id: None,
+                node_type: NodeType::PlanReview,
+                title: "Complete reviewer".to_owned(),
+                description: None,
+                skill_id: Some("senior-engineer".to_owned()),
+                initial_status: Some(NodeStatus::Complete),
+                requesting_task_id: None,
+                review_id: Some("rev-2".to_owned()),
+                retry_count: Some(0),
+            },
+        )
+        .expect("create complete reviewer node");
+        node.id
+    };
+
+    let result = db_claim_node_retry(&conn, &node_id)
+        .expect("db_claim_node_retry on complete node");
+    assert!(
+        !result,
+        "retry claim on a Complete node must return false — only Running nodes can be retried"
+    );
+
+    // Status and retry_count must be unchanged.
+    let node = db_get_node(&conn, &node_id).expect("get node after failed retry claim");
+    assert_eq!(
+        node.status,
+        NodeStatus::Complete,
+        "node status must remain Complete after failed retry claim"
+    );
+    assert_eq!(
+        node.retry_count, 0,
+        "retry_count must remain 0 after failed retry claim"
     );
 }
