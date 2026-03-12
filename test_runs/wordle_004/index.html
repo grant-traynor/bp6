@@ -5,12 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wordle</title>
   <style>
+    /* ── Reset ────────────────────────────────────────────── */
     *, *::before, *::after {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
 
+    /* ── Base ─────────────────────────────────────────────── */
     body {
       background-color: #121213;
       color: #ffffff;
@@ -19,14 +21,17 @@
       flex-direction: column;
       align-items: center;
       min-height: 100vh;
+      overflow-x: hidden;
     }
 
+    /* ── Header ───────────────────────────────────────────── */
     header {
       width: 100%;
       max-width: 500px;
       border-bottom: 1px solid #3a3a3c;
       padding: 12px 0;
       text-align: center;
+      flex-shrink: 0;
     }
 
     header h1 {
@@ -36,56 +41,259 @@
       text-transform: uppercase;
     }
 
+    /* ── Message / Toast ──────────────────────────────────── */
     #message {
-      min-height: 2rem;
+      min-height: 2.25rem;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.9rem;
-      font-weight: 600;
+      font-size: 0.875rem;
+      font-weight: 700;
       letter-spacing: 0.05rem;
-      margin: 12px 0;
+      margin: 10px 8px;
+      padding: 6px 20px;
+      border-radius: 4px;
+      text-transform: uppercase;
       color: #ffffff;
+      /* invisible by default; JS adds .visible */
+      opacity: 0;
+      transition: opacity 0.2s ease;
     }
 
+    #message.visible {
+      opacity: 1;
+    }
+
+    #message.win {
+      background-color: #538d4e;
+    }
+
+    #message.loss {
+      background-color: #3a3a3c;
+    }
+
+    #message.invalid {
+      background-color: #818384;
+    }
+
+    /* ── Board Container ──────────────────────────────────── */
     #board-container {
       display: flex;
       justify-content: center;
-      align-items: center;
-      flex-grow: 1;
-      padding: 16px 0;
+      align-items: flex-start;
+      padding: 16px 0 8px;
+      flex-shrink: 0;
     }
 
+    /* ── Board ────────────────────────────────────────────── */
     .board {
       display: flex;
       flex-direction: column;
       gap: 5px;
     }
 
+    /* ── Row ──────────────────────────────────────────────── */
     .row {
       display: flex;
       gap: 5px;
     }
 
+    /* Invalid-word shake ─────────────────────────────────── */
+    .row.shake {
+      animation: shake 0.5s ease;
+    }
+
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      10%, 50%, 90% { transform: translateX(-4px); }
+      30%, 70% { transform: translateX(4px); }
+    }
+
+    /* ── Tile ─────────────────────────────────────────────── */
+    /*
+     * Base tile: empty cell in the 6×5 grid.
+     * Sizing: clamp between 50px (min viable touch target) and 62px (desktop).
+     * Formula: (100vw - 48px) / 5 approximates the available width on mobile
+     * accounting for body padding and board gaps.
+     */
     .tile {
-      width: 62px;
-      height: 62px;
+      --tile-size: clamp(50px, calc((100vw - 48px) / 5), 62px);
+      width: var(--tile-size);
+      height: var(--tile-size);
       border: 2px solid #3a3a3c;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 2rem;
+      font-size: clamp(1.4rem, calc((100vw - 48px) / 5 * 0.53), 2rem);
       font-weight: 700;
       text-transform: uppercase;
       user-select: none;
       color: #ffffff;
+      /* flip transform context */
+      perspective: 250px;
+      position: relative;
     }
 
-    @media (max-width: 400px) {
-      .tile {
-        width: 52px;
-        height: 52px;
-        font-size: 1.6rem;
+    /* Letter typed but not yet submitted */
+    .tile[data-state="tbd"] {
+      border-color: #999;
+      animation: pop 0.1s ease;
+    }
+
+    /* ── Pop animation (letter input) ────────────────────── */
+    @keyframes pop {
+      0%   { transform: scale(1); }
+      50%  { transform: scale(1.12); }
+      100% { transform: scale(1); }
+    }
+
+    /* ── Flip animation (tile reveal) ────────────────────── */
+    .tile[data-state="correct"],
+    .tile[data-state="present"],
+    .tile[data-state="absent"] {
+      border: none;
+      animation: flip 0.5s ease forwards;
+    }
+
+    /*
+     * Each tile in a row is revealed with a staggered delay.
+     * JS sets --flip-delay on each tile (e.g. 0ms, 150ms, …, 600ms).
+     */
+    .tile {
+      animation-delay: var(--flip-delay, 0ms);
+    }
+
+    @keyframes flip {
+      0%   { transform: rotateX(0deg); }
+      49%  { transform: rotateX(-90deg); }
+      50%  {
+        transform: rotateX(-90deg);
+        /* background applied at midpoint so it shows on the way back */
+      }
+      100% { transform: rotateX(0deg); }
+    }
+
+    /* ── Color States ─────────────────────────────────────── */
+    /* Correct position — green */
+    .tile[data-state="correct"] {
+      background-color: #6aaa64;
+      color: #ffffff;
+    }
+
+    /* Present (wrong position) — yellow */
+    .tile[data-state="present"] {
+      background-color: #c9b458;
+      color: #ffffff;
+    }
+
+    /* Absent (not in word) — dark gray */
+    .tile[data-state="absent"] {
+      background-color: #787c7e;
+      color: #ffffff;
+    }
+
+    /* Win bounce on the row after all tiles flip */
+    .row.win-bounce .tile {
+      animation: bounce 0.6s ease forwards;
+      animation-delay: var(--bounce-delay, 0ms);
+    }
+
+    @keyframes bounce {
+      0%, 20%  { transform: translateY(0); }
+      40%      { transform: translateY(-20px); }
+      60%      { transform: translateY(-10px); }
+      80%      { transform: translateY(-16px); }
+      100%     { transform: translateY(0); }
+    }
+
+    /* ── Keyboard ─────────────────────────────────────────── */
+    #keyboard {
+      width: 100%;
+      max-width: 500px;
+      padding: 8px 4px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .kb-row {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .key {
+      height: 58px;
+      min-width: 43px;
+      padding: 0 6px;
+      border: none;
+      border-radius: 4px;
+      background-color: #818384;
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 0.8125rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      flex: 1;
+      max-width: 43px;
+      transition: background-color 0.2s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .key[data-key="Enter"],
+    .key[data-key="Backspace"] {
+      max-width: 66px;
+      font-size: 0.75rem;
+    }
+
+    /* Keyboard tile color states */
+    .key[data-state="correct"] {
+      background-color: #6aaa64;
+    }
+
+    .key[data-state="present"] {
+      background-color: #c9b458;
+    }
+
+    .key[data-state="absent"] {
+      background-color: #3a3a3c;
+    }
+
+    /* ── Responsive overrides ─────────────────────────────── */
+    /* Very narrow screens (< 340px) */
+    @media (max-width: 340px) {
+      .key {
+        min-width: 30px;
+        height: 50px;
+        font-size: 0.7rem;
+      }
+
+      .key[data-key="Enter"],
+      .key[data-key="Backspace"] {
+        max-width: 52px;
+        font-size: 0.65rem;
+      }
+
+      header h1 {
+        font-size: 1.4rem;
+      }
+    }
+
+    /* ── Accessibility ────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      .tile,
+      .tile[data-state="correct"],
+      .tile[data-state="present"],
+      .tile[data-state="absent"],
+      .row.shake,
+      .row.win-bounce .tile {
+        animation: none;
       }
     }
   </style>
@@ -95,7 +303,7 @@
     <h1>Wordle</h1>
   </header>
 
-  <div id="message"></div>
+  <div id="message" role="alert" aria-live="polite"></div>
 
   <div id="board-container">
     <div class="board" id="board">
@@ -141,6 +349,43 @@
         <div class="tile"></div>
         <div class="tile"></div>
       </div>
+    </div>
+  </div>
+
+  <div id="keyboard">
+    <div class="kb-row">
+      <button class="key" data-key="q">Q</button>
+      <button class="key" data-key="w">W</button>
+      <button class="key" data-key="e">E</button>
+      <button class="key" data-key="r">R</button>
+      <button class="key" data-key="t">T</button>
+      <button class="key" data-key="y">Y</button>
+      <button class="key" data-key="u">U</button>
+      <button class="key" data-key="i">I</button>
+      <button class="key" data-key="o">O</button>
+      <button class="key" data-key="p">P</button>
+    </div>
+    <div class="kb-row">
+      <button class="key" data-key="a">A</button>
+      <button class="key" data-key="s">S</button>
+      <button class="key" data-key="d">D</button>
+      <button class="key" data-key="f">F</button>
+      <button class="key" data-key="g">G</button>
+      <button class="key" data-key="h">H</button>
+      <button class="key" data-key="j">J</button>
+      <button class="key" data-key="k">K</button>
+      <button class="key" data-key="l">L</button>
+    </div>
+    <div class="kb-row">
+      <button class="key" data-key="Enter">Enter</button>
+      <button class="key" data-key="z">Z</button>
+      <button class="key" data-key="x">X</button>
+      <button class="key" data-key="c">C</button>
+      <button class="key" data-key="v">V</button>
+      <button class="key" data-key="b">B</button>
+      <button class="key" data-key="n">N</button>
+      <button class="key" data-key="m">M</button>
+      <button class="key" data-key="Backspace">⌫</button>
     </div>
   </div>
 </body>
