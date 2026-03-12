@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { QueueItem, Node, DecisionOption } from '../types';
+import type { QueueItem, DecisionOption, Node } from '../types';
 import AdvisorChatbot from './AdvisorChatbot';
 
 interface Props {
