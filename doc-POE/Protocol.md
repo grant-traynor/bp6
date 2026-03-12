@@ -151,7 +151,7 @@ One event per line. No multi-line JSON.
 {"poe": "task", "id": "<uuid>", "title": "...", "description": "...", "skill": "<skill-id>",
  "type": "task",  // "task" | "bug" | "chore" | "subtask"
  "parent_id": "<task-id>",  // optional — for subtask hierarchy
- "depends_on": ["<task-id>", "..."]}  // optional — creates edges
+ "depends_on": ["<task-id>", "..."]}  // optional — creates edges; best-effort (missing dep nodes are skipped with a warning, not fatal)
 
 // Update an existing task
 {"poe": "task:update", "id": "<task-id>",
@@ -624,6 +624,7 @@ All events use `app_handle.emit(event_name, payload)`. Event names use hyphen no
 | `poe-agent-stream` | `{agentId, taskId, projectId, event}` | Raw stream-json event from agent stdout — used by DebugPanel for live output display |
 | `poe-agent-exited` | `{agentId, taskId, projectId, success}` | Agent process exited; `success=false` if poe:done was never received |
 | `poe-phase-update` | `{phaseId, status, projectId}` | Update phase lifecycle state in Phase × Scope Matrix header |
+| `poe-ingester-warning` | `{taskId, agentId, eventType, error}` | A structured poe: event (`poe:task`, `poe:edge`, `poe:decision`, `poe:skill`) failed to process; the originating agent task was unaffected. Frontend may surface in activity feed. |
 
 ### Decision resolution (Frontend → Rust)
 

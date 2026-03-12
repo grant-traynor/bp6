@@ -288,6 +288,8 @@ See `doc-POE/Protocol.md §1` for the complete CREATE TABLE schema. Key tables:
 
 Every `nodes` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_id`. Queue items reference the task that raised the question. The events table is the audit trail — every poe: event lands here in full.
 
+**Agent stream transcripts** are written outside the DB, to `{project}/.poe/agent_stream/{agent_id}.jsonl` — one file per agent session, one raw stream-json line per entry. These are durable transcripts for post-session inspection and are not read by the orchestrator at runtime.
+
 ---
 
 ## Agent Event Protocol
