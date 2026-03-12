@@ -88,10 +88,17 @@ struct PoeKnowledge {
     supersedes: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
+pub struct DecisionOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct PoeDecision {
     question: String,
-    options: Option<Vec<String>>,
+    options: Option<Vec<DecisionOption>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -967,7 +974,7 @@ mod tests {
         let project_id = insert_project(&conn);
         let task_id = insert_task(&conn, &project_id);
 
-        let json = r#"{"poe":"decision","question":"Which approach?","options":["A","B"]}"#;
+        let json = r#"{"poe":"decision","question":"Which approach?","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}"#;
         let item = db_handle_decision(&conn, json, &project_id, &task_id, "agent-1").unwrap();
 
         // Node must now be Waiting
