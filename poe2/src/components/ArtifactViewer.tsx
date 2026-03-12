@@ -96,7 +96,17 @@ export default function ArtifactViewer({ artifact, projectId, taskId, previousVe
     setError(null);
     invoke<string>('read_artifact_content', { artifactId: art.id, projectId })
       .then(setContent)
-      .catch((e) => setError(String(e)));
+      .catch((e) => {
+        const msg = String(e);
+        // Suppress "not found" errors — the agent may have emitted poe:artifact before
+        // writing the file. The useEffect will retry when updatedAt changes on the next
+        // poe:artifact emission (after the agent writes the file).
+        if (msg.toLowerCase().includes('not found') || msg.toLowerCase().includes('no such file')) {
+          setContent(null); // stays in "Building document…" state
+        } else {
+          setError(msg);
+        }
+      });
   }, [effectiveArtifact?.id, effectiveArtifact?.updatedAt, projectId]);
 
   // Load previous version content when previousVersionId is provided

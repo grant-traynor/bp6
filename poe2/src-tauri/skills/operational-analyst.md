@@ -31,6 +31,17 @@ The orchestrator has injected an interactive mode protocol block. You will elici
 **Critical rule — no bare prose output:**
 Every message to the human — whether a question, an acknowledgement, or a clarification — MUST be emitted as a `poe:chat` event. Never write bare prose text. If you emit text outside a `poe:` event it will not reach the user. On every resume turn your output is: optional `poe:artifact`, then `poe:chat`, then `poe:yield` — nothing else.
 
+> ❌ WRONG — bare prose before poe events:
+> ```
+> Good — that tells me a lot. Let me ask a follow-up…
+> {"poe": "chat", "content": "Next question: who are the users?"}
+> ```
+> ✅ CORRECT — poe:chat only, no surrounding prose:
+> ```
+> {"poe": "chat", "content": "Thanks — that helps. Next question: who are the users?", "id": "c2"}
+> {"poe": "yield"}
+> ```
+
 ### Questions to ask (in order, 3–5 rounds)
 
 Cover these topics, one per round:
@@ -59,25 +70,36 @@ Skip a round if the project brief already answers it clearly. Stop after 5 round
 _(Orchestrator resumes the run with `Human: {response}` appended. You then update the draft and ask the next question, or conclude.)_
 
 **Step 2b — Resume round (after human answers):**
-```
-{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
-{"poe": "chat", "content": "Thanks — that helps. Next question: who are the primary users?", "id": "c2"}
-{"poe": "yield"}
-```
+
+**MANDATORY: Write the file BEFORE emitting poe:artifact.** The frontend reads the file immediately on receiving the event. Emitting poe:artifact before the file exists causes a "not found" error in the UI.
+
+> ❌ WRONG — poe:artifact emitted before file is written:
+> ```
+> {"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
+> [Write tool call here — TOO LATE]
+> ```
+> ✅ CORRECT — Write tool first, then poe:artifact:
+> ```
+> [Write tool call → writes docs/conops.md to disk]
+> {"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
+> {"poe": "chat", "content": "Thanks — that helps. Next question: who are the primary users?", "id": "c2"}
+> {"poe": "yield"}
+> ```
+
 Do NOT write any text before or between these events. The human only sees what is inside `poe:chat`.
 
 **Step 3 — After each answer, update the draft artifact:**
 
-Before emitting `poe:artifact`, write the file to `docs/conops.md` in the project directory using your Write tool with the relative path `docs/conops.md`.
+**MANDATORY: Write `docs/conops.md` to disk first, then emit `poe:artifact`.**
 ```
 {"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 ```
 
 **Step 4 — Final round: write the complete CONOPS and close:**
 
-Before emitting `poe:artifact`, write the file to `docs/conops.md` in the project directory using your Write tool with the relative path `docs/conops.md`.
+**MANDATORY: Write `docs/conops.md` to disk first, then emit `poe:artifact` and `poe:done`.**
 ```
-{"poe": "artifact", "name": "conops.md", "artifact_type": "<type>"}
+{"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 {"poe": "done", "summary": "CONOPS document complete: conops.md"}
 ```
 
@@ -99,7 +121,7 @@ No interactive mode protocol block was present. Write the CONOPS immediately fro
 {"poe": "step", "name": "Reading project brief", "detail": "Extracting system purpose, users, workflows, and constraints."}
 {"poe": "step", "name": "Writing CONOPS", "detail": "Synthesising gathered information into Concept of Operations document."}
 ```
-Before emitting `poe:artifact`, write the file to `docs/conops.md` in the project directory using your Write tool with the relative path `docs/conops.md`.
+**MANDATORY: Use your Write tool to write `docs/conops.md` to disk BEFORE emitting `poe:artifact`.**
 ```
 {"poe": "artifact", "name": "conops.md", "artifact_type": "conops"}
 {"poe": "done", "summary": "CONOPS document produced covering system purpose, N user personas, N core workflows, and N open questions."}
