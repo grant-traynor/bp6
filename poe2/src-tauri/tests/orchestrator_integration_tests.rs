@@ -24,13 +24,15 @@
 use poe2_lib::dag_store::{
     schema,
     types::{CreateNodeInput, EdgeType, NodeStatus, NodeType, PhaseLifecycleStage, UpdateNodeInput},
-    db_create_edge, db_create_node, db_create_phase, db_find_ready_tasks, db_get_node,
-    db_get_phase, db_insert_advisor_turn, db_insert_chat_turn, db_list_advisor_turns,
-    db_list_chat_turns, db_list_phases, db_update_node, db_update_node_session,
-    db_update_node_skill_modes,
+    db_all_children_terminal, db_claim_node_retry, db_count_running_agents, db_create_agent,
+    db_create_edge, db_create_node, db_create_phase, db_end_agent, db_find_ready_tasks, db_get_node,
+    db_get_node_parent, db_get_phase, db_insert_advisor_turn, db_insert_chat_turn,
+    db_list_advisor_turns, db_list_chat_turns, db_list_ghost_agents, db_list_phases, db_update_node,
+    db_update_node_session, db_update_node_skill_modes,
 };
 use poe2_lib::event_ingester::{db_handle_decision, db_handle_done};
 use rusqlite::Connection;
+use std::collections::HashSet;
 
 // ── In-memory DB setup ────────────────────────────────────────────────────────
 
@@ -76,6 +78,7 @@ fn new_mem_db() -> Connection {
         conn.execute_batch("ALTER TABLE phases ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN sort_order INTEGER");
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN skill_modes TEXT");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN verdict TEXT");
     let _ = conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS advisor_turns (
             id           TEXT PRIMARY KEY,
@@ -865,5 +868,392 @@ fn tc10_skill_modes_population_sets_json_array_on_node() {
         node.skill_modes.as_deref(),
         Some(skill_modes_json),
         "db_get_node must return the correct skill_modes"
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// u7s.3 — Ghost agent recovery does not consume a concurrency slot
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// u7s.3: A ghost agent (status='running' in agents table, absent from the live
+/// AgentMap) must be cleaned up by the ghost-sweep logic so it does not block
+/// concurrency.
+///
+/// This test exercises the DB layer directly — the same operations that
+/// `sweep_ghost_agents` performs internally — because that function is not `pub`.
+///
+/// Steps:
+/// 1. Create project + a Running task node.
+/// 2. Insert a ghost agent row (status='running') whose id is NOT in the live set.
+/// 3. Verify db_count_running_agents sees the ghost (count > 0).
+/// 4. Run the ghost-sweep logic: call db_list_ghost_agents with empty live set,
+///    then for each ghost call db_end_agent("failed") + db_claim_node_retry.
+/// 5. Assert db_count_running_agents returns 0.
+/// 6. Assert the task node was reset to Pending.
+/// 7. Assert the agent row status is 'failed'.
+#[test]
+fn ghost_agent_recovery_clears_concurrency_slot() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+
+    // Create a task node and manually force it to Running status (simulates a
+    // dispatch that occurred before the app crash).
+    let task_id = create_pending_task(&conn, &project_id, None, Some("implementer"));
+    force_status(&conn, &task_id, "running");
+
+    assert_eq!(
+        read_status(&conn, &task_id),
+        NodeStatus::Running,
+        "task must start as Running"
+    );
+
+    // Insert the ghost agent row via db_create_agent (status='running' by default).
+    let ghost = db_create_agent(&conn, &project_id, "implementer", &task_id, None)
+        .expect("db_create_agent");
+
+    // Sanity: db_count_running_agents sees it.
+    let count_before = db_count_running_agents(&conn, &project_id)
+        .expect("db_count_running_agents");
+    assert!(
+        count_before > 0,
+        "running agent count must be > 0 before sweep (got {})",
+        count_before
+    );
+
+    // ── Ghost sweep (mirrors sweep_ghost_agents DB logic) ──────────────────
+    // The live agent set is empty — nothing survived the crash.
+    let live_ids: HashSet<String> = HashSet::new();
+
+    let ghosts = db_list_ghost_agents(&conn, &project_id, &live_ids)
+        .expect("db_list_ghost_agents");
+    assert_eq!(ghosts.len(), 1, "exactly one ghost agent must be found");
+    assert_eq!(ghosts[0].id, ghost.id, "ghost agent id must match");
+
+    for g in &ghosts {
+        // Mark the agent row as failed.
+        db_end_agent(&conn, &g.id, "failed").expect("db_end_agent");
+
+        // Atomically reset the running node to pending (running → pending).
+        let claimed = db_claim_node_retry(&conn, &g.task_id)
+            .expect("db_claim_node_retry");
+        assert!(
+            claimed,
+            "db_claim_node_retry must return true for a Running node"
+        );
+    }
+    // ── End of sweep logic ─────────────────────────────────────────────────
+
+    // After sweep: no running agents visible.
+    let count_after = db_count_running_agents(&conn, &project_id)
+        .expect("db_count_running_agents after sweep");
+    assert_eq!(
+        count_after, 0,
+        "running agent count must be 0 after ghost sweep"
+    );
+
+    // The task node must have been reset to Pending so the scheduler can re-dispatch.
+    assert_eq!(
+        read_status(&conn, &task_id),
+        NodeStatus::Pending,
+        "task must be Pending after ghost sweep (was Running)"
+    );
+
+    // The agent row must be marked failed.
+    let agent_status: String = conn
+        .query_row(
+            "SELECT status FROM agents WHERE id = ?1",
+            [&ghost.id],
+            |r| r.get(0),
+        )
+        .expect("agent row must exist");
+    assert_eq!(
+        agent_status, "failed",
+        "ghost agent row must have status='failed' after sweep"
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// u7s.5 — Epic/feature/task hierarchy auto-close
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// u7s.5: When a task node (leaf) completes, `db_all_children_terminal` correctly
+/// detects the terminal condition, and `db_get_node_parent` returns the correct
+/// parent chain.  Simulating the ancestor sweep verifies that both feature and
+/// epic nodes can be transitioned to Complete via ordinary `db_update_node` calls.
+///
+/// (close_completed_ancestors uses AppHandle and is therefore not directly
+/// testable in integration tests; we exercise its building-block primitives here.)
+#[test]
+fn hierarchy_auto_close_when_all_children_terminal() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+
+    // Insert epic (no parent).
+    let epic = db_create_node(
+        &conn,
+        &CreateNodeInput {
+            id: None,
+            project_id: project_id.clone(),
+            phase_id: None,
+            parent_id: None,
+            node_type: NodeType::Epic,
+            title: "Epic".to_owned(),
+            description: None,
+            skill_id: None,
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        },
+    )
+    .expect("create epic");
+
+    // Insert feature (parent = epic).
+    let feature = db_create_node(
+        &conn,
+        &CreateNodeInput {
+            id: None,
+            project_id: project_id.clone(),
+            phase_id: None,
+            parent_id: Some(epic.id.clone()),
+            node_type: NodeType::Feature,
+            title: "Feature".to_owned(),
+            description: None,
+            skill_id: None,
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        },
+    )
+    .expect("create feature");
+
+    // Insert task (parent = feature).
+    let task = db_create_node(
+        &conn,
+        &CreateNodeInput {
+            id: None,
+            project_id: project_id.clone(),
+            phase_id: None,
+            parent_id: Some(feature.id.clone()),
+            node_type: NodeType::Task,
+            title: "Task".to_owned(),
+            description: None,
+            skill_id: Some("implementer".to_owned()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        },
+    )
+    .expect("create task");
+
+    // ── Step 5: task is Pending → feature has non-terminal children ───────────
+    let feature_all_done = db_all_children_terminal(&conn, &feature.id)
+        .expect("db_all_children_terminal feature (before task complete)");
+    assert!(
+        !feature_all_done,
+        "feature must NOT be all-terminal while task is Pending"
+    );
+
+    // ── Step 6: epic has non-terminal children (feature is Pending) ───────────
+    let epic_all_done = db_all_children_terminal(&conn, &epic.id)
+        .expect("db_all_children_terminal epic (before task complete)");
+    assert!(
+        !epic_all_done,
+        "epic must NOT be all-terminal while feature is Pending"
+    );
+
+    // ── Step 7: Mark task Complete ────────────────────────────────────────────
+    db_update_node(
+        &conn,
+        &task.id,
+        &UpdateNodeInput {
+            status: Some(NodeStatus::Complete),
+            ..Default::default()
+        },
+    )
+    .expect("update task to Complete");
+
+    // ── Step 8: feature's children are now all terminal ───────────────────────
+    let feature_all_done = db_all_children_terminal(&conn, &feature.id)
+        .expect("db_all_children_terminal feature (after task complete)");
+    assert!(
+        feature_all_done,
+        "feature must be all-terminal after task is Complete"
+    );
+
+    // ── Step 9: parent chain — task → feature ─────────────────────────────────
+    let task_parent = db_get_node_parent(&conn, &task.id)
+        .expect("db_get_node_parent task");
+    assert_eq!(
+        task_parent.as_deref(),
+        Some(feature.id.as_str()),
+        "task's parent must be feature"
+    );
+
+    // ── Step 10: parent chain — feature → epic ────────────────────────────────
+    let feature_parent = db_get_node_parent(&conn, &feature.id)
+        .expect("db_get_node_parent feature");
+    assert_eq!(
+        feature_parent.as_deref(),
+        Some(epic.id.as_str()),
+        "feature's parent must be epic"
+    );
+
+    // ── Step 11: epic has no parent ───────────────────────────────────────────
+    let epic_parent = db_get_node_parent(&conn, &epic.id)
+        .expect("db_get_node_parent epic");
+    assert!(
+        epic_parent.is_none(),
+        "epic must have no parent (it is the root)"
+    );
+
+    // ── Step 12: Simulate ancestor sweep — feature children all terminal ──────
+    // Sweep: since db_all_children_terminal(feature) is true, close feature.
+    db_update_node(
+        &conn,
+        &feature.id,
+        &UpdateNodeInput {
+            status: Some(NodeStatus::Complete),
+            ..Default::default()
+        },
+    )
+    .expect("update feature to Complete");
+
+    // Now epic's only child (feature) is Complete → epic can also close.
+    let epic_all_done = db_all_children_terminal(&conn, &epic.id)
+        .expect("db_all_children_terminal epic (after feature complete)");
+    assert!(
+        epic_all_done,
+        "epic must be all-terminal after feature is Complete"
+    );
+
+    db_update_node(
+        &conn,
+        &epic.id,
+        &UpdateNodeInput {
+            status: Some(NodeStatus::Complete),
+            ..Default::default()
+        },
+    )
+    .expect("update epic to Complete");
+
+    // ── Step 13: Assert both feature and epic are Complete ────────────────────
+    assert_eq!(
+        read_status(&conn, &feature.id),
+        NodeStatus::Complete,
+        "feature must be Complete after ancestor sweep"
+    );
+    assert_eq!(
+        read_status(&conn, &epic.id),
+        NodeStatus::Complete,
+        "epic must be Complete after ancestor sweep"
+    );
+}
+
+/// u7s.5 (sub-test): db_all_children_terminal correctly returns false when any
+/// child is non-terminal, and true once all children are complete.
+#[test]
+fn db_all_children_terminal_returns_false_with_mixed_statuses() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+
+    // Feature with two task children.
+    let feature = db_create_node(
+        &conn,
+        &CreateNodeInput {
+            id: None,
+            project_id: project_id.clone(),
+            phase_id: None,
+            parent_id: None,
+            node_type: NodeType::Feature,
+            title: "Feature".to_owned(),
+            description: None,
+            skill_id: None,
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        },
+    )
+    .expect("create feature");
+
+    let task1 = db_create_node(
+        &conn,
+        &CreateNodeInput {
+            id: None,
+            project_id: project_id.clone(),
+            phase_id: None,
+            parent_id: Some(feature.id.clone()),
+            node_type: NodeType::Task,
+            title: "Task 1".to_owned(),
+            description: None,
+            skill_id: Some("implementer".to_owned()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        },
+    )
+    .expect("create task1");
+
+    let task2 = db_create_node(
+        &conn,
+        &CreateNodeInput {
+            id: None,
+            project_id: project_id.clone(),
+            phase_id: None,
+            parent_id: Some(feature.id.clone()),
+            node_type: NodeType::Task,
+            title: "Task 2".to_owned(),
+            description: None,
+            skill_id: Some("implementer".to_owned()),
+            initial_status: Some(NodeStatus::Pending),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: None,
+        },
+    )
+    .expect("create task2");
+
+    // Both pending → not all terminal.
+    assert!(
+        !db_all_children_terminal(&conn, &feature.id).expect("all_children_terminal both pending"),
+        "must be false when both tasks are Pending"
+    );
+
+    // Mark task1 Complete, task2 still Pending → still not all terminal.
+    db_update_node(
+        &conn,
+        &task1.id,
+        &UpdateNodeInput {
+            status: Some(NodeStatus::Complete),
+            ..Default::default()
+        },
+    )
+    .expect("complete task1");
+
+    assert!(
+        !db_all_children_terminal(&conn, &feature.id)
+            .expect("all_children_terminal one complete one pending"),
+        "must be false when one task is Pending and one is Complete"
+    );
+
+    // Mark task2 Complete → all terminal.
+    db_update_node(
+        &conn,
+        &task2.id,
+        &UpdateNodeInput {
+            status: Some(NodeStatus::Complete),
+            ..Default::default()
+        },
+    )
+    .expect("complete task2");
+
+    assert!(
+        db_all_children_terminal(&conn, &feature.id)
+            .expect("all_children_terminal both complete"),
+        "must be true when both tasks are Complete"
     );
 }
