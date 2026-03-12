@@ -125,8 +125,8 @@ Clicking an entry opens the **agent session handover** — an xterm.js panel tha
 | `poe:brief` | Agent interpretation of its task |
 | `poe:step` | Named progress milestone |
 | `poe:artifact` | Artifact produced: `{name}` |
-| `poe:yield` (yield_reason=review) | Yielded — awaiting review from `{reviewer_skill}` |
-| `poe:yield` (yield_reason=decision) | Yielded — awaiting human decision |
+| `poe:yield` (after `poe:review`) | Yielded — awaiting review from `{reviewer_skill}` |
+| `poe:yield` (after `poe:decision`) | Yielded — awaiting human decision |
 | `poe:done` | Task complete |
 
 `poe:yield` must produce an activity feed entry. Without it, the human sees a task go from `running` to `waiting` with no explanation. The feed entry closes the glass-box gap.

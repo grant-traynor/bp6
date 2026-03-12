@@ -232,6 +232,9 @@ One event per line. No multi-line JSON.
 //   poe:review   → 'review'
 //   none         → NULL
 // The reason field on the wire was removed in Phase 2.3.
+// Agents MUST emit exactly {"poe": "yield"} with NO reason field.
+// Including a reason field (e.g. {"poe":"yield","reason":"decision"}) is a no-op
+// — the ingester ignores it — but is misleading and must not appear in agent output.
 {"poe": "yield"}
 
 // Signal task completion (all work done — not a yield checkpoint).
@@ -272,12 +275,12 @@ One event per line. No multi-line JSON.
 | `poe:skill` | write `{project}/.poe/skills/{name}.md` | yes | `poe-event` |
 | `poe:brief` | — | yes | `poe-event` |
 | `poe:step` | — | yes | `poe-event` |
-| `poe:decision` | INSERT queue_items, UPDATE task status=waiting | yes | `poe-decision-queued` |
+| `poe:decision` | INSERT queue_items, UPDATE nodes.status=waiting | yes | `poe-decision-queued` |
 | `poe:chat` | INSERT chat_turns | yes | `poe-chat-turn` |
 | `poe:advisor` | INSERT advisor_turns | yes | `poe-advisor-turn` |
 | `poe:review` | log only (orchestrator handles reviewer dispatch post-poe:yield) | yes | `poe-event` |
-| `poe:yield` | UPDATE tasks.status=waiting, SET yield_reason, signal orchestrator | yes | `poe-node-updated` + `poe-event` |
-| `poe:done` | UPDATE tasks.status=complete, signal orchestrator | yes | `poe-task-done` |
+| `poe:yield` | UPDATE nodes.status=waiting, SET yield_reason, signal orchestrator | yes | `poe-node-updated` + `poe-event` |
+| `poe:done` | UPDATE nodes.status=complete, signal orchestrator | yes | `poe-task-done` |
 
 ---
 
@@ -304,7 +307,7 @@ The skill's `modes:` frontmatter field declares which modes it supports. If a hu
 >
 > **`respond_to_chat` signal**: The `respond_to_chat` Tauri command writes the response to `chat_turns` and signals the orchestrator via `DagChanged::QueueItemResolved` (the same variant as decision resolution — the orchestrator routes by `node.yield_reason`, not by signal variant). This means the orchestrator's wake-up path is identical for both `poe:decision` and `poe:chat` continuations; only the yield_reason field differentiates them.
 >
-> **`DagChanged::QueueItemResolved` — `turn_type` field (bp6-17k.7)**: The signal carries a `turn_type: String` field with one of three values: `'decision'` | `'chat'` | `'advisor'`. This field allows `resume_waiting_agent()` to route directly to the correct continuation path without performing a DB existence probe on `decisions`, `chat_turns`, or `advisor_turns` — the type is embedded in the signal itself. Callers must set this field: `resolve_decision` passes `'decision'`, `respond_to_chat` passes `'chat'`, `respond_to_advisor` passes `'advisor'`.
+> **`DagChanged::QueueItemResolved` — `turn_type` field (bp6-17k.7)**: The signal carries a `turn_type: String` field with one of three values: `'decision'` | `'chat'` | `'advisor'`. This field allows `resume_waiting_agent()` to route directly to the correct continuation path without performing a DB existence probe on `queue_items`, `chat_turns`, or `advisor_turns` — the type is embedded in the signal itself. Callers must set this field: `resolve_decision` passes `'decision'`, `respond_to_chat` passes `'chat'`, `respond_to_advisor` passes `'advisor'`.
 
 **Autonomous mode block** (prepended for orchestrator-initiated tasks):
 
@@ -495,7 +498,7 @@ The frontend does **not poll**. All live state is event-driven via the Tauri eve
 
 ### Startup sequence
 
-1. Frontend calls `invoke("get_project_state", {project_id})` to hydrate initial state from SQLite (projects, phases, tasks, edges, recent event_log, open decisions).
+1. Frontend calls `invoke("get_project_state", {project_id})` to hydrate initial state from SQLite (projects, phases, nodes, edges, recent events, open queue_items).
 2. Frontend registers three listeners (see below).
 3. Rust side begins emitting events as agent stdout arrives.
 
@@ -533,7 +536,7 @@ invoke("resolve_decision", {decision_id, resolution: "..."})
 ```
 
 Rust handler:
-1. Updates `decisions.resolution` and `resolved_at` in SQLite.
+1. Updates `queue_items.resolution` and `resolved_at` in SQLite.
 2. Signals the orchestrator (`DagChanged`).
 3. Emits `poe-decision-resolved {itemId, projectId, taskId}` (frontend removes from queue).
 

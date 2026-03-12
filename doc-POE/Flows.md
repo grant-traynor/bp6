@@ -402,7 +402,7 @@ sequenceDiagram
     Note over A: Running via stream-json (SF-1 already complete)
 
     A-->>Ing: {"poe":"decision","id":"d1",<br/>"question":"...","options":["opt-a","opt-b"]}
-    Ing->>DB: INSERT decisions (id=d1, task_id=A.id, status=pending, question, options)
+    Ing->>DB: INSERT queue_items (id=d1, task_id=A.id, status=pending, question, options)
     Ing-->>FE: emit poe://decision (queue panel update)
 
     A-->>Ing: {"poe":"yield"}
@@ -418,7 +418,7 @@ sequenceDiagram
     Human->>FE: selects option / types resolution text
     FE->>Orch: invoke("resolve_decision", {decision_id: "d1", resolution: "opt-a"})
 
-    Orch->>DB: UPDATE decisions SET resolution='opt-a', resolved_at=now()
+    Orch->>DB: UPDATE queue_items SET resolution='opt-a', resolved_at=now()
     Orch->>Orch: DagChanged signal (internal)
 
     Note over Orch: SF-4: waiting task, yield_reason=decision<br/>resolved decisions exist → assemble continuation bundle
@@ -451,7 +451,7 @@ Agent A is running autonomously. It encounters an ambiguity or structural fork i
 - `question`: the question text displayed to the human
 - `options`: candidate options if enumerable (may be empty for open-ended questions)
 
-The ingester writes the decision to the `decisions` table and emits `poe://decision` to update the queue panel immediately. The agent then emits `poe:yield`.
+The ingester writes the decision to the `queue_items` table and emits `poe://decision` to update the queue panel immediately. The agent then emits `poe:yield`.
 
 **Note**: `poe:decision` is emitted *before* `poe:yield`. The ingester processes them as separate events in stream order. When the orchestrator wakes on the `DagChanged` from the yield, it reads `nodes.yield_reason` directly — no event log join required.
 
@@ -500,7 +500,7 @@ Each round creates a new agent process (spawn → work → yield → terminate �
 
 1. **`poe:decision` before `poe:yield`**: The decision event is always logged before the yield arrives. The orchestrator reads `nodes.yield_reason` when it processes the yield — it does not need to query event_log.
 
-2. **`resolve_decision` signals the orchestrator**: The Tauri command does NOT write to any process stdin. It updates `decisions` and signals DagChanged. The orchestrator wakes and assembles the SF-4 continuation.
+2. **`resolve_decision` signals the orchestrator**: The Tauri command does NOT write to any process stdin. It updates `queue_items` and signals DagChanged. The orchestrator wakes and assembles the SF-4 continuation.
 
 3. **Continuation bundle is a human turn**: Decision resolution is delivered as `Human: {resolution}` — not a structured ReviewResult block. The agent sees it as a direct human answer in conversation history.
 
