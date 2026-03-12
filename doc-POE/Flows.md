@@ -210,6 +210,62 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
 
 ---
 
+### SF-6: Missing-Skill Self-Healing
+
+*Trigger*: `dispatch_task()` calls `load_skill(skill_id)` → fails (skill not found in any priority tier: app bundle, user-level, project-local).
+
+```
+1.  Failing task status unchanged — stays 'pending' (not cancelled, not failed)
+
+2.  Compute dedup title: "Synthesize missing skill: {skill_id}"
+
+3.  Dedup guard: query DB for any node with this exact title and status IN ('pending', 'running')
+    - If found (a skill-author task already exists for this skill):
+        → Add 'depends_on' edge from failing task to existing skill-author node only
+        → Skip to step 7
+    - If not found: continue to step 4
+
+4.  Collect ALL pending nodes with skill_id = {missing skill}
+    (multiple tasks may be blocked on the same missing skill)
+
+5.  Create skill-author node:
+      title     = "Synthesize missing skill: {skill_id}"
+      skill_id  = "skill-author"
+      phase_id  = NULL
+      status    = 'pending'
+
+6.  Add 'depends_on' edges from ALL affected tasks → skill-author node
+
+7.  Emit DagChanged::DagStructureChanged to wake scheduler
+
+8.  Scheduler runs SF-1 on the skill-author node:
+      skill-author is 'pending' with no unsatisfied deps → dispatches immediately
+
+9.  skill-author agent emits poe:skill {name, content}
+      → orchestrator writes .poe/skills/{name}.md to disk
+
+10. skill-author emits poe:done → NodeStatusChanged sent
+
+11. run_loop fires → db_find_ready_tasks now returns previously-blocked tasks
+    (their depends_on dependency is status='done')
+
+12. Each unblocked task dispatched via SF-1:
+      load_skill succeeds (project-local tier) → task runs normally
+```
+
+**Dedup rationale**: Multiple tasks may require the same missing skill simultaneously. Steps 3–6 ensure exactly one skill-author node is created per missing skill. Subsequent tasks that also fail `load_skill` for the same skill hit the dedup guard (step 3) and simply add a `depends_on` edge to the already-existing skill-author node.
+
+**phase_id = NULL**: The skill-author node is a system-generated supporting task (like reviewer tasks in SF-3). It does not belong to any user-visible phase and does not appear in the Phase × Scope Matrix. It appears in the activity feed because it emits `poe:` events.
+
+**Invariants**:
+1. **Failing task stays `pending`**: `load_skill` failure never transitions a task to a terminal state. The task is left pending until the dependency is satisfied.
+2. **Single skill-author per missing skill**: The dedup guard prevents creating duplicate synthesisers for the same `skill_id`, regardless of how many tasks are blocked.
+3. **skill-author uses no missing skill itself**: `skill-author` is a built-in skill present in the app bundle tier. It will never trigger SF-6 recursively.
+4. **`DagStructureChanged` is the correct signal**: Adding new nodes and edges is a structural change, not just a status change. The `DagStructureChanged` variant ensures the scheduler re-evaluates the full DAG.
+5. **Unblocked tasks go through SF-1 normally**: Once the dependency is satisfied, the previously-blocked tasks are found by `db_find_ready_tasks` and dispatched exactly as any other ready task. No special-case resume path is needed.
+
+---
+
 ## 3. Primary Flows
 
 ### 3.1 Agent-to-Agent Review (`poe:review`)
@@ -1405,3 +1461,4 @@ The advisor emits `poe:done` when it has nothing more to offer or the human dism
 | Collaborative Artifact Building (`poe:chat`) | 3.8 | Draft |
 | Advisor Session (`poe:advisor`) | 3.9 | Draft |
 | Plan Composer → Phase Activation | SF-5 | Draft |
+| Missing-Skill Self-Healing | SF-6 | Draft |
