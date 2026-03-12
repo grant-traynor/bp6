@@ -476,6 +476,101 @@ Skills detect plan-review mode by the presence of `**Type**: plan_review` in the
 
 > **Autonomous mode block in reviewer bundles (bp6-17k.6)**: The orchestrator prepends the same autonomous mode protocol block (the `## Execution Protocol` block described above) before the `# Task` section in the reviewer stdin bundle — identical to regular task dispatch. Without this block the reviewer agent receives no execution protocol instruction and may behave incorrectly (prompting for input, failing to emit `poe:done`). The reviewer skill file is read-only and must not contain the execution protocol itself; it is always injected by the orchestrator at bundle assembly time.
 
+### Skill-Author Bundle (skill-author tasks only)
+
+When the orchestrator dispatches a task with `skill_id = "skill-author"`, it does **not** assemble a standard T+S+K bundle. Instead it calls `assemble_skill_author_bundle()`, which produces a non-standard bundle described here.
+
+#### When it applies
+
+Any task whose `skill` column equals `"skill-author"` receives this bundle. These tasks are created automatically when the scheduling loop attempts to dispatch a task and cannot resolve the required skill through the priority chain — the orchestrator creates a `skill-author` task as a prerequisite and re-queues the original.
+
+#### Bundle layout
+
+The mode protocol block (autonomous) is prepended identically to a standard bundle. The `# Skill` section contains the `skill-author` skill prompt. The `# Task` / Task Context sections are **replaced** by a single `## Skill Authoring Context` section:
+
+```markdown
+## Execution Protocol
+
+You are running in autonomous mode — there is no human at the keyboard.
+
+- Begin by emitting `poe:brief` describing your understanding of the task.
+- Work from the context in this bundle. Do not ask questions.
+- Raise genuine blockers via `poe:decision`, then continue with your best judgement.
+- Emit `poe:done` as your final output. The process exits after this.
+
+---
+
+# Skill
+
+{contents of skill-author skill file}
+
+---
+
+## Skill Authoring Context
+
+**skill_name**: {missing_skill_id}
+
+### Failing tasks that need this skill
+
+{for task in failing_tasks}
+- **{task.title}**: {task.description}
+{end}
+
+### Existing skills
+
+{comma-separated list of skill names already present in the priority chain}
+
+### Knowledge Register
+
+{for entry in knowledge where entry.project_id = project_id}
+## {entry.key}
+
+{entry.content}
+
+---
+{end}
+
+### Relevant Artifacts
+
+{for artifact in declared_inputs}
+- **{artifact.artifact_type}**: `{project.path}/docs/{artifact.name}` — read this file for context.
+{end}
+```
+
+Field semantics:
+
+- **`skill_name`**: the exact skill ID that is missing. The agent must use this value as the `name` field in its `poe:skill` output event. Divergence here causes a write-path mismatch.
+- **Failing tasks**: one entry per task that was blocked waiting for this skill. The list is the agent's primary signal for what the skill must be capable of — it defines the use-case.
+- **Existing skills**: a comma-separated list of skill IDs already registered in the priority chain (project-local + user-level + app bundle). The agent uses this for naming-convention consistency; it should not produce a skill whose ID conflicts with an existing one.
+- **Knowledge Register** and **Relevant Artifacts**: identical to the standard bundle — same format, same injection rules.
+
+> **No `# Task` section**: the skill-author bundle omits the standard `# Task` block entirely. The agent's "task" is implicitly defined by the `## Skill Authoring Context`. The `skill-author` skill prompt must not assume a `# Task` section is present.
+
+#### poe:skill output contract
+
+The skill-author agent must emit **exactly two events**, in order:
+
+1. **`poe:skill`** — writes the authored skill to disk:
+
+   ```json
+   {"poe": "skill", "name": "<skill_name>", "content": "<complete skill markdown>"}
+   ```
+
+   - `name` must exactly match the `skill_name` value from the bundle. Any deviation causes the orchestrator to write the file to the wrong path and leaves the original failing tasks unblocked.
+   - `content` must be a complete, runnable skill file including valid YAML frontmatter (with at minimum `id`, `name`, `description`, and `modes` fields). Partial or frontmatter-less content will cause skill-load failure on next dispatch.
+
+2. **`poe:done`**:
+
+   ```json
+   {"poe": "done"}
+   ```
+
+The orchestrator ingests the `poe:skill` event and writes the content to `{project.path}/.poe/skills/{name}.md` (project-local tier, highest priority in the skill priority chain). After `poe:done` is processed, the orchestrator scheduling loop re-evaluates pending tasks; the originally failing tasks are now unblocked and can be dispatched normally.
+
+> **No intermediate events required**: the skill-author agent should not emit `poe:task`, `poe:artifact`, or `poe:knowledge` events. Its only output contract is `poe:skill` + `poe:done`.
+
+---
+
 ### Skill priority chain
 
 The skill file for `{skill-id}` is resolved as follows (first match wins):
