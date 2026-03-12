@@ -240,6 +240,23 @@ pub fn ingest_line_with_tracker(
 
     if let Err(e) = result {
         eprintln!("[event_ingester] Error processing poe:{}: {}", poe_event, e);
+        // Emit a Tauri warning event for structured poe event failures so the
+        // frontend can surface them in the UI (e.g. activity feed warnings).
+        match poe_event {
+            "task" | "edge" | "decision" | "skill" => {
+                emit_tauri_event(
+                    sink,
+                    "poe-ingester-warning",
+                    &serde_json::json!({
+                        "taskId": task_id,
+                        "agentId": agent_id,
+                        "eventType": format!("poe:{}", poe_event),
+                        "error": e.to_string()
+                    }),
+                );
+            }
+            _ => {}
+        }
     }
 }
 
@@ -283,12 +300,17 @@ fn handle_task(
 
     let mut pending_events: Vec<(String, serde_json::Value)> = Vec::new();
     let result = with_project_conn(registry, project_id, |conn| {
+        // Node creation is fatal — propagate with `?`.
         let node = dag_store::db_create_node(conn, &input)?;
         // Finish-to-start edges: dep must finish before node can start.
         // from=dep, to=node — dep is the prerequisite, node is the dependent.
+        // Edge wiring is best-effort: a missing dep_id should not prevent the
+        // node from being registered or the DagChanged signal from firing.
         if let Some(ref deps) = payload.depends_on {
             for dep_id in deps {
-                dag_store::db_create_edge(conn, dep_id, &node.id, EdgeType::DependsOn)?;
+                if let Err(e) = dag_store::db_create_edge(conn, dep_id, &node.id, EdgeType::DependsOn) {
+                    eprintln!("[event_ingester] handle_task: dep edge {dep_id} → {} skipped: {e}", node.id);
+                }
             }
         }
         dag_store::db_log_event(conn, project_id, Some(agent_id), Some(task_id), "poe:task", json)?;
