@@ -647,6 +647,24 @@ Missing specialists to author for v2:
 | `validity-analyst` | Validity Analysis (outer loop Check) | Authors `phase-N-validity.md` |
 | `rca-analyst` | Retrospective (outer loop Act) | Authors `phase-N-rca.md`, updates skills and knowledge register |
 
+### Skill-Author: The Bootstrap Primitive
+
+**What it is.** `skill-author.md` is the one bundled skill that is never auto-generated. It is the system's self-repair mechanism for a missing-skill failure. When the orchestrator cannot load a required skill at dispatch time, it instantiates a skill-author task, supplies the missing-skill context, and the skill-author agent produces a project-local skill file via `poe:skill`. Every other skill in the library can itself be authored or refined by running through the system; skill-author is the fixed point that makes this possible.
+
+**The self-healing loop.** When `dispatch_task()` resolves the skill for a node and finds nothing loadable, instead of cancelling the task it performs the following sequence:
+
+1. Creates a skill-author node (`phase_id = NULL`, `parent_id = NULL`). A null `phase_id` makes the node unconditionally eligible — it is not gated by any phase lifecycle and will be scheduled as soon as concurrency permits.
+2. Wires a `depends_on` edge from every task blocked by the missing skill to the new skill-author node.
+3. Sends `DagStructureChanged` to the orchestrator channel to wake the scheduler immediately.
+
+When skill-author completes, it emits `poe:skill` → the orchestrator writes the file to `.poe/skills/{name}.md` → `NodeStatusChanged` fires → the run loop re-evaluates the dependency graph and dispatches the previously-blocked tasks, which now load the skill successfully.
+
+**Dedup invariant.** Exactly one skill-author task may exist per missing skill name per project at any time. The node is identified by the title `"Synthesize missing skill: {skill_name}"`. If a skill-author task with that title already exists (status pending or running), `dispatch_task()` adds only the `depends_on` edge from the newly-blocked task to the existing skill-author node — it does not create a second node. This ensures that concurrent tasks blocked on the same missing skill converge on a single synthesis effort rather than spawning duplicate work.
+
+**Priority chain interaction.** `poe:skill` always writes to the project-local tier (`.poe/skills/`). In the skill search path this is the highest-priority tier — it is evaluated after the user tier and before the bundle defaults. An authored skill therefore takes precedence over any bundled default with the same `id`, allowing the project to accumulate specialised behaviour that overrides general-purpose defaults without modifying the bundle.
+
+**Effect on f(C, T, S, K, H).** The S-gap — a missing skill — is now self-closing within a single run. The system's skill vocabulary grows at runtime as it encounters work requiring skills it does not yet have. No manual skill authoring is required to unblock execution. From the perspective of the formal model, the Retrospective's corrective action on **S** can now happen automatically mid-phase, not only between phases — making skill quality a converging property of a run rather than a static precondition for one.
+
 ---
 
 ## Process Architecture
