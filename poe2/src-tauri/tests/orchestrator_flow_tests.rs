@@ -433,7 +433,7 @@ fn sf3_decision_yield_sets_waiting_with_decision_reason() {
     force_status(&conn, &task_id, "running");
 
     // Step 1: poe:decision — sets task Waiting + creates queue_item.
-    let decision_json = r#"{"poe":"decision","question":"Deploy to prod?","options":["yes","no"]}"#;
+    let decision_json = r#"{"poe":"decision","question":"Deploy to prod?","options":[{"id":"yes","label":"Yes"},{"id":"no","label":"No"}]}"#;
     let item = db_handle_decision(&conn, decision_json, &project_id, &task_id, "agent-1")
         .expect("db_handle_decision");
 
@@ -718,7 +718,7 @@ fn sf4_decision_resolution_resolves_queue_item_and_formats_bundle() {
 
     // Simulate task in Waiting state with a queue_item.
     force_status(&conn, &task_id, "waiting");
-    let decision_json = r#"{"poe":"decision","question":"Which strategy?","options":["A","B"]}"#;
+    let decision_json = r#"{"poe":"decision","question":"Which strategy?","options":[{"id":"A","label":"A"},{"id":"B","label":"B"}]}"#;
     let item = db_handle_decision(&conn, decision_json, &project_id, &task_id, "agent-1")
         .expect("db_handle_decision");
 

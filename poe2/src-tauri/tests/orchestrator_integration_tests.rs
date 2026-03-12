@@ -304,7 +304,7 @@ fn tc2_decision_yield_creates_queue_item_and_sets_waiting() {
 
     // poe:decision — pure DB handler (no AppHandle required).
     let decision_json =
-        r#"{"poe":"decision","id":"d1","question":"Which DB?","options":["sqlite","postgres"]}"#;
+        r#"{"poe":"decision","id":"d1","question":"Which DB?","options":[{"id":"sqlite","label":"SQLite"},{"id":"postgres","label":"PostgreSQL"}]}"#;
     let item = db_handle_decision(&conn, decision_json, &project_id, &task_id, "agent-1")
         .expect("db_handle_decision");
 

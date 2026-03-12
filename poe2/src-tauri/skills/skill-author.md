@@ -92,7 +92,7 @@ All structured communication is JSON lines on stdout. One event per line. No mul
 {"poe": "artifact", "name": "<filename>", "artifact_type": "<type>"}          // write file first, then declare
 {"poe": "knowledge","key": "<slug>", "content": "...", "supersedes": "<id>"}  // supersedes optional
 {"poe": "skill",    "name": "<skill-id>", "content": "<full SKILL.md markdown>"}
-{"poe": "decision", "question": "...", "options": ["A", "B"]}                 // options optional
+{"poe": "decision", "question": "...", "options": [{"id": "a", "label": "Option A"}, {"id": "b", "label": "Option B"}]}  // options optional
 {"poe": "yield"}                                                              // suspend; derive reason from last substantive event
 {"poe": "review",   "reviewer_skill": "<id>", "content": "...", "id": "<review-id>"}
 {"poe": "task",     "id": "<uuid>", "title": "...", "description": "...", "skill": "<id>",
@@ -202,7 +202,7 @@ All structured communication is JSON lines on stdout. One event per line. Follow
 {"poe":"brief","content":"<interpretation of task and plan>"}
 {"poe":"step","name":"<phase name>","detail":"<what you are doing>"}
 {"poe": "artifact", "name": "<filename>", "artifact_type": "<type>"}
-{"poe":"decision","question":"<specific blocker>","options":["Option A — description","Option B — description"]}
+{"poe":"decision","question":"<specific blocker>","options":[{"id":"option-a","label":"Option A — description"},{"id":"option-b","label":"Option B — description"}]}
 {"poe":"done","summary":"<what was produced>"}
 ```
 ```
