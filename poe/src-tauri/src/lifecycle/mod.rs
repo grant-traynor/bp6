@@ -17,6 +17,7 @@ use std::path::PathBuf;
 use restate_sdk::prelude::*;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
+use uuid::Uuid;
 
 use crate::agents::{spawn_agent_internal, AgentState, SpawnAgentParams};
 use crate::dag::DagStore;
@@ -748,7 +749,7 @@ pub async fn spawn_execution_workflow(
                 workflow_id: Some(project_id.to_string()),
                 node_id: None,
                 workflow_type: Some(format!("lifecycle-step-4-task-{}", task.id)),
-                session_id: None,
+                session_id: Some(Uuid::new_v4().to_string()),
                 resume: false,
                 cwd: project_dir.clone(),
                 use_pty: true,
@@ -821,7 +822,7 @@ pub fn spawn_step_agent(
             workflow_id: Some(project_id.to_string()),
             node_id: None,
             workflow_type: Some(format!("lifecycle-step-{}", step_key)),
-            session_id: None,
+            session_id: Some(Uuid::new_v4().to_string()),
             resume: false,
             cwd: project_dir.map(|s| s.to_string()),
             use_pty: true,
@@ -867,7 +868,7 @@ pub fn spawn_step_agent_with_prompt(
             workflow_id: Some(project_id.to_string()),
             node_id: None,
             workflow_type: Some(format!("lifecycle-{}-review", skill_id)),
-            session_id: None,
+            session_id: Some(Uuid::new_v4().to_string()),
             resume: false,
             cwd: project_dir.map(|s| s.to_string()),
             use_pty: true,
