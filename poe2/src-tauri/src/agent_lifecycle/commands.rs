@@ -27,8 +27,7 @@ pub async fn list_agents(
 ) -> Result<Vec<AgentRecord>, String> {
     let reg = registry.lock().unwrap();
     let db = reg
-        .values()
-        .find(|db| db.project.id == project_id)
+        .get(&project_id)
         .ok_or_else(|| format!("Project not open: {}", project_id))?
         .clone();
     drop(reg);

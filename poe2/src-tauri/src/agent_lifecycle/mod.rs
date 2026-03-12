@@ -62,8 +62,7 @@ pub async fn spawn_agent(
     let agent_id = {
         let reg = registry.lock().unwrap();
         let db = reg
-            .values()
-            .find(|db| db.project.id == req.project_id)
+            .get(&req.project_id)
             .ok_or_else(|| anyhow::anyhow!("Project not open: {}", req.project_id))?
             .clone();
         drop(reg);
@@ -220,9 +219,7 @@ pub async fn spawn_agent(
                     // deadlock potential.
                     let db = {
                         let reg = registry_for_session.lock().unwrap();
-                        reg.values()
-                            .find(|db| db.project.id == project_id_for_session)
-                            .cloned()
+                        reg.get(&project_id_for_session).cloned()
                     };
                     if let Some(db) = db {
                         let conn = db.conn.lock().unwrap();
