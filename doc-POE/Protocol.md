@@ -262,6 +262,12 @@ One event per line. No multi-line JSON.
 // FAILED indicates the reviewer exceeded max retries and was cancelled by the watchdog.
 // Agent checks that all expected review IDs are present in the bundle before proceeding.
 // Any FAILED verdict should be treated as a signal to escalate via poe:decision.
+
+// Reviewer emits this BEFORE poe:done to record their explicit verdict.
+// The orchestrator reads nodes.verdict when building the ReviewResult bundle.
+// review_id must match the Review Request **Review ID** field.
+// Missing poe:review-outcome defaults to BLOCKED with a poe-ingester-warning emitted.
+{"poe": "review-outcome", "verdict": "APPROVED_WITH_CONDITIONS", "review_id": "r-eng"}
 ```
 
 ### Ingester responsibilities per event type
@@ -282,6 +288,7 @@ One event per line. No multi-line JSON.
 | `poe:chat` | INSERT chat_turns | yes | `poe-chat-turn` |
 | `poe:advisor` | INSERT advisor_turns | yes | `poe-advisor-turn` |
 | `poe:review` | log only (orchestrator handles reviewer dispatch post-poe:yield) | yes | `poe-event` |
+| `poe:review-outcome` | UPDATE nodes SET verdict=? WHERE id=task_id | yes | `poe-event` |
 | `poe:yield` | UPDATE nodes.status=waiting, SET yield_reason, signal orchestrator | yes | `poe-node-updated` + `poe-event` |
 | `poe:done` | UPDATE nodes.status=complete, signal orchestrator | yes | `poe-task-done` |
 

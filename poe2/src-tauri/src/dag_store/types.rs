@@ -224,6 +224,10 @@ pub struct Node {
     pub sort_order: Option<i64>,
     /// JSON array of modes declared in skill frontmatter. NULL = treat as '["autonomous"]'.
     pub skill_modes: Option<String>,
+    /// Review outcome verdict stored by poe:review-outcome event handler.
+    /// One of: APPROVED | APPROVED_WITH_CONDITIONS | BLOCKED | FAILED.
+    /// NULL for non-reviewer nodes or when reviewer has not yet emitted poe:review-outcome.
+    pub verdict: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

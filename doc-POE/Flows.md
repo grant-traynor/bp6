@@ -331,6 +331,11 @@ sequenceDiagram
     Ing->>DB: UPSERT artifacts (path indexed, file already written)
     Ing-->>FE: emit poe://event
 
+    B-->>Ing: {"poe":"review-outcome","verdict":"APPROVED_WITH_CONDITIONS","review_id":"r1"}
+    Note over B: MUST emit before poe:done — stores verdict on reviewer node
+    Ing->>DB: UPDATE nodes SET verdict='APPROVED_WITH_CONDITIONS' WHERE id=B.task_id
+    Ing-->>FE: emit poe-event (activity feed)
+
     B-->>Ing: {"poe":"done"}
     Note over Ing,DB: SF-2: reviewer task marked done
 
@@ -339,9 +344,10 @@ sequenceDiagram
 
     Note over Orch: All reviewers accounted for → SF-4: Agent Continuation
 
-    Orch->>DB: READ docs/review-{review_id}.md (path derived from review_id — no table query)
+    Orch->>DB: READ nodes.verdict for each reviewer node (u7s.4)<br/>READ docs/review-{review_id}.md (path derived from review_id — no table query)
+    Note over Orch: verdict=nodes.verdict if set<br/>verdict=FAILED if status=cancelled<br/>verdict=BLOCKED + poe-ingester-warning if nodes.verdict IS NULL
     Orch->>A: spawn --resume A1 (stream-json -p), cwd=project.path
-    Note over Orch,A: stdin bundle:<br/>---<br/>ReviewResult id=r1 skill=senior-engineer verdict=APPROVED<br/>{findings text}<br/>---
+    Note over Orch,A: stdin bundle:<br/>---<br/>ReviewResult id=r1 skill=senior-engineer verdict=APPROVED_WITH_CONDITIONS<br/>{findings text}<br/>---
 
     A-->>Ing: {"type":"system","subtype":"init","session_id":"A2"}
     Ing->>DB: UPDATE nodes SET session_id='A2', status='running'
@@ -390,7 +396,15 @@ The reviewer's stdin bundle is a modified T+S+K where the Task section identifie
 
 **Phase 3 — Review execution**
 
-The reviewer runs as a standard autonomous agent. It emits `poe:brief`, produces `poe:artifact` containing its findings, and emits `poe:done`. The review artifact is written to `docs/` and indexed in SQLite like any other artifact.
+The reviewer runs as a standard autonomous agent. It emits `poe:brief`, produces `poe:artifact` containing its findings, emits `poe:review-outcome` with its verdict, then emits `poe:done`. The review artifact is written to `docs/` and indexed in SQLite like any other artifact.
+
+The `poe:review-outcome` event (u7s.4) stores the reviewer's explicit verdict on `nodes.verdict`. This is what the orchestrator reads when building the ReviewResult bundle. The four valid verdicts are:
+- `APPROVED` — plan is correct and complete
+- `APPROVED_WITH_CONDITIONS` — acceptable but with specific items to address
+- `BLOCKED` — critical issues must be resolved before execution
+- `FAILED` — set by the orchestrator watchdog when a reviewer is cancelled; reviewers do not emit this themselves
+
+**If `poe:review-outcome` is missing** (reviewer emitted `poe:done` without it), the orchestrator defaults to `BLOCKED` and emits a `poe-ingester-warning` Tauri event to alert the operator. This is a reviewer skill bug, not a protocol error.
 
 The reviewer does not emit `poe:task` or `poe:edge` events — it is not planning work, it is reviewing it.
 

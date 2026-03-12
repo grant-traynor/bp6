@@ -207,7 +207,27 @@ Do NOT emit:
 - [ ] Review artifact emitted with name `review-{review_id}.md` (ID from bundle, not from requesting task ID)
 - [ ] Verdict is explicit: APPROVED, APPROVED_WITH_CONDITIONS, or BLOCKED
 - [ ] All BLOCKs and WARNs are specific: reference task ID, field name, or schema element; state the required fix
+- [ ] `poe:review-outcome` emitted with correct `review_id` and verdict BEFORE `poe:done`
 - [ ] `poe:done` is the final event
+
+---
+
+## Review Outcome Protocol
+
+Before emitting `poe:done`, you MUST emit a `poe:review-outcome` event with your verdict. This is machine-parsed by the orchestrator to populate the ReviewResult bundle delivered to the requesting agent. If you omit it, the orchestrator defaults to BLOCKED with a warning.
+
+```json
+{"poe": "review-outcome", "verdict": "<APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED|FAILED>", "review_id": "<your review_id from the Review Request section>"}
+```
+
+**Verdict guide:**
+
+- `APPROVED` — plan is technically correct and complete; no conditions. Proceed.
+- `APPROVED_WITH_CONDITIONS` — plan is acceptable but has specific WARNs to address before or during execution. List conditions in the artifact.
+- `BLOCKED` — plan has one or more BLOCKs that must be resolved before execution. Requesting agent must revise and re-submit.
+- `FAILED` — do not emit this yourself; it is used by the orchestrator when the watchdog cancels a reviewer task after max retries.
+
+The `review_id` value must match the `**Review ID**` field in the `## Review Request` section of your bundle.
 
 ---
 
@@ -226,6 +246,7 @@ Emit in this order:
 {"poe":"step","name":"skill-assignments","detail":"..."}
 {"poe":"step","name":"coverage","detail":"..."}
 {"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review"}
+{"poe":"review-outcome","verdict":"{APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED}","review_id":"{review_id}"}
 {"poe":"done","summary":"Review complete. Verdict: {APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED}. {One sentence on key finding.}"}
 ```
 

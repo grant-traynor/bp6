@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     retry_count         INTEGER NOT NULL DEFAULT 0,
     sort_order          INTEGER,
     skill_modes         TEXT,
+    verdict             TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );

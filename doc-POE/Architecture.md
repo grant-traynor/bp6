@@ -277,7 +277,7 @@ All project state is local-first, stored in `{project}/.poe/poe.db` (SQLite, WAL
 
 See `doc-POE/Protocol.md §1` for the complete CREATE TABLE schema. Key tables:
 
-- `nodes` — WBS nodes (title, description, type, skill, status, parent\_id, phase\_id, session\_id)
+- `nodes` — WBS nodes (title, description, type, skill, status, parent\_id, phase\_id, session\_id, verdict)
 - `edges` — directed dependency edges (from\_id, to\_id)
 - `events` — append-only structured agent event log (never updated or deleted)
 - `queue_items` — human decision queue items (question, options, resolution)
@@ -307,6 +307,7 @@ Agents communicate with POE via structured JSON events embedded in the `--output
 | `poe:skill` | Write a reusable pattern to `{project}/.poe/skills/<name>.md`. Closes the self-improvement loop: any agent that discovers a project-specific pattern can persist it as a local skill override without manual authoring. |
 | `poe:decision` | Raise a question for the human decision queue. Agent emits `poe:yield` immediately after; orchestrator resumes via `--resume` with the human's resolution. |
 | `poe:review` | Request a peer review from another specialist agent. Agent emits `poe:yield` after all review requests; orchestrator spawns reviewer(s), then resumes requesting agent via `--resume` with results. |
+| `poe:review-outcome` | Emitted by reviewer agents BEFORE `poe:done` to record their explicit verdict. Stored on `nodes.verdict`. Orchestrator reads `nodes.verdict` when building the ReviewResult bundle. Missing `poe:review-outcome` defaults to BLOCKED with a `poe-ingester-warning` to the frontend. |
 | `poe:yield` | Yield control while awaiting an asynchronous response (review or decision). task status → waiting. See Flows.md §SF-3. |
 | `poe:done` | Signal task completion. Task status → done. |
 

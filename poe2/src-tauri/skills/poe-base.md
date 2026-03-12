@@ -63,6 +63,7 @@ A line is a poe: event if and only if it parses as valid JSON and contains a `"p
 {"poe": "chat", "content": "...", "id": "<turn-id>"}
 {"poe": "yield"}
 {"poe": "review", "reviewer_skill": "<skill-id>", "content": "..."}
+{"poe": "review-outcome", "verdict": "<APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED|FAILED>", "review_id": "<review-id>"}
 {"poe": "task", "id": "<uuid>", "title": "...", "description": "...", "skill": "<skill-id>", "type": "task", "parent_id": "<id>", "depends_on": ["<id>"]}
 {"poe": "task:update", "id": "<task-id>", "title": "...", "description": "...", "skill": "..."}
 {"poe": "edge", "from": "<task-id>", "to": "<task-id>"}
@@ -177,7 +178,10 @@ When `**Type**: plan_review`:
 2. Read the `## Review Request` section — this contains the review content and the requesting task.
 3. Review the plan for your domain (see domain-specific checklist in your skill file).
 4. Emit a single `poe:artifact` with `artifact_type: plan-review` containing your findings and verdict.
-5. Emit `poe:done`.
+5. Emit `poe:review-outcome` with your verdict and the `review_id` from the Review Request.
+6. Emit `poe:done`.
+
+**`poe:review-outcome` is mandatory in plan-review mode.** The orchestrator reads this event to determine the verdict. If you omit it, the orchestrator defaults to BLOCKED with a `poe-ingester-warning`.
 
 **Do not** emit `poe:task`, `poe:edge`, or domain artifact types (`architecture-constraints`, etc.) in plan-review mode. Your only output is the review artifact.
 
