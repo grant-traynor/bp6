@@ -224,3 +224,52 @@ This is what "replan aggressively" means in practice: the DAG is always the curr
 POE manages multiple projects concurrently. Each project has its own plan, its own artifact corpus, and its own set of active agents. The human sees a unified view across all projects — a single activity feed and a single decision queue, scoped by project.
 
 Project state is local-first: all state lives in `{project}/.poe/` — a SQLite database for the plan, task graph, and artifact index, plus the `docs/` directory for artifact content. No central store. Projects are portable.
+
+---
+
+## Future State: POE as a Client/Server Application
+
+POE is architecturally a client/server application. This is not a planned change — it is an observation about what has already emerged.
+
+The Rust backend owns all state, all decisions, and all agent processes. It is the server. The JavaScript frontend renders state, surfaces decisions, and sends commands. It is the client. The Tauri IPC channels are the current transport — an implementation detail, not the architecture.
+
+Every `#[tauri::command]` is an API endpoint. Every `app.emit()` is a server-sent event. The separation is already clean.
+
+### The Thin Binding Layer
+
+When the time is right, Tauri's role narrows to a thin native shell:
+
+- Provides OS integration (filesystem trust, process management, auto-updates, native menus)
+- Hosts the webview
+- Exposes a binding layer that maps IPC channels ↔ HTTP/WebSocket
+
+The orchestrator remains Rust. The frontend remains JavaScript. The transport becomes HTTP+WebSocket alongside Tauri IPC. Nothing in the business logic changes.
+
+This opens without architectural disruption:
+
+- The localhost REST API (`/api/v1/*`) connects to the same orchestrator state
+- A web or mobile client can consume the same API
+- The Rust core is independently testable without any UI
+- Third-party integrations (CI/CD hooks, terminal dashboards, editor plugins) become straightforward
+
+### Why Tauri Stays
+
+Tauri is not incidental. It provides things a pure web server cannot:
+
+- Trusted filesystem access without browser sandbox restrictions
+- Ability to spawn and manage privileged subprocesses (the Claude CLI)
+- No CORS complications for localhost agent communication
+- Native auto-update delivery
+- Single distributable binary with embedded frontend
+
+The future state is not "replace Tauri with a web server." It is "Tauri as the native shell for a server that also speaks HTTP."
+
+### When This Matters
+
+Not yet. The current architecture is correct for the current stage. This future state becomes relevant when:
+
+- A second client surface is needed (mobile, web, editor plugin)
+- The REST API (Phase 5, Feature 6) proves that external consumers add real value
+- The merge between Tauri IPC and HTTP becomes the obvious next simplification
+
+No action required. The architecture will pull in this direction naturally.
