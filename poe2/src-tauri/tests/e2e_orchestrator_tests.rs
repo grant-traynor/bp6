@@ -442,6 +442,7 @@ async fn e2e_5_queue_item_resolved_no_live_agent_no_panic() {
             session_id: fake_session_id,
             resolution: "approved".to_string(),
             item_id: fake_item_id,
+            turn_type: "decision".to_string(),
         }],
         sink,
     )
@@ -1079,6 +1080,7 @@ async fn live_3_sf3_sf4_chat_roundtrip() {
             session_id: session_id.clone(),
             resolution: "It's a learning project. The CLI should print Hello, world! to stdout.".to_string(),
             item_id: turn_id.clone(),
+            turn_type: "chat".to_string(),
         })
         .expect("send QueueItemResolved");
 
