@@ -871,8 +871,7 @@ where
 {
     let reg = registry.lock().unwrap();
     let db = reg
-        .values()
-        .find(|db| db.project.id == project_id)
+        .get(project_id)
         .ok_or_else(|| anyhow::anyhow!("Project not open: {}", project_id))?
         .clone();
     drop(reg);

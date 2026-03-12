@@ -78,7 +78,7 @@ pub async fn cancel_task(
     }
     // Cancel in DB
     let reg = registry.lock().unwrap();
-    let db = reg.values().find(|db| db.project.id == project_id)
+    let db = reg.get(&project_id)
         .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
     drop(reg);
     let node = {
@@ -101,7 +101,7 @@ pub async fn pause_stage(
     // Collect task_ids running in this phase
     let task_ids_in_phase: Vec<String> = {
         let reg = registry.lock().unwrap();
-        let db = reg.values().find(|db| db.project.id == project_id)
+        let db = reg.get(&project_id)
             .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
         drop(reg);
         let conn = db.conn.lock().unwrap();
@@ -128,7 +128,7 @@ pub async fn pause_stage(
     // Re-queue tasks to Pending and hold gate
     {
         let reg = registry.lock().unwrap();
-        let db = reg.values().find(|db| db.project.id == project_id)
+        let db = reg.get(&project_id)
             .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
         drop(reg);
         let conn = db.conn.lock().unwrap();
@@ -175,7 +175,7 @@ pub async fn abort_project(
     // Re-queue all running tasks for this project to Pending
     {
         let reg = registry.lock().unwrap();
-        let db = reg.values().find(|db| db.project.id == project_id)
+        let db = reg.get(&project_id)
             .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
         drop(reg);
         let conn = db.conn.lock().unwrap();
@@ -199,7 +199,7 @@ pub async fn revise_stage(
     dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
 ) -> Result<(), String> {
     let reg = registry.lock().unwrap();
-    let db = reg.values().find(|db| db.project.id == project_id)
+    let db = reg.get(&project_id)
         .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
     drop(reg);
     {
@@ -223,7 +223,7 @@ pub async fn rerun_stage(
     dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
 ) -> Result<(), String> {
     let reg = registry.lock().unwrap();
-    let db = reg.values().find(|db| db.project.id == project_id)
+    let db = reg.get(&project_id)
         .ok_or_else(|| format!("Project not open: {}", project_id))?.clone();
     drop(reg);
     {

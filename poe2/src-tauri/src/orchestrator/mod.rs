@@ -189,7 +189,7 @@ async fn resume_decision_agent(
 ) {
     let (project_path, skill_id, model) = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => {
                 eprintln!("[orchestrator] resume_decision_agent: project not open {}", project_id);
@@ -255,7 +255,7 @@ async fn resume_chat_agent(
     // Guard: verify responded_at IS NOT NULL — race condition / stale signal check.
     let (response_text, project_path, skill_id, model) = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => {
                 eprintln!("[orchestrator] resume_chat_agent: project not open {}", project_id);
@@ -371,7 +371,7 @@ async fn resume_advisor_agent(
 
     let (response_text, project_path, skill_id, model) = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => {
                 eprintln!("[orchestrator] resume_advisor_agent: project not open {}", project_id);
@@ -482,7 +482,7 @@ async fn handle_node_status_changed(
 ) {
     let node = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -583,7 +583,7 @@ async fn handle_review_yield(
     // Query poe:review events for this task to get (review_id, reviewer_skill) pairs
     let review_events: Vec<(String, String)> = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -617,7 +617,7 @@ async fn handle_review_yield(
     for (review_id, reviewer_skill) in &review_events {
         let reviewer_node = {
             let reg = registry.lock().unwrap();
-            let db = match reg.values().find(|db| db.project.id == project_id) {
+            let db = match reg.get(project_id) {
                 Some(db) => db.clone(),
                 None => break,
             };
@@ -717,7 +717,7 @@ async fn dispatch_reviewer_task(
 
     let bundle_data = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -812,7 +812,7 @@ async fn check_review_completion(
 ) {
     let (requesting_task, expected_ids, answered_ids, project_path) = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -875,7 +875,7 @@ async fn check_review_completion(
         // Find the reviewer node to get skill and status
         let (reviewer_skill, verdict) = {
             let reg = registry.lock().unwrap();
-            let db = match reg.values().find(|db| db.project.id == project_id) {
+            let db = match reg.get(project_id) {
                 Some(db) => db.clone(),
                 None => continue,
             };
@@ -996,7 +996,7 @@ fn spawn_reviewer_watchdog(
         // Read current node state under a short-lived lock
         let (current_status, current_retry) = {
             let reg = registry.lock().unwrap();
-            let db = match reg.values().find(|db| db.project.id == project_id) {
+            let db = match reg.get(&project_id) {
                 Some(db) => db.clone(),
                 None => {
                     eprintln!("[orchestrator] watchdog: project not found {}", project_id);
@@ -1038,7 +1038,7 @@ fn spawn_reviewer_watchdog(
 
             let requeued = {
                 let reg = registry.lock().unwrap();
-                let db = match reg.values().find(|db| db.project.id == project_id) {
+                let db = match reg.get(&project_id) {
                     Some(db) => db.clone(),
                     None => return,
                 };
@@ -1101,7 +1101,7 @@ fn spawn_reviewer_watchdog(
 
             {
                 let reg = registry.lock().unwrap();
-                let db = match reg.values().find(|db| db.project.id == project_id) {
+                let db = match reg.get(&project_id) {
                     Some(db) => db.clone(),
                     None => return,
                 };
@@ -1143,7 +1143,7 @@ async fn check_phase_completion(
 ) {
     let should_gate = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -1178,7 +1178,7 @@ async fn check_phase_completion(
     if should_gate {
         eprintln!("[orchestrator] check_phase_completion: phase={} all tasks done — setting status=gate", phase_id);
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -1213,7 +1213,7 @@ async fn run_loop(
 
     let ready_tasks = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => {
                 eprintln!("[orchestrator] run_loop: project not open in registry, skipping");
@@ -1294,7 +1294,7 @@ async fn dispatch_task(
 
     let bundle_data = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -1342,7 +1342,7 @@ async fn dispatch_task(
             eprintln!("[orchestrator] Failed to load skill '{}': {}", skill_id, e);
             // Mark the task cancelled so the run_loop does not retry it endlessly.
             let reg = registry.lock().unwrap();
-            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+            if let Some(db) = reg.get(project_id) {
                 let conn = db.conn.lock().unwrap();
                 let update = dag_store::UpdateNodeInput {
                     status: Some(dag_store::NodeStatus::Cancelled),
@@ -1415,7 +1415,7 @@ pub async fn recover_interrupted(
 ) {
     let (interrupted, waiting_nodes, project_path) = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };
@@ -1465,7 +1465,7 @@ pub async fn recover_interrupted(
                         agent.task_id, e
                     );
                     let reg = registry.lock().unwrap();
-                    if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+                    if let Some(db) = reg.get(project_id) {
                         let conn = db.conn.lock().unwrap();
                         let update = dag_store::UpdateNodeInput {
                             status: Some(dag_store::NodeStatus::Pending),
@@ -1488,7 +1488,7 @@ pub async fn recover_interrupted(
                 agent.id, agent.task_id
             );
             let reg = registry.lock().unwrap();
-            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+            if let Some(db) = reg.get(project_id) {
                 let conn = db.conn.lock().unwrap();
                 let update = dag_store::UpdateNodeInput {
                     status: Some(dag_store::NodeStatus::Pending),
@@ -1566,7 +1566,7 @@ async fn recover_waiting_review(
     // Query expected vs. answered reviewer nodes.
     let (expected_ids, answered_ids) = {
         let reg = registry.lock().unwrap();
-        let db = match reg.values().find(|db| db.project.id == project_id) {
+        let db = match reg.get(project_id) {
             Some(db) => db.clone(),
             None => return,
         };

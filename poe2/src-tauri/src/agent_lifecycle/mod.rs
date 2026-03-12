@@ -327,7 +327,7 @@ pub async fn spawn_agent(
         // Waiting (yielded) is also a clean exit — the agent paused intentionally.
         let task_complete = {
             let reg = registry_clone.lock().unwrap();
-            if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+            if let Some(db) = reg.get(&project_id) {
                 let conn = db.conn.lock().unwrap();
                 if let Ok(node) = dag_store::db_get_node(&conn, &task_id) {
                     let agent_status = match node.status {

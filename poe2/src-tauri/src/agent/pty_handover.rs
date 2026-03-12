@@ -96,7 +96,7 @@ pub async fn agent_handover_open(
     //    doesn't race to dispatch the same task.
     if is_fresh {
         let reg = registry.lock().unwrap();
-        if let Some(db) = reg.values().find(|db| db.project.id == project_id) {
+        if let Some(db) = reg.get(&project_id) {
             let conn = db.conn.lock().unwrap();
             let update = crate::dag_store::UpdateNodeInput {
                 status: Some(crate::dag_store::NodeStatus::Running),

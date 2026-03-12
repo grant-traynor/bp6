@@ -18,7 +18,7 @@ pub async fn open_project(
         conn: Mutex::new(conn),
     });
 
-    registry.lock().unwrap().insert(project.path.clone(), db);
+    registry.lock().unwrap().insert(project.id.clone(), db);
 
     // Notify orchestrator: project just opened. This triggers ghost-agent recovery
     // (running tasks from a previous session whose process is no longer alive)
@@ -36,7 +36,7 @@ pub async fn close_project(
     registry: State<'_, ProjectRegistry>,
 ) -> Result<(), String> {
     let mut reg = registry.lock().unwrap();
-    reg.retain(|_, db| db.project.id != project_id);
+    reg.remove(&project_id);
     Ok(())
 }
 
@@ -54,8 +54,7 @@ where
 {
     let reg = registry.lock().unwrap();
     let db = reg
-        .values()
-        .find(|db| db.project.id == project_id)
+        .get(project_id)
         .ok_or_else(|| format!("Project not open: {}", project_id))?
         .clone();
     drop(reg);
@@ -775,8 +774,7 @@ pub async fn start_advisor_session(
     let (project_path, skill, knowledge, artifacts) = {
         let reg = registry.lock().unwrap();
         let db = reg
-            .values()
-            .find(|db| db.project.id == project_id)
+            .get(&project_id)
             .ok_or_else(|| format!("Project not open: {}", project_id))?
             .clone();
         drop(reg);
