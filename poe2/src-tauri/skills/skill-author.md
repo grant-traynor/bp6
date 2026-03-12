@@ -30,29 +30,33 @@ You are a bootstrap primitive. You must produce a runnable skill on the first at
 
 ## Input Context
 
-Your stdin bundle differs from the standard T+S+K task bundle. The `## Description` section of the Task block contains a **Skill Authoring Context** with the following fields:
+Your stdin bundle differs from the standard T+S+K task bundle. Instead of a Task block, it contains a `## Skill Authoring Context` section with the following fields:
 
 ### `skill_name`
 
 The kebab-case identifier of the skill to author. This must exactly match the `id:` field in the skill's YAML frontmatter and the filename stem. Example: `skill_name: database-migrator`.
 
-### `failing_tasks`
+### `Failing tasks that need this skill`
 
-A list of task titles and descriptions for tasks that are currently blocked because `skill_name` is missing. These are your primary design input — they define what the skill must do, at what scope, and in what domain. Read them carefully before writing a single line.
+A list of task titles and descriptions (format: `title: description`) for tasks that are currently blocked because `skill_name` is missing. These are your primary design input — they define what the skill must do, at what scope, and in what domain. Read them carefully before writing a single line.
 
 A skill that does not address the failing tasks' actual use case is worthless. Model your scope from these descriptions.
 
-### `existing_skills`
+### `Existing skills`
 
-A list of skill names already present in the project's skill inventory (across all tiers). Use these to:
+A comma-separated list of skill names already present in the project's skill inventory (across all tiers). Use these to:
 
 - Model naming conventions (kebab-case, domain-noun-verb or domain-role patterns)
 - Understand what vocabulary is already established (avoid inventing synonyms)
 - Identify what the new skill must NOT do (avoid duplicating an existing skill's domain)
 
-### `knowledge`
+### `Knowledge Register`
 
 The project knowledge register. Contains prior decisions, constraints, architectural choices, and domain context captured by earlier agents. Read it for project-specific vocabulary, technology choices, and constraints that the authored skill must respect.
+
+### `Relevant Artifacts`
+
+A list of project artifacts (documents, specs) relevant to the skill being authored. Injected under a `# Relevant Artifacts` section following the Skill Authoring Context.
 
 ---
 
