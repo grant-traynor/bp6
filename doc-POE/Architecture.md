@@ -704,6 +704,35 @@ Interactive Agent (claude --resume <session_id>, PTY)
 
 ---
 
+## Event Ingester → Tauri Event Map
+
+The `EventIngester` (`src-tauri/src/event_ingester/mod.rs`) processes each `poe:` event from the agent's stdout, writes to SQLite, and emits one or more Tauri events to the frontend. The canonical table is in `Protocol.md §4`; the entries below document the events that drive the Activity Feed panel.
+
+| `poe:` event | DB write | Tauri event(s) emitted | Notes |
+|---|---|---|---|
+| `poe:brief` | `events` table | `poe-event` + `poe-agent-activity` (type: `'brief'`) | Agent's task interpretation — first entry in feed for a run |
+| `poe:step` | `events` table | `poe-event` + `poe-agent-activity` (type: `'step'`) | Named progress milestone — primary liveness signal during long runs |
+| `poe:artifact` | `artifacts` table | `poe-artifact-created` | Artifact produced |
+| `poe:knowledge` | `knowledge` table | `poe-knowledge-created` | Knowledge register entry |
+| `poe:done` | `nodes.status = complete` | `poe-task-done` | Task complete |
+| agent spawn | — | `poe-agent-started` | Emitted by orchestrator, not ingester |
+| agent exit | `agents.status` | `poe-agent-exited` | Emitted by orchestrator, not ingester |
+
+### `poe-agent-activity` Payload
+
+```typescript
+interface PoeAgentActivity {
+  taskId: string;   // task the agent is executing
+  agentId: string;  // agent instance ID
+  type: 'step' | 'brief';
+  content: string;  // trimmed text content (poe:brief → "content" field; poe:step → "name" field)
+}
+```
+
+Rust struct: `PoeAgentActivity` in `src-tauri/src/event_ingester/mod.rs`, annotated `#[serde(rename_all = "camelCase")]`.
+
+---
+
 ## Invariants
 
 1. **One project per directory.** Project state is co-located with the project. No central store.

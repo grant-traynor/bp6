@@ -27,6 +27,22 @@ pub enum DagChanged {
     },
 }
 
+// ── poe-agent-activity Tauri event payload ────────────────────────────────────
+
+/// Emitted as `poe-agent-activity` when the agent reports a progress step
+/// (`poe:step`) or its task interpretation (`poe:brief`). The frontend uses
+/// this to populate the rolling activity feed without polling.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoeAgentActivity {
+    pub task_id: String,
+    pub agent_id: String,
+    /// "step" or "brief"
+    #[serde(rename = "type")]
+    pub activity_type: String,
+    pub content: String,
+}
+
 // ── poe: event payloads (Protocol.md §2 wire format) ─────────────────────────
 
 #[derive(Debug, serde::Deserialize)]
@@ -866,6 +882,35 @@ fn handle_log_only(
     for (event, payload) in pending_events {
         emit_tauri_event(sink, &event, &payload);
     }
+
+    // Emit a dedicated poe-agent-activity event for poe:step and poe:brief so
+    // the frontend activity feed sees real-time agent progress between start and
+    // done (root cause of the 11:47 silent run in wordle_004 — u7s.6).
+    let activity_type = match event_type {
+        "poe:step" => Some("step"),
+        "poe:brief" => Some("brief"),
+        _ => None,
+    };
+    if let Some(kind) = activity_type {
+        let content = serde_json::from_str::<serde_json::Value>(json)
+            .ok()
+            .and_then(|v| {
+                // poe:brief uses "content"; poe:step uses "name"
+                v.get("content")
+                    .or_else(|| v.get("name"))
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.trim().to_string())
+            })
+            .unwrap_or_default();
+        let activity = PoeAgentActivity {
+            task_id: task_id.to_string(),
+            agent_id: agent_id.to_string(),
+            activity_type: kind.to_string(),
+            content,
+        };
+        emit_tauri_event(sink, "poe-agent-activity", &activity);
+    }
+
     result
 }
 

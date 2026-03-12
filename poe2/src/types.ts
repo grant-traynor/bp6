@@ -142,3 +142,10 @@ export interface FeedItem {
   message: string;
   ts: string;   // ISO timestamp or createdAt
 }
+
+export interface PoeAgentActivityEvent {
+  taskId: string;
+  agentId: string;
+  type: 'step' | 'brief';
+  content: string;
+}

@@ -321,6 +321,12 @@ A document with substantive content and PENDING markers is far more valuable tha
 
 A high `poe:decision` volume during execution signals that the upstream CONOPS or Guardrails stage produced insufficient clarity — not a healthy working state.
 
+### Data size constraint
+
+For large data sets (>100 lines of generated content), write a separate file and reference it — never inline large arrays, objects, or corpora directly in source files. Prefer encoded formats (base64, JSON) in external files over inline literals.
+
+This prevents context-limit crashes when an agent generates thousands of lines of inline data (e.g. word corpora, large lookup tables). Skills targeting data-heavy tasks (frontend, implementer, etc.) should include this constraint explicitly in their `## Behaviour` or `## Data Size Constraints` section.
+
 ### Quality checklist pattern
 
 Every skill should include a quality checklist before `poe:done`. See `validity-analyst.md` or `poe-base.md §Quality Gate` for examples. Minimum checklist items:
@@ -347,5 +353,6 @@ Every skill should include a quality checklist before `poe:done`. See `validity-
 | `validity-analyst` | Validity Analysis | autonomous | None |
 | `rca-analyst` | Retrospective | autonomous | None |
 | `implementer` | Execution | autonomous | None |
+| `frontend` | Execution | autonomous | Includes data-size constraint (§7 Data size constraint). |
 | `planner` | Execution | autonomous | None |
 | `test` | Execution | autonomous | Detects project type and runs the appropriate test suite (cargo test, npm test, pytest, etc.). Emits poe:done on pass, poe:decision on failure. |

@@ -124,20 +124,42 @@ The `⚙` prefix and muted colour signal to the human: this is a housekeeping ta
 
 Clicking a task opens a detail panel: full description, WBS ancestry, skill assignment, dependency chain, agent brief (`poe:brief`), event log, and the option to open a node-scoped agent conversation.
 
-### 2b. Activity Feed
+### 2b. Activity Feed Panel
 
 A live, structured stream of agent events across the selected project — not raw PTY output. Built from the `poe:` event log.
 
+**Panel behaviour:**
+- **Default state**: open (visible). The operator should see activity without any manual action.
+- **Collapsible**: a toggle button (chevron) collapses or expands the panel. State is per-session.
+- **Position**: bottom of the main content area, below the Phase × Scope Matrix.
+- **Rolling feed**: capped at 50 entries — oldest entries are dropped when the cap is reached.
+- **Auto-scroll**: the feed scrolls to the latest entry on every new event.
+- **Purpose**: operator reassurance that the system is alive and making progress. The primary liveness signal during long agent runs (e.g. a task running for 10+ minutes should show poe:step entries throughout, not silence).
+
 Each entry shows:
-- Agent identifier and assigned skill
-- Model override, if the skill declares one (e.g. `[claude-opus-4-6]`) — omitted when the skill uses the default
-- Task name and WBS ancestry
-- Event type: brief / step / artifact produced / skill captured / decision raised / done
-- Timestamp
+- Timestamp (HH:MM:SS)
+- Task ID (WBS ancestry label on hover / secondary line)
+- Event type badge (colour-coded: brief = blue, step = neutral, agent-started = purple, agent-exited = slate/red, task-done = emerald)
+- Content (where applicable: step name or brief text)
+- Model override badge, if the skill declares one — omitted when the skill uses the default
 
-Clicking an entry opens the **agent session handover** — an xterm.js panel that resumes the agent's Claude session (`claude --resume <session_id>`) in a PTY, bridged to the browser via WebSocket. The human can read the raw conversation, ask follow-up questions, or assist an agent that raised a decision. Closing the panel does not terminate the agent's session — the session_id persists in SQLite. Time filters carried forward from bp6: last hour, last 6 hours, since phase start.
+Clicking an entry opens the **agent session handover** — an xterm.js panel that resumes the agent's Claude session (`claude --resume <session_id>`) in a PTY, bridged to the browser via WebSocket. The human can read the raw conversation, ask follow-up questions, or assist an agent that raised a decision. Closing the panel does not terminate the agent's session — the session_id persists in SQLite.
 
-**Activity feed entry types** from `poe:` events:
+**Event sources and feed entry types:**
+
+| Tauri event | Feed entry type | Content |
+|---|---|---|
+| `poe-agent-activity` (type: `brief`) | `poe:brief` | Agent's interpretation of its task — emitted at run start |
+| `poe-agent-activity` (type: `step`) | `poe:step` | Named progress milestone — primary liveness signal during long runs |
+| `poe-agent-started` | `agent-start` | `Agent started · {skillId}` with model badge |
+| `poe-agent-exited` | `agent-exit` | `Agent exited (success)` or `Agent exited (failed)` |
+| `poe-task-done` | `poe-task-done` | `Task done: {title}` |
+| `poe-artifact-created` | `poe:artifact` | `Artifact: {filename}` |
+| `poe-knowledge-created` | `poe:knowledge` | `Knowledge: {key}` |
+
+The `poe-agent-activity` event is emitted directly by the `EventIngester` for each `poe:step` and `poe:brief` line the agent writes to stdout. This ensures the feed updates in real time without polling — the frontend receives entries as soon as the agent emits them. Root cause of u7s.6: before this fix, `poe:step` and `poe:brief` were logged to the DB but no Tauri event was emitted, leaving the frontend blind during long runs.
+
+**Activity feed entry types** from `poe:` events (legacy reference):
 
 | Event | Feed entry |
 |---|---|
