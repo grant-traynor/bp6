@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_queue_unresolved ON queue_items(project_id, resol
 
 CREATE TABLE IF NOT EXISTS chat_turns (
     id          TEXT PRIMARY KEY,
-    task_id     TEXT NOT NULL,
+    task_id     TEXT NOT NULL REFERENCES nodes(id),
     content     TEXT NOT NULL,
     response    TEXT,
     created_at  TEXT NOT NULL,

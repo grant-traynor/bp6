@@ -10,6 +10,18 @@ use std::sync::{Arc, Mutex};
 
 pub use types::*;
 
+/// Apply a single migration SQL statement. Silently ignores "duplicate column"
+/// errors (expected when re-running ADD COLUMN on an existing database). All
+/// other errors are logged as warnings — migrations must not crash startup.
+fn apply_migration(conn: &Connection, sql: &str) {
+    if let Err(e) = conn.execute_batch(sql) {
+        let msg = e.to_string().to_lowercase();
+        if !msg.contains("duplicate column") {
+            eprintln!("[dag_store] migration warning: {}", e);
+        }
+    }
+}
+
 /// A project database open in memory.
 pub struct ProjectDb {
     pub project: Project,
@@ -38,20 +50,23 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
         .context("Failed to apply schema")?;
 
     // Migrate: add promoted column to knowledge if not present (ignore error if exists)
-    let _ = conn.execute_batch("ALTER TABLE knowledge ADD COLUMN promoted INTEGER NOT NULL DEFAULT 0");
+    apply_migration(&conn, "ALTER TABLE knowledge ADD COLUMN promoted INTEGER NOT NULL DEFAULT 0");
 
     // Migrate: add new node columns for existing databases (SQLite < 3.37 has no IF NOT EXISTS
     // for ALTER TABLE ADD COLUMN, so we ignore the "duplicate column name" error).
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN yield_reason TEXT");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN session_id TEXT");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN requesting_task_id TEXT REFERENCES nodes(id)");
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN yield_reason TEXT");
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN session_id TEXT");
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN requesting_task_id TEXT REFERENCES nodes(id)");
     // Add index for requesting_task_id (CREATE INDEX IF NOT EXISTS is safe to re-run).
-    let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_nodes_requesting_task_id ON nodes(requesting_task_id)");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN review_id TEXT");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
+    apply_migration(&conn, "CREATE INDEX IF NOT EXISTS idx_nodes_requesting_task_id ON nodes(requesting_task_id)");
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN review_id TEXT");
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0");
 
-    // Migrate: create chat_turns table for existing databases
-    let _ = conn.execute_batch(
+    // Migrate: create chat_turns table for existing databases.
+    // NOTE: task_id has a REFERENCES nodes(id) FK in the CREATE TABLE schema; SQLite does not
+    // support adding FK constraints via ALTER TABLE, so the constraint is enforced on new rows
+    // via the schema definition and this migration simply ensures the table exists on older DBs.
+    apply_migration(&conn,
         "CREATE TABLE IF NOT EXISTS chat_turns (
             id          TEXT PRIMARY KEY,
             task_id     TEXT NOT NULL,
@@ -61,26 +76,26 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
             responded_at TEXT
         )"
     );
-    let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id)");
+    apply_migration(&conn, "CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id)");
 
     // Phase 3 migrations
-    let _ = conn.execute_batch("ALTER TABLE phases ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'execution'");
-    let _ = conn.execute_batch("ALTER TABLE phases ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN sort_order INTEGER");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN skill_modes TEXT");
+    apply_migration(&conn, "ALTER TABLE phases ADD COLUMN stage_type TEXT NOT NULL DEFAULT 'execution'");
+    apply_migration(&conn, "ALTER TABLE phases ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'");
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN sort_order INTEGER");
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN skill_modes TEXT");
 
     // Migrate: create advisor_turns table for existing databases
-    let _ = conn.execute_batch(
+    apply_migration(&conn,
         "CREATE TABLE IF NOT EXISTS advisor_turns (
             id           TEXT PRIMARY KEY,
-            task_id      TEXT NOT NULL,
+            task_id      TEXT NOT NULL REFERENCES nodes(id),
             content      TEXT NOT NULL,
             response     TEXT,
             created_at   TEXT NOT NULL,
             responded_at TEXT
         )"
     );
-    let _ = conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_advisor_turns_task ON advisor_turns(task_id)");
+    apply_migration(&conn, "CREATE INDEX IF NOT EXISTS idx_advisor_turns_task ON advisor_turns(task_id)");
 
     // Upsert the project record based on path
     let path_str = project_path.to_string_lossy().to_string();

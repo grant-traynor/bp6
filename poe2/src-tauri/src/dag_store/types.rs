@@ -22,19 +22,37 @@ pub enum NodeType {
 
 impl std::fmt::Display for NodeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = serde_json::to_value(self)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s.to_owned()))
-            .unwrap_or_default();
-        write!(f, "{}", s)
+        match self {
+            NodeType::Project => write!(f, "project"),
+            NodeType::Phase => write!(f, "phase"),
+            NodeType::Epic => write!(f, "epic"),
+            NodeType::Feature => write!(f, "feature"),
+            NodeType::Task => write!(f, "task"),
+            NodeType::Bug => write!(f, "bug"),
+            NodeType::Chore => write!(f, "chore"),
+            NodeType::Subtask => write!(f, "subtask"),
+            NodeType::PlanReview => write!(f, "plan_review"),
+            NodeType::Advisor => write!(f, "advisor"),
+        }
     }
 }
 
 impl std::str::FromStr for NodeType {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        serde_json::from_value(serde_json::Value::String(s.to_owned()))
-            .map_err(|e| e.to_string())
+        match s {
+            "project" => Ok(NodeType::Project),
+            "phase" => Ok(NodeType::Phase),
+            "epic" => Ok(NodeType::Epic),
+            "feature" => Ok(NodeType::Feature),
+            "task" => Ok(NodeType::Task),
+            "bug" => Ok(NodeType::Bug),
+            "chore" => Ok(NodeType::Chore),
+            "subtask" => Ok(NodeType::Subtask),
+            "plan_review" => Ok(NodeType::PlanReview),
+            "advisor" => Ok(NodeType::Advisor),
+            _ => Err(format!("unknown node type: {}", s)),
+        }
     }
 }
 
@@ -51,19 +69,29 @@ pub enum NodeStatus {
 
 impl std::fmt::Display for NodeStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = serde_json::to_value(self)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s.to_owned()))
-            .unwrap_or_default();
-        write!(f, "{}", s)
+        match self {
+            NodeStatus::Pending => write!(f, "pending"),
+            NodeStatus::Running => write!(f, "running"),
+            NodeStatus::Waiting => write!(f, "waiting"),
+            NodeStatus::Blocked => write!(f, "blocked"),
+            NodeStatus::Complete => write!(f, "complete"),
+            NodeStatus::Cancelled => write!(f, "cancelled"),
+        }
     }
 }
 
 impl std::str::FromStr for NodeStatus {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        serde_json::from_value(serde_json::Value::String(s.to_owned()))
-            .map_err(|e| e.to_string())
+        match s {
+            "pending" => Ok(NodeStatus::Pending),
+            "running" => Ok(NodeStatus::Running),
+            "waiting" => Ok(NodeStatus::Waiting),
+            "blocked" => Ok(NodeStatus::Blocked),
+            "complete" => Ok(NodeStatus::Complete),
+            "cancelled" => Ok(NodeStatus::Cancelled),
+            _ => Err(format!("unknown node status: {}", s)),
+        }
     }
 }
 
@@ -109,19 +137,25 @@ pub enum PhaseLifecycleStage {
 
 impl std::fmt::Display for PhaseLifecycleStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = serde_json::to_value(self)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s.to_owned()))
-            .unwrap_or_default();
-        write!(f, "{}", s)
+        match self {
+            PhaseLifecycleStage::Planning => write!(f, "planning"),
+            PhaseLifecycleStage::Execution => write!(f, "execution"),
+            PhaseLifecycleStage::Retrospective => write!(f, "retrospective"),
+            PhaseLifecycleStage::Complete => write!(f, "complete"),
+        }
     }
 }
 
 impl std::str::FromStr for PhaseLifecycleStage {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        serde_json::from_value(serde_json::Value::String(s.to_owned()))
-            .map_err(|e| e.to_string())
+        match s {
+            "planning" => Ok(PhaseLifecycleStage::Planning),
+            "execution" => Ok(PhaseLifecycleStage::Execution),
+            "retrospective" => Ok(PhaseLifecycleStage::Retrospective),
+            "complete" => Ok(PhaseLifecycleStage::Complete),
+            _ => Err(format!("unknown phase lifecycle stage: {}", s)),
+        }
     }
 }
 
