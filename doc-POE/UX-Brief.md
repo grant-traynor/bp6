@@ -103,6 +103,25 @@ Epic B        ████ ████        [ planned ]       [ scoped ]
 
 `waiting` must be visually distinct from both `running` and `pending`. A task that shows `waiting` tells the human: the agent has done its part and handed off — the orchestrator is managing the continuation. No human action required unless the reason is `decision` (in which case the queue panel shows the pending item).
 
+**Skill-author tasks — meta-task presentation**:
+
+Skill-author tasks are infrastructure tasks automatically dispatched by the orchestrator when a required skill is missing. They are not work tasks — they are system self-healing. They must be visually distinct from both implementation and review tasks:
+
+- **Icon**: wrench or gear icon (e.g. `⚙`) in the task badge instead of the assigned-skill badge used by work tasks
+- **Colour**: muted / secondary colour (e.g. desaturated blue-grey) — not the accent colour used for work task progress
+- **Collapsible / hidden by default**: skill-author nodes are collapsed in the matrix by default; a toggle ("Show meta-tasks") reveals them. When hidden, the rows they would occupy are not shown, preserving visual density for work tasks
+- **Phase completion metrics**: skill-author tasks do **not** count toward phase completion. The phase progress bar and task counters in the project summary card exclude them entirely. Only work tasks (implementation, review) count.
+
+Example matrix cell appearance when visible:
+
+```
+  Feature A2  ████ running ●
+  ⚙ skill:    ░░░░ pending   [author-skill: deploy-validator]
+  Feature A3  ░░░░ pending
+```
+
+The `⚙` prefix and muted colour signal to the human: this is a housekeeping task the system is managing — not a deliverable. No action required.
+
 Clicking a task opens a detail panel: full description, WBS ancestry, skill assignment, dependency chain, agent brief (`poe:brief`), event log, and the option to open a node-scoped agent conversation.
 
 ### 2b. Activity Feed
@@ -130,6 +149,23 @@ Clicking an entry opens the **agent session handover** — an xterm.js panel tha
 | `poe:done` | Task complete |
 
 `poe:yield` must produce an activity feed entry. Without it, the human sees a task go from `running` to `waiting` with no explanation. The feed entry closes the glass-box gap.
+
+**Skill-author events in the activity feed**:
+
+Skill-author dispatch and completion are surfaced in the feed as system-level events — visually distinct from work task events. They carry a `system` tag and are rendered in a muted style (e.g. italic text, secondary colour, no agent avatar):
+
+| Trigger | Feed entry text |
+|---|---|
+| Skill-author task dispatched | `⚙ [system] Authoring missing skill: {skill_name} — {N} task(s) blocked` |
+| Skill-author task complete | `⚙ [system] Skill authored: {skill_name}.md — {N} task(s) unblocked` |
+
+The dispatch entry explains why execution paused — without it, the human sees tasks sit in `waiting` with no cause. The completion entry is a positive signal: the system self-healed and blocked tasks are now eligible to run. Together they close the glass-box gap for infrastructure events.
+
+Styling rules:
+- No agent avatar / skill badge — system events are not agent turns
+- `[system]` label replaces the skill badge, rendered in a muted secondary colour
+- The `⚙` prefix mirrors the matrix meta-task icon for visual consistency
+- System events may be filtered out via a "Hide system events" toggle in the feed toolbar (off by default — they should be visible)
 
 The activity feed is the glass box. It answers: *is everything running as expected?*
 
