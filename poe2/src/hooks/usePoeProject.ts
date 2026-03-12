@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Node, QueueItem, EventRecord, FeedItem, Phase, Artifact, KnowledgeEntry, PoeAgentActivityEvent } from '../types';
+import type { Node, QueueItem, EventRecord, FeedItem, Phase, Artifact, KnowledgeEntry } from '../types';
 
 export interface AgentStreamEvent {
   agentId: string;
@@ -320,7 +320,7 @@ export function usePoeProject(projectId: string | null): {
       // Provides real-time agent progress between agent-started and agent-exited.
       // Feed is capped at MAX_FEED_ITEMS (50) — oldest entries are dropped when full.
       const MAX_FEED_ITEMS = 50;
-      const u13 = await listen<PoeAgentActivityEvent>('poe-agent-activity', ({ payload }) => {
+      const u13 = await listen<{ taskId: string; agentId: string; type: 'step' | 'brief'; content: string }>('poe-agent-activity', ({ payload }) => {
         setFeedItems(prev => {
           const entry: FeedItem = {
             id: `activity-${payload.agentId}-${payload.type}-${Date.now()}-${Math.random()}`,
