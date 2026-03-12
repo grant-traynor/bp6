@@ -216,11 +216,10 @@ The ingester logs each `poe:review` / `poe:decision` event as it arrives. When `
 ### Wire format
 
 ```
-{"poe": "yield", "reason": "review"}
-{"poe": "yield", "reason": "decision"}
+{"poe": "yield"}
 ```
 
-`reason` is required. Values: `"review"` | `"decision"`.
+No fields other than `"poe"`. The ingester derives the reason from the last substantive event (`chat`, `decision`, or `review`) — do not include a `reason` field.
 
 ### Code example — chat yield (interactive mode)
 
@@ -252,7 +251,7 @@ Write("docs/conops.md", "...final...")
 // Correct: emit all poe:review events first, then yield
 {"poe": "review", "reviewer_skill": "senior-engineer", "id": "r-eng", "content": "..."}
 {"poe": "review", "reviewer_skill": "architecture-analyst", "id": "r-arch", "content": "..."}
-{"poe": "yield", "reason": "review"}
+{"poe": "yield"}
 
 // The process exits. Orchestrator dispatches reviewers in parallel (SF-3).
 // When all reviews complete, orchestrator resumes via --resume (SF-4).
@@ -266,7 +265,7 @@ Write("docs/conops.md", "...final...")
 ```
 // Correct: emit poe:decision, then yield to wait for human resolution
 {"poe": "decision", "question": "Should Stage 1 include user account management?", "options": ["Include", "Defer"]}
-{"poe": "yield", "reason": "decision"}
+{"poe": "yield"}
 
 // The process exits. Orchestrator waits for human resolution (SF-3).
 // When resolved, orchestrator resumes via --resume (SF-4).
@@ -284,10 +283,10 @@ Write("docs/conops.md", "...final...")
 
 // WRONG: poe:yield after all work is done — task stays waiting forever
 {"poe": "artifact", ...}
-{"poe": "yield", "reason": "review"}   // ← BUG: use poe:done if no review was requested
+{"poe": "yield"}   // ← BUG: use poe:done if no review was requested
 
 // WRONG: poe:yield before the poe:review events — orchestrator sees no reviews to dispatch
-{"poe": "yield", "reason": "review"}   // ← BUG: emit poe:review events first
+{"poe": "yield"}   // ← BUG: emit poe:review events first
 {"poe": "review", "reviewer_skill": "...", "id": "r1", "content": "..."}
 ```
 
@@ -344,7 +343,7 @@ Every skill should include a quality checklist before `poe:done`. See `validity-
 | `data-model-analyst` | Guardrails | autonomous | None |
 | `must-not-analyst` | Guardrails | autonomous | None |
 | `senior-engineer` | Guardrails review, Plan Review, ad-hoc | autonomous | None |
-| `product-manager` | Increment Planning | autonomous | **v1 context model** — `Input Context` section injects `POE_WORKFLOW_ID`, `POE_NODE_ID`, `POE_NODE_DATA` env vars. POE2 delivers context via stdin bundle (Protocol.md §3), not env vars. Event emission section uses v1 payload format. Do not use as a format reference. Fix tracked in bp6-rub.5. BLOCKED path now correctly emits `poe:yield reason="decision"` (was incorrectly `poe:done` — fixed in bp6-m2f.17). |
+| `product-manager` | Increment Planning | autonomous | **v1 context model** — `Input Context` section injects `POE_WORKFLOW_ID`, `POE_NODE_ID`, `POE_NODE_DATA` env vars. POE2 delivers context via stdin bundle (Protocol.md §3), not env vars. Event emission section uses v1 payload format. Do not use as a format reference. Fix tracked in bp6-rub.5. BLOCKED path now correctly emits `poe:yield` (after `poe:decision`, no reason field) (was incorrectly `poe:done` — fixed in bp6-m2f.17). |
 | `validity-analyst` | Validity Analysis | autonomous | None |
 | `rca-analyst` | Retrospective | autonomous | None |
 | `implementer` | Execution | autonomous | None |
