@@ -192,6 +192,7 @@ pub async fn spawn_agent(
 
         let project_path_for_chunk = project_path.clone();
         let project_path_for_complete = project_path.clone();
+        let project_path_for_raw = project_path.clone();
 
         let result = JsonStreamTransport::run(
             &input_bundle,
@@ -270,7 +271,15 @@ pub async fn spawn_agent(
                     }
                 }),
                 on_raw_json: Box::new(move |json| {
-                    eprintln!("[transport] raw: {}", json);
+                    // Write raw transcript line to {project}/.poe/agent_stream/{agent_id}.jsonl
+                    let stream_dir = project_path_for_raw.join(".poe").join("agent_stream");
+                    if std::fs::create_dir_all(&stream_dir).is_ok() {
+                        let file_path = stream_dir.join(format!("{}.jsonl", agent_id_for_raw));
+                        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file_path) {
+                            use std::io::Write;
+                            let _ = writeln!(f, "{}", json);
+                        }
+                    }
                     sink_for_raw.emit(
                         "poe-agent-stream",
                         &serde_json::json!({
