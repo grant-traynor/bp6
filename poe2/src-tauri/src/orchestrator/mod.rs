@@ -1428,12 +1428,13 @@ async fn dispatch_task(
                 }
             };
 
-            // ── Add depends_on edges: failing task (and siblings) → author node ──
-            // Wire the task that just failed first.
-            if let Err(ee) = dag_store::db_create_edge(&conn, &task.id, &author_id, EdgeType::DependsOn) {
+            // ── Add depends_on edges: author node → failing task (and siblings) ──
+            // Edge semantics: db_find_ready_tasks blocks `to_id` until `from_id` is complete.
+            // So (from=author, to=task) means task waits for skill-author to finish.
+            if let Err(ee) = dag_store::db_create_edge(&conn, &author_id, &task.id, EdgeType::DependsOn) {
                 eprintln!(
                     "[orchestrator] dispatch_task: failed to add edge {} → {}: {}",
-                    task.id, author_id, ee
+                    author_id, task.id, ee
                 );
             }
             // Also wire any other pending tasks with the same skill_id.
@@ -1442,10 +1443,10 @@ async fn dispatch_task(
                     if n.id != task.id
                         && n.skill_id.as_deref() == Some(skill_id.as_str())
                     {
-                        if let Err(ee) = dag_store::db_create_edge(&conn, &n.id, &author_id, EdgeType::DependsOn) {
+                        if let Err(ee) = dag_store::db_create_edge(&conn, &author_id, &n.id, EdgeType::DependsOn) {
                             eprintln!(
                                 "[orchestrator] dispatch_task: edge {} → {} failed: {}",
-                                n.id, author_id, ee
+                                author_id, n.id, ee
                             );
                         }
                     }
