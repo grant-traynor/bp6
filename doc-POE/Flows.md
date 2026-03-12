@@ -127,6 +127,8 @@ The yield event is the handoff point — the agent process is about to exit and 
 
 **Note**: `poe:decision` and `poe:chat` are both logged by the ingester before `poe:yield` arrives. The orchestrator reads `nodes.yield_reason` (not event_log) when it processes the yield — direct column read, no join required.
 
+**`turn_type` in QueueItemResolved** (bp6-17k.7): When a queue item (decision, chat, or advisor turn) is resolved, the `QueueItemResolved` signal carries a `turn_type` field with one of three values: `'decision'`, `'chat'`, or `'advisor'`. The `resume_waiting_agent()` function uses `turn_type` for direct routing — it selects the correct continuation bundle format and resume path without performing an additional DB probe to determine the yield kind. `turn_type` is set by the frontend command handler at resolution time from the context in which the human responded (decision queue, artifact chat panel, or advisor panel).
+
 ### SF-4: Agent Continuation (Resume)
 
 *Trigger*: Orchestrator determines a `waiting` task can continue — all reviewers accounted for (SF-3 review path), human has resolved a decision (SF-3 decision path), or human has responded to a chat turn (SF-3 chat path).

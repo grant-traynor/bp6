@@ -505,6 +505,8 @@ On app restart:
 
 Agent session IDs are captured from the `{"type":"system","subtype":"init","session_id":"..."}` JSON event at spawn time and stored in `nodes.session_id`. Resume is attempted first; clean restart is the fallback.
 
+**Concurrent recovery** (bp6-17k.8): Recovery is not performed serially. Each project's recovery work is spawned as an independent `tokio::spawn` task — the orchestrator does not `await` one project's recovery before beginning the next. On completion, each recovery task re-signals the orchestrator with `DagChanged::DagStructureChanged` so that normal task scheduling resumes for that project. The main orchestrator loop is never blocked by recovery; all projects recover in parallel.
+
 ### Concurrency
 
 Two levels of concurrency limit, both configurable and visible in the UI:
@@ -519,6 +521,20 @@ The orchestrator respects both limits when selecting tasks to spawn in the core 
 **`waiting` tasks do not count against the concurrency limit.** A task in `waiting` status has no live agent process — the process exited after emitting `poe:yield`. Counting waiting tasks would artificially suppress parallelism while reviewers run. Only `status = running` tasks consume a concurrency slot.
 
 The UI displays a concurrency indicator — running count / limit — for each project and globally. Both limits are adjustable from the UI. Higher limits suit powerful machines with fast API access; lower limits suit constrained environments or when the human wants to keep queue volume manageable.
+
+### SQLite Lock Ordering (bp6-17k.13)
+
+All code that touches the SQLite connection must obey this ordering invariant to prevent the connection lock from being held across async Tauri event emission, which would stall other DB operations:
+
+```
+1. Acquire the SQLite connection lock
+2. Perform all DB reads and writes inside the closure
+3. Collect any Tauri events to emit into a local Vec (do not emit yet)
+4. Release the SQLite connection lock (closure returns)
+5. Emit the collected Tauri events outside the lock
+```
+
+The critical rule is that Tauri event emission must happen **after** the connection lock is released, never inside it. Holding the lock during async emission blocks other threads from accessing the database for the duration of the emit call, serialising what should be concurrent operations. Collect events into a `Vec` inside the closure; iterate and emit after the closure returns.
 
 ### Phase Bootstrap
 
@@ -654,6 +670,9 @@ Autonomous Agent (claude --output-format stream-json -p)
   — emits poe: events embedded in assistant text ({"poe": "<type>", ...})
   — process exits after {"type":"result",...}
   — session_id stored at spawn from {"type":"system","subtype":"init",...}
+  — terminated via nix::sys::signal::kill(pid, Signal::SIGTERM) when interrupted
+    (bp6-17k.10: uses nix crate directly — no kill subprocess spawned)
+    SIGTERM gives the agent opportunity to clean up before exiting
 
 Interactive Agent (claude --resume <session_id>, PTY)
   — human handover only — not parsed by orchestrator
