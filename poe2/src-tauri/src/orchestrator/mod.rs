@@ -68,6 +68,11 @@ pub async fn start(
     mut dag_rx: mpsc::UnboundedReceiver<DagChanged>,
 ) {
     eprintln!("[orchestrator] start: loop running");
+
+    // u7s.3: Start periodic ghost-agent integrity loop — fires every 5 minutes,
+    // cross-references agents table against AgentMap, cleans up any divergence.
+    spawn_ghost_agent_integrity_loop(registry.clone(), agent_map.clone());
+
     loop {
         let signal = match dag_rx.recv().await {
             Some(s) => s,
@@ -878,7 +883,7 @@ async fn check_review_completion(
     // Each reviewer's artifact is at {project.path}/docs/review-{review_id}.md
     let mut bundle = String::new();
     for review_id in &expected_sorted {
-        // Find the reviewer node to get skill and status
+        // Find the reviewer node to get skill, status, and stored verdict (u7s.4)
         let (reviewer_skill, verdict) = {
             let reg = registry.lock().unwrap();
             let db = match reg.get(project_id) {
@@ -888,18 +893,50 @@ async fn check_review_completion(
             drop(reg);
             let conn = db.conn.lock().unwrap();
             let result = conn.query_row(
-                "SELECT skill_id, status FROM nodes WHERE requesting_task_id = ?1 AND review_id = ?2 LIMIT 1",
+                "SELECT id, skill_id, status, verdict FROM nodes WHERE requesting_task_id = ?1 AND review_id = ?2 LIMIT 1",
                 rusqlite::params![requesting_task_id, review_id],
                 |row| {
                     Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(0)?,        // id
+                        row.get::<_, Option<String>>(1)?, // skill_id
+                        row.get::<_, String>(2)?,         // status
+                        row.get::<_, Option<String>>(3)?, // verdict
                     ))
                 },
             );
             match result {
-                Ok((skill, status)) => {
-                    let verdict = if status == "cancelled" { "FAILED".to_owned() } else { "APPROVED".to_owned() };
+                Ok((reviewer_node_id, skill, status, stored_verdict)) => {
+                    // u7s.4: derive verdict from stored poe:review-outcome value,
+                    // falling back to FAILED for cancelled nodes, or BLOCKED with
+                    // a warning when poe:review-outcome was not received.
+                    let verdict = if status == "cancelled" {
+                        // Watchdog cancelled: treat as FAILED regardless of stored verdict
+                        "FAILED".to_owned()
+                    } else if let Some(v) = stored_verdict {
+                        v
+                    } else {
+                        // Reviewer completed (poe:done) but never emitted poe:review-outcome
+                        // — this is a reviewer skill bug. Emit a warning and use BLOCKED.
+                        eprintln!(
+                            "[orchestrator] check_review_completion: reviewer node={} review_id={} has no verdict (poe:review-outcome missing) — defaulting to BLOCKED",
+                            reviewer_node_id, review_id
+                        );
+                        // Emit poe-ingester-warning to the frontend so the operator sees it.
+                        crate::event_sink::emit_event(
+                            &*sink,
+                            "poe-ingester-warning",
+                            &serde_json::json!({
+                                "taskId": requesting_task_id,
+                                "agentId": reviewer_node_id,
+                                "eventType": "poe:review-outcome",
+                                "error": format!(
+                                    "Reviewer task {} (review_id={}) completed without emitting poe:review-outcome; verdict defaulted to BLOCKED",
+                                    reviewer_node_id, review_id
+                                )
+                            }),
+                        );
+                        "BLOCKED".to_owned()
+                    };
                     (skill.unwrap_or_else(|| "unknown".to_owned()), verdict)
                 }
                 Err(e) => {
@@ -1768,6 +1805,134 @@ async fn dispatch_task(
 
 // ── Recovery on app start ─────────────────────────────────────────────────────
 
+/// u7s.3 — Cross-reference agents table against AgentMap and close any ghost rows.
+///
+/// A ghost agent is an `agents` row with `status='running'` whose `agent_id` is NOT
+/// present in the in-memory AgentMap (i.e. there is no corresponding live process).
+/// Ghost agents inflate `db_count_running_agents` and permanently consume concurrency
+/// slots until they are cleaned up.
+///
+/// For each ghost agent found:
+/// 1. Mark agents row as `failed` (status='failed', ended_at=now).
+/// 2. If the associated node is still `running` (not `resuming`, `waiting`, etc.),
+///    atomically claim it for retry via `db_claim_node_retry` (running → pending).
+///    This queues it for fresh dispatch by the normal scheduler.
+async fn sweep_ghost_agents(
+    project_id: &str,
+    registry: &ProjectRegistry,
+    agent_map: &AgentMap,
+) {
+    // Collect the set of live agent IDs while holding AgentMap lock as briefly as possible.
+    let live_ids: std::collections::HashSet<String> = {
+        agent_map.lock().unwrap().keys().cloned().collect()
+    };
+
+    let ghost_agents = {
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        dag_store::db_list_ghost_agents(&conn, project_id, &live_ids).unwrap_or_default()
+    };
+
+    if ghost_agents.is_empty() {
+        return;
+    }
+
+    eprintln!(
+        "[orchestrator] sweep_ghost_agents: found {} ghost agent(s) for project={}",
+        ghost_agents.len(),
+        project_id
+    );
+
+    for ghost in ghost_agents {
+        eprintln!(
+            "[orchestrator] sweep_ghost_agents: closing ghost agent={} task={}",
+            ghost.id, ghost.task_id
+        );
+
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => continue,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+
+        // Mark the agent row as failed.
+        if let Err(e) = dag_store::db_end_agent(&conn, &ghost.id, "failed") {
+            eprintln!(
+                "[orchestrator] sweep_ghost_agents: failed to end agent={}: {}",
+                ghost.id, e
+            );
+        }
+
+        // If the node is still running, atomically claim it for retry (running → pending).
+        // db_claim_node_retry returns Ok(false) if the node is no longer running — safe to ignore.
+        match dag_store::db_claim_node_retry(&conn, &ghost.task_id) {
+            Ok(true) => {
+                eprintln!(
+                    "[orchestrator] sweep_ghost_agents: ghost agent={} task={} reset to pending",
+                    ghost.id, ghost.task_id
+                );
+            }
+            Ok(false) => {
+                // Node already moved to a non-running status (e.g. complete, cancelled, waiting).
+                // No action needed — the existing status is authoritative.
+            }
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] sweep_ghost_agents: db_claim_node_retry failed for task={}: {}",
+                    ghost.task_id, e
+                );
+            }
+        }
+    }
+}
+
+/// u7s.3 — Spawn a periodic ghost-agent integrity check that fires every 5 minutes.
+///
+/// This is a mid-session safeguard: if a live agent crashes without removing itself
+/// from the agents table (e.g. Tokio runtime crash), the ghost row would block
+/// future scheduling indefinitely. The periodic sweep detects and cleans these up.
+///
+/// The loop runs until the registry is empty for all projects on a given check, at
+/// which point it stops (app is closing). In practice it runs for the entire app
+/// lifetime because there is always at least one open project.
+pub fn spawn_ghost_agent_integrity_loop(
+    registry: ProjectRegistry,
+    agent_map: AgentMap,
+) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(300)).await; // 5 minutes
+
+            // Collect currently open project IDs.
+            let project_ids: Vec<String> = {
+                registry.lock().unwrap().keys().cloned().collect()
+            };
+
+            if project_ids.is_empty() {
+                // No projects open — nothing to sweep. Keep looping in case a project
+                // is opened later in the session.
+                continue;
+            }
+
+            eprintln!(
+                "[orchestrator] ghost_integrity_loop: periodic sweep across {} project(s)",
+                project_ids.len()
+            );
+
+            for project_id in project_ids {
+                sweep_ghost_agents(&project_id, &registry, &agent_map).await;
+            }
+        }
+    });
+}
+
 pub async fn recover_interrupted(
     project_id: &str,
     registry: &ProjectRegistry,
@@ -1775,6 +1940,13 @@ pub async fn recover_interrupted(
     agent_map: &AgentMap,
     sink: Arc<dyn EventSink>,
 ) {
+    // u7s.3: Ghost-agent sweep — mark any agents table rows with status='running'
+    // that have no corresponding live process (not in AgentMap) as failed, and
+    // reset their associated node to pending so it can be re-dispatched.
+    // This runs BEFORE the normal interrupted-agent recovery so that ghost rows
+    // do not artificially inflate db_count_running_agents.
+    sweep_ghost_agents(project_id, registry, agent_map).await;
+
     let (interrupted, waiting_nodes, project_path) = {
         let reg = registry.lock().unwrap();
         let db = match reg.get(project_id) {

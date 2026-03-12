@@ -752,6 +752,13 @@ sequenceDiagram
     Note over Orch: Startup recovery scan<br/>across all registered projects
 
     loop For each registered project
+        Orch->>DB: SELECT agents WHERE status='running'<br/>AND agent_id NOT IN AgentMap
+        DB-->>Orch: [ghost agent rows]
+
+        Note over Orch: Ghost agents: rows with status='running'<br/>but no live process. Mark failed, reset node to pending.
+
+        Orch->>DB: UPDATE agents SET status='failed' WHERE id=ghost_id<br/>UPDATE nodes SET status='pending' WHERE id=task_id AND status='running'
+
         Orch->>DB: SELECT nodes WHERE status='running'
         DB-->>Orch: [orphaned running nodes]
 
@@ -825,13 +832,17 @@ sequenceDiagram
 
 **Startup recovery**
 
-On app launch, the orchestrator scans all previously-registered projects in its configuration. For each project, it queries the database for nodes in states that imply a live process (`running`) or a pending async operation (`waiting`).
+On app launch, the orchestrator scans all previously-registered projects in its configuration. For each project, it runs two sweeps before normal scheduling begins.
 
-`running` nodes are reset to `pending`: the agent process died with the app. The session_id is preserved (it may still be valid for a `--resume` attempt). On the synthetic DagChanged, the orchestrator will attempt to re-dispatch these tasks. If `--resume` succeeds, the task continues from where it left off. If it fails, SF-4's fallback mechanism restarts it fresh.
+**Ghost-agent sweep (u7s.3)**: The orchestrator queries all `agents` rows with `status='running'` and cross-references them against the in-memory `AgentMap`. Any row whose `agent_id` is not in the map is a ghost — a process that died without cleaning up its DB row. For each ghost: the `agents` row is marked `failed`; if its associated node is still `running`, it is atomically claimed (running → pending via `db_claim_node_retry`) so the scheduler can re-dispatch it. This sweep runs *before* the node-level scan, keeping `db_count_running_agents` honest.
+
+**Node-level sweep**: `running` nodes are reset to `pending` — the agent process died with the app. The session_id is preserved (it may still be valid for a `--resume` attempt). On the synthetic DagChanged, the orchestrator will attempt to re-dispatch these tasks. If `--resume` succeeds, the task continues from where it left off. If it fails, SF-4's fallback mechanism restarts it fresh.
 
 > **Implementation note**: The current app does not set `status='running'` on spawn — it is set on the init event from the agent. This means a task that was spawned but whose init event was not yet processed would stay `pending` (correct) rather than `running` (stale) after restart. Verify this timing in the ingester implementation.
 
 `waiting` nodes are evaluated for recoverability. Review-waiting tasks may have had reviewers complete while the app was closed (their results are in SQLite). The orchestrator computes the answered/expected set and either resumes or re-dispatches missing reviewers. Decision-waiting tasks are left waiting unless all decisions are already resolved.
+
+**Periodic integrity check (u7s.3)**: In addition to the startup sweep, the orchestrator spawns a background loop that fires every 5 minutes during a live session. It repeats the ghost-agent sweep across all open projects. This covers the crash-during-session scenario where a live agent's process dies without removing its `AgentMap` entry and closing its DB row.
 
 **Opening a new project**
 
@@ -854,6 +865,8 @@ The orchestrator opens the existing database and emits a full state snapshot to 
 4. **Single source of truth is SQLite**: The orchestrator never reconstructs state from agent stdout. SQLite is the only source. If SQLite is consistent, the system is recoverable regardless of how the app was closed.
 
 5. **Project path is canonical**: The `open_project` path is the same path used as `cwd` for all agent spawns. If the project is moved on disk, `--resume` will fail for all existing sessions (cwd mismatch). The human must re-register the project from its new path.
+
+6. **Ghost-agent recovery keeps concurrency counts honest (u7s.3)**: `db_count_running_agents` is a pure SQL query counting `agents` rows with `status='running'`. Ghost rows (no live process) inflate this count and permanently consume concurrency slots. Recovery at project-open time and the periodic 5-minute integrity check sweep the agents table against the AgentMap and close any ghost rows before the scheduler reads the count.
 
 ---
 

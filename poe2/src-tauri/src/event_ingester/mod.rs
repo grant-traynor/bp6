@@ -149,6 +149,15 @@ struct PoeSkill {
     content: String,
 }
 
+/// Wire format: {"poe": "review-outcome", "verdict": "APPROVED_WITH_CONDITIONS", "review_id": "r-eng"}
+/// Emitted by reviewer agents before poe:done to record their explicit verdict.
+/// Stored on the reviewer node via db_set_node_verdict.
+#[derive(Debug, serde::Deserialize)]
+struct PoeReviewOutcome {
+    verdict: String,
+    review_id: String,
+}
+
 // ── Core ingestion ────────────────────────────────────────────────────────────
 
 /// Detect and classify a single line as a poe: event.
@@ -255,6 +264,9 @@ pub fn ingest_line_with_tracker(
             *last_substantive = Some("review".to_owned());
             handle_review(trimmed, project_id, task_id, agent_id, registry, dag_tx, sink)
         }
+        "review-outcome" => {
+            handle_review_outcome(trimmed, project_id, task_id, agent_id, registry, sink)
+        }
         other => {
             eprintln!("[event_ingester] Unknown poe: event type: {}", other);
             Ok(None)
@@ -266,7 +278,7 @@ pub fn ingest_line_with_tracker(
         // Emit a Tauri warning event for structured poe event failures so the
         // frontend can surface them in the UI (e.g. activity feed warnings).
         match poe_event {
-            "task" | "edge" | "decision" | "skill" => {
+            "task" | "edge" | "decision" | "skill" | "review-outcome" => {
                 emit_tauri_event(
                     sink,
                     "poe-ingester-warning",
@@ -956,6 +968,72 @@ fn handle_review(
         emit_tauri_event(sink, &event, &payload);
     }
     result
+}
+
+/// Handle `poe:review-outcome` — store the reviewer's explicit verdict on the reviewer node.
+///
+/// Wire format: {"poe": "review-outcome", "verdict": "APPROVED_WITH_CONDITIONS", "review_id": "r-eng"}
+///
+/// The reviewer node is found by matching `review_id = payload.review_id` with
+/// `requesting_task_id IS NOT NULL` (reviewer nodes have this set). The verdict
+/// is stored via `db_set_node_verdict` so `check_review_completion` can read it
+/// when building the ReviewResult bundle.
+fn handle_review_outcome(
+    json: &str,
+    project_id: &str,
+    task_id: &str,
+    agent_id: &str,
+    registry: &ProjectRegistry,
+    sink: &dyn EventSink,
+) -> Result<Option<DagChanged>> {
+    let payload: PoeReviewOutcome = serde_json::from_str(json)?;
+
+    // Validate verdict value. Must be one of the four canonical values.
+    let valid_verdicts = ["APPROVED", "APPROVED_WITH_CONDITIONS", "BLOCKED", "FAILED"];
+    if !valid_verdicts.contains(&payload.verdict.as_str()) {
+        return Err(anyhow::anyhow!(
+            "poe:review-outcome: invalid verdict '{}'; must be one of {:?}",
+            payload.verdict, valid_verdicts
+        ));
+    }
+
+    with_project_conn(registry, project_id, |conn| {
+        // Log the event for the audit trail.
+        dag_store::db_log_event(
+            conn,
+            project_id,
+            Some(agent_id),
+            Some(task_id),
+            "poe:review-outcome",
+            json,
+        )?;
+
+        // The task_id here is the reviewer task's ID. Store verdict directly on it.
+        dag_store::db_set_node_verdict(conn, task_id, &payload.verdict)?;
+
+        eprintln!(
+            "[event_ingester] review-outcome: reviewer task={} review_id={} verdict={}",
+            task_id, payload.review_id, payload.verdict
+        );
+
+        Ok(None::<DagChanged>)
+    })?;
+
+    // Emit Tauri event so the frontend activity feed can show the verdict.
+    emit_tauri_event(
+        sink,
+        "poe-event",
+        &serde_json::json!({
+            "eventType": "poe:review-outcome",
+            "projectId": project_id,
+            "agentId": agent_id,
+            "taskId": task_id,
+            "summary": format!("Review outcome: {} (review_id={})", payload.verdict, payload.review_id),
+            "payload": json,
+        }),
+    );
+
+    Ok(None)
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────

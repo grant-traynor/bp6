@@ -524,6 +524,13 @@ The orchestrator respects both limits when selecting tasks to spawn in the core 
 
 The UI displays a concurrency indicator — running count / limit — for each project and globally. Both limits are adjustable from the UI. Higher limits suit powerful machines with fast API access; lower limits suit constrained environments or when the human wants to keep queue volume manageable.
 
+**`db_count_running_agents` is a pure SQL query** — it counts `agents` rows with `status='running'` without any cross-reference to live processes. Its accuracy depends on ghost-agent recovery keeping those rows clean:
+
+- **At project-open**: `recover_interrupted` calls `sweep_ghost_agents` before scheduling begins. This queries all `status='running'` agent rows, cross-references them against the in-memory `AgentMap`, marks orphans as `failed`, and resets their nodes to `pending`.
+- **Periodic (every 5 min)**: `spawn_ghost_agent_integrity_loop` repeats the same sweep across all open projects while the app is running. This handles the crash-during-session scenario where a live agent's process dies mid-session without cleaning up.
+
+The two-layer approach (open-time + periodic) ensures that `db_count_running_agents` reflects the true number of running processes, not stale DB rows from previous crashes.
+
 ### SQLite Lock Ordering (bp6-17k.13)
 
 All code that touches the SQLite connection must obey this ordering invariant to prevent the connection lock from being held across async Tauri event emission, which would stall other DB operations:
