@@ -1,7 +1,7 @@
 pub mod commands;
 
 use crate::agent_lifecycle::{self, AgentMap, SpawnRequest};
-use crate::dag_store::{self, Node, NodeStatus, NodeType, ProjectRegistry};
+use crate::dag_store::{self, CreateNodeInput, EdgeType, Node, NodeStatus, NodeType, ProjectRegistry};
 use crate::event_ingester::DagChanged;
 use crate::event_sink::EventSink;
 use crate::skills;
@@ -1339,22 +1339,126 @@ async fn dispatch_task(
             s
         }
         Err(e) => {
-            eprintln!("[orchestrator] Failed to load skill '{}': {}", skill_id, e);
-            // Mark the task cancelled so the run_loop does not retry it endlessly.
+            eprintln!("[orchestrator] Failed to load skill '{}': {} — triggering self-healing skill-author task", skill_id, e);
+
+            // Self-healing: synthesise a skill-author task instead of cancelling.
+            // The failing task stays `pending`; it will be dispatched once the
+            // skill-author task completes and the skill file exists.
+            let synth_title = format!("Synthesize missing skill: {}", skill_id);
+
             let reg = registry.lock().unwrap();
-            if let Some(db) = reg.get(project_id) {
-                let conn = db.conn.lock().unwrap();
-                let update = dag_store::UpdateNodeInput {
-                    status: Some(dag_store::NodeStatus::Cancelled),
-                    description: Some(format!("Cancelled: skill '{}' could not be loaded: {}", skill_id, e)),
-                    ..Default::default()
+            let db = match reg.get(project_id) {
+                Some(db) => db.clone(),
+                None => return,
+            };
+            drop(reg);
+
+            let conn = db.conn.lock().unwrap();
+
+            // ── Dedup check ───────────────────────────────────────────────────
+            // Look for an existing pending/running skill-author task for this skill.
+            let existing_author: Option<String> = {
+                let mut found = None;
+                for status_str in &["pending", "running"] {
+                    if let Ok(nodes) = dag_store::db_list_nodes_by_status(&conn, project_id, status_str) {
+                        for n in nodes {
+                            if n.skill_id.as_deref() == Some("skill-author") && n.title == synth_title {
+                                found = Some(n.id.clone());
+                                break;
+                            }
+                        }
+                    }
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                found
+            };
+
+            let author_id = if let Some(id) = existing_author {
+                eprintln!(
+                    "[orchestrator] dispatch_task: existing skill-author task {} found for skill '{}', reusing",
+                    id, skill_id
+                );
+                id
+            } else {
+                // ── Gather sibling tasks that also need this skill ────────────
+                let description = {
+                    let mut desc = format!("Synthesize the '{}' skill file.\n\nBlocked tasks:\n", skill_id);
+                    if let Ok(pending) = dag_store::db_list_nodes_by_status(&conn, project_id, "pending") {
+                        for n in &pending {
+                            if n.skill_id.as_deref() == Some(skill_id.as_str()) {
+                                desc.push_str(&format!("- {}\n", n.title));
+                            }
+                        }
+                    }
+                    desc
                 };
-                if let Err(ue) = dag_store::db_update_node(&conn, &task.id, &update) {
-                    eprintln!("[orchestrator] dispatch_task: failed to cancel task {}: {}", task.id, ue);
-                } else {
-                    eprintln!("[orchestrator] dispatch_task: task {} marked cancelled (skill load failure)", task.id);
+
+                // ── Create the skill-author node ──────────────────────────────
+                let input = CreateNodeInput {
+                    project_id: project_id.to_string(),
+                    id: None,
+                    phase_id: None, // no-phase tasks are always eligible in db_find_ready_tasks
+                    parent_id: None,
+                    node_type: NodeType::Task,
+                    title: synth_title.clone(),
+                    description: Some(description),
+                    skill_id: Some("skill-author".to_string()),
+                    initial_status: Some(NodeStatus::Pending),
+                    requesting_task_id: None,
+                    review_id: None,
+                    retry_count: None,
+                };
+                match dag_store::db_create_node(&conn, &input) {
+                    Ok(n) => {
+                        eprintln!(
+                            "[orchestrator] dispatch_task: created skill-author task {} for skill '{}'",
+                            n.id, skill_id
+                        );
+                        n.id
+                    }
+                    Err(ce) => {
+                        eprintln!(
+                            "[orchestrator] dispatch_task: failed to create skill-author task for skill '{}': {}",
+                            skill_id, ce
+                        );
+                        return;
+                    }
+                }
+            };
+
+            // ── Add depends_on edges: failing task (and siblings) → author node ──
+            // Wire the task that just failed first.
+            if let Err(ee) = dag_store::db_create_edge(&conn, &task.id, &author_id, EdgeType::DependsOn) {
+                eprintln!(
+                    "[orchestrator] dispatch_task: failed to add edge {} → {}: {}",
+                    task.id, author_id, ee
+                );
+            }
+            // Also wire any other pending tasks with the same skill_id.
+            if let Ok(pending) = dag_store::db_list_nodes_by_status(&conn, project_id, "pending") {
+                for n in &pending {
+                    if n.id != task.id
+                        && n.skill_id.as_deref() == Some(skill_id.as_str())
+                    {
+                        if let Err(ee) = dag_store::db_create_edge(&conn, &n.id, &author_id, EdgeType::DependsOn) {
+                            eprintln!(
+                                "[orchestrator] dispatch_task: edge {} → {} failed: {}",
+                                n.id, author_id, ee
+                            );
+                        }
+                    }
                 }
             }
+
+            drop(conn);
+
+            // Wake the scheduler so the new skill-author task is dispatched immediately.
+            let _ = dag_tx.send(DagChanged::DagStructureChanged {
+                project_id: project_id.to_string(),
+            });
+
             return;
         }
     };
@@ -1379,15 +1483,89 @@ async fn dispatch_task(
         skills::SpawnMode::Autonomous
     };
 
-    let input_bundle = skills::assemble_input_bundle(
-        &spawn_mode,
-        &skill,
-        &task.title,
-        task.description.as_deref(),
-        &ancestry_refs,
-        &knowledge_refs,
-        &artifact_refs,
-    );
+    // For skill-author tasks, use a specialised bundle that injects skill-authoring context.
+    let input_bundle = if skill_id == "skill-author" {
+        // The task title encodes the missing skill name: "Synthesize missing skill: {name}"
+        let missing_skill_name = task
+            .title
+            .strip_prefix("Synthesize missing skill: ")
+            .unwrap_or(task.title.as_str())
+            .to_owned();
+
+        // Gather pending tasks that need the missing skill.
+        let failing_tasks_owned: Vec<(String, String)> = {
+            let reg = registry.lock().unwrap();
+            if let Some(db) = reg.get(project_id) {
+                let conn = db.conn.lock().unwrap();
+                dag_store::db_list_nodes_by_status(&conn, project_id, "pending")
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|n| n.skill_id.as_deref() == Some(missing_skill_name.as_str()))
+                    .map(|n| (n.title, n.description.unwrap_or_default()))
+                    .collect()
+            } else {
+                vec![]
+            }
+        };
+        let failing_refs: Vec<(&str, &str)> = failing_tasks_owned
+            .iter()
+            .map(|(t, d)| (t.as_str(), d.as_str()))
+            .collect();
+
+        // Collect existing skill names from the same search paths load_skill() uses.
+        let existing_skills_owned: Vec<String> = {
+            let mut names: Vec<String> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            let mut scan_dir = |dir: PathBuf| {
+                if let Ok(entries) = std::fs::read_dir(&dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                                if stem != "SKILL_GUIDE" && seen.insert(stem.to_owned()) {
+                                    names.push(stem.to_owned());
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            #[cfg(debug_assertions)]
+            scan_dir(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("skills"),
+            );
+            scan_dir(resource_dir.join("skills"));
+            if let Some(home) = dirs::home_dir() {
+                scan_dir(home.join(".poe").join("skills"));
+            }
+            scan_dir(project_path.join(".poe").join("skills"));
+
+            names
+        };
+        let existing_refs: Vec<&str> = existing_skills_owned.iter().map(|s| s.as_str()).collect();
+
+        skills::assemble_skill_author_bundle(
+            &spawn_mode,
+            &skill,
+            &missing_skill_name,
+            &failing_refs,
+            &existing_refs,
+            &knowledge_refs,
+            &artifact_refs,
+        )
+    } else {
+        skills::assemble_input_bundle(
+            &spawn_mode,
+            &skill,
+            &task.title,
+            task.description.as_deref(),
+            &ancestry_refs,
+            &knowledge_refs,
+            &artifact_refs,
+        )
+    };
 
     let spawn_req = SpawnRequest {
         project_id: project_id.to_owned(),

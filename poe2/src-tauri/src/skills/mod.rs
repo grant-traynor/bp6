@@ -296,6 +296,85 @@ pub fn assemble_input_bundle(
     bundle
 }
 
+/// Assemble the input bundle for a `skill-author` agent.
+///
+/// Replaces the standard Task Context section with a "Skill Authoring Context"
+/// that describes the missing skill, the tasks waiting on it, and the palette
+/// of existing skills the author can use as naming references.
+pub fn assemble_skill_author_bundle(
+    mode: &SpawnMode,
+    skill: &ResolvedSkill,
+    skill_name: &str,
+    failing_tasks: &[(&str, &str)],     // (title, description)
+    existing_skills: &[&str],           // skill names already present
+    knowledge: &[(&str, &str)],         // [(key, value)]
+    artifacts: &[(&str, &str)],         // [(artifact_type, filename)]
+) -> String {
+    let mut bundle = String::new();
+
+    // Mode protocol block
+    let mode_block = match mode {
+        SpawnMode::Autonomous => concat!(
+            "## Execution Protocol\n\n",
+            "You are running in autonomous mode — there is no human at the keyboard.\n\n",
+            "- Begin by emitting `poe:brief` describing your understanding of the task.\n",
+            "- Work from the context in this bundle. Do not ask questions.\n",
+            "- Raise genuine blockers via `poe:decision`, then continue with your best judgement.\n",
+            "- Emit `poe:done` as your final output. The process exits after this.\n",
+        ),
+        SpawnMode::Interactive => concat!(
+            "## Interactive Mode\n\n",
+            "You are running in interactive mode — a human is present at the keyboard.\n\n",
+            "- Use `poe:chat` + `poe:yield` to ask questions and wait for the human's answer.\n",
+            "- The orchestrator will resume your run with the answer as `Human: {response}`.\n",
+            "- Follow the Interactive Mode instructions in your skill prompt exactly.\n",
+        ),
+    };
+    bundle.push_str(mode_block);
+    bundle.push_str("\n---\n\n");
+
+    // Skill prompt
+    bundle.push_str(&skill.prompt);
+    bundle.push_str("\n\n---\n");
+
+    // Skill Authoring Context (replaces Task Context + Task sections)
+    bundle.push_str("\n## Skill Authoring Context\n\n");
+    bundle.push_str(&format!("**skill_name**: {}\n\n", skill_name));
+
+    if !failing_tasks.is_empty() {
+        bundle.push_str("**Failing tasks that need this skill**:\n");
+        for (title, description) in failing_tasks {
+            bundle.push_str(&format!("- {}: {}\n", title, description));
+        }
+        bundle.push('\n');
+    }
+
+    if !existing_skills.is_empty() {
+        bundle.push_str("**Existing skills (model naming conventions from these)**:\n");
+        bundle.push_str(&existing_skills.join(", "));
+        bundle.push_str("\n\n");
+    }
+
+    // Knowledge register
+    if !knowledge.is_empty() {
+        bundle.push_str("**Knowledge Register**:\n");
+        for (key, value) in knowledge {
+            bundle.push_str(&format!("**{}**: {}\n\n", key, value));
+        }
+    }
+
+    // Artifacts
+    if !artifacts.is_empty() {
+        bundle.push_str("\n# Relevant Artifacts\n\n");
+        for (artifact_type, filename) in artifacts {
+            bundle.push_str(&format!("- `{}` ({})\n", filename, artifact_type));
+        }
+        bundle.push('\n');
+    }
+
+    bundle
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
