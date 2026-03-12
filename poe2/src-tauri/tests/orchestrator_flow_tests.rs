@@ -2037,3 +2037,221 @@ fn review_outcome_present_uses_stored_verdict() {
         "effective verdict must be 'APPROVED_WITH_CONDITIONS', not the BLOCKED default"
     );
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// u7s.6 — poe:step and poe:brief emit poe-agent-activity Tauri events
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Minimal event-capture sink for the u7s.6 integration test.
+///
+/// Stores every (event_name, payload) pair in a shared Vec so the test can
+/// assert on `poe-agent-activity` entries after calling `ingest_line_with_tracker`.
+mod u7s6_helpers {
+    use poe2_lib::event_sink::EventSink;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    pub struct CaptureSink {
+        pub events: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+    }
+
+    impl CaptureSink {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Return all captured payloads whose event name equals `name`.
+        pub fn find_all(&self, name: &str) -> Vec<serde_json::Value> {
+            self.events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(e, _)| e == name)
+                .map(|(_, v)| v.clone())
+                .collect()
+        }
+    }
+
+    impl EventSink for CaptureSink {
+        fn emit(&self, event: &str, payload: &serde_json::Value) {
+            self.events
+                .lock()
+                .unwrap()
+                .push((event.to_string(), payload.clone()));
+        }
+
+        fn resource_dir(&self) -> PathBuf {
+            PathBuf::from(".")
+        }
+    }
+}
+
+/// AC: u7s.6 — ingesting a `poe:step` or `poe:brief` line must emit a
+/// `poe-agent-activity` Tauri event with the correct `type` and `content` fields.
+///
+/// Steps:
+///   1. Create an in-memory DB (via `new_mem_db`) and insert a project + node.
+///   2. Register the project in a `ProjectRegistry` (required by `ingest_line_with_tracker`).
+///   3. Call `ingest_line_with_tracker` with a `poe:step` JSON line.
+///   4. Assert the sink captured a `poe-agent-activity` event with `type=="step"`
+///      and `content` equal to the "name" field in the JSON.
+///   5. Repeat for `poe:brief`, asserting `type=="brief"` and `content` from the
+///      "content" field.
+#[test]
+fn poe_step_and_brief_emit_agent_activity_event() {
+    use poe2_lib::dag_store::{new_registry, types::Project, ProjectDb};
+    use poe2_lib::event_ingester::{ingest_line_with_tracker, DagChanged};
+    use poe2_lib::event_sink::EventSink;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+    use tokio::sync::mpsc;
+    use u7s6_helpers::CaptureSink;
+
+    // ── 1. Set up in-memory DB with a project and a running task node ─────────
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+    let task_id = db_create_node(
+        &conn,
+        &CreateNodeInput {
+            id: None,
+            project_id: project_id.clone(),
+            phase_id: None,
+            parent_id: None,
+            node_type: NodeType::Task,
+            title: "u7s.6 test task".to_owned(),
+            description: None,
+            skill_id: Some("implementer".to_owned()),
+            initial_status: Some(NodeStatus::Running),
+            requesting_task_id: None,
+            review_id: None,
+            retry_count: Some(0),
+        },
+    )
+    .expect("create task node")
+    .id;
+
+    let agent_id = "agent-u7s6-test";
+
+    // ── 2. Register the project in the registry ───────────────────────────────
+    let now = chrono::Utc::now().to_rfc3339();
+    let project = Project {
+        id: project_id.clone(),
+        name: "u7s.6 Test Project".to_string(),
+        path: format!("/tmp/u7s6-{}", project_id),
+        conops_ref: None,
+        active_phase_id: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    let db = Arc::new(ProjectDb {
+        project,
+        conn: Mutex::new(conn),
+    });
+    let registry = new_registry();
+    registry
+        .lock()
+        .unwrap()
+        .insert(project_id.clone(), db.clone());
+
+    // ── 3. Create the capture sink and a DagChanged channel ───────────────────
+    let sink = CaptureSink::new();
+    let sink_arc: Arc<dyn EventSink> = Arc::new(sink.clone());
+    let (dag_tx, _dag_rx) = mpsc::unbounded_channel::<DagChanged>();
+
+    // project_path is unused by handle_log_only but required by the signature.
+    let project_path = Path::new("/tmp");
+
+    // ── 4. Ingest a poe:step line ─────────────────────────────────────────────
+    let step_line = r#"{"poe":"step","name":"Writing implementation","status":"running"}"#;
+    let mut last_substantive: Option<String> = None;
+    ingest_line_with_tracker(
+        step_line,
+        &project_id,
+        &task_id,
+        agent_id,
+        &registry,
+        &dag_tx,
+        sink_arc.as_ref(),
+        project_path,
+        &mut last_substantive,
+    );
+
+    // ── 5. Assert poe-agent-activity was emitted with type=="step" ────────────
+    let step_events = sink.find_all("poe-agent-activity");
+    assert_eq!(
+        step_events.len(),
+        1,
+        "expected exactly 1 poe-agent-activity event after poe:step, got {}",
+        step_events.len()
+    );
+    let step_payload = &step_events[0];
+    assert_eq!(
+        step_payload["type"].as_str(),
+        Some("step"),
+        "poe-agent-activity payload must have type=='step', got: {}",
+        step_payload
+    );
+    assert_eq!(
+        step_payload["content"].as_str(),
+        Some("Writing implementation"),
+        "poe-agent-activity payload must have content=='Writing implementation', got: {}",
+        step_payload
+    );
+    assert_eq!(
+        step_payload["taskId"].as_str(),
+        Some(task_id.as_str()),
+        "poe-agent-activity payload must carry the correct taskId"
+    );
+    assert_eq!(
+        step_payload["agentId"].as_str(),
+        Some(agent_id),
+        "poe-agent-activity payload must carry the correct agentId"
+    );
+
+    // ── 6. Ingest a poe:brief line ────────────────────────────────────────────
+    let brief_line = r#"{"poe":"brief","content":"Analysing requirements"}"#;
+    ingest_line_with_tracker(
+        brief_line,
+        &project_id,
+        &task_id,
+        agent_id,
+        &registry,
+        &dag_tx,
+        sink_arc.as_ref(),
+        project_path,
+        &mut last_substantive,
+    );
+
+    // ── 7. Assert poe-agent-activity was emitted with type=="brief" ───────────
+    let all_activity = sink.find_all("poe-agent-activity");
+    assert_eq!(
+        all_activity.len(),
+        2,
+        "expected 2 poe-agent-activity events total after poe:step + poe:brief, got {}",
+        all_activity.len()
+    );
+    let brief_payload = &all_activity[1];
+    assert_eq!(
+        brief_payload["type"].as_str(),
+        Some("brief"),
+        "poe-agent-activity payload must have type=='brief', got: {}",
+        brief_payload
+    );
+    assert_eq!(
+        brief_payload["content"].as_str(),
+        Some("Analysing requirements"),
+        "poe-agent-activity payload must have content=='Analysing requirements', got: {}",
+        brief_payload
+    );
+    assert_eq!(
+        brief_payload["taskId"].as_str(),
+        Some(task_id.as_str()),
+        "poe-agent-activity brief payload must carry the correct taskId"
+    );
+    assert_eq!(
+        brief_payload["agentId"].as_str(),
+        Some(agent_id),
+        "poe-agent-activity brief payload must carry the correct agentId"
+    );
+}
