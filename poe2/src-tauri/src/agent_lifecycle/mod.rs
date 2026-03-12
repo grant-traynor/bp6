@@ -215,11 +215,16 @@ pub async fn spawn_agent(
                         "[agent_lifecycle] agent={} session_id={}",
                         agent_id_for_session, sid
                     );
-                    let reg = registry_for_session.lock().unwrap();
-                    if let Some(db) = reg
-                        .values()
-                        .find(|db| db.project.id == project_id_for_session)
-                    {
+                    // Extract Arc<ProjectDb> from the registry, then drop the registry
+                    // lock before acquiring db.conn — avoids registry → conn nested-lock
+                    // deadlock potential.
+                    let db = {
+                        let reg = registry_for_session.lock().unwrap();
+                        reg.values()
+                            .find(|db| db.project.id == project_id_for_session)
+                            .cloned()
+                    };
+                    if let Some(db) = db {
                         let conn = db.conn.lock().unwrap();
                         // Write to agents.session_id (legacy).
                         if let Err(e) = dag_store::db_update_agent_session(
@@ -399,6 +404,9 @@ pub fn write_to_agent_stdin(
 }
 
 /// Interrupt a running agent via SIGTERM.
+///
+/// Uses `nix::sys::signal::kill` directly — no `kill` subprocess, no PID-reuse
+/// race, errors are surfaced and logged.
 pub fn interrupt_agent_process(agent_map: &AgentMap, agent_id: &str) -> Result<()> {
     let pid_opt = {
         let map = agent_map.lock().unwrap();
@@ -409,9 +417,15 @@ pub fn interrupt_agent_process(agent_map: &AgentMap, agent_id: &str) -> Result<(
     };
     match pid_opt {
         Some(pid) => {
-            let _ = std::process::Command::new("kill")
-                .arg(pid.to_string())
-                .status();
+            let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
+            if let Err(e) = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM) {
+                let msg = format!(
+                    "interrupt_agent_process: kill(pid={}, SIGTERM) failed: {}",
+                    pid, e
+                );
+                eprintln!("[agent_lifecycle] {}", msg);
+                return Err(anyhow::anyhow!(msg));
+            }
             Ok(())
         }
         None => Err(anyhow::anyhow!(

@@ -18,12 +18,16 @@ impl TextBufExtractor {
     }
 
     /// Push a text chunk and return any complete lines (split on '\n').
+    ///
+    /// Uses `drain()` to consume matched portions in-place, avoiding a full
+    /// re-allocation of the tail on every extracted line.
     pub fn push(&mut self, text: &str) -> Vec<String> {
         self.buf.push_str(text);
         let mut lines = Vec::new();
         while let Some(pos) = self.buf.find('\n') {
-            let line = self.buf[..pos].to_owned();
-            self.buf = self.buf[pos + 1..].to_owned();
+            // Drain up to and including the '\n', collect the chars before it as
+            // the line (excluding the newline itself).
+            let line: String = self.buf.drain(..=pos).take(pos).collect();
             lines.push(line);
         }
         lines
