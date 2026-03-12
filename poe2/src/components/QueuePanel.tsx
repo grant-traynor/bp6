@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { QueueItem, Node } from '../types';
+import type { QueueItem, Node, DecisionOption } from '../types';
 import AdvisorChatbot from './AdvisorChatbot';
 
 interface Props {
@@ -16,11 +16,11 @@ interface StandardCardProps {
   onResolve: (itemId: string, resolution: string) => Promise<void>;
 }
 
-function parsedOptions(item: QueueItem): string[] {
+function parsedOptions(item: QueueItem): DecisionOption[] {
   if (!item.options) return [];
   try {
     const parsed = JSON.parse(item.options);
-    return Array.isArray(parsed) ? (parsed as string[]) : [];
+    return Array.isArray(parsed) ? (parsed as DecisionOption[]) : [];
   } catch {
     return [];
   }
@@ -57,13 +57,13 @@ function AnswerInput({
             <button
               key={i}
               className={`px-2 py-0.5 rounded text-[11px] border transition-colors ${
-                input === opt
+                input === opt.id
                   ? 'border-amber-500 bg-amber-900 text-amber-200'
                   : 'border-neutral-600 text-neutral-400 hover:border-neutral-400 hover:text-neutral-200'
               }`}
-              onClick={() => setInput(opt)}
+              onClick={() => setInput(opt.id)}
             >
-              {opt}
+              {opt.label}
             </button>
           ))}
         </div>

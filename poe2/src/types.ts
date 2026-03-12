@@ -27,6 +27,12 @@ export interface Node {
   updatedAt: string;
 }
 
+export interface DecisionOption {
+  id: string;
+  label: string;
+  description?: string;
+}
+
 export interface QueueItem {
   id: string;
   projectId: string;

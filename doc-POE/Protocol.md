@@ -76,7 +76,7 @@ CREATE TABLE decisions (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   task_id     TEXT    NOT NULL REFERENCES tasks(id),
   question    TEXT    NOT NULL,
-  options     TEXT,              -- JSON array of strings, null if agent provided no options
+  options     TEXT,              -- JSON array of {id, label, description?} objects, null if agent provided no options
   resolution  TEXT,              -- null until human resolves
   created_at  INTEGER NOT NULL,
   resolved_at INTEGER
@@ -206,8 +206,11 @@ One event per line. No multi-line JSON.
 // Raise a question for the human queue. Task status → waiting.
 // For autonomous agents only — routes to the Decision Queue (Pane 3).
 // Agent emits poe:yield immediately after. Orchestrator resumes via --resume once resolved.
-{"poe": "decision", "question": "...", "options": ["Option A", "Option B"]}
-// options is optional
+{"poe": "decision", "question": "...", "options": [{"id": "opt_a", "label": "Option A", "description": "..."}, {"id": "opt_b", "label": "Option B"}]}
+// options is optional. Each option is {id, label, description?}.
+// id is the machine-readable resolution value delivered to the agent on --resume.
+// label is the human-readable button text shown in the Decision Queue.
+// description is optional hover/tooltip text.
 
 // Collaborative turn — agent sends a message or question to the human during a co-authoring session.
 // For interactive agents only — routes to the Artifact Viewer chat panel, NOT the Decision Queue.
