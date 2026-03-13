@@ -55,7 +55,6 @@ function NodeRow({ item, onHandoverOpen, onDebugOpen }: {
   const { symbol, cls } = statusDot(item.node.status);
   const isRunning = item.node.status === 'running';
   const isWaiting = item.node.status === 'waiting';
-  const isActive = isRunning || isWaiting;
   const typeLabel = item.node.nodeType === 'epic' ? 'EPIC'
                   : item.node.nodeType === 'feature' ? 'FEAT'
                   : item.node.nodeType === 'bug' ? 'BUG'
@@ -65,7 +64,11 @@ function NodeRow({ item, onHandoverOpen, onDebugOpen }: {
     <>
       <div
         className={`flex items-baseline gap-1.5 py-0.5 px-1 rounded text-[12px] leading-5 group ${
-          isActive ? 'cursor-pointer hover:bg-neutral-800/60' : ''
+          isRunning
+            ? 'bg-emerald-950/40 cursor-pointer hover:bg-emerald-950/60'
+            : isWaiting
+            ? 'cursor-pointer hover:bg-neutral-800/60'
+            : ''
         }`}
         style={{ paddingLeft: `${4 + item.depth * 16}px` }}
         onClick={() => {
@@ -74,7 +77,13 @@ function NodeRow({ item, onHandoverOpen, onDebugOpen }: {
         }}
         title={isRunning ? 'Click to view stream output' : isWaiting ? 'Click to open agent handover' : undefined}
       >
-        <span className={`shrink-0 font-mono text-[11px] w-3 text-center ${cls}`}>{symbol}</span>
+        {isRunning ? (
+          <span className="shrink-0 w-3 flex items-center justify-center">
+            <span className={`inline-block w-2 h-2 rounded-full border border-emerald-400 border-t-transparent animate-spin ${cls}`} />
+          </span>
+        ) : (
+          <span className={`shrink-0 font-mono text-[11px] w-3 text-center ${cls}`}>{symbol}</span>
+        )}
         {typeLabel && (
           <span className="shrink-0 text-[9px] font-bold text-neutral-600 tracking-wider">{typeLabel}</span>
         )}
