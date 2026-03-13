@@ -1,7 +1,7 @@
 # POE — Pairti Orchestration Engine: Architect
 
 **Status**: Draft
-**Last updated**: 2026-03-11
+**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
 
 ---
 
@@ -490,23 +490,26 @@ On app restart:
 
 ```
 1. Open all known project databases
-2. Find tasks with status = running → agent process is gone
-   → Attempt to resume each via stored session_id (Claude --resume)
-   → If resume fails → mark back to pending, orchestrator re-spawns fresh
-3. Find tasks with status = waiting → agent process has already exited (expected)
-   → Query event_log for poe:yield event to recover yield_reason
+2. Ghost-agent sweep: find agents rows WHERE status='running' AND id NOT IN AgentMap
+   → Mark as failed; reset associated node to pending via atomic db_claim_node_retry
+   (This runs before node-level sweep so db_count_running_agents is clean first)
+3. Find nodes with status = running → agent process is gone (no ghost row survived step 2)
+   → Reset to pending (status was set at SF-1 step 0, agent process died)
+4. Find nodes with status = waiting → agent yielded before crash; agent has already exited
+   → Read nodes.yield_reason (direct column read — no events join required)
    → reason = review:
-       Query reviewer task statuses (requesting_task_id = task.id)
-       All done → trigger SF-4 (resume with batched ReviewResult)
-       Some still running → they will trigger SF-4 on completion via SF-2
+       Query reviewer nodes (requesting_task_id = node.id)
+       All done/cancelled → trigger SF-4 (resume with batched ReviewResult)
+       Some still pending/running → re-dispatch missing reviewers via SF-1; restart watchdog timers
    → reason = decision:
-       Decision remains in queue. No action — human resolves when ready.
-4. Queue items persist as-is
-5. Artifacts persist on disk and in SQLite index
-6. Trigger orchestrator loop → re-evaluates all ready tasks
+       queue_items row persists. Leave waiting — queue panel shows it to the human.
+5. queue_items, artifacts, and knowledge persist as-is
+6. Trigger synthetic DagChanged → orchestrator loop re-evaluates all ready tasks
 ```
 
-Agent session IDs are captured from the `{"type":"system","subtype":"init","session_id":"..."}` JSON event at spawn time and stored in `nodes.session_id`. Resume is attempted first; clean restart is the fallback.
+**Status transition timing**: `nodes.status` is set to `'running'` by the atomic claim at SF-1 step 0, *before* bundle assembly and spawn. A node stays `'running'` in the DB from claim time until the agent emits `poe:done` or `poe:yield`. On restart, any `'running'` node without a live agent process is reset to `'pending'` — the atomic claim at SF-1 step 0 will prevent double-dispatch if two wake-ups happen to find the same ready node simultaneously.
+
+Agent session IDs are written when the init event arrives (`nodes.session_id`), overwriting the prior value on each SF-4 continuation.
 
 **Concurrent recovery** (bp6-17k.8): Recovery is not performed serially. Each project's recovery work is spawned as an independent `tokio::spawn` task — the orchestrator does not `await` one project's recovery before beginning the next. On completion, each recovery task re-signals the orchestrator with `DagChanged::DagStructureChanged` so that normal task scheduling resumes for that project. The main orchestrator loop is never blocked by recovery; all projects recover in parallel.
 
@@ -548,7 +551,7 @@ The critical rule is that Tauri event emission must happen **after** the connect
 
 ### Phase Bootstrap
 
-When a phase is activated via `activate_phase` or `advance_phase` and the phase has no tasks, the orchestrator auto-creates a default task using a static stage-type → skill mapping (`bootstrap_skill_for_stage` in `dag_store/commands.rs`).
+When a phase is activated via `activate_phase` or `advance_phase` and the phase has no tasks, the orchestrator auto-creates a default task using a static stage-type → skill mapping.
 
 **Stage-type → bootstrap skill mapping:**
 
@@ -557,7 +560,12 @@ When a phase is activated via `activate_phase` or `advance_phase` and the phase 
 | `conops` | `operational-analyst` | "Develop CONOPS" |
 | `guardrails` | `must-not-analyst` | "Develop Guardrails" |
 | `increment_planning` | `product-manager` | "Plan Increment" |
+| `plan_review` | `senior-engineer` | "Review Plan" |
 | `execution` | — (no bootstrap) | Tasks come from product-manager `poe:task` events in the preceding increment_planning phase |
+| `rework` | `product-manager` | "Plan Rework" |
+| `validity_analysis` | `validity-analyst` | "Validate Deliverables" |
+| `retrospective` | `rca-analyst` | "Run Retrospective" |
+| `onboarding` | `operational-analyst` | "Onboard to Project" |
 
 **Bootstrap is skipped** if the phase already has tasks (human-added or previously bootstrapped). The check runs before the `DagChanged` signal is sent, so the orchestrator always sees at least one ready task when the phase activates.
 

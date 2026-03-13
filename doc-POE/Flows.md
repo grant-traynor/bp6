@@ -1,15 +1,13 @@
 # POE — Runtime Flows
 
 **Status**: Draft
-**Last updated**: 2026-03-11
+**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
 
 **Artifact classification**: `flows.md` — the authoritative Runtime Flows document for POE v2. Specifies the dynamic execution model: what happens in what order, who is responsible at each step, and the invariants that must hold across orchestrator, ingester, agent, and frontend. Injected into every implementation task's input bundle alongside `interface-control.md` and `data-model.md`.
 
 > This document specifies the dynamic execution model for POE. It answers the question the other documents do not: *in what order do things happen, and who is responsible at each step?*
 >
 > Static definitions — wire format, schema, event catalogue, orchestrator structure — live in `Protocol.md` and `Architecture.md`. This document references them; it does not duplicate them.
-
-> **Note on table names**: Sequence diagrams in this document use the design schema names from Protocol.md §1 (`event_log`, `tasks`, `decisions`). The poe2 implementation uses different names: `events`, `nodes`, `queue_items`. See Protocol.md §1 note.
 
 ---
 
@@ -37,6 +35,13 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 *Trigger*: Orchestrator wakes (any `DagChanged` signal) and finds a task where `status = pending` and all dependency tasks have `status = done`.
 
 ```
+0. Atomic claim:
+     UPDATE nodes SET status='running', last_dispatch_at=<now_iso8601>
+       WHERE id=<task_id> AND status='pending'
+   rows_changed = 0 → another caller already claimed this task; abort dispatch silently
+   rows_changed = 1 → this caller owns the task; proceed
+   (last_dispatch_at is written here — this is its only write point. SF-3 uses it to scope review event collection.)
+
 1. Orchestrator assembles T+S+K bundle (Protocol.md §3)
 2. Orchestrator spawns: claude --output-format stream-json --verbose -p
                                --dangerously-skip-permissions [--model <id>]
@@ -44,16 +49,19 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 3. Bundle written to stdin; stdin closed (EOF)
 4. Ingester reads first stdout event:
      {"type":"system","subtype":"init","session_id":"<uuid>"}
-   → UPDATE nodes SET session_id = '<uuid>', status = 'running'
-5. Orchestrator emits poe://task-update to frontend
+   → UPDATE nodes SET session_id = '<uuid>'
+   (status was set to 'running' at step 0; session_id is the only new update here)
+5. Ingester emits poe://task-update to frontend
 ```
+
+**Invariant**: The atomic claim at step 0 is the sole status transition from `pending` → `running`. It uses `WHERE status='pending'` as an optimistic lock — if two orchestrator wake-ups find the same ready task simultaneously, only one wins the UPDATE; the other sees `rows_changed=0` and discards the task from its dispatch list. This prevents double-dispatch regardless of how many DagChanged signals arrive during bundle assembly (steps 1–3).
 
 ### SF-2: Agent Completion
 
 *Trigger*: Ingester receives `{"poe":"done"}` in agent stdout.
 
 ```
-1. Ingester: INSERT event_log (poe:done, full payload)
+1. Ingester: INSERT events (poe:done, full payload)
 2. Ingester: UPDATE nodes SET status = 'done'
 3. Ingester: signal Orchestrator (DagChanged)
 4. Ingester: emit poe://task-update to frontend
@@ -78,7 +86,7 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 The yield event is the handoff point — the agent process is about to exit and control passes to the orchestrator. The derived `yield_reason` determines what the orchestrator does next.
 
 ```
-1. Ingester: INSERT event_log (poe:yield, full payload)
+1. Ingester: INSERT events (poe:yield, full payload)
 2. Ingester: derives yield_reason from the preceding poe: event type (see note above)
    Ingester: UPDATE nodes SET status = 'waiting', yield_reason = <derived value>
 3. Ingester: emit poe://task-update to frontend (status change)
@@ -87,8 +95,15 @@ The yield event is the handoff point — the agent process is about to exit and 
 6. Orchestrator wakes, reads nodes.yield_reason:
 
    yield_reason = 'review':
-     → Collect all poe:review events logged for this task (these carry id, reviewer_skill)
-     → expected_ids = {event.id for each poe:review event}  ← identity set, not a count
+     → Collect all poe:review events logged for this task in the current round:
+         SELECT * FROM events
+           WHERE task_id = task.id
+             AND event_type = 'poe:review'
+             AND created_at > nodes.last_dispatch_at
+       nodes.last_dispatch_at was written at SF-1 step 0 (the atomic claim) for this run.
+       Events from prior review rounds (created before the most recent dispatch) are excluded.
+     → expected_ids = {event.id for each poe:review event in this batch}
+       ← identity set scoped to the current round; prior-round review events are excluded
      → For each poe:review event:
          INSERT reviewer task (type=plan_review, skill=reviewer_skill,
                                requesting_task_id=task.id,
@@ -100,7 +115,9 @@ The yield event is the handoff point — the agent process is about to exit and 
 
    Completion check (fires on reviewer status=done via SF-2, OR on watchdog cancellation):
      → answered_ids = {nodes.review_id WHERE requesting_task_id=task.id
-                                         AND status IN ('done', 'cancelled')}
+                                         AND status IN ('done', 'cancelled')
+                                         AND review_id IN expected_ids}
+       ← scoped to current batch only; reviewer nodes from prior rework rounds are excluded
      → If answered_ids = expected_ids → all reviews accounted for:
          DB-arbitrated claim (u7s.1):
            UPDATE nodes SET status='resuming' WHERE id=requesting_task.id AND status='waiting'
@@ -139,7 +156,7 @@ The yield event is the handoff point — the agent process is about to exit and 
      → Continuation bundle format is identical to decision: "Human: {response text}"
 ```
 
-**Note**: `poe:decision` and `poe:chat` are both logged by the ingester before `poe:yield` arrives. The orchestrator reads `nodes.yield_reason` (not event_log) when it processes the yield — direct column read, no join required.
+**Note**: `poe:decision` and `poe:chat` are both logged by the ingester before `poe:yield` arrives. The orchestrator reads `nodes.yield_reason` (not events) when it processes the yield — direct column read, no join required.
 
 **`turn_type` in QueueItemResolved** (bp6-17k.7): When a queue item (decision, chat, or advisor turn) is resolved, the `QueueItemResolved` signal carries a `turn_type` field with one of three values: `'decision'`, `'chat'`, or `'advisor'`. The `resume_waiting_agent()` function uses `turn_type` for direct routing — it selects the correct continuation bundle format and resume path without performing an additional DB probe to determine the yield kind. `turn_type` is set by the frontend command handler at resolution time from the context in which the human responded (decision queue, artifact chat panel, or advisor panel).
 
@@ -303,7 +320,7 @@ sequenceDiagram
     Note over A: Running via stream-json (SF-1 already complete)
 
     A-->>Ing: {"poe":"review","reviewer_skill":"senior-engineer",<br/>"id":"r1","content":"..."}
-    Ing->>DB: INSERT event_log
+    Ing->>DB: INSERT events
     Ing->>Orch: DagChanged signal
     Ing-->>FE: emit poe://event
 
@@ -322,7 +339,7 @@ sequenceDiagram
     Ing->>DB: UPDATE reviewer task session_id='B1', status='running'
 
     B-->>Ing: {"poe":"brief","content":"..."}
-    Ing->>DB: INSERT event_log
+    Ing->>DB: INSERT events
     Ing-->>FE: emit poe://event
 
     Note over B: Writes docs/review-r1.md directly using own tools
@@ -439,8 +456,10 @@ ReviewResult id=r-arch skill=architecture-analyst verdict=APPROVED_WITH_CONDITIO
 Agent A receives all results simultaneously and can reason across them before proceeding.
 
 The orchestrator tracks completion by comparing two sets:
-- **expected_ids**: review IDs from all `poe:review` events emitted before `poe:yield`
-- **answered_ids**: `review_id` values from reviewer tasks with `requesting_task_id = A.id` and `status = done` or `status = cancelled` (cancelled = watchdog exhausted)
+- **expected_ids**: review IDs from all `poe:review` events in the **current batch** — `events WHERE task_id = A.id AND event_type = 'poe:review' AND created_at > nodes.last_dispatch_at`. `last_dispatch_at` is written at SF-1 step 0; it is the durable anchor for "current round" scoping. See SF-3.
+- **answered_ids**: `review_id` values from reviewer tasks with `requesting_task_id = A.id`, `status IN ('done', 'cancelled')`, and `review_id IN expected_ids` (cancelled = watchdog exhausted)
+
+Scoping `answered_ids` to `expected_ids` is mandatory: without it, reviewer nodes from prior rework rounds accumulate in the query and cause `expected` to grow unboundedly, preventing the completion check from ever firing.
 
 When `answered_ids = expected_ids`, all reviews are accounted for — the requesting agent is resumed via SF-3 with all results, including any `verdict=FAILED` entries for watchdog-exhausted reviewers.
 
@@ -448,7 +467,7 @@ When `answered_ids = expected_ids`, all reviews are accounted for — the reques
 
 #### Key Invariants
 
-1. **poe:yield is unambiguous**: `poe:yield` always means waiting; `poe:done` always means complete. The ingester derives `yield_reason` from the last substantive `poe:` event before the yield (see SF-3 note) and stores it in `nodes.yield_reason`. The orchestrator reads that column directly when it wakes — no `event_log` join required.
+1. **poe:yield is unambiguous**: `poe:yield` always means waiting; `poe:done` always means complete. The ingester derives `yield_reason` from the last substantive `poe:` event before the yield (see SF-3 note) and stores it in `nodes.yield_reason`. The orchestrator reads that column directly when it wakes — no `events` join required.
 
 2. **Batch collection**: The orchestrator collects all `poe:review` events logged since the task last ran before dispatching reviewers. An agent that emits three `poe:review` events before `poe:yield` produces three reviewers, all dispatched in parallel.
 
@@ -582,7 +601,7 @@ Each round creates a new agent process (spawn → work → yield → terminate �
 
 #### Key Invariants
 
-1. **`poe:decision` before `poe:yield`**: The decision event is always logged before the yield arrives. The orchestrator reads `nodes.yield_reason` when it processes the yield — it does not need to query event_log.
+1. **`poe:decision` before `poe:yield`**: The decision event is always logged before the yield arrives. The orchestrator reads `nodes.yield_reason` when it processes the yield — it does not need to query events.
 
 2. **`resolve_decision` signals the orchestrator**: The Tauri command does NOT write to any process stdin. It updates `queue_items` and signals DagChanged. The orchestrator wakes and assembles the SF-4 continuation.
 
@@ -632,12 +651,12 @@ sequenceDiagram
     Note over A: Agent reads T+S+K bundle<br/>Interprets its task
 
     A-->>Ing: {"poe":"brief","content":"..."}
-    Ing->>DB: INSERT event_log
+    Ing->>DB: INSERT events
     Ing-->>FE: emit poe://event (activity feed: brief text)
 
     loop Agent execution
         A-->>Ing: {"poe":"step","name":"...","summary":"..."}
-        Ing->>DB: INSERT event_log
+        Ing->>DB: INSERT events
         Ing-->>FE: emit poe://event (activity feed: step milestone)
 
         opt Artifact produced
@@ -663,7 +682,7 @@ sequenceDiagram
     end
 
     A-->>Ing: {"poe":"done","summary":"..."}
-    Ing->>DB: INSERT event_log (poe:done)
+    Ing->>DB: INSERT events (poe:done)
     Ing->>DB: UPDATE nodes SET status='done'
     Ing->>Orch: DagChanged signal
     Ing-->>FE: emit poe://task-update (status: done)
@@ -1305,7 +1324,7 @@ sequenceDiagram
     Note over Orch: SF-1: dispatch with interactive mode<br/>protocol block in T+S+K bundle
 
     A-->>Ing: {"poe":"brief","content":"..."}
-    Ing->>DB: INSERT event_log
+    Ing->>DB: INSERT events
     Ing-->>FE: emit poe://event (activity feed: brief)
 
     A-->>Ing: {"poe":"chat","content":"What problem does this system solve?","id":"c1"}
@@ -1443,7 +1462,7 @@ sequenceDiagram
     Orch->>A: SF-1: spawn stream-json -p, write bundle to stdin
 
     A-->>Ing: {"poe":"brief","content":"..."}
-    Ing->>DB: INSERT event_log
+    Ing->>DB: INSERT events
     Ing-->>FE: emit poe://event (activity feed)
 
     A-->>Ing: {"poe":"advisor","content":"I've reviewed the constraints. Here's what's relevant...","id":"a1"}
@@ -1508,7 +1527,135 @@ The advisor emits `poe:done` when it has nothing more to offer or the human dism
 
 ## 4. Error & Recovery Flows
 
-*To be documented.*
+### 4.1 Agent Crash (Process Exits Without `poe:done`)
+
+*Trigger*: The agent process exits (result event received) but `nodes.status` is still `'running'` — `poe:done` was never processed.
+
+```
+1. Exit handler fires (orchestrator's stdout reader detects EOF / result event)
+2. Check nodes.status for the associated node:
+   - status = 'done'     → poe:done arrived and was processed before the exit handler; no action
+   - status = 'running'  → poe:done was never emitted; treat as crash
+3. DB-arbitrated retry claim (u7s.2):
+     UPDATE nodes SET status='pending', retry_count=retry_count+1
+       WHERE id=<task_id> AND status='running'
+   rows_changed = 0 → watchdog already handled it (race); stand down
+   rows_changed = 1 → this caller won
+4. UPDATE agents SET status='failed', ended_at=now() WHERE id=<agent_id>
+5. Signal orchestrator (DagChanged::NodeStatusChanged) — node is now pending
+6. Emit poe-agent-exited {agentId, taskId, projectId, success: false} to frontend
+7. Emit poe-ingester-warning {taskId, agentId, eventType: 'agent-crash', error: 'Process exited without poe:done'}
+8. Orchestrator wakes → SF-1 attempts re-dispatch:
+   - Attempt --resume <session_id> (SF-4) first — prior session may be continuable
+   - If SF-4 fails (session expired), fall back to fresh SF-1 spawn (full T+S+K bundle)
+```
+
+**Retry limit**: `nodes.retry_count` is incremented on each crash-reset. If `retry_count >= 3`, the orchestrator cancels the task instead of retrying, emits `poe-node-updated {status: 'cancelled'}`, and emits a `poe-ingester-warning` with `error: 'Task cancelled after max retries'`. The task is preserved in history with status `'cancelled'`.
+
+**Key invariant**: `u7s.2` (DB-arbitrated retry claim) prevents the watchdog timer and the exit handler from both resetting the same node.
+
+---
+
+### 4.2 SF-4 Resume Failure (Session Expired or cwd Mismatch)
+
+*Trigger*: `claude --resume <session_id>` returns an error before emitting the init event. Claude returns `"No conversation found with session ID: ..."` or similar.
+
+```
+1. Orchestrator spawns: claude --resume <session_id> --output-format stream-json -p
+2. Ingester reads stdout — no {"type":"system","subtype":"init",...} arrives within timeout (5s)
+   OR stdout contains an error message (no poe: events, result event shows subtype='error')
+3. Orchestrator detects resume failure
+4. Fall back to SF-1: fresh spawn with full T+S+K bundle (no --resume)
+   - Prior session context is lost; agent restarts the task from the beginning
+   - Log to events: {event_type: 'resume-failed', payload: {session_id, reason}}
+5. Emit poe-ingester-warning {taskId, agentId, eventType: 'resume-failed', error: '...'} to frontend
+```
+
+**Session ID handling on fallback**: the fresh SF-1 spawn writes a new `session_id` to `nodes.session_id` on init, overwriting the expired value. The old session_id is no longer referenced anywhere.
+
+**No retry limit for resume failures**: resume failure followed by successful SF-1 is a clean recovery, not a crash. `retry_count` is not incremented.
+
+---
+
+### 4.3 DB Write Failure (Ingester Error)
+
+*Trigger*: A SQLite write inside the ingester fails (constraint violation, lock timeout, disk full).
+
+```
+1. Ingester catches the error on the specific event write
+2. Log error to stderr / application log (not SQLite — the write failed)
+3. Emit poe-ingester-warning {taskId, agentId, eventType: <failed-event-type>, error: <message>}
+4. Continue processing subsequent events from the same agent stdout stream
+   ← The agent is unaffected; it has already emitted and moved on
+5. If the failed write was for poe:done or poe:yield (status-transition events):
+   → These are critical — retry once immediately
+   → If retry fails, mark the agent as failed (same as §4.1 crash path step 3 onwards)
+```
+
+**Non-critical events** (`poe:step`, `poe:brief`, `poe:knowledge`, `poe:artifact`): a single failed write is logged and skipped. The agent session continues. The activity feed may be missing one entry; this is acceptable.
+
+**Critical events** (`poe:done`, `poe:yield`, `poe:task`, `poe:edge`): these mutate the DAG. Failure here is treated as a crash (§4.1), because the orchestrator's state is now inconsistent with what the agent believes it wrote.
+
+---
+
+### 4.4 `poe:review-outcome` Missing (Reviewer Exits Without Verdict)
+
+*Trigger*: Reviewer agent emits `poe:done` without a preceding `poe:review-outcome`.
+
+```
+1. SF-2: reviewer task marked done
+2. Orchestrator reads nodes.verdict for the reviewer node: NULL
+3. Default: treat as verdict = 'BLOCKED'
+4. Emit poe-ingester-warning {taskId: reviewer_task_id, agentId, eventType: 'poe:review-outcome',
+   error: 'Reviewer completed without emitting poe:review-outcome — defaulting to BLOCKED'}
+5. Proceed with SF-4 resume as normal, including the BLOCKED verdict in the ReviewResult bundle:
+     ReviewResult id=<review_id> skill=<skill> verdict=BLOCKED
+     [no findings — reviewer did not produce a review artifact]
+```
+
+The requesting agent receives `verdict=BLOCKED` and should escalate via `poe:decision`. This is a reviewer skill bug; the orchestrator handles it gracefully without stalling.
+
+---
+
+### 4.5 `poe:skill` Produces Malformed Output (Skill-Author Failure)
+
+*Trigger*: The skill-author agent completes (SF-6 step 9) but the written skill file fails YAML frontmatter parsing when the orchestrator attempts to load it.
+
+```
+1. SF-6 step 9: poe:skill event received, file written to .poe/skills/{name}.md
+2. SF-6 step 12: orchestrator attempts to dispatch previously-blocked tasks
+3. load_skill({name}) fails: YAML parse error in frontmatter
+4. Orchestrator does NOT re-trigger SF-6 for the same skill (infinite loop prevention)
+5. Instead: mark the skill-author task as cancelled (status='cancelled', not retried)
+6. Emit poe-ingester-warning {taskId: skill_author_task_id, eventType: 'skill-load-failed',
+   error: 'Authored skill file is malformed — manual intervention required'}
+7. Blocked tasks remain pending with the depends_on edge to the (now cancelled) skill-author node
+   → db_find_ready_tasks will NOT find them (dependency not done)
+8. Frontend: poe-node-updated for skill-author (cancelled) and poe-ingester-warning visible
+   → Human must manually fix the skill file or cancel the blocked tasks and re-add them
+```
+
+**Recovery path for the human**: edit `.poe/skills/{name}.md` to fix the YAML frontmatter. The next DagChanged signal (from any source) will cause the orchestrator to re-evaluate the blocked tasks. Since the skill file now loads successfully, the tasks are dispatchable.
+
+---
+
+### 4.6 Phase Activation with No Bootstrap Skill
+
+*Trigger*: `activate_phase` or `advance_phase` is called, the phase has no tasks, and the `stage_type → skill` bootstrap mapping has no entry for this stage type (e.g. `execution` — which intentionally has no bootstrap).
+
+```
+1. maybe_bootstrap_phase runs: stage_type = 'execution' (or any non-bootstrappable type)
+2. No default task is created (by design for execution stages)
+3. Orchestrator wakes on DagChanged — finds zero pending tasks in the new phase
+4. Phase remains 'running' with zero tasks
+5. No error — this is expected for execution stages (tasks come from prior product-manager poe:task events)
+6. If this is NOT an execution stage (unexpected missing bootstrap entry):
+   → Log warning: 'Phase activated with stage_type={X} but no bootstrap skill mapping found'
+   → Emit poe-ingester-warning {error: 'Phase has no tasks and no bootstrap mapping for stage_type={X}'}
+   → Phase stalls visibly: running but 0 tasks. Human must manually add a task or edit the plan.
+```
+
+**Key distinction**: execution phases are intentionally taskless at activation (tasks arrive later via poe:task events from the planning phase). All other stage types should have a bootstrap mapping; a missing entry for a non-execution stage is a configuration error, not a design choice.
 
 ---
 

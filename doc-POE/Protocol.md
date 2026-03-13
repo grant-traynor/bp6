@@ -1,7 +1,7 @@
 # POE — Protocol Specification
 
 **Status**: Draft
-**Last updated**: 2026-03-12
+**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
 
 **Artifact classification**: This document serves as both:
 - `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), and the frontend update mechanism (§4).
@@ -15,113 +15,174 @@ This document specifies the four I/O contracts that Phase 2 is built around. Eve
 
 ## 1. SQLite Schema
 
-> **Note**: This section reflects the intended design schema. The actual poe2 implementation diverges in table and column names: `nodes` (not `tasks`), `events` (not `event_log`), `queue_items` (not `decisions`), and ISO text timestamps (not INTEGER). §5 is correct for the actual codebase. Do not use §1 as a migration guide against the live schema — treat it as the canonical design intent and refer to `poe2/src-tauri/src/dag_store/schema.rs` for the actual DDL.
-
-All durable state lives in `{project}/.poe/poe.db`. Phase 2 creates this schema on first run. Phase 1's `dag/mod.rs` NodeType/EdgeType enums are **not extended** — they are superseded by this schema and the v1 lifecycle module is retired.
+All durable state lives in `{project}/.poe/poe.db`. All timestamps are ISO 8601 text (`TEXT NOT NULL`). WAL mode and foreign keys are always enabled.
 
 ```sql
-CREATE TABLE projects (
-  id          TEXT    PRIMARY KEY,
-  name        TEXT    NOT NULL,
-  path        TEXT    NOT NULL,
-  created_at  INTEGER NOT NULL
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+
+CREATE TABLE IF NOT EXISTS projects (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    path            TEXT NOT NULL UNIQUE,
+    conops_ref      TEXT,           -- path to conops artifact, set after guardrails phase
+    active_phase_id TEXT,           -- currently active phase; NULL between gates
+    status          TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'paused'. Set to 'paused' by abort_project; back to 'active' on resume. Orchestrator excludes paused projects from dispatch.
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL
 );
 
-CREATE TABLE phases (
-  id          TEXT    PRIMARY KEY,
-  project_id  TEXT    NOT NULL REFERENCES projects(id),
-  name        TEXT    NOT NULL,
-  stage_type  TEXT    NOT NULL,  -- 'conops' | 'guardrails' | 'increment_planning' | 'execution' | 'rework' | 'retrospective' | 'onboarding'
-  status      TEXT    NOT NULL DEFAULT 'pending',  -- 'pending' | 'running' | 'gate' | 'complete'
-  pdca_state  TEXT    NOT NULL DEFAULT 'plan',     -- 'plan' | 'do' | 'check' | 'act'
-  position    INTEGER NOT NULL,
-  created_at  INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS phases (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id),
+    number          INTEGER NOT NULL,   -- 1-based ordering; advance_phase uses number+1
+    title           TEXT NOT NULL,
+    stage_type      TEXT NOT NULL DEFAULT 'execution', -- 'conops' | 'guardrails' | 'increment_planning' | 'execution' | 'plan_review' | 'rework' | 'validity_analysis' | 'retrospective' | 'onboarding'
+    status          TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'running' | 'gate' | 'complete'
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    UNIQUE(project_id, number)
 );
 
-CREATE TABLE tasks (
-  id          TEXT    PRIMARY KEY,
-  project_id  TEXT    NOT NULL REFERENCES projects(id),
-  phase_id    TEXT    REFERENCES phases(id),
-  parent_id   TEXT    REFERENCES tasks(id),
-  title       TEXT    NOT NULL,
-  description TEXT,
-  type        TEXT    NOT NULL DEFAULT 'task',    -- 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review' | 'advisor'
-  skill       TEXT,
-  status      TEXT    NOT NULL DEFAULT 'pending', -- 'pending' | 'running' | 'waiting' | 'done' | 'cancelled'
-  session_id   TEXT,        -- Claude --resume handle, stored on spawn, used on restart
-  yield_reason TEXT,        -- 'review' | 'decision' | 'chat' | 'advisor' | NULL. Set when status=waiting. Used by recovery to determine SF-4 path without event_log join.
-  review_id    TEXT,        -- populated for reviewer tasks only: the 'id' from the originating poe:review event. Enables ID-based completion tracking.
-  retry_count  INTEGER NOT NULL DEFAULT 0,  -- reviewer tasks only: watchdog retry counter. Max configurable, default 2.
-  skill_modes  TEXT,        -- JSON array of modes declared in skill frontmatter, e.g. '["autonomous","interactive"]'. Populated at SF-1 dispatch time. Used by frontend mode guard in task detail panel.
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
+-- WBS nodes: tasks, reviewers, skill-author nodes, and container nodes (epic/feature).
+-- Reviewer nodes: phase_id=NULL, requesting_task_id set, review_id set.
+-- Skill-author nodes: phase_id=NULL, skill_id='skill-author'.
+CREATE TABLE IF NOT EXISTS nodes (
+    id                  TEXT PRIMARY KEY,
+    project_id          TEXT NOT NULL REFERENCES projects(id),
+    phase_id            TEXT REFERENCES phases(id),
+    parent_id           TEXT REFERENCES nodes(id),
+    node_type           TEXT NOT NULL,  -- 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review' | 'advisor' | 'epic' | 'feature'
+    title               TEXT NOT NULL,
+    description         TEXT,
+    status              TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'running' | 'waiting' | 'resuming' | 'done' | 'cancelled'
+    skill_id            TEXT,
+    assignee            TEXT,
+    yield_reason        TEXT,   -- 'review' | 'decision' | 'chat' | 'advisor' | NULL. Set when status='waiting'. Used by SF-4 routing without events join.
+    session_id          TEXT,   -- Claude --resume handle. Written on init event. Overwritten on each SF-4 continuation.
+    requesting_task_id  TEXT REFERENCES nodes(id),  -- reviewer nodes only: back-reference to the requesting task
+    review_id           TEXT,   -- reviewer nodes only: the 'id' field from the originating poe:review event. Enables batch-scoped completion tracking.
+    retry_count         INTEGER NOT NULL DEFAULT 0, -- reviewer nodes only: watchdog retry counter. Default max: 2.
+    sort_order          INTEGER,
+    skill_modes         TEXT,   -- JSON array from skill frontmatter, e.g. '["autonomous","interactive"]'. Set at SF-1 dispatch. Read by frontend to enforce the node-scoped conversation mode guard: if skill_modes = '["autonomous"]' only, the "Open conversation" button is disabled (UX-Brief §Node-Scoped Conversation).
+    verdict             TEXT,   -- reviewer nodes only: 'APPROVED' | 'APPROVED_WITH_CONDITIONS' | 'BLOCKED' | 'FAILED'. Set by poe:review-outcome or watchdog.
+    last_dispatch_at    TEXT,   -- ISO 8601 timestamp set at SF-1 step 0 (the atomic pending→running claim). Used by SF-3 to scope poe:review event collection to the current review round: only events with created_at > last_dispatch_at are included, excluding reviewer nodes from prior rework rounds.
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
 );
 
-CREATE TABLE edges (
-  from_id  TEXT NOT NULL REFERENCES tasks(id),
-  to_id    TEXT NOT NULL REFERENCES tasks(id),
-  PRIMARY KEY (from_id, to_id)
+CREATE INDEX IF NOT EXISTS idx_nodes_project   ON nodes(project_id);
+CREATE INDEX IF NOT EXISTS idx_nodes_phase     ON nodes(phase_id);
+CREATE INDEX IF NOT EXISTS idx_nodes_parent    ON nodes(parent_id);
+CREATE INDEX IF NOT EXISTS idx_nodes_status    ON nodes(status);
+CREATE INDEX IF NOT EXISTS idx_nodes_requesting_task_id ON nodes(requesting_task_id);
+
+CREATE TABLE IF NOT EXISTS edges (
+    id          TEXT PRIMARY KEY,
+    from_id     TEXT NOT NULL REFERENCES nodes(id),
+    to_id       TEXT NOT NULL REFERENCES nodes(id),
+    edge_type   TEXT NOT NULL DEFAULT 'depends_on',
+    created_at  TEXT NOT NULL,
+    UNIQUE(from_id, to_id, edge_type)
 );
 
--- Append-only. Never update or delete rows. Every poe: event lands here.
-CREATE TABLE event_log (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id     TEXT    NOT NULL REFERENCES tasks(id),
-  event_type  TEXT    NOT NULL,  -- 'poe:brief' | 'poe:step' | 'poe:decision' | 'poe:artifact' | 'poe:knowledge' | 'poe:done' | ...
-  payload     TEXT    NOT NULL,  -- full original JSON line
-  created_at  INTEGER NOT NULL
+CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_id);
+CREATE INDEX IF NOT EXISTS idx_edges_to   ON edges(to_id);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    id                  TEXT PRIMARY KEY,
+    project_id          TEXT NOT NULL REFERENCES projects(id),
+    phase_id            TEXT REFERENCES phases(id),
+    artifact_type       TEXT NOT NULL,  -- 'conops' | 'must-nots' | 'phase-plan' | 'plan-review' | ...
+    filename            TEXT NOT NULL,  -- e.g. 'must-nots.md'. Relative to project docs/ dir.
+    produced_by_stage   TEXT,           -- stage_type that produced this artifact
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    UNIQUE(project_id, filename)
 );
 
-CREATE TABLE decisions (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  task_id     TEXT    NOT NULL REFERENCES tasks(id),
-  question    TEXT    NOT NULL,
-  options     TEXT,              -- JSON array of {id, label, description?} objects, null if agent provided no options
-  resolution  TEXT,              -- null until human resolves
-  created_at  INTEGER NOT NULL,
-  resolved_at INTEGER
+CREATE TABLE IF NOT EXISTS knowledge (
+    id              TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL REFERENCES projects(id),
+    key             TEXT NOT NULL,
+    value           TEXT NOT NULL,
+    source          TEXT,           -- free-text provenance (task id, agent, or 'human')
+    supersedes_id   TEXT REFERENCES knowledge(id),
+    created_at      TEXT NOT NULL
 );
 
-CREATE TABLE chat_turns (
-  id           TEXT    PRIMARY KEY,
-  task_id      TEXT    NOT NULL REFERENCES tasks(id),
-  content      TEXT    NOT NULL,   -- agent's message or question during co-authoring session
-  response     TEXT,               -- null until human responds via respond_to_chat
-  created_at   TEXT    NOT NULL,
-  responded_at TEXT
+CREATE INDEX IF NOT EXISTS idx_knowledge_project ON knowledge(project_id);
+CREATE INDEX IF NOT EXISTS idx_knowledge_key     ON knowledge(project_id, key);
+
+-- Append-only. Never update or delete rows. Every poe: event lands here in full.
+CREATE TABLE IF NOT EXISTS events (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id),
+    agent_id    TEXT,       -- agents.id, if the event came from a managed agent
+    task_id     TEXT,       -- nodes.id the event belongs to
+    event_type  TEXT NOT NULL,  -- 'poe:brief' | 'poe:step' | 'poe:decision' | 'poe:artifact' | 'poe:done' | ...
+    payload     TEXT NOT NULL,  -- full original JSON line
+    created_at  TEXT NOT NULL
 );
 
-CREATE TABLE advisor_turns (
-  id           TEXT    PRIMARY KEY,
-  task_id      TEXT    NOT NULL REFERENCES tasks(id),
-  content      TEXT    NOT NULL,   -- advisor agent's message or question
-  response     TEXT,               -- null until human responds via respond_to_advisor
-  created_at   TEXT    NOT NULL,
-  responded_at TEXT
-);
--- advisor_turns is structurally identical to chat_turns but routes to Pane 3 (advisor panel),
--- not the Artifact Viewer. Separation keeps routing unambiguous at the ingester level.
+CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id);
+CREATE INDEX IF NOT EXISTS idx_events_task    ON events(task_id);
 
-CREATE TABLE artifacts (
-  id                TEXT    PRIMARY KEY,
-  project_id        TEXT    NOT NULL REFERENCES projects(id),
-  name              TEXT    NOT NULL,  -- e.g. 'conops.md'
-  artifact_type     TEXT    NOT NULL,  -- e.g. 'conops' | 'architecture-constraints' | 'phase-plan'
-  path              TEXT    NOT NULL,  -- relative to project dir, e.g. 'docs/conops.md'
-  producing_task_id TEXT    REFERENCES tasks(id),
-  created_at        INTEGER NOT NULL,
-  updated_at        INTEGER NOT NULL
+-- Live agent processes. One row per spawn. status='running' until the process exits.
+-- db_count_running_agents queries this table. Ghost-agent recovery sweeps it against AgentMap.
+CREATE TABLE IF NOT EXISTS agents (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id),
+    skill_id    TEXT NOT NULL,
+    task_id     TEXT NOT NULL REFERENCES nodes(id),
+    status      TEXT NOT NULL DEFAULT 'running',  -- 'running' | 'done' | 'failed'
+    session_id  TEXT,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT
 );
 
-CREATE TABLE knowledge (
-  id             TEXT    PRIMARY KEY,
-  project_id     TEXT    NOT NULL REFERENCES projects(id),
-  key            TEXT    NOT NULL,   -- human-readable slug, unique per project
-  content        TEXT    NOT NULL,
-  source_task_id TEXT    REFERENCES tasks(id),
-  supersedes_id  TEXT    REFERENCES knowledge(id),
-  created_at     INTEGER NOT NULL
+CREATE INDEX IF NOT EXISTS idx_agents_project ON agents(project_id);
+CREATE INDEX IF NOT EXISTS idx_agents_task    ON agents(task_id);
+CREATE INDEX IF NOT EXISTS idx_agents_status  ON agents(status);
+
+-- Human decision queue. One row per poe:decision event.
+CREATE TABLE IF NOT EXISTS queue_items (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id),
+    agent_id    TEXT,
+    task_id     TEXT,       -- nodes.id that raised this decision
+    question    TEXT NOT NULL,
+    options     TEXT,       -- JSON array of candidate options, null if open-ended
+    resolution  TEXT,       -- null until human resolves via invoke("resolve_decision")
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT
 );
+
+CREATE INDEX IF NOT EXISTS idx_queue_project    ON queue_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_queue_unresolved ON queue_items(project_id, resolved_at);
+
+CREATE TABLE IF NOT EXISTS chat_turns (
+    id           TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL REFERENCES nodes(id),
+    content      TEXT NOT NULL,   -- agent's message during collaborative session
+    response     TEXT,            -- null until human responds via respond_to_chat
+    created_at   TEXT NOT NULL,
+    responded_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_turns_task ON chat_turns(task_id);
+
+-- Structurally identical to chat_turns but routes to Pane 3 (advisor panel), not Artifact Viewer.
+CREATE TABLE IF NOT EXISTS advisor_turns (
+    id           TEXT PRIMARY KEY,
+    task_id      TEXT NOT NULL REFERENCES nodes(id),
+    content      TEXT NOT NULL,
+    response     TEXT,
+    created_at   TEXT NOT NULL,
+    responded_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_advisor_turns_task ON advisor_turns(task_id);
 ```
 
 ---
@@ -182,7 +243,9 @@ One event per line. No multi-line JSON.
 // Write a knowledge register entry. key must be unique per project;
 // supersedes retires the prior entry (not deleted, linked).
 {"poe": "knowledge", "key": "target-platform", "content": "...", "supersedes": "<prior-id>"}
-// supersedes is optional
+// supersedes is optional.
+// Field mapping: "content" on the wire → "value" column in the knowledge table. The ingester
+// performs this translation on INSERT. Callers emit "content"; the DB stores "value".
 
 // Write a reusable skill pattern to {project}/.poe/skills/<name>.md.
 // Closes the self-improvement loop: agents that discover a useful pattern
@@ -272,7 +335,7 @@ One event per line. No multi-line JSON.
 
 ### Ingester responsibilities per event type
 
-| Event | DAG write | event_log | Tauri emit |
+| Event | DAG write | events | Tauri emit |
 |---|---|---|---|
 | `poe:task` | INSERT nodes + edges | yes | `poe-task-created` |
 | `poe:task:update` | UPDATE nodes | yes | `poe-node-updated` |
@@ -591,7 +654,7 @@ The skill file for `{skill-id}` is resolved as follows (first match wins):
 
 If no file is found, abort the task with an error — do not spawn the agent with no skill.
 
-> **Skill-load failure (bp6-17k.17)**: When the skill file cannot be resolved through the priority chain, the orchestrator sets `tasks.status = 'cancelled'` and logs an error to `event_log`. The task does **not** retry. Recovery requires human intervention: either add the missing skill file (which makes the task eligible for re-dispatch on the next scheduling loop pass) or cancel and replace the task with a corrected one.
+> **Skill-load failure (bp6-17k.17)**: When the skill file cannot be resolved through the priority chain, the orchestrator sets the node status to `'cancelled'` and logs an error to `events`. The task does **not** retry. Recovery requires human intervention: either add the missing skill file (which makes the task eligible for re-dispatch on the next scheduling loop pass) or cancel and replace the task with a corrected one.
 
 The **mode protocol block** is prepended to the bundle before the `# Skill` section — not inserted into the skill file itself. The skill file is read-only from the orchestrator's perspective; it is never modified at runtime.
 
@@ -632,6 +695,7 @@ All events use `app_handle.emit(event_name, payload)`. Event names use hyphen no
 | `poe-agent-exited` | `{agentId, taskId, projectId, success}` | Agent process exited; `success=false` if poe:done was never received |
 | `poe-phase-update` | `{phaseId, status, projectId}` | Update phase lifecycle state in Phase × Scope Matrix header |
 | `poe-ingester-warning` | `{taskId, agentId, eventType, error}` | A structured poe: event (`poe:task`, `poe:edge`, `poe:decision`, `poe:skill`) failed to process; the originating agent task was unaffected. Frontend may surface in activity feed. |
+| `poe-project-opened` | `{projectId, isNew: bool}` | Emitted after `open_project` completes DB initialisation and recovery. `isNew=true` for first-time opens; `false` for existing projects. Frontend calls `invoke("get_project_state", {project_id})` in response to hydrate nodes, phases, edges, artifacts, and open queue items. |
 
 ### Decision resolution (Frontend → Rust)
 
@@ -700,12 +764,59 @@ invoke("activate_phase", {project_id, phase_id: first_phase_id})
 
 The orchestrator wakes, finds pending tasks in the now-active phase with no unmet dependencies, and dispatches via SF-1. See Flows.md SF-5.
 
+### Phase Gate Commands (Frontend → Rust)
+
+These three commands handle the three gate outcomes described in Flows.md §3.7. All require `project_id` so the handler can emit `poe-phase-update` events.
+
+```
+invoke("advance_phase", {project_id: String, phase_id: String})
+```
+Rust handler:
+1. `UPDATE phases SET status='complete' WHERE id = phase_id`
+2. Finds the next phase (lowest `number` > current with `status='pending'`). Updates it: `status='running'`.
+3. Runs `maybe_bootstrap_phase` on the next phase (creates default task if none exist — see SF-5 §2b).
+4. Signals orchestrator (`DagChanged::DagStructureChanged`).
+5. Emits `poe-phase-update {phaseId: phase_id, status: 'complete', projectId}` and `poe-phase-update {phaseId: next_phase_id, status: 'running', projectId}`.
+
+```
+invoke("revise_phase", {project_id: String, phase_id: String, task_ids: Vec<String>})
+```
+Rust handler:
+1. `UPDATE nodes SET status='pending' WHERE id IN (task_ids)` — resets only the specified tasks.
+2. `UPDATE phases SET status='running' WHERE id = phase_id`
+3. Signals orchestrator (`DagChanged`).
+4. Emits `poe-phase-update {phaseId, status: 'running', projectId}` + `poe-node-updated` for each reset task.
+
+```
+invoke("rerun_phase", {project_id: String, phase_id: String})
+```
+Rust handler:
+1. `UPDATE nodes SET status='pending' WHERE phase_id = phase_id AND status = 'done'` — resets all done tasks.
+2. `UPDATE phases SET status='running' WHERE id = phase_id`
+3. Signals orchestrator (`DagChanged`).
+4. Emits `poe-phase-update {phaseId, status: 'running', projectId}` + `poe-node-updated` for each reset task.
+
+**Note**: `revise_phase` and `rerun_phase` do not delete artifacts. When the reset tasks re-run they produce new artifact versions (UPSERT). Prior versions remain accessible via artifact history.
+
+### Phase Pause and Abort (Frontend → Rust)
+
+```
+invoke("pause_stage", {project_id: String, phase_id: String})
+invoke("resume_stage", {project_id: String, phase_id: String})
+invoke("abort_project", {project_id: String})
+invoke("resume_project", {project_id: String})
+```
+
+See Flows.md §3.5 for the full sequences. `pause_stage` and `abort_project` send SIGTERM to running agents and reset their nodes to `pending`. The orchestrator does NOT emit `DagChanged` after a pause — no further dispatch until the human resumes. `pause_stage` sets `phases.status='paused'`; `abort_project` sets `projects.status='paused'`.
+
+**Schema note**: `phases.status` valid values: `'pending' | 'running' | 'gate' | 'complete' | 'paused'`. `projects.status` valid values: `'active' | 'paused'`.
+
 ### User-level knowledge promotion
 
 `promote_knowledge(id: String)` Rust handler:
 1. Reads the knowledge entry from SQLite by id.
 2. Writes `~/.poe/knowledge/{key}.md` — one file per entry, content is the raw `content` field.
-3. Logs the promotion action to `event_log` with `event_type = 'knowledge:promoted'`.
+3. Logs the promotion action to `events` with `event_type = 'knowledge:promoted'`.
 4. Sets a `promoted = 1` flag on the knowledge row (already stubbed).
 
 **Bundle assembly merge**: at T+S+K assembly time, the orchestrator merges user-level knowledge from `~/.poe/knowledge/*.md` with the project's SQLite knowledge entries. Project-level entries take precedence on key collision (same `key` filename stem). User-level entries are injected as additional `## {key}` sections in the `# Knowledge Register` block, after project entries.
@@ -731,6 +842,8 @@ Every orchestrated agent runs via:
 ```
 claude --output-format stream-json --verbose -p --dangerously-skip-permissions
 ```
+
+`--verbose` causes Claude to emit additional stream-json metadata objects (token usage, stop reasons, timing). The ingester ignores these extra fields — they do not affect event processing. The flag is included because it enables monitoring and cost tracking without any code change; the overhead is negligible.
 
 Stdin receives the T+S+K input bundle; stdin is closed (EOF) immediately after writing. Claude processes the bundle, emits a stream of JSON objects to stdout, and exits cleanly.
 
@@ -875,9 +988,9 @@ See §3 for the **mode protocol injection** pattern, which allows skills to be i
 
 ---
 
-## 6. Phase 3 Tauri Command Surface
+## 6. Tauri Command Surface (Full Catalogue)
 
-New Tauri commands required for Phase 3. All work in `poe2/src-tauri/src/`. Commands shared across beads are noted.
+All Tauri commands exposed by the backend. Authoritative interface spec — not phase-specific planning notes. All implementations live in `poe2/src-tauri/src/`.
 
 ### Phase / Plan Composer (7ct.1, 7ct.3)
 
@@ -890,7 +1003,7 @@ create_phase(project_id: String, name: String, stage_type: String, number: i64) 
 
 **Stage type catalogue** — static constant in Rust + TypeScript (not a SQLite table):
 ```
-conops | guardrails | increment_planning | execution | pm_review
+conops | guardrails | increment_planning | execution | plan_review
 rework | validity_analysis | retrospective | onboarding
 ```
 Each stage type has a static list of consumed and produced artifact types. The plan composer validates connections against this catalogue at the UI layer.

@@ -2,7 +2,7 @@
 
 
 **Status**: Draft
-**Last updated**: 2026-03-13
+**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
 
 > **Proof of concept**: The design session that produced this document and its companions (Architecture.md, UX-Brief.md) ran the exact lifecycle POE is designed to orchestrate — as a conversation. Concept → Guardrails → Architecture → UX Brief, collaboratively, with a human seeding the idea and an AI asking the questions. The output is the brief for the implementation. If POE can produce output of equal or better quality when it orchestrates this process through specialist agents, the concept is proven.
 
@@ -207,10 +207,16 @@ The protocol is fundamentally **CRUD against the project database**. The DAG is 
 |---|---|
 | `poe:brief` | Agent's interpretation of its task — written before execution begins, non-blocking |
 | `poe:step` | Named progress milestone during execution |
-| `poe:decision` | Raise a question for the human queue, with candidate options if available |
+| `poe:decision` | Raise a question for the human queue, with candidate options if available. For autonomous agents only — routes to the Decision Queue. |
+| `poe:chat` | Collaborative turn in a co-authoring session. For interactive agents only — routes to the Artifact Viewer chat panel, not the Decision Queue. The agent drives the conversation to build an artifact together with the human. See Architecture.md §Two Human Interaction Models. |
+| `poe:advisor` | Advisor turn in a Queue Advisor session. Routes to Pane 3 advisor panel. Structurally identical to poe:chat but for a different surface and purpose (decision research, not artifact co-authoring). |
 | `poe:review-outcome` | Reviewer signals its verdict before yielding: APPROVED, APPROVED_WITH_CONDITIONS, BLOCKED, or FAILED. Orchestrator uses this to build the ReviewResult bundle for the resumed task. Missing verdict defaults to BLOCKED. |
-| `poe:yield` | Yield control while awaiting a review or decision response. Task status → waiting. |
+| `poe:yield` | Yield control while awaiting a review, decision, chat, or advisor response. Task status → waiting. |
 | `poe:done` | Signal task completion (all work done). |
+
+### Skill Self-Healing
+
+When the orchestrator cannot load a required skill at dispatch time, it does not cancel the task. Instead it auto-creates a `skill-author` task as a prerequisite, wires it as a dependency of the blocked task, and dispatches it. The `skill-author` agent produces a project-local skill file via `poe:skill`, after which the originally blocked task is dispatched normally. This is the system's self-repair mechanism — any missing skill in the library can be synthesised at runtime without human intervention. See Architecture.md §Skill System for the full self-healing loop.
 
 ### The Living DAG
 

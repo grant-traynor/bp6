@@ -1,7 +1,7 @@
 # POE — UX Design Brief
 
 **Status**: Draft
-**Last updated**: 2026-03-08
+**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
 
 ---
 
@@ -136,12 +136,17 @@ A live, structured stream of agent events across the selected project — not ra
 - **Auto-scroll**: the feed scrolls to the latest entry on every new event.
 - **Purpose**: operator reassurance that the system is alive and making progress. The primary liveness signal during long agent runs (e.g. a task running for 10+ minutes should show poe:step entries throughout, not silence).
 
-Each entry shows:
-- Timestamp (HH:MM:SS)
-- Task ID (WBS ancestry label on hover / secondary line)
-- Event type badge (colour-coded: brief = blue, step = neutral, agent-started = purple, agent-exited = slate/red, task-done = emerald)
-- Content (where applicable: step name or brief text)
-- Model override badge, if the skill declares one — omitted when the skill uses the default
+Each entry shows the following fields. All fields are **mandatory** — missing any one of them makes the feed opaque to the human:
+
+| Field | Content | Notes |
+|---|---|---|
+| **Timestamp** | HH:MM:SS | Local time |
+| **Skill name** | The `skill_id` of the agent that emitted this event | e.g. `must-not-analyst`, `senior-engineer`. Required — without it, the human cannot tell which kind of agent is acting |
+| **Task title** | Short title of the WBS node this agent is working on | e.g. `Develop Guardrails`. Required — without it, the human cannot tell *what* the agent is doing |
+| **Event type badge** | Colour-coded category (brief = blue, step = neutral, agent-started = purple, agent-exited = slate/red, task-done = emerald) | |
+| **Content** | Step name or brief text, where applicable | Omitted for agent-start / agent-exit entries |
+| **WBS ancestry** | Parent feature → epic → phase (secondary line or hover) | Provides the "why" chain |
+| **Model badge** | Model override if skill declares one | Omitted when skill uses default |
 
 Clicking an entry opens the **agent session handover** — an xterm.js panel that resumes the agent's Claude session (`claude --resume <session_id>`) in a PTY, bridged to the browser via WebSocket. The human can read the raw conversation, ask follow-up questions, or assist an agent that raised a decision. Closing the panel does not terminate the agent's session — the session_id persists in SQLite.
 
@@ -149,28 +154,24 @@ Clicking an entry opens the **agent session handover** — an xterm.js panel tha
 
 | Tauri event | Feed entry type | Content |
 |---|---|---|
-| `poe-agent-activity` (type: `brief`) | `poe:brief` | Agent's interpretation of its task — emitted at run start |
-| `poe-agent-activity` (type: `step`) | `poe:step` | Named progress milestone — primary liveness signal during long runs |
-| `poe-agent-started` | `agent-start` | `Agent started · {skillId}` with model badge |
-| `poe-agent-exited` | `agent-exit` | `Agent exited (success)` or `Agent exited (failed)` |
-| `poe-task-done` | `poe-task-done` | `Task done: {title}` |
-| `poe-artifact-created` | `poe:artifact` | `Artifact: {filename}` |
+| `poe-agent-activity` (type: `brief`) | `poe:brief` | `{skill_name} · {task_title}` — agent's interpretation of its task |
+| `poe-agent-activity` (type: `step`) | `poe:step` | `{skill_name} · {task_title} — {step_name}` — primary liveness signal |
+| `poe-agent-started` | `agent-start` | `{skill_name} started · {task_title}` with model badge |
+| `poe-agent-exited` | `agent-exit` | `{skill_name} exited (success/failed) · {task_title}` |
+| `poe-task-done` | `poe-task-done` | `Task done: {task_title} ({skill_name})` |
+| `poe-artifact-created` | `poe:artifact` | `Artifact: {filename} — {skill_name}` |
 | `poe-knowledge-created` | `poe:knowledge` | `Knowledge: {key}` |
 
-The `poe-agent-activity` event is emitted directly by the `EventIngester` for each `poe:step` and `poe:brief` line the agent writes to stdout. This ensures the feed updates in real time without polling — the frontend receives entries as soon as the agent emits them. Root cause of u7s.6: before this fix, `poe:step` and `poe:brief` were logged to the DB but no Tauri event was emitted, leaving the frontend blind during long runs.
+The `poe-agent-activity` event is emitted directly by the `EventIngester` for each `poe:step` and `poe:brief` line the agent writes to stdout. This ensures the feed updates in real time without polling — the frontend receives entries as soon as the agent emits them.
 
-**Activity feed entry types** from `poe:` events (legacy reference):
+**Yield entries**: `poe:yield` must produce an activity feed entry. Without it, the human sees a task go from `running` to `waiting` with no explanation.
 
-| Event | Feed entry |
+| yield_reason | Feed entry text |
 |---|---|
-| `poe:brief` | Agent interpretation of its task |
-| `poe:step` | Named progress milestone |
-| `poe:artifact` | Artifact produced: `{name}` |
-| `poe:yield` (after `poe:review`) | Yielded — awaiting review from `{reviewer_skill}` |
-| `poe:yield` (after `poe:decision`) | Yielded — awaiting human decision |
-| `poe:done` | Task complete |
-
-`poe:yield` must produce an activity feed entry. Without it, the human sees a task go from `running` to `waiting` with no explanation. The feed entry closes the glass-box gap.
+| `review` | `{skill_name} · {task_title} — Yielded, awaiting review from {reviewer_skill}` |
+| `decision` | `{skill_name} · {task_title} — Yielded, awaiting human decision` |
+| `chat` | `{skill_name} · {task_title} — Awaiting your response` |
+| `advisor` | `{skill_name} · {task_title} — Advisor session active` |
 
 **Skill-author events in the activity feed**:
 
@@ -194,6 +195,10 @@ The activity feed is the glass box. It answers: *is everything running as expect
 ### 2c. Concurrency Indicator
 
 Visible within the project header: `● 5 / 5 agents` (running / limit). Clicking opens concurrency settings. The global indicator lives in the global bar.
+
+**Data source**: the running count is `SELECT COUNT(*) FROM agents WHERE project_id=? AND status='running'`. The limit comes from the project's configured concurrency setting. The frontend receives updates via `poe-agent-started` and `poe-agent-exited` Tauri events — it increments/decrements the displayed count on each event rather than re-querying. On initial project load, the count is hydrated from the full state snapshot.
+
+**Correctness requirement**: the count must reflect live processes only. Ghost agent rows (processes that died without cleanup) inflate the count and suppress task dispatch. Ghost-agent recovery at project-open time (Architecture.md §Recovery) keeps the `agents` table clean. The indicator is only trustworthy if ghost recovery runs before it is first displayed.
 
 ---
 
