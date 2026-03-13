@@ -41,6 +41,12 @@ pub struct PoeAgentActivity {
     #[serde(rename = "type")]
     pub activity_type: String,
     pub content: String,
+    /// bp6-7r2.8: skill name for the task — allows the frontend to label which
+    /// agent is speaking in a multi-agent activity feed.
+    pub skill_id: String,
+    /// bp6-7r2.8: human-readable task title — used as the subtitle in the feed
+    /// row so the operator knows which task the agent is working on.
+    pub task_title: String,
 }
 
 // ── poe: event payloads (Protocol.md §2 wire format) ─────────────────────────
@@ -331,6 +337,7 @@ fn handle_task(
         requesting_task_id: None,
         review_id: None,
         retry_count: None,
+        requires_manual_verification: None,
     };
 
     let mut pending_events: Vec<(String, serde_json::Value)> = Vec::new();
@@ -914,11 +921,23 @@ fn handle_log_only(
                     .map(|s| s.trim().to_string())
             })
             .unwrap_or_default();
+        // bp6-7r2.8: look up skill_id and task title from the nodes table so the
+        // frontend can label which agent is speaking without polling the DB.
+        let (skill_id, task_title) = with_project_conn(registry, project_id, |conn| {
+            let node = dag_store::db_get_node(conn, task_id)?;
+            Ok((
+                node.skill_id.unwrap_or_else(|| "unknown".to_owned()),
+                node.title,
+            ))
+        })
+        .unwrap_or_else(|_| ("unknown".to_owned(), task_id.to_owned()));
         let activity = PoeAgentActivity {
             task_id: task_id.to_string(),
             agent_id: agent_id.to_string(),
             activity_type: kind.to_string(),
             content,
+            skill_id,
+            task_title,
         };
         emit_tauri_event(sink, "poe-agent-activity", &activity);
     }

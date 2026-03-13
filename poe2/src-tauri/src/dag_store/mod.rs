@@ -87,6 +87,10 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
     // u7s.4: verdict column stores poe:review-outcome verdict on reviewer nodes.
     apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN verdict TEXT");
 
+    // bp6-7r2.12: flag tasks that require live human verification (e.g. animation smoke tests).
+    // These nodes are excluded from automated agent dispatch by db_find_ready_tasks.
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN requires_manual_verification INTEGER NOT NULL DEFAULT 0");
+
     // Migrate: create advisor_turns table for existing databases
     apply_migration(&conn,
         "CREATE TABLE IF NOT EXISTS advisor_turns (
@@ -177,14 +181,15 @@ pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node
         .map(|s| s.to_string())
         .unwrap_or_else(|| "pending".to_owned());
     let retry_count = input.retry_count.unwrap_or(0);
+    let requires_manual = input.requires_manual_verification.unwrap_or(false) as i64;
     conn.execute(
-        "INSERT INTO nodes (id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, requesting_task_id, review_id, retry_count, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        "INSERT INTO nodes (id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, requesting_task_id, review_id, retry_count, requires_manual_verification, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         rusqlite::params![
             id, input.project_id, input.phase_id, input.parent_id,
             input.node_type.to_string(), input.title, input.description,
             status, input.skill_id, input.requesting_task_id, input.review_id,
-            retry_count, now, now
+            retry_count, requires_manual, now, now
         ],
     )
     .context("Failed to insert node")?;
@@ -193,7 +198,7 @@ pub fn db_create_node(conn: &Connection, input: &CreateNodeInput) -> Result<Node
 
 pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
     conn.query_row(
-        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, verdict, created_at, updated_at
+        "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, verdict, requires_manual_verification, created_at, updated_at
          FROM nodes WHERE id = ?1",
         [node_id],
         |row| {
@@ -216,8 +221,9 @@ pub fn db_get_node(conn: &Connection, node_id: &str) -> Result<Node> {
                 sort_order: row.get(15)?,
                 skill_modes: row.get(16)?,
                 verdict: row.get(17)?,
-                created_at: row.get(18)?,
-                updated_at: row.get(19)?,
+                requires_manual_verification: row.get::<_, i64>(18)? != 0,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
             })
         },
     )
@@ -271,7 +277,7 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
     let mut rows = Vec::new();
     if let Some(pid) = phase_id {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, verdict, created_at, updated_at
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, verdict, requires_manual_verification, created_at, updated_at
              FROM nodes WHERE project_id = ?1 AND phase_id = ?2 ORDER BY COALESCE(sort_order, 999999), created_at"
         )?;
         for row in stmt.query_map(rusqlite::params![project_id, pid], |row| {
@@ -283,22 +289,25 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
                 row.get::<_,Option<String>>(13)?, row.get::<_,i64>(14)?,
                 row.get::<_,Option<i64>>(15)?, row.get::<_,Option<String>>(16)?,
                 row.get::<_,Option<String>>(17)?,
-                row.get::<_,String>(18)?, row.get::<_,String>(19)?))
+                row.get::<_,i64>(18)?,
+                row.get::<_,String>(19)?, row.get::<_,String>(20)?))
         })? {
             let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
                  yield_reason, session_id, requesting_task_id, review_id, retry_count,
-                 sort_order, skill_modes, verdict, cat, uat) = row?;
+                 sort_order, skill_modes, verdict, requires_manual_raw, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
                 yield_reason, session_id, requesting_task_id, review_id, retry_count,
-                sort_order, skill_modes, verdict, created_at: cat, updated_at: uat,
+                sort_order, skill_modes, verdict,
+                requires_manual_verification: requires_manual_raw != 0,
+                created_at: cat, updated_at: uat,
             });
         }
     } else {
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, verdict, created_at, updated_at
+            "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status, skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id, retry_count, sort_order, skill_modes, verdict, requires_manual_verification, created_at, updated_at
              FROM nodes WHERE project_id = ?1 ORDER BY COALESCE(sort_order, 999999), created_at"
         )?;
         for row in stmt.query_map([project_id], |row| {
@@ -310,17 +319,20 @@ pub fn db_list_nodes(conn: &Connection, project_id: &str, phase_id: Option<&str>
                 row.get::<_,Option<String>>(13)?, row.get::<_,i64>(14)?,
                 row.get::<_,Option<i64>>(15)?, row.get::<_,Option<String>>(16)?,
                 row.get::<_,Option<String>>(17)?,
-                row.get::<_,String>(18)?, row.get::<_,String>(19)?))
+                row.get::<_,i64>(18)?,
+                row.get::<_,String>(19)?, row.get::<_,String>(20)?))
         })? {
             let (id, proj, phase, parent, nt, title, desc, status, skill, assignee,
                  yield_reason, session_id, requesting_task_id, review_id, retry_count,
-                 sort_order, skill_modes, verdict, cat, uat) = row?;
+                 sort_order, skill_modes, verdict, requires_manual_raw, cat, uat) = row?;
             rows.push(Node {
                 id, project_id: proj, phase_id: phase, parent_id: parent,
                 node_type: parse_node_type(nt)?, title, description: desc,
                 status: parse_node_status(status)?, skill_id: skill, assignee,
                 yield_reason, session_id, requesting_task_id, review_id, retry_count,
-                sort_order, skill_modes, verdict, created_at: cat, updated_at: uat,
+                sort_order, skill_modes, verdict,
+                requires_manual_verification: requires_manual_raw != 0,
+                created_at: cat, updated_at: uat,
             });
         }
     }
@@ -859,15 +871,19 @@ pub fn db_advance_stage_gate(conn: &Connection, phase_id: &str) -> Result<Phase>
 
 /// Find all pending tasks whose dependencies are all complete and whose phase is in execution mode.
 /// Tasks with no phase (e.g. CONOPS bootstrap tasks) are always eligible — they have no gate.
+/// Excludes tasks flagged with `requires_manual_verification = 1` — these must be verified by
+/// a human in-browser and must not be dispatched to automated agents.
 pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<Node>> {
     let mut stmt = conn.prepare(
         "SELECT n.id, n.project_id, n.phase_id, n.parent_id, n.node_type, n.title, n.description,
                 n.status, n.skill_id, n.assignee, n.yield_reason, n.session_id, n.requesting_task_id,
-                n.review_id, n.retry_count, n.sort_order, n.skill_modes, n.verdict, n.created_at, n.updated_at
+                n.review_id, n.retry_count, n.sort_order, n.skill_modes, n.verdict,
+                n.requires_manual_verification, n.created_at, n.updated_at
          FROM nodes n
          LEFT JOIN phases p ON p.id = n.phase_id
          WHERE n.project_id = ?1
            AND n.status = 'pending'
+           AND n.requires_manual_verification = 0
            AND (n.phase_id IS NULL OR (p.lifecycle_stage = 'execution' AND p.gate_held = 0)
                 OR (n.phase_id IS NOT NULL AND p.status = 'running' AND p.gate_held = 0))
            AND n.node_type IN ('task', 'bug', 'chore', 'subtask', 'plan_review', 'advisor')
@@ -900,8 +916,9 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
                 sort_order: row.get(15)?,
                 skill_modes: row.get(16)?,
                 verdict: row.get(17)?,
-                created_at: row.get(18)?,
-                updated_at: row.get(19)?,
+                requires_manual_verification: row.get::<_, i64>(18)? != 0,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -960,7 +977,8 @@ pub fn db_list_nodes_by_status(conn: &Connection, project_id: &str, status: &str
     let mut stmt = conn.prepare(
         "SELECT id, project_id, phase_id, parent_id, node_type, title, description, status,
                 skill_id, assignee, yield_reason, session_id, requesting_task_id, review_id,
-                retry_count, sort_order, skill_modes, verdict, created_at, updated_at
+                retry_count, sort_order, skill_modes, verdict, requires_manual_verification,
+                created_at, updated_at
          FROM nodes WHERE project_id = ?1 AND status = ?2 ORDER BY created_at"
     )?;
     let rows = stmt
@@ -984,8 +1002,9 @@ pub fn db_list_nodes_by_status(conn: &Connection, project_id: &str, status: &str
                 sort_order: row.get(15)?,
                 skill_modes: row.get(16)?,
                 verdict: row.get(17)?,
-                created_at: row.get(18)?,
-                updated_at: row.get(19)?,
+                requires_manual_verification: row.get::<_, i64>(18)? != 0,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()

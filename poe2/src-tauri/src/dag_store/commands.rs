@@ -457,6 +457,7 @@ fn maybe_bootstrap_phase(conn: &rusqlite::Connection, project_id: &str, phase_id
                 requesting_task_id: None,
                 review_id: None,
                 retry_count: None,
+                requires_manual_verification: None,
             })?;
         }
     }
@@ -766,6 +767,7 @@ pub async fn start_advisor_session(
             requesting_task_id: None,
             review_id: None,
             retry_count: Some(0),
+            requires_manual_verification: None,
         };
         db_create_node(conn, &input)
     })?;

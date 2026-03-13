@@ -228,6 +228,10 @@ pub struct Node {
     /// One of: APPROVED | APPROVED_WITH_CONDITIONS | BLOCKED | FAILED.
     /// NULL for non-reviewer nodes or when reviewer has not yet emitted poe:review-outcome.
     pub verdict: Option<String>,
+    /// When true, this task requires live human verification and must not be dispatched
+    /// to an automated agent. Set via poe:task:create or poe:task:update events.
+    /// Example: animation smoke tests that require a live browser session.
+    pub requires_manual_verification: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -354,6 +358,9 @@ pub struct CreateNodeInput {
     pub review_id: Option<String>,
     /// Watchdog retry counter initial value. Defaults to 0.
     pub retry_count: Option<i64>,
+    /// If true, task requires live human verification and will not be dispatched to
+    /// automated agents. Defaults to false.
+    pub requires_manual_verification: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]

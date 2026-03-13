@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     sort_order          INTEGER,
     skill_modes         TEXT,
     verdict             TEXT,
+    requires_manual_verification INTEGER NOT NULL DEFAULT 0,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
 );

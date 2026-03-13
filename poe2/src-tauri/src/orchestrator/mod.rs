@@ -668,6 +668,7 @@ async fn handle_review_yield(
                 requesting_task_id: Some(waiting_task.id.clone()),
                 review_id: Some(review_id.clone()),
                 retry_count: Some(0),
+                requires_manual_verification: None,
             };
 
             match dag_store::db_create_node(&conn, &input) {
@@ -882,6 +883,9 @@ async fn check_review_completion(
     // Build ReviewResult bundle per Protocol.md §5
     // Each reviewer's artifact is at {project.path}/docs/review-{review_id}.md
     let mut bundle = String::new();
+    // bp6-7r2.3: collect artifact paths so the resumed PM has a direct pointer
+    // to the approved baseline file(s) rather than re-deriving from scratch.
+    let mut artifact_paths: Vec<String> = Vec::new();
     for review_id in &expected_sorted {
         // Find the reviewer node to get skill, status, and stored verdict (u7s.4)
         let (reviewer_skill, verdict) = {
@@ -948,6 +952,8 @@ async fn check_review_completion(
 
         // Read artifact content from docs/review-{review_id}.md
         let artifact_path = project_path.join("docs").join(format!("review-{}.md", review_id));
+        // bp6-7r2.3: record the path so the PM resume bundle can reference it
+        artifact_paths.push(artifact_path.to_string_lossy().into_owned());
         let artifact_content = std::fs::read_to_string(&artifact_path).unwrap_or_else(|e| {
             eprintln!(
                 "[orchestrator] check_review_completion: failed to read artifact {:?}: {}",
@@ -959,6 +965,15 @@ async fn check_review_completion(
         bundle.push_str(&format!(
             "---\nReviewResult id={} skill={} verdict={}\n{}\n---\n",
             review_id, reviewer_skill, verdict, artifact_content
+        ));
+    }
+
+    // bp6-7r2.3: append reviewer artifact paths to the bundle so the resumed PM
+    // agent can read the approved baseline directly instead of re-deriving it.
+    if !artifact_paths.is_empty() {
+        bundle.push_str(&format!(
+            "Reviewer artifacts: {}\n",
+            artifact_paths.join(", ")
         ));
     }
 
@@ -1361,8 +1376,15 @@ async fn close_completed_ancestors(
             }
         };
 
-        // Notify frontend of container closure
+        // Notify frontend of container closure via legacy poe-dag-node-status
         sink.emit("poe-dag-node-status", &serde_json::json!({
+            "nodeId": parent_id,
+            "status": "complete",
+            "projectId": project_id,
+        }));
+        // bp6-7r2.5 (backend): also emit node-status-changed so the WBS view
+        // can subscribe to a single canonical event for all node status updates.
+        sink.emit("node-status-changed", &serde_json::json!({
             "nodeId": parent_id,
             "status": "complete",
             "projectId": project_id,
@@ -1629,6 +1651,7 @@ async fn dispatch_task(
                     requesting_task_id: None,
                     review_id: None,
                     retry_count: None,
+                    requires_manual_verification: None,
                 };
                 match dag_store::db_create_node(&conn, &input) {
                     Ok(n) => {
