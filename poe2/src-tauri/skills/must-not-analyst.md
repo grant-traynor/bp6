@@ -96,6 +96,63 @@ Emit these events in order:
 {"poe": "done", "summary": "must-nots.md produced. N must-nots defined across N categories. N items flagged for human clarification."}
 ```
 
+## Escalation via poe:decision
+
+Most constraint ambiguity should be resolved autonomously. The CONOPS being silent on a topic is **not** a blocker — apply domain knowledge, mark the inference `[DEFAULT: rationale]`, and proceed. Reserve `poe:decision` for genuine blockers where proceeding with any default would be unsafe or fabricated.
+
+### When to escalate (emit poe:decision)
+
+Escalate **only** when one of these conditions holds:
+
+1. **Conflicting CONOPS directives** — two explicit directives directly contradict each other and satisfying one necessarily violates the other. A default cannot resolve a real contradiction.
+2. **Human policy decision required** — a constraint involves a legal, regulatory, or compliance threshold that requires a policy owner's input (e.g. "what data retention period satisfies our GDPR DPA?" is not a question the analyst can answer alone).
+3. **Scope so undefined that any default is fabrication** — the feature or data domain has no description at all in the CONOPS or architecture constraints, and guessing the shape of the constraint would produce a must-not that is purely invented, not inferred.
+
+### When to apply a default (do not escalate)
+
+Apply `[DEFAULT: rationale]` when:
+
+- The CONOPS is merely **silent or incomplete** on a topic that has a reasonable industry standard answer.
+- The constraint follows logically from the stated security posture, even if not spelled out.
+- The prohibition is a well-established baseline (e.g. "never store passwords in plaintext") that every system must satisfy regardless of CONOPS language.
+
+**Threshold**: If you can write a one-sentence rationale grounded in domain knowledge or the project's stated posture, use a default. If you cannot, escalate.
+
+### poe:decision event format
+
+```
+{"poe": "decision", "question": "<precise question requiring human judgment>", "options": ["Option A — description and implications", "Option B — description and implications"], "context": "<why the analyst cannot resolve this with a default>"}
+```
+
+Required fields:
+- `question` — a single, unambiguous question. Not a list of sub-questions.
+- `options` — the candidate answers the human should choose between. Include when you have identified realistic choices; omit only when the answer space is genuinely open-ended.
+- `context` — one or two sentences explaining which CONOPS section is ambiguous or contradictory, and why a default is not safe here.
+
+After emitting `poe:decision`, continue writing all must-nots that do not depend on the blocked question. Mark the blocked must-not as `[PENDING: awaiting decision]` rather than omitting it.
+
+### Example: when to escalate vs. when to apply a default
+
+**Scenario A — apply a default (no escalation):**
+
+CONOPS says "users will log in with email and password" but is silent on password complexity rules.
+
+Correct action: apply a default.
+```
+MUST NOT accept passwords shorter than 12 characters or without mixed character classes. [DEFAULT: CONOPS specifies password auth but does not define complexity requirements; NIST SP 800-63B minimum applied.]
+```
+
+**Scenario B — escalate:**
+
+CONOPS section 3.2 says "all user activity must be logged for audit purposes" and section 7.1 says "the system must not retain any user behavioural data beyond the end of the session."
+
+These are direct contradictions — audit logging requires retention; the privacy clause prohibits it. No safe default resolves which directive takes precedence.
+
+Correct action: emit `poe:decision`.
+```json
+{"poe": "decision", "question": "Section 3.2 requires activity logs for audit; section 7.1 prohibits retaining behavioural data beyond the session. Which directive takes precedence, or should audit logs be anonymised?", "options": ["Audit logging takes precedence — retain activity logs per audit policy, carve out an exemption in the privacy clause", "Privacy clause takes precedence — session-scoped activity only, no persistent audit trail", "Reconcile both — retain anonymised/aggregated audit logs only, no user-identifiable behavioural data"], "context": "The two directives directly conflict. A default in either direction would silently override an explicit stakeholder requirement."}
+```
+
 ## Quality Checklist
 
 Before emitting `poe:done`, verify:
