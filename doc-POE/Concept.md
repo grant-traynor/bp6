@@ -2,7 +2,7 @@
 
 
 **Status**: Draft
-**Last updated**: 2026-03-08
+**Last updated**: 2026-03-13
 
 > **Proof of concept**: The design session that produced this document and its companions (Architecture.md, UX-Brief.md) ran the exact lifecycle POE is designed to orchestrate — as a conversation. Concept → Guardrails → Architecture → UX Brief, collaboratively, with a human seeding the idea and an AI asking the questions. The output is the brief for the implementation. If POE can produce output of equal or better quality when it orchestrates this process through specialist agents, the concept is proven.
 
@@ -208,6 +208,7 @@ The protocol is fundamentally **CRUD against the project database**. The DAG is 
 | `poe:brief` | Agent's interpretation of its task — written before execution begins, non-blocking |
 | `poe:step` | Named progress milestone during execution |
 | `poe:decision` | Raise a question for the human queue, with candidate options if available |
+| `poe:review-outcome` | Reviewer signals its verdict before yielding: APPROVED, APPROVED_WITH_CONDITIONS, BLOCKED, or FAILED. Orchestrator uses this to build the ReviewResult bundle for the resumed task. Missing verdict defaults to BLOCKED. |
 | `poe:yield` | Yield control while awaiting a review or decision response. Task status → waiting. |
 | `poe:done` | Signal task completion (all work done). |
 
