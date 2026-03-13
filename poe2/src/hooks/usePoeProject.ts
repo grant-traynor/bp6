@@ -165,16 +165,15 @@ export function usePoeProject(projectId: string | null): {
         ]);
       });
 
-      const u4 = await listen<QueueItem>('poe-decision-queued', ({ payload }) => {
+      await reg<QueueItem>('poe-decision-queued', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         setQueueItems(prev => {
           if (prev.some(q => q.id === payload.id)) return prev;
           return [...prev, payload];
         });
       });
-      unlisteners.push(u4);
 
-      const u5 = await listen<{
+      await reg<{
         eventType: string;
         projectId: string;
         agentId: string | null;
@@ -205,9 +204,8 @@ export function usePoeProject(projectId: string | null): {
           },
         ]);
       });
-      unlisteners.push(u5);
 
-      const u6 = await listen<{
+      await reg<{
         agentId: string;
         taskId: string;
         projectId: string;
@@ -235,9 +233,8 @@ export function usePoeProject(projectId: string | null): {
           },
         ]);
       });
-      unlisteners.push(u6);
 
-      const u7 = await listen<{
+      await reg<{
         agentId: string;
         taskId: string;
         projectId: string;
@@ -262,9 +259,8 @@ export function usePoeProject(projectId: string | null): {
           },
         ]);
       });
-      unlisteners.push(u7);
 
-      const u8 = await listen<Artifact>('poe-artifact-created', ({ payload }) => {
+      await reg<Artifact>('poe-artifact-created', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         setArtifacts(prev => {
           const idx = prev.findIndex(a => a.id === payload.id);
@@ -280,9 +276,8 @@ export function usePoeProject(projectId: string | null): {
           ts: payload.createdAt,
         }]);
       });
-      unlisteners.push(u8);
 
-      const u9 = await listen<KnowledgeEntry>('poe-knowledge-created', ({ payload }) => {
+      await reg<KnowledgeEntry>('poe-knowledge-created', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         setKnowledgeEntries(prev => {
           const idx = prev.findIndex(k => k.id === payload.id);
@@ -298,9 +293,8 @@ export function usePoeProject(projectId: string | null): {
           ts: payload.createdAt,
         }]);
       });
-      unlisteners.push(u9);
 
-      const u10 = await listen<{ itemId: string; projectId: string; resolution: string }>('poe-decision-resolved', ({ payload }) => {
+      await reg<{ itemId: string; projectId: string; resolution: string }>('poe-decision-resolved', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         // Mark resolved in-place so thread mode retains history; pending items have resolvedAt === null.
         setQueueItems(prev => prev.map(q =>
@@ -309,11 +303,10 @@ export function usePoeProject(projectId: string | null): {
             : q
         ));
       });
-      unlisteners.push(u10);
 
       const MAX_STREAM_EVENTS = 500;
       console.log('[usePoeProject] registering poe-agent-stream listener, projectId=', projectId);
-      const u11 = await listen<AgentStreamEvent>('poe-agent-stream', ({ payload }) => {
+      await reg<AgentStreamEvent>('poe-agent-stream', ({ payload }) => {
         console.log('[poe-agent-stream] raw event arrived, payload.projectId=', payload.projectId, 'watching=', projectId, 'event.type=', payload.event?.['type']);
         if (payload.projectId !== projectId) {
           console.warn('[poe-agent-stream] DROPPED — projectId mismatch');
@@ -330,21 +323,19 @@ export function usePoeProject(projectId: string | null): {
           return m;
         });
       });
-      unlisteners.push(u11);
 
       // Reload phases whenever the orchestrator updates phase state
       // (gate reached, advance, revise, rerun, or activate).
-      const u12 = await listen<{ projectId: string }>('poe-phase-update', ({ payload }) => {
+      await reg<{ projectId: string }>('poe-phase-update', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         invoke<Phase[]>('list_phases', { projectId }).then(setPhases).catch(console.error);
       });
-      unlisteners.push(u12);
 
       // poe-agent-activity: emitted for poe:step and poe:brief (u7s.6).
       // Provides real-time agent progress between agent-started and agent-exited.
       // Feed is capped at MAX_FEED_ITEMS (50) — oldest entries are dropped when full.
       const MAX_FEED_ITEMS = 50;
-      const u13 = await listen<{ taskId: string; agentId: string; type: 'step' | 'brief'; content: string }>('poe-agent-activity', ({ payload }) => {
+      await reg<{ taskId: string; agentId: string; type: 'step' | 'brief'; content: string }>('poe-agent-activity', ({ payload }) => {
         setFeedItems(prev => {
           const entry: FeedItem = {
             id: `activity-${payload.agentId}-${payload.type}-${Date.now()}-${Math.random()}`,
@@ -358,13 +349,12 @@ export function usePoeProject(projectId: string | null): {
           return next.length > MAX_FEED_ITEMS ? next.slice(next.length - MAX_FEED_ITEMS) : next;
         });
       });
-      unlisteners.push(u13);
 
       // poe-dag-node-status: emitted by close_completed_ancestors when a container
       // node (epic/feature) transitions to 'complete' or 'cancelled'.  Without this
       // subscription the WBS view never reflects those closures because they bypass
       // the poe-node-updated / poe-task-done paths.
-      const u14 = await listen<{ nodeId: string; status: Node['status']; projectId: string }>(
+      await reg<{ nodeId: string; status: Node['status']; projectId: string }>(
         'poe-dag-node-status',
         ({ payload }) => {
           if (payload.projectId !== projectId) return;
@@ -377,7 +367,6 @@ export function usePoeProject(projectId: string | null): {
           });
         },
       );
-      unlisteners.push(u14);
 
     }
 
