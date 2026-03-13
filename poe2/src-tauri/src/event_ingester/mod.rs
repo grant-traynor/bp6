@@ -61,6 +61,10 @@ struct PoeTask {
     node_type: Option<String>,
     parent_id: Option<String>,
     depends_on: Option<Vec<String>>,
+    /// When true, this task requires live human verification and must not be dispatched to
+    /// automated agents. Defaults to false if absent.
+    #[serde(default)]
+    requires_manual_verification: bool,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -337,7 +341,7 @@ fn handle_task(
         requesting_task_id: None,
         review_id: None,
         retry_count: None,
-        requires_manual_verification: None,
+        requires_manual_verification: Some(payload.requires_manual_verification),
     };
 
     let mut pending_events: Vec<(String, serde_json::Value)> = Vec::new();

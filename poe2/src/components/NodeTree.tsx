@@ -87,6 +87,9 @@ function NodeRow({ item, onHandoverOpen, onDebugOpen }: {
         {typeLabel && (
           <span className="shrink-0 text-[9px] font-bold text-neutral-600 tracking-wider">{typeLabel}</span>
         )}
+        {item.node.requiresManualVerification && (
+          <span className="shrink-0 text-[9px] font-bold text-amber-500/80 tracking-wider border border-amber-500/40 rounded px-0.5">Manual</span>
+        )}
         <span className={`truncate ${item.node.status === 'complete' || item.node.status === 'cancelled' ? 'text-neutral-600' : 'text-neutral-300'}`}>
           {item.node.title}
         </span>

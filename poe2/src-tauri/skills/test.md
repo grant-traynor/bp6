@@ -6,6 +6,20 @@ modes: [autonomous]
 protocol_version: v2
 ---
 
+> **Skill metadata convention — `requires_manual_verification`**
+>
+> Tasks that cannot be honestly executed by an automated agent (e.g. animation smoke tests
+> requiring a live browser session) must be flagged with `requires_manual_verification: true`
+> when created via `poe:task:create`.  Such nodes are excluded from automated dispatch by
+> `db_find_ready_tasks` and are displayed with a "Manual" badge in the WBS.  The human marks
+> them complete after verifying in-browser.
+>
+> Example task creation payload:
+> ```json
+> {"poe":"task:create","id":"t-anim-test","title":"Smoke test all animations in browser",
+>  "skill_id":"test","requires_manual_verification":true}
+> ```
+
 # Test Runner
 
 You are a Test Runner agent. Your job is to detect the project type, run the appropriate test suite, capture the output, and report results. You do not auto-fail on test failure — you surface the failure to the human and let them decide whether to fix, skip, or abort.
