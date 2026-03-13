@@ -112,7 +112,24 @@ export function usePoeProject(projectId: string | null): {
 
     async function subscribe() {
       console.log('[usePoeProject] subscribe() called, projectId=', projectId);
-      const u1 = await listen<Node>('poe-task-created', ({ payload }) => {
+
+      // reg() wraps each listen() call so that if the effect cleanup has already
+      // run by the time the Promise resolves (React StrictMode double-invoke), the
+      // unlisten function is called immediately rather than being pushed into the
+      // unlisteners array — preventing permanently-leaked duplicate listeners.
+      async function reg<T>(
+        event: string,
+        handler: (e: { payload: T }) => void,
+      ): Promise<void> {
+        const u = await listen<T>(event, handler);
+        if (cancelled) {
+          u();
+        } else {
+          unlisteners.push(u);
+        }
+      }
+
+      await reg<Node>('poe-task-created', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         updateNode(payload);
         setFeedItems(prev => [
@@ -126,15 +143,13 @@ export function usePoeProject(projectId: string | null): {
           },
         ]);
       });
-      unlisteners.push(u1);
 
-      const u2 = await listen<Node>('poe-node-updated', ({ payload }) => {
+      await reg<Node>('poe-node-updated', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         updateNode(payload);
       });
-      unlisteners.push(u2);
 
-      const u3 = await listen<Node>('poe-task-done', ({ payload }) => {
+      await reg<Node>('poe-task-done', ({ payload }) => {
         if (payload.projectId !== projectId) return;
         updateNode(payload);
         setFeedItems(prev => [
@@ -149,7 +164,6 @@ export function usePoeProject(projectId: string | null): {
           },
         ]);
       });
-      unlisteners.push(u3);
 
       const u4 = await listen<QueueItem>('poe-decision-queued', ({ payload }) => {
         if (payload.projectId !== projectId) return;
@@ -202,6 +216,10 @@ export function usePoeProject(projectId: string | null): {
       }>('poe-agent-started', ({ payload }) => {
         console.log('[poe-agent-started] agentId=', payload.agentId, 'taskId=', payload.taskId, 'projectId=', payload.projectId);
         if (payload.projectId !== projectId) return;
+        // Optimistically mark the node as running so counters update immediately.
+        setNodes(prev => prev.map(n =>
+          n.id === payload.taskId ? { ...n, status: 'running' } : n
+        ));
         setFeedItems(prev => [
           ...prev,
           {
@@ -226,6 +244,12 @@ export function usePoeProject(projectId: string | null): {
         success: boolean;
       }>('poe-agent-exited', ({ payload }) => {
         if (payload.projectId !== projectId) return;
+        // Optimistically mark the node as complete/cancelled so counters update immediately.
+        setNodes(prev => prev.map(n =>
+          n.id === payload.taskId
+            ? { ...n, status: payload.success ? 'complete' : 'cancelled' }
+            : n
+        ));
         setFeedItems(prev => [
           ...prev,
           {
@@ -335,6 +359,25 @@ export function usePoeProject(projectId: string | null): {
         });
       });
       unlisteners.push(u13);
+
+      // poe-dag-node-status: emitted by close_completed_ancestors when a container
+      // node (epic/feature) transitions to 'complete' or 'cancelled'.  Without this
+      // subscription the WBS view never reflects those closures because they bypass
+      // the poe-node-updated / poe-task-done paths.
+      const u14 = await listen<{ nodeId: string; status: Node['status']; projectId: string }>(
+        'poe-dag-node-status',
+        ({ payload }) => {
+          if (payload.projectId !== projectId) return;
+          setNodes(prev => {
+            const idx = prev.findIndex(n => n.id === payload.nodeId);
+            if (idx === -1) return prev;
+            const next = [...prev];
+            next[idx] = { ...next[idx], status: payload.status, updatedAt: new Date().toISOString() };
+            return next;
+          });
+        },
+      );
+      unlisteners.push(u14);
 
     }
 

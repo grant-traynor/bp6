@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import type { QueueItem, DecisionOption, Node } from '../types';
 import AdvisorChatbot from './AdvisorChatbot';
 
@@ -13,6 +14,7 @@ interface Props {
 interface StandardCardProps {
   item: QueueItem;
   nodes: Node[];
+  processing: boolean;
   onResolve: (itemId: string, resolution: string) => Promise<void>;
 }
 
@@ -29,9 +31,11 @@ function parsedOptions(item: QueueItem): DecisionOption[] {
 function AnswerInput({
   item,
   onResolve,
+  onAfterResolve,
 }: {
   item: QueueItem;
   onResolve: (itemId: string, resolution: string) => Promise<void>;
+  onAfterResolve?: (taskId: string | null) => void;
 }) {
   const [input, setInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -44,6 +48,7 @@ function AnswerInput({
     try {
       await onResolve(item.id, trimmed);
       setInput('');
+      onAfterResolve?.(item.taskId ?? null);
     } finally {
       setSubmitting(false);
     }
@@ -91,7 +96,7 @@ function AnswerInput({
 }
 
 // Standard single-question card (no prior history for this task).
-function StandardCard({ item, nodes, onResolve }: StandardCardProps) {
+function StandardCard({ item, nodes, processing, onResolve, onAfterResolve }: StandardCardProps & { onAfterResolve?: (taskId: string | null) => void }) {
   const taskNode = item.taskId ? nodes.find(n => n.id === item.taskId) : null;
   const taskLabel = taskNode ? taskNode.title : item.taskId ?? '—';
   const agentLabel = item.agentId ? item.agentId.slice(0, 12) + '…' : '—';
@@ -104,7 +109,14 @@ function StandardCard({ item, nodes, onResolve }: StandardCardProps) {
         {' · '}
         <span className="text-neutral-600">{agentLabel}</span>
       </p>
-      <AnswerInput item={item} onResolve={onResolve} />
+      {processing ? (
+        <div className="flex items-center gap-1.5 text-[11px] text-neutral-500 py-1">
+          <span className="inline-block w-3 h-3 border border-neutral-500 border-t-neutral-300 rounded-full animate-spin" />
+          Processing…
+        </div>
+      ) : (
+        <AnswerInput item={item} onResolve={onResolve} onAfterResolve={onAfterResolve} />
+      )}
     </div>
   );
 }
@@ -114,12 +126,16 @@ function ThreadCard({
   resolved,
   pending,
   nodes,
+  processing,
   onResolve,
+  onAfterResolve,
 }: {
   resolved: QueueItem[];
   pending: QueueItem;
   nodes: Node[];
+  processing: boolean;
   onResolve: (itemId: string, resolution: string) => Promise<void>;
+  onAfterResolve?: (taskId: string | null) => void;
 }) {
   const taskNode = pending.taskId ? nodes.find(n => n.id === pending.taskId) : null;
   const taskLabel = taskNode ? taskNode.title : pending.taskId ?? '—';
@@ -154,13 +170,38 @@ function ThreadCard({
           <span className="mr-1">Q{resolved.length + 1} (pending):</span>
         </p>
         <p className="text-neutral-100 text-xs font-semibold leading-snug">{pending.question}</p>
-        <AnswerInput item={pending} onResolve={onResolve} />
+        {processing ? (
+          <div className="flex items-center gap-1.5 text-[11px] text-neutral-500 py-1">
+            <span className="inline-block w-3 h-3 border border-neutral-500 border-t-neutral-300 rounded-full animate-spin" />
+            Processing…
+          </div>
+        ) : (
+          <AnswerInput item={pending} onResolve={onResolve} onAfterResolve={onAfterResolve} />
+        )}
       </div>
     </div>
   );
 }
 
 export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onResolve }: Props) {
+  // processingTaskId: set after human submits a reply, cleared when agent responds.
+  const [processingTaskId, setProcessingTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<{ taskId: string; agentId: string; type: string; content: string }>(
+      'poe-agent-activity',
+      ({ payload }) => {
+        // Clear the processing indicator when the agent next speaks for that task.
+        setProcessingTaskId(prev => (prev === payload.taskId ? null : prev));
+      }
+    );
+    return () => { void unlisten.then(u => u()); };
+  }, []);
+
+  function handleAfterResolve(taskId: string | null) {
+    if (taskId) setProcessingTaskId(taskId);
+  }
+
   // Group all items by taskId to detect thread mode.
   const taskGroups = new Map<string, { resolved: QueueItem[]; pending: QueueItem[] }>();
 
@@ -206,6 +247,7 @@ export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onR
         ) : (
           pendingGroups.map(group => {
             const pending = group.pending[0];  // one pending at a time per task
+            const processing = processingTaskId === (pending.taskId ?? null);
             if (group.resolved.length > 0) {
               // Thread mode: prior Q+A + current pending.
               return (
@@ -214,7 +256,9 @@ export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onR
                   resolved={group.resolved}
                   pending={pending}
                   nodes={nodes}
+                  processing={processing}
                   onResolve={onResolve}
+                  onAfterResolve={handleAfterResolve}
                 />
               );
             }
@@ -223,7 +267,9 @@ export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onR
                 key={pending.id}
                 item={pending}
                 nodes={nodes}
+                processing={processing}
                 onResolve={onResolve}
+                onAfterResolve={handleAfterResolve}
               />
             );
           })
