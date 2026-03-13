@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import './mocks/tauri';
 
 // Mock AdvisorChatbot to avoid tauri deps in its internals
 vi.mock('../components/AdvisorChatbot', () => ({

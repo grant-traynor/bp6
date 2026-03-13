@@ -253,7 +253,7 @@ export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onR
         ) : (
           pendingGroups.map(group => {
             const pending = group.pending[0];  // one pending at a time per task
-            const processing = processingTaskId === (pending.taskId ?? null);
+            const processing = processingTaskId !== null && processingTaskId === (pending.taskId ?? null);
             if (group.resolved.length > 0) {
               // Thread mode: prior Q+A + current pending.
               return (
