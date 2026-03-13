@@ -89,6 +89,8 @@ pub fn run() {
             orchestrator::commands::abort_project,
             orchestrator::commands::revise_stage,
             orchestrator::commands::rerun_stage,
+            orchestrator::commands::resume_stage,
+            orchestrator::commands::resume_project,
             // agent_lifecycle commands
             agent_lifecycle::commands::write_to_agent,
             agent_lifecycle::commands::interrupt_agent,

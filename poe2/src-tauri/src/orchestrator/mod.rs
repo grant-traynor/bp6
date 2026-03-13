@@ -1378,7 +1378,7 @@ async fn check_phase_completion(
         let conn = db.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         let _ = conn.execute(
-            "UPDATE phases SET status = 'gate', gate_held = 1, updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'gate', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         );
         drop(conn);

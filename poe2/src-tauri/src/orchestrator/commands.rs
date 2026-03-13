@@ -3,7 +3,7 @@ use crate::agent_lifecycle::{AgentMap, interrupt_agent_process};
 use crate::dag_store::{self, NodeStatus, ProjectRegistry, UpdateNodeInput};
 use crate::event_ingester::DagChanged;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 use tokio::sync::mpsc;
 
 #[derive(serde::Serialize)]
@@ -22,6 +22,7 @@ pub async fn advance_stage_gate(
     project_id: String,
     registry: State<'_, ProjectRegistry>,
     dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+    app: tauri::AppHandle,
 ) -> Result<(), String> {
     let reg = registry.lock().unwrap();
     let db = reg
@@ -34,6 +35,13 @@ pub async fn advance_stage_gate(
         let conn = db.conn.lock().unwrap();
         dag_store::db_advance_stage_gate(&conn, &phase_id).map_err(|e| e.to_string())?;
     }
+
+    // Emit phase update event
+    app.emit("poe-phase-update", serde_json::json!({
+        "phaseId": phase_id,
+        "status": "gate",
+        "projectId": project_id,
+    })).ok();
 
     // Notify orchestrator — gate advancement may unlock pending tasks
     let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
@@ -141,7 +149,7 @@ pub async fn pause_stage(
         }
         let now = chrono::Utc::now().to_rfc3339();
         let _ = conn.execute(
-            "UPDATE phases SET gate_held = 1, updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'paused', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         );
     }
@@ -171,7 +179,7 @@ pub async fn abort_project(
         let _ = interrupt_agent_process(&agent_map, agent_id);
     }
 
-    // Re-queue all running tasks for this project to Pending
+    // Re-queue all running tasks for this project to Pending; mark project paused
     {
         let reg = registry.lock().unwrap();
         let db = reg.get(&project_id)
@@ -181,6 +189,10 @@ pub async fn abort_project(
         let now = chrono::Utc::now().to_rfc3339();
         let _ = conn.execute(
             "UPDATE nodes SET status = 'pending', updated_at = ?1 WHERE project_id = ?2 AND status = 'running'",
+            rusqlite::params![now, project_id],
+        );
+        let _ = conn.execute(
+            "UPDATE projects SET status = 'paused', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, project_id],
         );
     }
@@ -205,7 +217,7 @@ pub async fn revise_stage(
         let conn = db.conn.lock().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "UPDATE phases SET lifecycle_stage = 'planning', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'pending', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         ).map_err(|e| e.to_string())?;
     }
@@ -233,11 +245,70 @@ pub async fn rerun_stage(
             "UPDATE nodes SET status = 'pending', updated_at = ?1 WHERE phase_id = ?2 AND status != 'cancelled'",
             rusqlite::params![now, phase_id],
         ).map_err(|e| e.to_string())?;
-        // Release the gate
+        // Set phase to running
         conn.execute(
-            "UPDATE phases SET gate_held = 0, lifecycle_stage = 'execution', updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'running', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         ).map_err(|e| e.to_string())?;
+    }
+    let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
+    Ok(())
+}
+
+/// Resume a paused stage — sets status back to 'running' and emits poe-phase-update.
+#[tauri::command]
+pub async fn resume_stage(
+    phase_id: String,
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+    dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let reg = registry.lock().unwrap();
+    let db = reg
+        .get(&project_id)
+        .ok_or_else(|| format!("Project not open: {}", project_id))?
+        .clone();
+    drop(reg);
+    {
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE phases SET status = 'running', updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, phase_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    app.emit("poe-phase-update", serde_json::json!({
+        "phaseId": phase_id,
+        "status": "running",
+        "projectId": project_id,
+    })).ok();
+    let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
+    Ok(())
+}
+
+/// Resume a paused/aborted project — sets projects.status back to 'active' and resumes dispatch.
+#[tauri::command]
+pub async fn resume_project(
+    project_id: String,
+    registry: State<'_, ProjectRegistry>,
+    dag_tx: State<'_, mpsc::UnboundedSender<DagChanged>>,
+) -> Result<(), String> {
+    let reg = registry.lock().unwrap();
+    let db = reg
+        .get(&project_id)
+        .ok_or_else(|| format!("Project not open: {}", project_id))?
+        .clone();
+    drop(reg);
+    {
+        let conn = db.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE projects SET status = 'active', updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, project_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     let _ = dag_tx.send(DagChanged::DagStructureChanged { project_id });
     Ok(())

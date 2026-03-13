@@ -131,41 +131,6 @@ impl std::str::FromStr for EdgeType {
     }
 }
 
-// ── Phase lifecycle ───────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum PhaseLifecycleStage {
-    Planning,
-    Execution,
-    Retrospective,
-    Complete,
-}
-
-impl std::fmt::Display for PhaseLifecycleStage {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PhaseLifecycleStage::Planning => write!(f, "planning"),
-            PhaseLifecycleStage::Execution => write!(f, "execution"),
-            PhaseLifecycleStage::Retrospective => write!(f, "retrospective"),
-            PhaseLifecycleStage::Complete => write!(f, "complete"),
-        }
-    }
-}
-
-impl std::str::FromStr for PhaseLifecycleStage {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "planning" => Ok(PhaseLifecycleStage::Planning),
-            "execution" => Ok(PhaseLifecycleStage::Execution),
-            "retrospective" => Ok(PhaseLifecycleStage::Retrospective),
-            "complete" => Ok(PhaseLifecycleStage::Complete),
-            _ => Err(format!("unknown phase lifecycle stage: {}", s)),
-        }
-    }
-}
-
 // ── Core structs ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,6 +143,8 @@ pub struct Project {
     pub active_phase_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Project lifecycle status: 'active' | 'paused'. Added in bp6-0xu.3.
+    pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,11 +154,9 @@ pub struct Phase {
     pub project_id: String,
     pub number: i64,
     pub title: String,
-    pub lifecycle_stage: PhaseLifecycleStage,
-    pub gate_held: bool,
-    /// Stage type e.g. 'execution' | 'conops' | 'guardrails' | etc. Added in Phase 3.
+    /// Stage type e.g. 'execution' | 'conops' | 'guardrails' | etc.
     pub stage_type: String,
-    /// Phase status: 'pending' | 'running' | 'gate' | 'complete'. Added in Phase 3.
+    /// Phase status: 'pending' | 'running' | 'gate' | 'complete' | 'paused'.
     pub status: String,
     pub created_at: String,
     pub updated_at: String,

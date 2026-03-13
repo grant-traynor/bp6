@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS projects (
     conops_ref  TEXT,
     active_phase_id TEXT,
     created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL
+    updated_at  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active'
 );
 
 CREATE TABLE IF NOT EXISTS phases (
@@ -17,8 +18,6 @@ CREATE TABLE IF NOT EXISTS phases (
     project_id      TEXT NOT NULL REFERENCES projects(id),
     number          INTEGER NOT NULL,
     title           TEXT NOT NULL,
-    lifecycle_stage TEXT NOT NULL DEFAULT 'planning',
-    gate_held       INTEGER NOT NULL DEFAULT 0,
     stage_type      TEXT NOT NULL DEFAULT 'execution',
     status          TEXT NOT NULL DEFAULT 'pending',
     created_at      TEXT NOT NULL,
@@ -42,6 +41,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     requesting_task_id  TEXT REFERENCES nodes(id),
     review_id           TEXT,
     retry_count         INTEGER NOT NULL DEFAULT 0,
+    last_dispatch_at    TEXT,
     sort_order          INTEGER,
     skill_modes         TEXT,
     verdict             TEXT,

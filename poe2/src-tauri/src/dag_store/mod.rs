@@ -16,7 +16,10 @@ pub use types::*;
 fn apply_migration(conn: &Connection, sql: &str) {
     if let Err(e) = conn.execute_batch(sql) {
         let msg = e.to_string().to_lowercase();
-        if !msg.contains("duplicate column") {
+        // Silently ignore expected idempotency errors:
+        // - "duplicate column" when re-running ADD COLUMN
+        // - "no such column" when re-running DROP COLUMN on already-removed column
+        if !msg.contains("duplicate column") && !msg.contains("no such column") {
             eprintln!("[dag_store] migration warning: {}", e);
         }
     }
@@ -104,6 +107,17 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
     );
     apply_migration(&conn, "CREATE INDEX IF NOT EXISTS idx_advisor_turns_task ON advisor_turns(task_id)");
 
+    // bp6-0xu.2: add last_dispatch_at to nodes
+    apply_migration(&conn, "ALTER TABLE nodes ADD COLUMN last_dispatch_at TEXT");
+
+    // bp6-0xu.3: add status to projects
+    apply_migration(&conn, "ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+
+    // bp6-0xu.4: drop non-spec lifecycle_stage and gate_held from phases
+    // SQLite 3.35+ supports DROP COLUMN; errors silently caught.
+    apply_migration(&conn, "ALTER TABLE phases DROP COLUMN lifecycle_stage");
+    apply_migration(&conn, "ALTER TABLE phases DROP COLUMN gate_held");
+
     // Upsert the project record based on path
     let path_str = project_path.to_string_lossy().to_string();
     let name = project_path
@@ -124,7 +138,8 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
 
     let project = conn
         .query_row(
-            "SELECT id, name, path, conops_ref, active_phase_id, created_at, updated_at
+            "SELECT id, name, path, conops_ref, active_phase_id, created_at, updated_at,
+                    COALESCE(status, 'active')
              FROM projects WHERE path = ?1",
             [&path_str],
             |row| {
@@ -136,6 +151,7 @@ pub fn open_project_db(project_path: &Path) -> Result<(Project, Connection)> {
                     active_phase_id: row.get(4)?,
                     created_at: row.get(5)?,
                     updated_at: row.get(6)?,
+                    status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "active".to_owned()),
                 })
             },
         )
@@ -165,12 +181,6 @@ fn parse_edge_type(s: String) -> rusqlite::Result<EdgeType> {
     })
 }
 
-/// Parse a `PhaseLifecycleStage` from a string stored in SQLite.
-fn parse_lifecycle_stage(s: String) -> rusqlite::Result<PhaseLifecycleStage> {
-    s.parse().map_err(|e: String| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
-    })
-}
 
 // ── Node helpers ──────────────────────────────────────────────────────────────
 
@@ -672,7 +682,7 @@ pub fn db_get_agent_session_for_task(conn: &Connection, task_id: &str) -> Result
 /// List all phases for a project ordered by number.
 pub fn db_list_phases(conn: &Connection, project_id: &str) -> Result<Vec<Phase>> {
     let mut stmt = conn.prepare(
-        "SELECT id, project_id, number, title, lifecycle_stage, gate_held, stage_type, status, created_at, updated_at
+        "SELECT id, project_id, number, title, stage_type, status, created_at, updated_at
          FROM phases WHERE project_id = ?1 ORDER BY number"
     )?;
     let rows = stmt
@@ -682,12 +692,10 @@ pub fn db_list_phases(conn: &Connection, project_id: &str) -> Result<Vec<Phase>>
                 project_id: row.get(1)?,
                 number: row.get(2)?,
                 title: row.get(3)?,
-                lifecycle_stage: parse_lifecycle_stage(row.get(4)?)?,
-                gate_held: row.get::<_, i64>(5)? != 0,
-                stage_type: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "execution".to_owned()),
-                status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "pending".to_owned()),
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                stage_type: row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "execution".to_owned()),
+                status: row.get::<_, Option<String>>(5)?.unwrap_or_else(|| "pending".to_owned()),
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -831,7 +839,7 @@ pub fn db_list_agents_by_status(conn: &Connection, project_id: &str, status: &st
 
 pub fn db_get_phase(conn: &Connection, phase_id: &str) -> Result<Phase> {
     conn.query_row(
-        "SELECT id, project_id, number, title, lifecycle_stage, gate_held, stage_type, status, created_at, updated_at
+        "SELECT id, project_id, number, title, stage_type, status, created_at, updated_at
          FROM phases WHERE id = ?1",
         [phase_id],
         |row| {
@@ -840,12 +848,10 @@ pub fn db_get_phase(conn: &Connection, phase_id: &str) -> Result<Phase> {
                 project_id: row.get(1)?,
                 number: row.get(2)?,
                 title: row.get(3)?,
-                lifecycle_stage: parse_lifecycle_stage(row.get(4)?)?,
-                gate_held: row.get::<_, i64>(5)? != 0,
-                stage_type: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "execution".to_owned()),
-                status: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "pending".to_owned()),
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                stage_type: row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "execution".to_owned()),
+                status: row.get::<_, Option<String>>(5)?.unwrap_or_else(|| "pending".to_owned()),
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         },
     )
@@ -853,17 +859,10 @@ pub fn db_get_phase(conn: &Connection, phase_id: &str) -> Result<Phase> {
 }
 
 pub fn db_advance_stage_gate(conn: &Connection, phase_id: &str) -> Result<Phase> {
-    let phase = db_get_phase(conn, phase_id)?;
-    let next_stage = match phase.lifecycle_stage {
-        PhaseLifecycleStage::Planning => PhaseLifecycleStage::Execution,
-        PhaseLifecycleStage::Execution => PhaseLifecycleStage::Retrospective,
-        PhaseLifecycleStage::Retrospective => PhaseLifecycleStage::Complete,
-        PhaseLifecycleStage::Complete => return Ok(phase),
-    };
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE phases SET lifecycle_stage = ?1, gate_held = 0, updated_at = ?2 WHERE id = ?3",
-        rusqlite::params![next_stage.to_string(), now, phase_id],
+        "UPDATE phases SET status = 'gate', updated_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, phase_id],
     )
     .context("Failed to advance stage gate")?;
     db_get_phase(conn, phase_id)
@@ -884,9 +883,9 @@ pub fn db_find_ready_tasks(conn: &Connection, project_id: &str) -> Result<Vec<No
          WHERE n.project_id = ?1
            AND n.status = 'pending'
            AND n.requires_manual_verification = 0
-           AND (n.phase_id IS NULL OR (p.lifecycle_stage = 'execution' AND p.gate_held = 0)
-                OR (n.phase_id IS NOT NULL AND p.status = 'running' AND p.gate_held = 0))
+           AND (n.phase_id IS NULL OR p.status = 'running')
            AND n.node_type IN ('task', 'bug', 'chore', 'subtask', 'plan_review', 'advisor')
+           AND n.project_id IN (SELECT id FROM projects WHERE status = 'active')
            AND NOT EXISTS (
                SELECT 1 FROM edges e
                JOIN nodes dep ON dep.id = e.from_id
@@ -1231,8 +1230,8 @@ pub fn db_create_phase(
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO phases (id, project_id, number, title, lifecycle_stage, gate_held, stage_type, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, 'planning', 0, ?5, 'pending', ?6, ?7)",
+        "INSERT INTO phases (id, project_id, number, title, stage_type, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)",
         rusqlite::params![id, project_id, number, title, stage_type, now, now],
     )
     .context("Failed to insert phase")?;

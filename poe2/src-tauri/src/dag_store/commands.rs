@@ -9,9 +9,22 @@ pub async fn open_project(
     path: String,
     registry: State<'_, ProjectRegistry>,
     dag_tx: State<'_, mpsc::UnboundedSender<crate::event_ingester::DagChanged>>,
+    app: tauri::AppHandle,
 ) -> Result<Project, String> {
+    use tauri::Emitter;
+
     let project_path = std::path::Path::new(&path);
+
+    // Determine whether this is a new project (does the DB file already exist?)
+    let poe_dir = project_path.join(".poe");
+    let db_path = poe_dir.join("dag.db");
+    let db_existed = db_path.exists();
+
     let (project, conn) = open_project_db(project_path).map_err(|e| e.to_string())?;
+
+    // If the DB existed before, the project record already existed — not new.
+    // If it didn't exist, it was just created.
+    let is_new = !db_existed;
 
     let db = std::sync::Arc::new(ProjectDb {
         project: project.clone(),
@@ -26,6 +39,12 @@ pub async fn open_project(
     let _ = dag_tx.send(crate::event_ingester::DagChanged::ProjectOpened {
         project_id: project.id.clone(),
     });
+
+    // bp6-0xu.9: emit poe-project-opened so frontend can react
+    let _ = app.emit("poe-project-opened", serde_json::json!({
+        "projectId": project.id,
+        "isNew": is_new,
+    }));
 
     Ok(project)
 }
@@ -492,7 +511,7 @@ pub async fn activate_phase(
     with_conn(&registry, &project_id, |conn| {
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "UPDATE phases SET status = 'running', lifecycle_stage = 'execution', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'running', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         )
         .map_err(|e| anyhow::anyhow!("Failed to activate phase: {}", e))?;
@@ -525,7 +544,7 @@ pub async fn advance_phase(
         // Mark current phase complete
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
-            "UPDATE phases SET status = 'complete', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'complete', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         )
         .map_err(|e| anyhow::anyhow!("Failed to complete phase: {}", e))?;
@@ -546,7 +565,7 @@ pub async fn advance_phase(
         match next_id {
             Ok(id) => {
                 conn.execute(
-                    "UPDATE phases SET status = 'running', lifecycle_stage = 'execution', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+                    "UPDATE phases SET status = 'running', updated_at = ?1 WHERE id = ?2",
                     rusqlite::params![now, id],
                 )
                 .map_err(|e| anyhow::anyhow!("Failed to activate next phase: {}", e))?;
@@ -596,7 +615,7 @@ pub async fn revise_phase(
             .map_err(|e| anyhow::anyhow!("Failed to reset task {}: {}", task_id, e))?;
         }
         conn.execute(
-            "UPDATE phases SET status = 'running', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'running', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         )
         .map_err(|e| anyhow::anyhow!("Failed to update phase: {}", e))?;
@@ -632,7 +651,7 @@ pub async fn rerun_phase(
         )
         .map_err(|e| anyhow::anyhow!("Failed to reset tasks: {}", e))?;
         conn.execute(
-            "UPDATE phases SET status = 'running', gate_held = 0, updated_at = ?1 WHERE id = ?2",
+            "UPDATE phases SET status = 'running', updated_at = ?1 WHERE id = ?2",
             rusqlite::params![now, phase_id],
         )
         .map_err(|e| anyhow::anyhow!("Failed to update phase: {}", e))?;
