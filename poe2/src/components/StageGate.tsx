@@ -38,7 +38,7 @@ export default function StageGate({ phase, projectId, artifacts, onArtifactOpen,
     setError(null);
     try {
       const cmd =
-        action === 'advance' ? 'advance_stage_gate' :
+        action === 'advance' ? 'advance_phase' :
         action === 'revise'  ? 'revise_stage' :
         'rerun_stage';
       await invoke(cmd, { phaseId: phase.id, projectId });
