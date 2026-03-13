@@ -31,7 +31,7 @@ describe('StageGate', () => {
     expect(screen.getByText(/conops\.md/)).toBeInTheDocument();
   });
 
-  it('Advance button calls invoke(advance_stage_gate) with both phaseId and projectId', async () => {
+  it('Advance button calls invoke(advance_phase) with both phaseId and projectId', async () => {
     const phase = makePhase({ id: 'phase-42', title: 'Beta Phase' });
     const onAction = vi.fn();
 
@@ -52,7 +52,7 @@ describe('StageGate', () => {
     fireEvent.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('advance_stage_gate', {
+      expect(mockInvoke).toHaveBeenCalledWith('advance_phase', {
         phaseId: 'phase-42',
         projectId: 'project-1',
       });

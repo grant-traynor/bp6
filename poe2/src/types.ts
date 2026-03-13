@@ -72,7 +72,7 @@ export interface Phase {
   projectId: string;
   number: number;
   title: string;
-  lifecycleStage: 'planning' | 'execution' | 'retrospective' | 'complete';
+  status: string;
   gateHeld: boolean;
   createdAt: string;
   updatedAt: string;
@@ -115,6 +115,12 @@ export interface PhaseGateEvent {
   phaseTitle: string;
   completedCount: number;
   totalCount: number;
+}
+
+export interface PoePhaseUpdateEvent {
+  phaseId: string;
+  status: string;
+  projectId: string;
 }
 
 export interface Edge {

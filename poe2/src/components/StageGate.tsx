@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { Phase, Artifact, PhaseGateEvent } from '../types';
+import type { Phase, Artifact, PoePhaseUpdateEvent } from '../types';
 
 interface Props {
   phase: Phase;
@@ -15,17 +15,17 @@ export default function StageGate({ phase, projectId, artifacts, onArtifactOpen,
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<'advance' | 'revise' | 'rerun' | null>(null);
-  const [gateEvent, setGateEvent] = useState<PhaseGateEvent | null>(null);
+  const [gateReached, setGateReached] = useState(false);
 
   const phaseArtifacts = artifacts.filter(a => a.phaseId === phase.id);
 
-  // Listen for phase-gate-reached events to get completion summary
+  // Listen for poe-phase-update events to detect gate state
   useEffect(() => {
     let cancelled = false;
-    const unlisten = listen<PhaseGateEvent>('phase-gate-reached', ({ payload }) => {
+    const unlisten = listen<PoePhaseUpdateEvent>('poe-phase-update', ({ payload }) => {
       if (cancelled) return;
       if (payload.phaseId !== phase.id) return;
-      setGateEvent(payload);
+      if (payload.status === 'gate') setGateReached(true);
     });
     return () => {
       cancelled = true;
@@ -60,22 +60,19 @@ export default function StageGate({ phase, projectId, artifacts, onArtifactOpen,
           <span className="text-amber-400 text-[11px] font-semibold uppercase tracking-wide">
             ⬡ Stage Gate — {phase.title}
           </span>
-          <span className="text-[10px] text-amber-600 font-mono">{phase.lifecycleStage}</span>
+          <span className="text-[10px] text-amber-600 font-mono">{phase.status}</span>
         </div>
-        {gateEvent && (
+        {gateReached && (
           <span className="text-[10px] text-neutral-500 font-mono shrink-0">
-            {gateEvent.completedCount}/{gateEvent.totalCount} tasks complete
+            gate reached
           </span>
         )}
       </div>
 
-      {/* Completion summary */}
-      {gateEvent && (
+      {/* Gate notification */}
+      {gateReached && (
         <div className="text-[11px] text-neutral-500">
-          <span className="text-neutral-400">{gateEvent.phaseTitle}</span> phase reached the gate.{' '}
-          {gateEvent.completedCount === gateEvent.totalCount
-            ? 'All tasks complete.'
-            : `${gateEvent.totalCount - gateEvent.completedCount} task(s) did not complete.`}
+          Phase reached the gate.
         </div>
       )}
 
