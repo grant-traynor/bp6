@@ -245,6 +245,7 @@ async fn e2e_2_dag_structure_changed_no_ready_tasks() {
         requesting_task_id: None,
         review_id: None,
         retry_count: None,
+            requires_manual_verification: None,
     };
     let task_input = CreateNodeInput { id: None,
         project_id: project_id.clone(),
@@ -258,6 +259,7 @@ async fn e2e_2_dag_structure_changed_no_ready_tasks() {
         requesting_task_id: None,
         review_id: None,
         retry_count: None,
+            requires_manual_verification: None,
     };
     let blocker = dag_store::db_create_node(&conn, &blocker_input).expect("blocker");
     let task = dag_store::db_create_node(&conn, &task_input).expect("task");
@@ -314,6 +316,7 @@ async fn e2e_3_ready_task_with_skill_emits_agent_started() {
         requesting_task_id: None,
         review_id: None,
         retry_count: None,
+            requires_manual_verification: None,
     };
     let _task = dag_store::db_create_node(&conn, &task_input).expect("task");
 
@@ -377,6 +380,7 @@ async fn e2e_4_node_status_changed_waiting_no_panic() {
         requesting_task_id: None,
         review_id: None,
         retry_count: None,
+            requires_manual_verification: None,
     };
     let task = dag_store::db_create_node(&conn, &task_input).expect("task");
 
@@ -649,6 +653,7 @@ fn insert_live_task(
         requesting_task_id: None,
         review_id: None,
         retry_count: None,
+            requires_manual_verification: None,
     };
     let task = poe2_lib::dag_store::db_create_node(&conn, &task_input).expect("create live task");
     task.id
@@ -861,6 +866,7 @@ async fn live_2_activate_phase_bootstraps_and_runs() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         };
         poe2_lib::dag_store::db_create_node(&conn, &task_input).expect("bootstrap task");
     }
@@ -983,6 +989,7 @@ async fn live_3_sf3_sf4_chat_roundtrip() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         };
         poe2_lib::dag_store::db_create_node(&conn, &task_input)
             .expect("create interactive task")
@@ -1290,6 +1297,7 @@ async fn live_5_advance_phase_bootstraps_next() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         };
         poe2_lib::dag_store::db_create_node(&conn, &task_input).expect("create phase2 bootstrap task");
     }
@@ -1430,6 +1438,7 @@ async fn live_6_activate_phase_bootstraps_task() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         };
         let task = poe2_lib::dag_store::db_create_node(&conn, &task_input)
             .expect("bootstrap task");
@@ -1616,6 +1625,7 @@ async fn live_7_advance_phase_bootstraps_next() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         };
         poe2_lib::dag_store::db_create_node(&conn, &task_input)
             .expect("bootstrap phase2 task");

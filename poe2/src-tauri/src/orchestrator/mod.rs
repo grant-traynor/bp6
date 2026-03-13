@@ -219,6 +219,34 @@ async fn resume_decision_agent(
         (path, skill_id, model)
     };
 
+    // bp6-5c5: Atomic claim — transition waiting → resuming before spawning.
+    {
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        match dag_store::db_claim_node_resuming(&conn, task_id) {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "[orchestrator] resume_decision_agent: claim lost for task={} — already resuming, skipping",
+                    task_id
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] resume_decision_agent: claim failed for task={}: {}",
+                    task_id, e
+                );
+                return;
+            }
+        }
+    }
+
     // Resolution bundle format per Protocol.md §5
     let input_bundle = format!("---\nHuman: {}\n", resolution);
 
@@ -330,6 +358,35 @@ async fn resume_chat_agent(
 
         (response_text, path, skill_id, model)
     };
+
+    // bp6-5c5: Atomic claim — transition waiting → resuming before spawning.
+    // Guards against duplicate QueueItemResolved signals for the same turn.
+    {
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        match dag_store::db_claim_node_resuming(&conn, task_id) {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "[orchestrator] resume_chat_agent: claim lost for task={} — already resuming, skipping",
+                    task_id
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] resume_chat_agent: claim failed for task={}: {}",
+                    task_id, e
+                );
+                return;
+            }
+        }
+    }
 
     // Continuation bundle: identical format to decision resolution (Protocol.md §5).
     let input_bundle = format!("---\nHuman: {}\n", response_text);
@@ -443,6 +500,34 @@ async fn resume_advisor_agent(
 
         (response_text, path, skill_id, model)
     };
+
+    // bp6-5c5: Atomic claim — transition waiting → resuming before spawning.
+    {
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        match dag_store::db_claim_node_resuming(&conn, task_id) {
+            Ok(true) => {}
+            Ok(false) => {
+                eprintln!(
+                    "[orchestrator] resume_advisor_agent: claim lost for task={} — already resuming, skipping",
+                    task_id
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] resume_advisor_agent: claim failed for task={}: {}",
+                    task_id, e
+                );
+                return;
+            }
+        }
+    }
 
     let input_bundle = format!("---\nHuman: {}\n", response_text);
 
@@ -726,6 +811,36 @@ async fn dispatch_reviewer_task(
         "[orchestrator] dispatch_reviewer_task: reviewer={} review_id={:?} skill={:?}",
         reviewer.id, reviewer.review_id, reviewer.skill_id
     );
+
+    // bp6-5c5: Atomic claim — same pattern as dispatch_task.
+    {
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        match dag_store::db_claim_node_running(&conn, &reviewer.id) {
+            Ok(true) => {
+                eprintln!("[orchestrator] dispatch_reviewer_task: claimed reviewer={}", reviewer.id);
+            }
+            Ok(false) => {
+                eprintln!(
+                    "[orchestrator] dispatch_reviewer_task: claim lost for reviewer={} — already claimed, skipping",
+                    reviewer.id
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] dispatch_reviewer_task: claim failed for reviewer={}: {}",
+                    reviewer.id, e
+                );
+                return;
+            }
+        }
+    }
 
     let bundle_data = {
         let reg = registry.lock().unwrap();
@@ -1492,6 +1607,39 @@ async fn dispatch_task(
         "[orchestrator] dispatch_task: id={} title={:?} skill={:?}",
         task.id, task.title, task.skill_id
     );
+
+    // bp6-5c5: Atomic claim — transition pending → running before any bundle assembly.
+    // Closes the TOCTOU window: if a second DagStructureChanged arrives while bundle
+    // assembly is in progress, the second dispatch_task call will see rows_affected=0
+    // and return early. This is idempotent and race-free.
+    {
+        let reg = registry.lock().unwrap();
+        let db = match reg.get(project_id) {
+            Some(db) => db.clone(),
+            None => return,
+        };
+        drop(reg);
+        let conn = db.conn.lock().unwrap();
+        match dag_store::db_claim_node_running(&conn, &task.id) {
+            Ok(true) => {
+                eprintln!("[orchestrator] dispatch_task: claimed task={}", task.id);
+            }
+            Ok(false) => {
+                eprintln!(
+                    "[orchestrator] dispatch_task: claim lost for task={} — already claimed by another dispatch, skipping",
+                    task.id
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[orchestrator] dispatch_task: claim failed for task={}: {}",
+                    task.id, e
+                );
+                return;
+            }
+        }
+    }
 
     let bundle_data = {
         let reg = registry.lock().unwrap();

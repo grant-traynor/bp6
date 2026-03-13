@@ -129,6 +129,7 @@ fn create_pending_task(
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create task node");
@@ -422,6 +423,7 @@ fn tc3_review_yield_creates_reviewer_node_and_sets_waiting() {
             requesting_task_id: Some(task_id.clone()),
             review_id: Some(review_id.to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer node");
@@ -1004,6 +1006,7 @@ fn hierarchy_auto_close_when_all_children_terminal() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create epic");
@@ -1024,6 +1027,7 @@ fn hierarchy_auto_close_when_all_children_terminal() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create feature");
@@ -1044,6 +1048,7 @@ fn hierarchy_auto_close_when_all_children_terminal() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create task");
@@ -1175,6 +1180,7 @@ fn db_all_children_terminal_returns_false_with_mixed_statuses() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create feature");
@@ -1194,6 +1200,7 @@ fn db_all_children_terminal_returns_false_with_mixed_statuses() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create task1");
@@ -1213,6 +1220,7 @@ fn db_all_children_terminal_returns_false_with_mixed_statuses() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create task2");

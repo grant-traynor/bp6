@@ -23,7 +23,7 @@ use poe2_lib::dag_store::{
     types::{
         CreateNodeInput, EdgeType, NodeStatus, NodeType, UpdateNodeInput,
     },
-    db_claim_node_resuming, db_claim_node_retry,
+    db_claim_node_resuming, db_claim_node_retry, db_claim_node_running,
     db_create_agent, db_create_edge, db_create_node, db_find_ready_tasks,
     db_get_node, db_get_node_verdict, db_increment_retry_count, db_insert_chat_turn,
     db_list_agents_by_status, db_list_chat_turns, db_list_nodes_by_status, db_log_event,
@@ -117,6 +117,7 @@ fn create_pending_task(
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create task node");
@@ -619,6 +620,7 @@ fn sf3_review_yield_sets_waiting_and_reviewer_task_created() {
             requesting_task_id: Some(task_id.clone()),
             review_id: Some(review_id.to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer node");
@@ -879,6 +881,7 @@ fn watchdog_retry_path_increments_retry_count_and_requeues() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-001".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer node");
@@ -935,6 +938,7 @@ fn watchdog_max_retry_cancels_reviewer() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-002".to_owned()),
             retry_count: Some(2), // at max
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer at max retries");
@@ -984,6 +988,7 @@ fn watchdog_no_op_if_reviewer_already_complete() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-003".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create complete reviewer");
@@ -1036,6 +1041,7 @@ fn review_completion_all_done_enables_resume() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-A".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer 1");
@@ -1054,6 +1060,7 @@ fn review_completion_all_done_enables_resume() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-B".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer 2");
@@ -1099,6 +1106,7 @@ fn review_completion_not_all_done_blocks_resume() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-A".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer 1 (complete)");
@@ -1117,6 +1125,7 @@ fn review_completion_not_all_done_blocks_resume() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-B".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer 2 (running)");
@@ -1511,6 +1520,7 @@ fn sf1_plan_review_node_is_dispatchable() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-X".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer node");
@@ -1559,6 +1569,7 @@ fn claim_node_resuming_only_one_caller_wins() {
                 requesting_task_id: None,
                 review_id: None,
                 retry_count: None,
+            requires_manual_verification: None,
             },
         )
         .expect("create waiting task");
@@ -1656,6 +1667,7 @@ fn claim_node_retry_only_one_caller_wins() {
                 requesting_task_id: None,
                 review_id: Some("rev-1".to_owned()),
                 retry_count: Some(0),
+                requires_manual_verification: None,
             },
         )
         .expect("create running reviewer node");
@@ -1719,6 +1731,7 @@ fn claim_node_retry_on_non_running_status_returns_false() {
                 requesting_task_id: None,
                 review_id: Some("rev-2".to_owned()),
                 retry_count: Some(0),
+                requires_manual_verification: None,
             },
         )
         .expect("create complete reviewer node");
@@ -1781,6 +1794,7 @@ fn review_outcome_stores_all_four_verdicts() {
                 requesting_task_id: None,
                 review_id: Some("rev-u7s4a".to_owned()),
                 retry_count: Some(0),
+                requires_manual_verification: None,
             },
         )
         .expect("create reviewer node")
@@ -1886,6 +1900,7 @@ fn review_outcome_rejects_invalid_verdict() {
             requesting_task_id: None,
             review_id: Some("rev-invalid".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer node")
@@ -1932,6 +1947,7 @@ fn missing_review_outcome_defaults_to_blocked() {
             requesting_task_id: None,
             review_id: None,
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create requesting task")
@@ -1954,6 +1970,7 @@ fn missing_review_outcome_defaults_to_blocked() {
             requesting_task_id: Some(requesting_task_id.clone()),
             review_id: Some("rev-u7s4b".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer node")
@@ -2013,6 +2030,7 @@ fn review_outcome_present_uses_stored_verdict() {
             requesting_task_id: None,
             review_id: Some("rev-u7s4b-sub".to_owned()),
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create reviewer node")
@@ -2126,6 +2144,7 @@ fn poe_step_and_brief_emit_agent_activity_event() {
             requesting_task_id: None,
             review_id: None,
             retry_count: Some(0),
+            requires_manual_verification: None,
         },
     )
     .expect("create task node")
@@ -2254,4 +2273,105 @@ fn poe_step_and_brief_emit_agent_activity_event() {
         Some(agent_id),
         "poe-agent-activity brief payload must carry the correct agentId"
     );
+}
+
+// ── bp6-5c5: Atomic claim — double-dispatch prevention ────────────────────────
+
+/// bp6-5c5: db_claim_node_running is idempotent — the first caller wins, the
+/// second returns Ok(false) and must not dispatch.
+///
+/// Simulates the TOCTOU race in run_loop: two concurrent dispatch_task calls
+/// for the same pending node. The first atomically transitions pending → running
+/// (rows_affected == 1). The second sees the node is already running
+/// (rows_affected == 0) and returns early.
+///
+/// Asserts:
+/// - First claim returns Ok(true)
+/// - Node status is 'running' after first claim
+/// - Second claim returns Ok(false) (idempotent, no double-dispatch)
+#[test]
+fn bp6_5c5_atomic_claim_prevents_double_dispatch() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+    let phase_id = insert_execution_phase(&conn, &project_id);
+
+    // Create a pending task.
+    let task_id = create_pending_task(&conn, &project_id, Some(&phase_id), Some("implementer"));
+
+    // Verify initial status is pending.
+    let initial_status = read_status(&conn, &task_id);
+    assert_eq!(
+        initial_status,
+        NodeStatus::Pending,
+        "task must start as Pending"
+    );
+
+    // First caller: atomic claim — must win.
+    let first_claim = db_claim_node_running(&conn, &task_id)
+        .expect("db_claim_node_running must not fail");
+    assert!(first_claim, "first claim must return true (won the race)");
+
+    // Node must now be Running.
+    let after_first = read_status(&conn, &task_id);
+    assert_eq!(
+        after_first,
+        NodeStatus::Running,
+        "node must be Running after first claim"
+    );
+
+    // Second caller (simulating the race): claim must return false.
+    let second_claim = db_claim_node_running(&conn, &task_id)
+        .expect("db_claim_node_running must not fail on second call");
+    assert!(
+        !second_claim,
+        "second claim must return false — node is already running"
+    );
+
+    // Node status must remain Running (not double-transitioned).
+    let after_second = read_status(&conn, &task_id);
+    assert_eq!(
+        after_second,
+        NodeStatus::Running,
+        "node must remain Running after second (losing) claim"
+    );
+}
+
+/// bp6-5c5: db_claim_node_running does not affect nodes that are not pending.
+/// Waiting, complete, and cancelled nodes must be unaffected.
+#[test]
+fn bp6_5c5_claim_only_transitions_pending_nodes() {
+    let conn = new_mem_db();
+    let project_id = insert_project(&conn);
+    let phase_id = insert_execution_phase(&conn, &project_id);
+
+    for (status_str, node_status) in &[
+        ("waiting", NodeStatus::Waiting),
+        ("complete", NodeStatus::Complete),
+        ("cancelled", NodeStatus::Cancelled),
+    ] {
+        let task_id = create_pending_task(&conn, &project_id, Some(&phase_id), Some("implementer"));
+
+        // Manually set status to the test value.
+        conn.execute(
+            "UPDATE nodes SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status_str, task_id],
+        )
+        .unwrap();
+
+        let claimed = db_claim_node_running(&conn, &task_id)
+            .expect("db_claim_node_running must not fail");
+        assert!(
+            !claimed,
+            "claim must return false for status={} (only pending nodes can be claimed)",
+            status_str
+        );
+
+        // Status must be unchanged.
+        let after = read_status(&conn, &task_id);
+        assert_eq!(
+            after, *node_status,
+            "node status must be unchanged after failing claim for status={}",
+            status_str
+        );
+    }
 }

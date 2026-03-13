@@ -98,6 +98,7 @@ fn create_pending_task(conn: &Connection, project_id: &str, skill_id: &str) -> S
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create task node");

@@ -118,6 +118,7 @@ fn node_status_transitions_pending_running_waiting_complete() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create node");
@@ -197,6 +198,7 @@ fn ancestry_three_level_hierarchy_closest_first() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create grandparent");
@@ -215,6 +217,7 @@ fn ancestry_three_level_hierarchy_closest_first() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create parent");
@@ -233,6 +236,7 @@ fn ancestry_three_level_hierarchy_closest_first() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create child");
@@ -264,6 +268,7 @@ fn ancestry_root_node_returns_single_entry() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create root");
@@ -365,6 +370,7 @@ fn agent_session_retrievable_for_task() {
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create node");
@@ -483,6 +489,7 @@ fn add_task(conn: &Connection, project_id: &str, phase_id: &str, title: &str) ->
             requesting_task_id: None,
             review_id: None,
             retry_count: None,
+            requires_manual_verification: None,
         },
     )
     .expect("create task node")

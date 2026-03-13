@@ -1295,6 +1295,23 @@ pub fn db_count_active_tasks_in_phase(conn: &Connection, phase_id: &str) -> Resu
     Ok((total as usize, done as usize))
 }
 
+/// bp6-5c5 — Atomically claim a pending node for dispatch by transitioning it from
+/// `pending` → `running`. Returns `Ok(true)` if this caller won the claim
+/// (rows_changed == 1), `Ok(false)` if another caller already claimed it
+/// (rows_changed == 0 means the node was not in `pending` status).
+///
+/// Call this at the start of `dispatch_task` / `dispatch_reviewer_task` before
+/// any bundle assembly to close the TOCTOU window between `db_find_ready_tasks`
+/// and the `spawn_agent` call that eventually marks the node running.
+pub fn db_claim_node_running(conn: &Connection, node_id: &str) -> Result<bool> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = conn.execute(
+        "UPDATE nodes SET status = 'running', updated_at = ?1 WHERE id = ?2 AND status = 'pending'",
+        rusqlite::params![now, node_id],
+    )?;
+    Ok(rows == 1)
+}
+
 /// u7s.1 — Atomically claim a waiting node for resume by transitioning it from
 /// `waiting` → `resuming`. Returns `Ok(true)` if this caller won the claim
 /// (rows_changed == 1), `Ok(false)` if another caller already claimed it
