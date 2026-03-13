@@ -335,13 +335,15 @@ export function usePoeProject(projectId: string | null): {
       // Provides real-time agent progress between agent-started and agent-exited.
       // Feed is capped at MAX_FEED_ITEMS (50) — oldest entries are dropped when full.
       const MAX_FEED_ITEMS = 50;
-      await reg<{ taskId: string; agentId: string; type: 'step' | 'brief'; content: string }>('poe-agent-activity', ({ payload }) => {
+      await reg<{ taskId: string; agentId: string; type: 'step' | 'brief'; content: string; skillId: string; taskTitle: string }>('poe-agent-activity', ({ payload }) => {
         setFeedItems(prev => {
           const entry: FeedItem = {
             id: `activity-${payload.agentId}-${payload.type}-${Date.now()}-${Math.random()}`,
             type: 'event',
             eventType: `poe:${payload.type}`,
             taskId: payload.taskId,
+            skillId: payload.skillId,
+            taskTitle: payload.taskTitle,
             message: payload.content,
             ts: new Date().toISOString(),
           };

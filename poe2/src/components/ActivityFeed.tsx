@@ -102,6 +102,25 @@ export default function ActivityFeed({ items, nodes, onHandoverOpen }: Props) {
           ? `Chat turn — ${item.message.slice(0, 60)}${item.message.length > 60 ? '…' : ''}`
           : item.message;
 
+        // bp6-7r2.8: poe:step and poe:brief carry skillId and taskTitle directly from
+        // the backend payload. Use these for the subtitle instead of the ancestry chain
+        // (which bleeds the wrong node's context into every activity row).
+        const isActivityEntry =
+          item.eventType === 'poe:step' || item.eventType === 'poe:brief';
+
+        // Skill label: strip leading path segments and file extension (e.g.
+        // "skills/implementor.md" → "implementor").
+        const skillLabel = item.skillId
+          ? item.skillId.replace(/^.*[\\/]/, '').replace(/\.[^.]+$/, '')
+          : null;
+
+        // Subtitle: for activity entries use the task title from the payload; for
+        // all other entries use the ancestry chain (if any). This prevents the
+        // wrong node's context from appearing on every row.
+        const subtitle = isActivityEntry
+          ? (item.taskTitle ?? null)
+          : ancestryLabel;
+
         return (
           <div
             key={item.id}
@@ -130,13 +149,18 @@ export default function ActivityFeed({ items, nodes, onHandoverOpen }: Props) {
                   {item.model}
                 </span>
               )}
+              {isActivityEntry && skillLabel && (
+                <span className="shrink-0 inline-block px-1.5 py-0.5 rounded text-[10px] font-mono bg-neutral-800 text-neutral-400">
+                  {skillLabel}
+                </span>
+              )}
               <span className={`text-[12px] break-words min-w-0 leading-5 ${isChatTurn ? 'text-sky-300/80' : 'text-neutral-300'}`}>
                 {displayMessage}
               </span>
             </div>
-            {ancestryLabel && (
+            {subtitle && (
               <p className="text-[10px] text-neutral-600 pl-[72px] truncate leading-4">
-                {ancestryLabel}
+                {subtitle}
               </p>
             )}
           </div>

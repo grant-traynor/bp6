@@ -142,6 +142,8 @@ export interface FeedItem {
   model?: string | null;
   message: string;
   ts: string;   // ISO timestamp or createdAt
+  /** bp6-7r2.8: human-readable task title carried by poe:step / poe:brief entries */
+  taskTitle?: string | null;
 }
 
 export interface PoeAgentActivityEvent {
@@ -149,4 +151,8 @@ export interface PoeAgentActivityEvent {
   agentId: string;
   type: 'step' | 'brief';
   content: string;
+  /** bp6-7r2.8: skill name for the agent (e.g. "implementor", "reviewer") */
+  skillId: string;
+  /** bp6-7r2.8: human-readable title of the task the agent is working on */
+  taskTitle: string;
 }
