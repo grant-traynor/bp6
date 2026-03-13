@@ -15,7 +15,7 @@ This document specifies the four I/O contracts that Phase 2 is built around. Eve
 
 ## 1. SQLite Schema
 
-All durable state lives in `{project}/.poe/poe.db`. All timestamps are ISO 8601 text (`TEXT NOT NULL`). WAL mode and foreign keys are always enabled.
+All durable state lives in `{project}/.poe/dag.db`. All timestamps are ISO 8601 text (`TEXT NOT NULL`). WAL mode and foreign keys are always enabled.
 
 ```sql
 PRAGMA journal_mode=WAL;
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     node_type           TEXT NOT NULL,  -- 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review' | 'advisor' | 'epic' | 'feature'
     title               TEXT NOT NULL,
     description         TEXT,
-    status              TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'running' | 'waiting' | 'resuming' | 'done' | 'cancelled'
+    status              TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'running' | 'waiting' | 'resuming' | 'complete' | 'cancelled'
     skill_id            TEXT,
     assignee            TEXT,
     yield_reason        TEXT,   -- 'review' | 'decision' | 'chat' | 'advisor' | NULL. Set when status='waiting'. Used by SF-4 routing without events join.
@@ -380,7 +380,7 @@ The skill's `modes:` frontmatter field declares which modes it supports. If a hu
 >
 > **`respond_to_chat` signal**: The `respond_to_chat` Tauri command writes the response to `chat_turns` and signals the orchestrator via `DagChanged::QueueItemResolved` (the same variant as decision resolution — the orchestrator routes by `node.yield_reason`, not by signal variant). This means the orchestrator's wake-up path is identical for both `poe:decision` and `poe:chat` continuations; only the yield_reason field differentiates them.
 >
-> **`DagChanged::QueueItemResolved` — `turn_type` field (bp6-17k.7)**: The signal carries a `turn_type: String` field with one of three values: `'decision'` | `'chat'` | `'advisor'`. This field allows `resume_waiting_agent()` to route directly to the correct continuation path without performing a DB existence probe on `queue_items`, `chat_turns`, or `advisor_turns` — the type is embedded in the signal itself. Callers must set this field: `resolve_decision` passes `'decision'`, `respond_to_chat` passes `'chat'`, `respond_to_advisor` passes `'advisor'`.
+> **`DagChanged::QueueItemResolved` — `turn_type` field**: The signal carries a `turn_type: String` field with one of three values: `'decision'` | `'chat'` | `'advisor'`. This field allows `resume_waiting_agent()` to route directly to the correct continuation path without performing a DB existence probe on `queue_items`, `chat_turns`, or `advisor_turns` — the type is embedded in the signal itself. Callers must set this field: `resolve_decision` passes `'decision'`, `respond_to_chat` passes `'chat'`, `respond_to_advisor` passes `'advisor'`.
 
 **Autonomous mode block** (prepended for orchestrator-initiated tasks):
 
@@ -547,7 +547,7 @@ When the orchestrator spawns a reviewer agent in response to a `poe:review` even
 
 Skills detect plan-review mode by the presence of `**Type**: plan_review` in the T section. All other bundle sections are identical to a standard task bundle.
 
-> **Autonomous mode block in reviewer bundles (bp6-17k.6)**: The orchestrator prepends the same autonomous mode protocol block (the `## Execution Protocol` block described above) before the `# Task` section in the reviewer stdin bundle — identical to regular task dispatch. Without this block the reviewer agent receives no execution protocol instruction and may behave incorrectly (prompting for input, failing to emit `poe:done`). The reviewer skill file is read-only and must not contain the execution protocol itself; it is always injected by the orchestrator at bundle assembly time.
+> **Autonomous mode block in reviewer bundles**: The orchestrator prepends the same autonomous mode protocol block (the `## Execution Protocol` block described above) before the `# Task` section in the reviewer stdin bundle — identical to regular task dispatch. Without this block the reviewer agent receives no execution protocol instruction and may behave incorrectly (prompting for input, failing to emit `poe:done`). The reviewer skill file is read-only and must not contain the execution protocol itself; it is always injected by the orchestrator at bundle assembly time.
 
 ### Skill-Author Bundle (skill-author tasks only)
 
@@ -654,7 +654,7 @@ The skill file for `{skill-id}` is resolved as follows (first match wins):
 
 If no file is found, abort the task with an error — do not spawn the agent with no skill.
 
-> **Skill-load failure (bp6-17k.17)**: When the skill file cannot be resolved through the priority chain, the orchestrator sets the node status to `'cancelled'` and logs an error to `events`. The task does **not** retry. Recovery requires human intervention: either add the missing skill file (which makes the task eligible for re-dispatch on the next scheduling loop pass) or cancel and replace the task with a corrected one.
+> **Skill-load failure**: When the skill file cannot be resolved through the priority chain, the orchestrator sets the node status to `'cancelled'` and logs an error to `events`. The task does **not** retry. Recovery requires human intervention: either add the missing skill file (which makes the task eligible for re-dispatch on the next scheduling loop pass) or cancel and replace the task with a corrected one.
 
 The **mode protocol block** is prepended to the bundle before the `# Skill` section — not inserted into the skill file itself. The skill file is read-only from the orchestrator's perspective; it is never modified at runtime.
 
@@ -992,7 +992,7 @@ See §3 for the **mode protocol injection** pattern, which allows skills to be i
 
 All Tauri commands exposed by the backend. Authoritative interface spec — not phase-specific planning notes. All implementations live in `poe2/src-tauri/src/`.
 
-### Phase / Plan Composer (7ct.1, 7ct.3)
+### Phase / Plan Composer
 
 ```
 list_phases(project_id: String) → Vec<Phase>
@@ -1010,7 +1010,7 @@ Each stage type has a static list of consumed and produced artifact types. The p
 
 **Schema change**: add `stage_type TEXT` column to `phases` table.
 
-### Matrix / DAG (7ct.1)
+### Matrix / DAG
 
 ```
 list_edges(project_id: String) → Vec<Edge>
@@ -1019,14 +1019,14 @@ update_node_sort_order(node_id: String, sort_order: i32) → ()
 
 **Schema change**: add `sort_order INTEGER` column to `nodes` table.
 
-### WBS Ancestry + Artifact Content (7ct.2, 7ct.4, 7ct.6)
+### WBS Ancestry + Artifact Content
 
 ```
 get_node_ancestry(node_id: String) → Vec<Node>                          // walks parent_id chain to root
 read_artifact_content(artifact_id: String, project_id: String) → String // reads file from disk
 ```
 
-`read_artifact_content` path formula (bp6-17k.16): look up `artifact.filename` from the artifacts table, look up `project.path` from the project registry by `project_id`. Path resolution uses a two-step fallback:
+`read_artifact_content` path formula: look up `artifact.filename` from the artifacts table, look up `project.path` from the project registry by `project_id`. Path resolution uses a two-step fallback:
 
 1. Try `{project.path}/docs/{artifact.filename}` — the canonical location for declared artifacts.
 2. If not found, fall back to `{project.path}/{artifact.filename}` — covers artifacts written directly to the project root.
@@ -1034,27 +1034,28 @@ read_artifact_content(artifact_id: String, project_id: String) → String // rea
 
 The `Artifact` struct has `filename: String`; there is no stored `path` field.
 
-### Knowledge (7ct.6)
+### Knowledge
 
 ```
 update_knowledge(id: String, content: String) → ()
 ```
 
-### Queue Advisor / Node Chat (7ct.4)
+### Queue Advisor / Node Chat
 
-Claude API calls go through a **Rust-side proxy** — API key in Tauri config, never exposed to frontend. Streaming via Tauri `Channel`.
+The Queue Advisor uses an agent-spawn approach. Conversations are persisted to SQLite and streamed to the frontend via `poe:advisor` Tauri events.
 
+**Tauri commands:**
 ```
-advisor_chat_start(project_id: String, context: AdvisorContext) → Channel<AdvisorChunk>
-advisor_chat_send(session_id: String, message: String) → ()
-advisor_chat_stop(session_id: String) → ()
+start_advisor_session(task_id: String) → ()
+respond_to_advisor(task_id: String, content: String) → ()
+get_advisor_turns(task_id: String) → Vec<AdvisorTurn>
 ```
 
-`AdvisorContext` carries: `mode` (queue | node), `decision_id?`, `node_id?`. Rust assembles artifact corpus + knowledge register + relevant task context from SQLite before opening the Claude stream.
+**Wire events**: The backend emits `poe:advisor` Tauri events to the frontend as the agent streams its response. The frontend listens for these events to update the conversation panel in real time.
 
-Add to `Cargo.toml`: `reqwest` with `features = ["json", "stream"]`.
+**Storage**: All conversation turns (both human and advisor) are persisted in the `advisor_turns` SQLite table, keyed by `task_id`. `get_advisor_turns` returns the full conversation history for a task.
 
-### Terminal (7ct.5)
+### Terminal
 
 Two distinct terminal surfaces — they are not the same feature:
 
@@ -1083,12 +1084,10 @@ Add to `package.json`: `@xterm/xterm`, `@xterm/addon-fit`, `@xyflow/react`.
 
 ---
 
-## Minor gaps addressed
+## Implementation Notes
 
-**Stage runner trigger (.3)**: The orchestrator is event-driven via a Tokio `mpsc` channel (`DagChanged` signal). The event ingester sends a signal on every event that mutates DAG structure or task status (`poe:task`, `poe:task:update`, `poe:task:cancel`, `poe:edge`, `poe:edge:remove`, `poe:done`, plus human gate advances and decision resolutions). On each signal, the orchestrator queries SQLite for tasks where `status = 'pending'` and all `depends_on` tasks have `status = 'done'`, and the running count is below the concurrency limit. Eligible tasks are spawned. No explicit Tauri command triggers execution — the loop fires on DAG changes automatically.
+**Stage runner trigger**: The orchestrator is event-driven via a Tokio `mpsc` channel (`DagChanged` signal). The event ingester sends a signal on every event that mutates DAG structure or task status (`poe:task`, `poe:task:update`, `poe:task:cancel`, `poe:edge`, `poe:edge:remove`, `poe:done`, plus human gate advances and decision resolutions). On each signal, the orchestrator queries SQLite for tasks where `status = 'pending'` and all `depends_on` tasks have `status = 'done'`, and the running count is below the concurrency limit. Eligible tasks are spawned. No explicit Tauri command triggers execution — the loop fires on DAG changes automatically.
 
-**v1 skill locations (.5)**: Existing skill files are at `poe/src-tauri/skills/`. Port targets:
-- `poe/src-tauri/skills/operational-analyst.md` → `skills/operational-analyst.md` in app bundle
-- `poe/src-tauri/skills/product-manager.md` → `skills/product-manager.md` in app bundle
+**Skill file locations**: Skill files live in the app bundle at `resources/skills/<skill-id>.md`. User-level overrides at `~/.poe/skills/<skill-id>.md`. Project-level overrides at `{project.path}/.poe/skills/<skill-id>.md`.
 
-**UX-Brief §Pane 3**: Exists and is finalized. Always-visible right panel: decision queue (top) + Queue Advisor chatbot (bottom). Never in a tab.
+**UX-Brief §Pane 3**: Always-visible right panel: decision queue (top) + Queue Advisor chatbot (bottom). Never in a tab.

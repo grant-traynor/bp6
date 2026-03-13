@@ -62,7 +62,7 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 
 ```
 1. Ingester: INSERT events (poe:done, full payload)
-2. Ingester: UPDATE nodes SET status = 'done'
+2. Ingester: UPDATE nodes SET status = 'complete'
 3. Ingester: signal Orchestrator (DagChanged)
 4. Ingester: emit poe://task-update to frontend
 5. Orchestrator wakes → evaluates DAG for newly-ready tasks → runs SF-1 for each
@@ -119,7 +119,7 @@ The yield event is the handoff point — the agent process is about to exit and 
                                          AND review_id IN expected_ids}
        ← scoped to current batch only; reviewer nodes from prior rework rounds are excluded
      → If answered_ids = expected_ids → all reviews accounted for:
-         DB-arbitrated claim (u7s.1):
+         DB-arbitrated claim:
            UPDATE nodes SET status='resuming' WHERE id=requesting_task.id AND status='waiting'
            rows_changed == 1 → this caller won the claim; proceed with SF-4 resume spawn
            rows_changed == 0 → another concurrent caller already claimed it; abort silently
@@ -128,7 +128,7 @@ The yield event is the handoff point — the agent process is about to exit and 
    Watchdog timer fires for reviewer task R:
      → R.status = done → no action (already complete)
      → R.status ≠ done AND R.retry_count < max_retry (default 2):
-         DB-arbitrated retry claim (u7s.2):
+         DB-arbitrated retry claim:
            UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=R.id AND status='running'
            rows_changed == 1 → this caller won; dispatch via SF-1 (re-spawn fresh), spawn new watchdog
            rows_changed == 0 → exit handler already handled it; stand down
@@ -141,7 +141,7 @@ The yield event is the handoff point — the agent process is about to exit and 
          Else: await remaining reviewers (they may still complete)
 
    Exit handler fires for reviewer crash (agent exits without poe:done):
-     → DB-arbitrated retry claim (u7s.2):
+     → DB-arbitrated retry claim:
          UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=R.id AND status='running'
          rows_changed == 1 → this caller won; node is now pending; run_loop re-dispatches via SF-1
          rows_changed == 0 → watchdog already handled it; stand down (do not re-queue again)
@@ -158,7 +158,7 @@ The yield event is the handoff point — the agent process is about to exit and 
 
 **Note**: `poe:decision` and `poe:chat` are both logged by the ingester before `poe:yield` arrives. The orchestrator reads `nodes.yield_reason` (not events) when it processes the yield — direct column read, no join required.
 
-**`turn_type` in QueueItemResolved** (bp6-17k.7): When a queue item (decision, chat, or advisor turn) is resolved, the `QueueItemResolved` signal carries a `turn_type` field with one of three values: `'decision'`, `'chat'`, or `'advisor'`. The `resume_waiting_agent()` function uses `turn_type` for direct routing — it selects the correct continuation bundle format and resume path without performing an additional DB probe to determine the yield kind. `turn_type` is set by the frontend command handler at resolution time from the context in which the human responded (decision queue, artifact chat panel, or advisor panel).
+**`turn_type` in QueueItemResolved**: When a queue item (decision, chat, or advisor turn) is resolved, the `QueueItemResolved` signal carries a `turn_type` field with one of three values: `'decision'`, `'chat'`, or `'advisor'`. The `resume_waiting_agent()` function uses `turn_type` for direct routing — it selects the correct continuation bundle format and resume path without performing an additional DB probe to determine the yield kind. `turn_type` is set by the frontend command handler at resolution time from the context in which the human responded (decision queue, artifact chat panel, or advisor panel).
 
 ### SF-4: Agent Continuation (Resume)
 
@@ -361,7 +361,7 @@ sequenceDiagram
 
     Note over Orch: All reviewers accounted for → SF-4: Agent Continuation
 
-    Orch->>DB: READ nodes.verdict for each reviewer node (u7s.4)<br/>READ docs/review-{review_id}.md (path derived from review_id — no table query)
+    Orch->>DB: READ nodes.verdict for each reviewer node<br/>READ docs/review-{review_id}.md (path derived from review_id — no table query)
     Note over Orch: verdict=nodes.verdict if set<br/>verdict=FAILED if status=cancelled<br/>verdict=BLOCKED + poe-ingester-warning if nodes.verdict IS NULL
     Orch->>A: spawn --resume A1 (stream-json -p), cwd=project.path
     Note over Orch,A: stdin bundle:<br/>---<br/>ReviewResult id=r1 skill=senior-engineer verdict=APPROVED_WITH_CONDITIONS<br/>{findings text}<br/>---
@@ -415,7 +415,7 @@ The reviewer's stdin bundle is a modified T+S+K where the Task section identifie
 
 The reviewer runs as a standard autonomous agent. It emits `poe:brief`, produces `poe:artifact` containing its findings, emits `poe:review-outcome` with its verdict, then emits `poe:done`. The review artifact is written to `docs/` and indexed in SQLite like any other artifact.
 
-The `poe:review-outcome` event (u7s.4) stores the reviewer's explicit verdict on `nodes.verdict`. This is what the orchestrator reads when building the ReviewResult bundle. The four valid verdicts are:
+The `poe:review-outcome` event stores the reviewer's explicit verdict on `nodes.verdict`. This is what the orchestrator reads when building the ReviewResult bundle. The four valid verdicts are:
 - `APPROVED` — plan is correct and complete
 - `APPROVED_WITH_CONDITIONS` — acceptable but with specific items to address
 - `BLOCKED` — critical issues must be resolved before execution
@@ -427,7 +427,7 @@ The reviewer does not emit `poe:task` or `poe:edge` events — it is not plannin
 
 **Phase 4 — Result delivery**
 
-When all reviewer tasks are accounted for (`answered_ids = expected_ids`), the orchestrator performs a **DB-arbitrated claim** (u7s.1): it executes `UPDATE nodes SET status='resuming' WHERE id=requesting_task.id AND status='waiting'`. If `rows_changed == 1`, this caller won and proceeds to build the resume bundle. If `rows_changed == 0`, another concurrent caller already claimed the node (e.g., two reviewers completed simultaneously); this caller aborts silently.
+When all reviewer tasks are accounted for (`answered_ids = expected_ids`), the orchestrator performs a **DB-arbitrated claim**: it executes `UPDATE nodes SET status='resuming' WHERE id=requesting_task.id AND status='waiting'`. If `rows_changed == 1`, this caller won and proceeds to build the resume bundle. If `rows_changed == 0`, another concurrent caller already claimed the node (e.g., two reviewers completed simultaneously); this caller aborts silently.
 
 The winning caller reads each reviewer's artifact content from disk and formats it as a `ReviewResult` block (Protocol.md §5). It then resumes the requesting agent via **SF-4: Agent Continuation**, with a bundle containing all `ReviewResult` blocks in sequence.
 
@@ -471,7 +471,7 @@ When `answered_ids = expected_ids`, all reviews are accounted for — the reques
 
 2. **Batch collection**: The orchestrator collects all `poe:review` events logged since the task last ran before dispatching reviewers. An agent that emits three `poe:review` events before `poe:yield` produces three reviewers, all dispatched in parallel.
 
-3. **Single resume**: Regardless of how many reviewers ran, the requesting agent is resumed exactly once, with all results in a single bundle. Partial delivery is not permitted. The DB-arbitrated `waiting → resuming` claim (u7s.1) enforces this: only one concurrent caller can win the `UPDATE ... WHERE status='waiting'`; all others abort silently.
+3. **Single resume**: Regardless of how many reviewers ran, the requesting agent is resumed exactly once, with all results in a single bundle. Partial delivery is not permitted. The DB-arbitrated `waiting → resuming` claim enforces this: only one concurrent caller can win the `UPDATE ... WHERE status='waiting'`; all others abort silently.
 
 4. **Resume mechanics via SF-4**: Result delivery uses SF-4: Agent Continuation. cwd must match the original session's cwd; the new session_id overwrites the prior one immediately. If resume fails, SF-4 falls back to SF-1 (fresh spawn). See SF-4 for the full failure mode.
 
@@ -867,7 +867,7 @@ sequenceDiagram
 
 On app launch, the orchestrator scans all previously-registered projects in its configuration. For each project, it runs two sweeps before normal scheduling begins.
 
-**Ghost-agent sweep (u7s.3)**: The orchestrator queries all `agents` rows with `status='running'` and cross-references them against the in-memory `AgentMap`. Any row whose `agent_id` is not in the map is a ghost — a process that died without cleaning up its DB row. For each ghost: the `agents` row is marked `failed`; if its associated node is still `running`, it is atomically claimed (running → pending via `db_claim_node_retry`) so the scheduler can re-dispatch it. This sweep runs *before* the node-level scan, keeping `db_count_running_agents` honest.
+**Ghost-agent sweep**: The orchestrator queries all `agents` rows with `status='running'` and cross-references them against the in-memory `AgentMap`. Any row whose `agent_id` is not in the map is a ghost — a process that died without cleaning up its DB row. For each ghost: the `agents` row is marked `failed`; if its associated node is still `running`, it is atomically claimed (running → pending via `db_claim_node_retry`) so the scheduler can re-dispatch it. This sweep runs *before* the node-level scan, keeping `db_count_running_agents` honest.
 
 **Node-level sweep**: `running` nodes are reset to `pending` — the agent process died with the app. The session_id is preserved (it may still be valid for a `--resume` attempt). On the synthetic DagChanged, the orchestrator will attempt to re-dispatch these tasks. If `--resume` succeeds, the task continues from where it left off. If it fails, SF-4's fallback mechanism restarts it fresh.
 
@@ -875,7 +875,7 @@ On app launch, the orchestrator scans all previously-registered projects in its 
 
 `waiting` nodes are evaluated for recoverability. Review-waiting tasks may have had reviewers complete while the app was closed (their results are in SQLite). The orchestrator computes the answered/expected set and either resumes or re-dispatches missing reviewers. Decision-waiting tasks are left waiting unless all decisions are already resolved.
 
-**Periodic integrity check (u7s.3)**: In addition to the startup sweep, the orchestrator spawns a background loop that fires every 5 minutes during a live session. It repeats the ghost-agent sweep across all open projects. This covers the crash-during-session scenario where a live agent's process dies without removing its `AgentMap` entry and closing its DB row.
+**Periodic integrity check**: In addition to the startup sweep, the orchestrator spawns a background loop that fires every 5 minutes during a live session. It repeats the ghost-agent sweep across all open projects. This covers the crash-during-session scenario where a live agent's process dies without removing its `AgentMap` entry and closing its DB row.
 
 **Opening a new project**
 
@@ -899,7 +899,7 @@ The orchestrator opens the existing database and emits a full state snapshot to 
 
 5. **Project path is canonical**: The `open_project` path is the same path used as `cwd` for all agent spawns. If the project is moved on disk, `--resume` will fail for all existing sessions (cwd mismatch). The human must re-register the project from its new path.
 
-6. **Ghost-agent recovery keeps concurrency counts honest (u7s.3)**: `db_count_running_agents` is a pure SQL query counting `agents` rows with `status='running'`. Ghost rows (no live process) inflate this count and permanently consume concurrency slots. Recovery at project-open time and the periodic 5-minute integrity check sweep the agents table against the AgentMap and close any ghost rows before the scheduler reads the count.
+6. **Ghost-agent recovery keeps concurrency counts honest**: `db_count_running_agents` is a pure SQL query counting `agents` rows with `status='running'`. Ghost rows (no live process) inflate this count and permanently consume concurrency slots. Recovery at project-open time and the periodic 5-minute integrity check sweep the agents table against the AgentMap and close any ghost rows before the scheduler reads the count.
 
 ---
 
@@ -1223,7 +1223,7 @@ sequenceDiagram
 
 #### Walkthrough
 
-**Container node auto-close (hierarchy sweep, u7s.5)**
+**Container node auto-close (hierarchy sweep)**
 
 Feature, epic, and other container nodes are never dispatched by the scheduler — they have no `skill_id` and no executable work. They are closed automatically by a post-completion hierarchy sweep.
 
@@ -1536,7 +1536,7 @@ The advisor emits `poe:done` when it has nothing more to offer or the human dism
 2. Check nodes.status for the associated node:
    - status = 'done'     → poe:done arrived and was processed before the exit handler; no action
    - status = 'running'  → poe:done was never emitted; treat as crash
-3. DB-arbitrated retry claim (u7s.2):
+3. DB-arbitrated retry claim:
      UPDATE nodes SET status='pending', retry_count=retry_count+1
        WHERE id=<task_id> AND status='running'
    rows_changed = 0 → watchdog already handled it (race); stand down
@@ -1552,7 +1552,7 @@ The advisor emits `poe:done` when it has nothing more to offer or the human dism
 
 **Retry limit**: `nodes.retry_count` is incremented on each crash-reset. If `retry_count >= 3`, the orchestrator cancels the task instead of retrying, emits `poe-node-updated {status: 'cancelled'}`, and emits a `poe-ingester-warning` with `error: 'Task cancelled after max retries'`. The task is preserved in history with status `'cancelled'`.
 
-**Key invariant**: `u7s.2` (DB-arbitrated retry claim) prevents the watchdog timer and the exit handler from both resetting the same node.
+**Key invariant**: The DB-arbitrated retry claim prevents the watchdog timer and the exit handler from both resetting the same node.
 
 ---
 
