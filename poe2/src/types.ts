@@ -15,7 +15,7 @@ export interface Node {
   projectId: string;
   phaseId: string | null;
   parentId: string | null;
-  nodeType: 'project' | 'phase' | 'epic' | 'feature' | 'task' | 'bug' | 'chore' | 'subtask';
+  nodeType: 'project' | 'phase' | 'epic' | 'feature' | 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review' | 'advisor';
   title: string;
   description: string | null;
   status: 'pending' | 'running' | 'waiting' | 'blocked' | 'complete' | 'cancelled';
@@ -23,6 +23,7 @@ export interface Node {
   assignee: string | null;
   skillModes: string | null;  // JSON array string, e.g. '["autonomous","interactive"]'
   sortOrder: number | null;
+  requiresManualVerification: boolean;
   createdAt: string;
   updatedAt: string;
 }

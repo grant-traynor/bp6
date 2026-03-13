@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import type { QueueItem, DecisionOption, Node } from '../types';
 import AdvisorChatbot from './AdvisorChatbot';
+import AdvisorPanel from './AdvisorPanel';
 
 interface Props {
   items: QueueItem[];   // all items for the project (resolved + pending)
@@ -226,6 +227,11 @@ export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onR
 
   const totalPending = pendingGroups.reduce((s, g) => s + g.pending.length, 0);
 
+  // Advisor nodes that have entered waiting or a terminal state — these drive AdvisorPanel.
+  const advisorNodes = nodes.filter(
+    n => n.nodeType === 'advisor' && (n.status === 'waiting' || n.status === 'complete' || n.status === 'cancelled')
+  );
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-neutral-800 shrink-0">
@@ -276,13 +282,16 @@ export default function QueuePanel({ items, nodes, projectId, advisorTaskId, onR
         )}
       </div>
 
-      {/* Advisor sub-panel */}
+      {/* Legacy advisor chatbot sub-panel */}
       <div className="shrink-0 border-t border-neutral-800 h-[260px] min-h-0 flex flex-col">
         <AdvisorChatbot
           projectId={projectId}
           taskNodeId={advisorTaskId}
         />
       </div>
+
+      {/* Advisor interaction panel — renders when advisor nodes are active */}
+      <AdvisorPanel advisorNodes={advisorNodes} />
     </div>
   );
 }
