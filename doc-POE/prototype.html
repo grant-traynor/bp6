@@ -9,6 +9,7 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
+      --label-col: 380px;
       --bg0: #070A12; --bg1: #0C1020; --bg2: #111526; --bg3: #161B2E; --bg4: #1C2238;
       --border0: #1A1F30; --border1: #222840; --border2: #2C3450;
       --text0: #E4E8F4; --text1: #8892B0; --text2: #4A5270; --text3: #2C3050;
@@ -72,7 +73,27 @@
     /* ─── Main ─── */
     #main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
     #content-area { flex:1; display:flex; flex-direction:row; overflow:hidden; }
-    #content-left { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+    #content-left { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; position:relative; }
+
+    /* ─── Column resizer ─── */
+    #col-resizer {
+      position:fixed; top:40px; bottom:0;
+      width:10px; cursor:col-resize; z-index:20;
+      transform:translateX(-50%);
+    }
+    #col-resizer::after {
+      content:''; position:absolute; top:0; bottom:0; left:4px; width:1px;
+      background:var(--border2); transition:background .1s, width .1s;
+    }
+    #col-resizer:hover::after, #col-resizer.dragging::after {
+      background:var(--cyan); width:2px; left:3px;
+    }
+    /* Full-height drag line during active resize */
+    #col-drag-line {
+      position:fixed; top:0; bottom:0; width:1px;
+      background:var(--cyan); opacity:.6; z-index:1000;
+      pointer-events:none; display:none;
+    }
 
     #project-header { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:0 14px; height:36px; border-bottom:1px solid var(--border0); background:var(--bg1); }
     .phase-info { display:flex; align-items:center; gap:8px; font-size:11px; }
@@ -84,15 +105,7 @@
     .btn-sm { padding:3px 10px; border-radius:3px; border:1px solid var(--border2); background:transparent; color:var(--text1); font-family:var(--font); font-size:10px; cursor:pointer; transition:all .15s; letter-spacing:.04em; }
     .btn-sm:hover { background:var(--bg4); color:var(--text0); }
 
-    /* Lifecycle flow */
-    #lifecycle-flow { flex-shrink:0; padding:7px 14px; border-bottom:1px solid var(--border0); display:flex; align-items:center; gap:0; overflow-x:auto; }
-    .lf-step { display:flex; align-items:center; font-size:9px; letter-spacing:.07em; text-transform:uppercase; color:var(--text3); white-space:nowrap; }
-    .lf-step .lf-label { padding:3px 8px; border-radius:2px; color:var(--text2); }
-    .lf-step.done .lf-label { color:var(--green); }
-    .lf-step.active .lf-label { color:var(--cyan); background:var(--cyan-bg); border:1px solid var(--cyan-border); }
-    .lf-arrow { color:var(--text3); padding:0 2px; font-size:8px; }
-
-    /* ─── Phase matrix ─── */
+/* ─── Phase matrix ─── */
     #phase-matrix { flex-shrink:0; max-height:48%; overflow-y:auto; border-bottom:1px solid var(--border0); }
     .matrix-header { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; padding:6px 14px; background:var(--bg1); border-bottom:1px solid var(--border0); }
     .matrix-header-label { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--text2); }
@@ -109,8 +122,7 @@
     .dep-swatch.up { background:var(--cyan); }
     .dep-swatch.down { background:var(--amber); }
 
-    .phase-section { border-bottom:1px solid var(--border0); }
-    .phase-section-header { display:flex; align-items:center; gap:8px; padding:6px 14px 5px; background:var(--bg1); position:sticky; top:31px; z-index:1; }
+    .phase-section { }
     .phase-num { font-size:9px; color:var(--text2); letter-spacing:.06em; }
     .phase-title-text { font-size:11px; font-weight:500; color:var(--text1); }
     .phase-lifecycle-badge { font-size:9px; padding:1px 6px; border-radius:2px; border:1px solid; letter-spacing:.06em; text-transform:uppercase; }
@@ -121,24 +133,56 @@
     .phase-progress-bar { width:60px; height:2px; background:var(--border1); border-radius:2px; overflow:hidden; }
     .phase-progress-fill { height:100%; background:var(--green); border-radius:2px; }
 
-    .task-grid { padding:4px 14px 8px; display:flex; flex-direction:column; gap:1px; }
+    .task-grid { display:flex; flex-direction:column; }
 
-    /* ─── Task row ─── */
-    .task-row {
-      display:flex; align-items:center; gap:8px;
-      padding:5px 8px; border-radius:3px; border:1px solid transparent;
-      cursor:pointer; transition:background .1s, border-color .1s, opacity .15s;
-      position:relative;
-    }
-    .task-row:hover { background:var(--bg3); border-color:var(--border1); }
-    .task-row.indent-1 { padding-left:24px; }
-    .task-row.indent-2 { padding-left:40px; }
+    /* ─── WBS Gantt layout ─── */
+    .task-row { display:flex; min-height:28px; border-bottom:1px solid var(--border0); transition:opacity .15s; }
+    .task-label { width:var(--label-col); flex-shrink:0; display:flex; align-items:center; gap:8px; padding:4px 8px; border-right:1px solid var(--border1); background:var(--bg1); cursor:pointer; transition:background .1s; overflow:hidden; }
+    .task-label.indent-1 { padding-left:24px; }
+    .task-label.indent-2 { padding-left:40px; }
+    .task-row:hover .task-label { background:var(--bg3); }
 
-    /* Dep highlight states */
-    .dep-active-upstream { background:rgba(14,165,233,.06) !important; border-color:var(--cyan-border) !important; border-left:2px solid var(--cyan) !important; }
-    .dep-active-downstream { background:rgba(245,158,11,.06) !important; border-color:var(--amber-border) !important; border-left:2px solid var(--amber) !important; }
-    .dep-active-self { background:var(--bg3) !important; border-color:var(--border2) !important; }
-    .dep-dimmed { opacity:.3; }
+    /* Dep highlight states — applied to .task-label inside each row */
+    .dep-active-upstream .task-label { background:rgba(14,165,233,.08) !important; border-left:2px solid var(--cyan) !important; }
+    .dep-active-downstream .task-label { background:rgba(245,158,11,.07) !important; border-left:2px solid var(--amber) !important; }
+    .dep-active-self .task-label { background:var(--bg3) !important; border-left:2px solid var(--border2) !important; }
+    .dep-dimmed { opacity:.25; }
+
+    /* Timeline slot area */
+    .task-slots { flex:1; display:flex; }
+    .task-slot { flex:1; position:relative; border-right:1px solid var(--border0); min-height:28px; }
+    .task-slot:last-child { border-right:none; }
+    .task-slot.slot-done { background:rgba(16,185,129,.03); }
+    .task-slot.slot-here { background:rgba(14,165,233,.02); }
+
+    /* Gantt bars */
+    .slot-bar { position:absolute; top:50%; transform:translateY(-50%); left:4px; right:4px; height:6px; border-radius:2px; }
+    .slot-bar.complete { background:var(--green); opacity:.45; }
+    .slot-bar.running { background:var(--cyan); opacity:.65; animation:slot-pulse 2s ease-in-out infinite; }
+    .slot-bar.waiting { background:var(--amber); opacity:.4; height:4px; }
+    .slot-bar.blocked { background:var(--border2); opacity:.55; height:4px; }
+    .slot-bar.span-start { left:4px; right:0; border-radius:2px 0 0 2px; }
+    .slot-bar.span-mid { left:0; right:0; border-radius:0; }
+    .slot-bar.span-end { left:0; right:4px; border-radius:0 2px 2px 0; }
+    @keyframes slot-pulse { 0%,100%{opacity:.65} 50%{opacity:.3} }
+
+
+    /* Phase section header — full-width divider with inline lifecycle strip */
+    .phase-section-header { display:flex; align-items:stretch; }
+    .phase-header-label { flex:1; display:flex; align-items:center; gap:0; padding:0 14px; background:var(--bg1); border-bottom:1px solid var(--border0); border-top:1px solid var(--border0); position:sticky; top:29px; z-index:1; min-height:30px; }
+    .phase-header-id { width:var(--label-col); flex-shrink:0; display:flex; align-items:center; gap:8px; padding:5px 14px; border-right:1px solid var(--border1); box-sizing:border-box; cursor:pointer; }
+    .phase-collapse-btn { font-size:9px; color:var(--text3); flex-shrink:0; transition:transform .2s; display:inline-block; margin-right:2px; }
+    .phase-section.collapsed .phase-collapse-btn { transform:rotate(-90deg); }
+    .phase-section.collapsed .task-grid { display:none; }
+    .phase-header-progress { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--text2); flex-shrink:0; padding-left:12px; border-left:1px solid var(--border1); margin-left:auto; }
+
+    /* Lifecycle strip inside phase header */
+    .phase-lf { display:flex; align-items:center; gap:0; flex:1; overflow:hidden; }
+    .phase-lf-step { display:flex; align-items:center; font-size:9px; letter-spacing:.05em; white-space:nowrap; }
+    .phase-lf-step .lf-lbl { padding:2px 7px; border-radius:2px; color:var(--text3); }
+    .phase-lf-step.done .lf-lbl { color:var(--green); }
+    .phase-lf-step.active .lf-lbl { color:var(--cyan); background:var(--cyan-bg); border:1px solid var(--cyan-border); }
+    .phase-lf-arr { color:var(--text3); padding:0 1px; font-size:8px; flex-shrink:0; }
 
     /* Status cell */
     .task-status-cell { width:16px; height:16px; border-radius:2px; display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0; border:1px solid; }
@@ -149,7 +193,7 @@
     .task-status-cell.pending-blocked { background:var(--bg3); border-color:var(--border1); color:var(--text3); }
     @keyframes cell-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(14,165,233,0)} 50%{box-shadow:0 0 0 3px rgba(14,165,233,.15)} }
 
-    .task-title { font-size:11px; color:var(--text1); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .task-title { font-size:11px; color:var(--text1); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
     .task-row.running .task-title { color:var(--text0); }
     .task-row.complete .task-title { color:var(--text2); }
     .task-row.dep-blocked .task-title { color:var(--text2); }
@@ -396,20 +440,6 @@
         </div>
       </div>
 
-      <!-- Lifecycle flow -->
-      <div id="lifecycle-flow">
-        <div class="lf-step done"><div class="lf-label">Increment Planning</div></div>
-        <div class="lf-arrow">→</div>
-        <div class="lf-step done"><div class="lf-label">Plan Review</div></div>
-        <div class="lf-arrow">→</div>
-        <div class="lf-step done"><div class="lf-label">Plan Revision</div></div>
-        <div class="lf-arrow">→</div>
-        <div class="lf-step active"><div class="lf-label">▶ Execution</div></div>
-        <div class="lf-arrow">→</div>
-        <div class="lf-step"><div class="lf-label">Validity Analysis</div></div>
-        <div class="lf-arrow">→</div>
-        <div class="lf-step"><div class="lf-label">Retrospective</div></div>
-      </div>
 
       <!-- Content area: WBS/feed on left, task detail on right -->
       <div id="content-area">
@@ -434,150 +464,280 @@
           <div class="dep-legend-item"><div class="dep-swatch down"></div><span>downstream (unblocked by this)</span></div>
         </div>
 
-        <!-- Phase 1 complete — collapsed -->
-        <div class="phase-section">
+        <!-- Phase 1 complete — collapsed by default -->
+        <div class="phase-section collapsed" id="phase-1">
           <div class="phase-section-header">
-            <span class="phase-num">Phase 1</span>
-            <span class="phase-title-text">Foundation</span>
-            <span class="phase-lifecycle-badge complete">Complete</span>
-            <div class="phase-progress">
-              <div class="phase-progress-bar"><div class="phase-progress-fill" style="width:100%"></div></div>
-              <span>6 / 6</span>
+            <div class="phase-header-label">
+              <div class="phase-header-id" onclick="togglePhase('phase-1')">
+                <span class="phase-collapse-btn">▾</span>
+                <span class="phase-num">Phase 1</span>
+                <span class="phase-title-text">Foundation</span>
+              </div>
+              <div class="phase-lf">
+                <div class="phase-lf-step done"><span class="lf-lbl">Scope</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Plan</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Review</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Execute</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Test</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Patch</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Validate</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Rework</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Retro</span></div>
+              </div>
+              <div class="phase-header-progress">
+                <div class="phase-progress-bar"><div class="phase-progress-fill" style="width:100%"></div></div>
+                <span>6 / 6</span>
+              </div>
+            </div>
+          </div>
+          <div class="task-grid" id="task-grid-p1">
+            <div class="task-row complete" data-id="p1-scaffold" data-grid="p1">
+              <div class="task-label"><div class="task-status-cell complete">✓</div><span class="task-node-type">epic</span><span class="task-title">Project Scaffold</span></div>
+              <div class="task-slots"></div>
+            </div>
+            <div class="task-row complete" data-id="p1-tauri-init" data-deps="" data-grid="p1">
+              <div class="task-label indent-1"><div class="task-status-cell complete">✓</div><span class="task-title">Tauri + React project init</span><span class="task-skill-badge">implementor</span></div>
+              <div class="task-slots"></div>
+            </div>
+            <div class="task-row complete" data-id="p1-db-init" data-deps="p1-tauri-init" data-grid="p1">
+              <div class="task-label indent-1"><div class="task-status-cell complete">✓</div><span class="task-title">SQLite init &amp; connection pool</span><span class="task-skill-badge">implementor</span></div>
+              <div class="task-slots"></div>
+            </div>
+            <div class="task-row complete" data-id="p1-ipc" data-deps="p1-tauri-init" data-grid="p1">
+              <div class="task-label indent-1"><div class="task-status-cell complete">✓</div><span class="task-title">Tauri IPC skeleton</span><span class="task-skill-badge">tauri-engineer</span></div>
+              <div class="task-slots"></div>
+            </div>
+            <div class="task-row complete" data-id="p1-ui-shell" data-deps="p1-ipc" data-grid="p1">
+              <div class="task-label"><div class="task-status-cell complete">✓</div><span class="task-node-type">epic</span><span class="task-title">UI Shell</span></div>
+              <div class="task-slots"></div>
+            </div>
+            <div class="task-row complete" data-id="p1-layout" data-deps="p1-ui-shell" data-grid="p1">
+              <div class="task-label indent-1"><div class="task-status-cell complete">✓</div><span class="task-title">Three-pane layout</span><span class="task-skill-badge">ui-engineer</span></div>
+              <div class="task-slots"></div>
+            </div>
+            <div class="task-row complete" data-id="p1-design" data-deps="p1-ui-shell" data-grid="p1">
+              <div class="task-label indent-1"><div class="task-status-cell complete">✓</div><span class="task-title">Design system &amp; tokens</span><span class="task-skill-badge">ui-engineer</span></div>
+              <div class="task-slots"></div>
             </div>
           </div>
         </div>
 
         <!-- Phase 2 active -->
-        <div class="phase-section">
+        <div class="phase-section" id="phase-2">
           <div class="phase-section-header">
-            <span class="phase-num">Phase 2</span>
-            <span class="phase-title-text">Orchestration Core</span>
-            <span class="phase-lifecycle-badge execution">Execution</span>
-            <div class="phase-progress">
-              <div class="phase-progress-bar"><div class="phase-progress-fill" style="width:43%"></div></div>
-              <span>6 / 14</span>
+            <div class="phase-header-label">
+              <div class="phase-header-id" onclick="togglePhase('phase-2')">
+                <span class="phase-collapse-btn">▾</span>
+                <span class="phase-num">Phase 2</span>
+                <span class="phase-title-text">Orchestration Core</span>
+              </div>
+              <div class="phase-lf">
+                <div class="phase-lf-step done"><span class="lf-lbl">Scope</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Plan</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step done"><span class="lf-lbl">Review</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step active"><span class="lf-lbl">Execute</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Test</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Patch</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Validate</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Rework</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Retro</span></div>
+              </div>
+              <div class="phase-header-progress">
+                <div class="phase-progress-bar"><div class="phase-progress-fill" style="width:43%"></div></div>
+                <span>6 / 14</span>
+              </div>
             </div>
           </div>
           <div class="task-grid" id="task-grid">
 
-            <!-- Epic -->
-            <div class="task-row" data-id="ep1" data-blocks="ep2">
-              <div class="task-status-cell complete">✓</div>
-              <span class="task-node-type">epic</span>
-              <span class="task-title">Event Protocol Layer</span>
-              <span class="task-blocks-badge">→ unblocks Orchestration epic</span>
+            <!-- Epic 1 (complete) -->
+            <div class="task-row" data-id="ep1" data-blocks="ep2" data-epic-children="t-schema,t-types,t-task-handler,t-artifact">
+              <div class="task-label">
+                <div class="task-status-cell complete">✓</div>
+                <span class="task-node-type">epic</span>
+                <span class="task-title">Event Protocol Layer</span>
+                <span class="task-blocks-badge">→ unblocks Orchestration epic</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <div class="task-row complete indent-1" data-id="t-schema" data-blocks="t-types,t-dag-store">
-              <div class="task-status-cell complete">✓</div>
-              <span class="task-title">SQLite schema &amp; migrations</span>
-              <span class="task-skill-badge">implementor</span>
-              <span class="task-blocks-badge">→ 2</span>
+            <div class="task-row complete" data-id="t-schema" data-blocks="t-types,t-dag-store">
+              <div class="task-label indent-1">
+                <div class="task-status-cell complete">✓</div>
+                <span class="task-title">SQLite schema &amp; migrations</span>
+                <span class="task-skill-badge">implementor</span>
+                <span class="task-blocks-badge">→ 2</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <div class="task-row complete indent-1" data-id="t-types" data-deps="t-schema" data-blocks="t-ingester,t-task-handler,t-artifact">
-              <div class="task-status-cell complete">✓</div>
-              <span class="task-title">Rust event types &amp; serde models</span>
-              <span class="task-skill-badge">implementor</span>
-              <span class="task-blocks-badge">→ 3</span>
+            <div class="task-row complete" data-id="t-types" data-deps="t-schema" data-blocks="t-ingester,t-task-handler,t-artifact">
+              <div class="task-label indent-1">
+                <div class="task-status-cell complete">✓</div>
+                <span class="task-title">Rust event types &amp; serde models</span>
+                <span class="task-skill-badge">implementor</span>
+                <span class="task-blocks-badge">→ 3</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <div class="task-row complete indent-1" data-id="t-task-handler" data-deps="t-types" data-blocks="t-ingester">
-              <div class="task-status-cell complete">✓</div>
-              <span class="task-title">poe:task / poe:edge handler</span>
-              <span class="task-skill-badge">implementor</span>
-              <span class="task-blocks-badge">→ 1</span>
+            <div class="task-row complete" data-id="t-task-handler" data-deps="t-types" data-blocks="t-ingester">
+              <div class="task-label indent-1">
+                <div class="task-status-cell complete">✓</div>
+                <span class="task-title">poe:task / poe:edge handler</span>
+                <span class="task-skill-badge">implementor</span>
+                <span class="task-blocks-badge">→ 1</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <div class="task-row complete indent-1" data-id="t-artifact" data-deps="t-types" data-blocks="t-ingester">
-              <div class="task-status-cell complete">✓</div>
-              <span class="task-title">poe:artifact &amp; poe:knowledge handler</span>
-              <span class="task-skill-badge">implementor</span>
-              <span class="task-blocks-badge">→ 1</span>
+            <div class="task-row complete" data-id="t-artifact" data-deps="t-types" data-blocks="t-ingester">
+              <div class="task-label indent-1">
+                <div class="task-status-cell complete">✓</div>
+                <span class="task-title">poe:artifact &amp; poe:knowledge handler</span>
+                <span class="task-skill-badge">implementor</span>
+                <span class="task-blocks-badge">→ 1</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <!-- Epic 2 -->
-            <div class="task-row" data-id="ep2" data-deps="ep1">
-              <div class="task-status-cell running">●</div>
-              <span class="task-node-type">epic</span>
-              <span class="task-title">Orchestrator Core</span>
+            <!-- Epic 2 (running) -->
+            <div class="task-row" data-id="ep2" data-deps="ep1" data-epic-children="t-ingester,t-concurrency,t-plan-review,t-dag-store,t-spawn,t-recovery,t-tauri-cmds">
+              <div class="task-label">
+                <div class="task-status-cell running">●</div>
+                <span class="task-node-type">epic</span>
+                <span class="task-title">Orchestrator Core</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <!-- Running task with downstream deps -->
-            <div class="task-row running indent-1" data-id="t-ingester" data-deps="t-types,t-task-handler,t-artifact" data-blocks="t-spawn">
-              <div class="task-status-cell running">●</div>
-              <span class="task-title">Event ingester — stream-json parsing</span>
-              <span class="task-skill-badge">tauri-engineer</span>
-              <span class="task-current-step live" id="ingester-step">Handling poe:done events</span>
-              <span class="task-blocks-badge">→ 1</span>
+            <!-- Running task -->
+            <div class="task-row running" data-id="t-ingester" data-deps="t-types,t-task-handler,t-artifact" data-blocks="t-spawn">
+              <div class="task-label indent-1">
+                <div class="task-status-cell running">●</div>
+                <span class="task-title">Event ingester — stream-json parsing</span>
+                <span class="task-skill-badge">tauri-engineer</span>
+                <span class="task-current-step live" id="ingester-step">Handling poe:done events</span>
+                <span class="task-blocks-badge">→ 1</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <!-- Waiting on decision — no dep blocker -->
-            <div class="task-row indent-1" data-id="t-concurrency" data-deps="t-schema">
-              <div class="task-status-cell waiting">⏸</div>
-              <span class="task-title">Concurrency limiter</span>
-              <span class="task-skill-badge">implementor</span>
-              <span class="task-current-step" style="color:var(--amber)">decision pending</span>
+            <!-- Waiting on decision -->
+            <div class="task-row" data-id="t-concurrency" data-deps="t-schema">
+              <div class="task-label indent-1">
+                <div class="task-status-cell waiting">⏸</div>
+                <span class="task-title">Concurrency limiter</span>
+                <span class="task-skill-badge">implementor</span>
+                <span class="task-current-step" style="color:var(--amber)">decision pending</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
             <!-- Waiting on review -->
-            <div class="task-row indent-1" data-id="t-plan-review">
-              <div class="task-status-cell waiting" title="Awaiting peer review">⏸</div>
-              <span class="task-title">Plan Review — architecture validation</span>
-              <span class="task-skill-badge" style="background:var(--amber-bg);border-color:var(--amber-border);color:var(--amber)">senior-engineer</span>
-              <span class="task-current-step">reviewing</span>
+            <div class="task-row" data-id="t-plan-review">
+              <div class="task-label indent-1">
+                <div class="task-status-cell waiting" title="Awaiting peer review">⏸</div>
+                <span class="task-title">Plan Review — architecture validation</span>
+                <span class="task-skill-badge" style="background:var(--amber-bg);border-color:var(--amber-border);color:var(--amber)">senior-engineer</span>
+                <span class="task-current-step">reviewing</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
             <!-- Running -->
-            <div class="task-row running indent-1" data-id="t-dag-store" data-deps="t-schema,t-types" data-blocks="t-spawn,t-tauri-cmds">
-              <div class="task-status-cell running">●</div>
-              <span class="task-title">DAG store &amp; orchestrator loop</span>
-              <span class="task-skill-badge">implementor</span>
-              <span class="task-current-step live" id="dag-step">Writing db_find_ready_tasks</span>
-              <span class="task-blocks-badge">→ 2</span>
+            <div class="task-row running" data-id="t-dag-store" data-deps="t-schema,t-types" data-blocks="t-spawn,t-tauri-cmds">
+              <div class="task-label indent-1">
+                <div class="task-status-cell running">●</div>
+                <span class="task-title">DAG store &amp; orchestrator loop</span>
+                <span class="task-skill-badge">implementor</span>
+                <span class="task-current-step live" id="dag-step">Writing db_find_ready_tasks</span>
+                <span class="task-blocks-badge">→ 2</span>
+              </div>
+              <div class="task-slots"></div>
             </div>
 
-            <!-- Dependency-blocked: waiting on t-ingester AND t-dag-store -->
-            <div class="task-row dep-blocked indent-1" data-id="t-spawn" data-deps="t-ingester,t-dag-store" data-blocks="t-recovery,t-tauri-cmds">
-              <div class="task-status-cell pending-blocked">○</div>
-              <span class="task-title">Agent spawn &amp; watchdog</span>
-              <span class="task-skill-badge">implementor</span>
-              <div class="task-dep-chips">
-                <span class="dep-chip unmet">⊣ ingester</span>
-                <span class="dep-chip unmet">⊣ dag-store</span>
+            <!-- Dependency-blocked -->
+            <div class="task-row dep-blocked" data-id="t-spawn" data-deps="t-ingester,t-dag-store" data-blocks="t-recovery,t-tauri-cmds">
+              <div class="task-label indent-1">
+                <div class="task-status-cell pending-blocked">○</div>
+                <span class="task-title">Agent spawn &amp; watchdog</span>
+                <span class="task-skill-badge">implementor</span>
+                <div class="task-dep-chips">
+                  <span class="dep-chip unmet">⊣ ingester</span>
+                  <span class="dep-chip unmet">⊣ dag-store</span>
+                </div>
+                <span class="task-blocks-badge">→ 2</span>
               </div>
-              <span class="task-blocks-badge">→ 2</span>
+              <div class="task-slots"></div>
             </div>
 
-            <div class="task-row dep-blocked indent-1" data-id="t-recovery" data-deps="t-spawn">
-              <div class="task-status-cell pending-blocked">○</div>
-              <span class="task-title">Recovery on app restart</span>
-              <span class="task-skill-badge">implementor</span>
-              <div class="task-dep-chips">
-                <span class="dep-chip unmet">⊣ spawn</span>
+            <div class="task-row dep-blocked" data-id="t-recovery" data-deps="t-spawn">
+              <div class="task-label indent-1">
+                <div class="task-status-cell pending-blocked">○</div>
+                <span class="task-title">Recovery on app restart</span>
+                <span class="task-skill-badge">implementor</span>
+                <div class="task-dep-chips">
+                  <span class="dep-chip unmet">⊣ spawn</span>
+                </div>
               </div>
+              <div class="task-slots"></div>
             </div>
 
-            <div class="task-row dep-blocked indent-1" data-id="t-tauri-cmds" data-deps="t-dag-store,t-spawn">
-              <div class="task-status-cell pending-blocked">○</div>
-              <span class="task-title">Tauri commands — advance_phase, revise_phase</span>
-              <span class="task-skill-badge">tauri-engineer</span>
-              <div class="task-dep-chips">
-                <span class="dep-chip unmet">⊣ dag-store</span>
-                <span class="dep-chip unmet">⊣ spawn</span>
+            <div class="task-row dep-blocked" data-id="t-tauri-cmds" data-deps="t-dag-store,t-spawn">
+              <div class="task-label indent-1">
+                <div class="task-status-cell pending-blocked">○</div>
+                <span class="task-title">Tauri commands — advance_phase, revise_phase</span>
+                <span class="task-skill-badge">tauri-engineer</span>
+                <div class="task-dep-chips">
+                  <span class="dep-chip unmet">⊣ dag-store</span>
+                  <span class="dep-chip unmet">⊣ spawn</span>
+                </div>
               </div>
+              <div class="task-slots"></div>
             </div>
 
           </div>
         </div>
 
-        <!-- Phase 3 pending -->
-        <div class="phase-section">
+        <!-- Phase 3 scoping -->
+        <div class="phase-section" id="phase-3">
           <div class="phase-section-header">
-            <span class="phase-num">Phase 3</span>
-            <span class="phase-title-text">Human Oversight Layer</span>
-            <span class="phase-lifecycle-badge pending">Pending</span>
+            <div class="phase-header-label">
+              <div class="phase-header-id" onclick="togglePhase('phase-3')">
+                <span class="phase-collapse-btn">▾</span>
+                <span class="phase-num">Phase 3</span>
+                <span class="phase-title-text">Human Oversight Layer</span>
+              </div>
+              <div class="phase-lf">
+                <div class="phase-lf-step active"><span class="lf-lbl">Scope</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Plan</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Review</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Execute</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Test</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Patch</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Validate</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Rework</span></div><span class="phase-lf-arr">→</span>
+                <div class="phase-lf-step"><span class="lf-lbl">Retro</span></div>
+              </div>
+            </div>
           </div>
+          <!-- Phase 3 tasks — scope in progress, plan not yet started -->
+          <div class="task-grid" id="task-grid-p3">
+            <div class="task-row running" data-id="p3-scope" data-grid="p3">
+              <div class="task-label"><div class="task-status-cell running">●</div><span class="task-node-type">task</span><span class="task-title">Scope session — Human Oversight Layer</span><span class="task-skill-badge">scope-agent</span><span class="task-current-step live">Reviewing prior artifacts…</span></div>
+              <div class="task-slots"></div>
+            </div>
+            <div class="task-row dep-blocked" data-id="p3-plan" data-deps="p3-scope" data-grid="p3">
+              <div class="task-label"><div class="task-status-cell pending-blocked">○</div><span class="task-node-type">task</span><span class="task-title">Increment Planning</span><span class="task-skill-badge">product-manager</span><div class="task-dep-chips"><span class="dep-chip unmet">⊣ scope</span></div></div>
+              <div class="task-slots"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add next phase -->
+        <div style="padding:8px 14px; border-top:1px solid var(--border0);">
+          <button class="sidebar-open-btn" style="width:100%;text-align:center;letter-spacing:.06em;" onclick="alert('Opens Scope session for Phase 4')">+ Begin Next Phase</button>
         </div>
 
       </div>
@@ -758,9 +918,114 @@
 </div>
 
 <script>
+// ─── Phase collapse / expand ───────────────────────────────────────────
+function togglePhase(id) {
+  document.getElementById(id).classList.toggle('collapsed');
+}
+
+// ─── Gantt: compute DAG depths and render slot columns ─────────────────
+(function buildGantt() {
+  // Must run after DEP_EDGES is defined — deferred to end of script
+  window._buildGantt = function() {
+    const taskRows = [...document.querySelectorAll('.task-row[data-id]')]
+      .filter(r => !r.dataset.epicChildren); // skip epics first pass
+
+    // Compute depth: max upstream depth + 1
+    const depthMemo = {};
+    function nodeDepth(id) {
+      if (id in depthMemo) return depthMemo[id];
+      const ups = upstream[id] || [];
+      depthMemo[id] = ups.length === 0 ? 0 : 1 + Math.max(...ups.map(u => nodeDepth(u)));
+      return depthMemo[id];
+    }
+    taskRows.forEach(r => nodeDepth(r.dataset.id));
+
+    // Max depth across all tasks
+    const maxDepth = Math.max(...Object.values(depthMemo));
+    const colCount = maxDepth + 1;
+
+    // Helper: build N empty slot divs
+    function emptySlots(n) {
+      return Array.from({length: n}, () => document.createElement('div'));
+    }
+
+    // Render task rows
+    taskRows.forEach(row => {
+      const id = row.dataset.id;
+      const depth = depthMemo[id] ?? 0;
+      const slotsEl = row.querySelector('.task-slots');
+      slotsEl.innerHTML = '';
+
+      // Determine bar style from status
+      const sc = row.querySelector('.task-status-cell');
+      let barClass = 'blocked';
+      if (sc) {
+        if (sc.classList.contains('complete')) barClass = 'complete';
+        else if (sc.classList.contains('running')) barClass = 'running';
+        else if (sc.classList.contains('waiting')) barClass = 'waiting';
+      }
+
+      for (let i = 0; i < colCount; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'task-slot';
+        if (i < depth)  cell.classList.add('slot-done');
+        if (i === depth) {
+          cell.classList.add('slot-here');
+          const bar = document.createElement('div');
+          bar.className = `slot-bar ${barClass}`;
+          cell.appendChild(bar);
+        }
+        slotsEl.appendChild(cell);
+      }
+    });
+
+    // Render epic rows: span from min to max child depth
+    document.querySelectorAll('.task-row[data-epic-children]').forEach(row => {
+      const children = row.dataset.epicChildren.split(',');
+      const depths = children.map(c => depthMemo[c] ?? 0).filter(d => d !== undefined);
+      const minD = Math.min(...depths);
+      const maxD = Math.max(...depths);
+      const slotsEl = row.querySelector('.task-slots');
+      slotsEl.innerHTML = '';
+
+      const sc = row.querySelector('.task-status-cell');
+      let barClass = 'blocked';
+      if (sc) {
+        if (sc.classList.contains('complete')) barClass = 'complete';
+        else if (sc.classList.contains('running')) barClass = 'running';
+      }
+
+      for (let i = 0; i < colCount; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'task-slot';
+        if (i >= minD && i <= maxD) {
+          const bar = document.createElement('div');
+          let spanClass = '';
+          if (i === minD && i === maxD) spanClass = '';
+          else if (i === minD) spanClass = 'span-start';
+          else if (i === maxD) spanClass = 'span-end';
+          else spanClass = 'span-mid';
+          bar.className = `slot-bar ${barClass} ${spanClass}`.trim();
+          bar.style.height = '3px';
+          bar.style.top = '60%';
+          cell.appendChild(bar);
+        }
+        slotsEl.appendChild(cell);
+      }
+    });
+  };
+})();
+
 // ─── Dependency graph data ─────────────────────────────────────────────
 // dep edges: fromId → toId means "from" must finish before "to" can run
 const DEP_EDGES = [
+  // Phase 1
+  ['p1-tauri-init', 'p1-db-init'],
+  ['p1-tauri-init', 'p1-ipc'],
+  ['p1-ipc', 'p1-ui-shell'],
+  ['p1-ui-shell', 'p1-layout'],
+  ['p1-ui-shell', 'p1-design'],
+  // Phase 2
   ['t-schema', 't-types'],
   ['t-schema', 't-dag-store'],
   ['t-types', 't-ingester'],
@@ -798,6 +1063,9 @@ function allDownstream(id, visited = new Set()) {
   (downstream[id] || []).forEach(d => allDownstream(d, visited));
   return visited;
 }
+
+// Build Gantt after dep maps are ready
+window._buildGantt();
 
 // ─── Dep hover highlighting ────────────────────────────────────────────
 const grid = document.getElementById('task-grid');
@@ -1058,6 +1326,7 @@ function resolveDecision() {
       cRow.querySelector('.task-status-cell').textContent = '●';
       cRow.querySelector('.task-current-step').textContent = 'Implementing exclude logic';
       cRow.querySelector('.task-current-step').className = 'task-current-step live';
+      window._buildGantt();
     }
   }, 800);
 }
@@ -1108,6 +1377,55 @@ function addLive(){
 }
 setTimeout(addLive,4000);
 
+// ─── Column resizer ────────────────────────────────────────────────────
+(function() {
+  const resizer = document.getElementById('col-resizer');
+  const dragLine = document.getElementById('col-drag-line');
+  const root = document.documentElement;
+  const SIDEBAR_W = 200; // px — sidebar-left width
+  let dragging = false, startX = 0, startW = 0;
+
+  function resizerLeft(w) { return SIDEBAR_W + w; }
+
+  function positionResizer(w) {
+    resizer.style.left = resizerLeft(w) + 'px';
+  }
+
+  // Initial position
+  positionResizer(parseInt(getComputedStyle(root).getPropertyValue('--label-col')) || 380);
+
+  resizer.addEventListener('mousedown', e => {
+    dragging = true;
+    startX = e.clientX;
+    startW = parseInt(getComputedStyle(root).getPropertyValue('--label-col')) || 380;
+    resizer.classList.add('dragging');
+    dragLine.style.display = 'block';
+    dragLine.style.left = e.clientX + 'px';
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const newW = Math.max(180, Math.min(620, startW + (e.clientX - startX)));
+    dragLine.style.left = e.clientX + 'px';
+    root.style.setProperty('--label-col', newW + 'px');
+    positionResizer(newW);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    resizer.classList.remove('dragging');
+    dragLine.style.display = 'none';
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    window._buildGantt();
+  });
+})();
+
 // Live step cycling
 const ingesterSteps=['Handling poe:done events','Writing Tauri emit logic','Writing integration test','Handling poe:artifact events'];
 const dagSteps=['Writing db_claim_node_resuming','Testing atomic claim','Writing orchestrator wake loop','Wiring DagChanged channel'];
@@ -1115,5 +1433,7 @@ let si=0,di=0;
 setInterval(()=>{ si=(si+1)%ingesterSteps.length; const e=document.getElementById('ingester-step'); if(e)e.textContent=ingesterSteps[si]; },5000);
 setInterval(()=>{ di=(di+1)%dagSteps.length; const e=document.getElementById('dag-step'); if(e)e.textContent=dagSteps[di]; },4500);
 </script>
+<div id="col-drag-line"></div>
+<div id="col-resizer"></div>
 </body>
 </html>
