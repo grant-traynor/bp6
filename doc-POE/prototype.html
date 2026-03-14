@@ -132,12 +132,16 @@
     .task-label { width:var(--label-col); flex-shrink:0; display:flex; align-items:center; gap:8px; padding:4px 8px; border-right:1px solid var(--border1); background:var(--bg1); cursor:pointer; transition:background .1s; overflow:hidden; }
     .task-label.indent-1 { padding-left:24px; }
     .task-label.indent-2 { padding-left:40px; }
-    .task-row:hover .task-label { background:var(--bg3); }
+    .task-row:hover .task-label  { background:var(--bg3); }
+    .task-row:hover .task-slots  { background:var(--bg3); }
 
-    /* Dep highlight states — applied to .task-label inside each row */
-    .dep-active-upstream .task-label { background:rgba(14,165,233,.08) !important; border-left:2px solid var(--cyan) !important; }
-    .dep-active-downstream .task-label { background:rgba(245,158,11,.07) !important; border-left:2px solid var(--amber) !important; }
-    .dep-active-self .task-label { background:var(--bg3) !important; border-left:2px solid var(--border2) !important; }
+    /* Dep highlight states — label AND slots must match */
+    .dep-active-upstream   .task-label  { background:rgba(14,165,233,.08) !important; border-left:2px solid var(--cyan) !important; }
+    .dep-active-upstream   .task-slots  { background:rgba(14,165,233,.05) !important; }
+    .dep-active-downstream .task-label  { background:rgba(245,158,11,.07) !important; border-left:2px solid var(--amber) !important; }
+    .dep-active-downstream .task-slots  { background:rgba(245,158,11,.04) !important; }
+    .dep-active-self       .task-label  { background:var(--bg3) !important; border-left:2px solid var(--border2) !important; }
+    .dep-active-self       .task-slots  { background:var(--bg3) !important; }
     .dep-dimmed { opacity:.25; }
 
     /* Timeline slot area — each slot is a fixed-width column; spacer fills remainder */
