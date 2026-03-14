@@ -1549,7 +1549,7 @@ Add to `package.json`: `@xterm/xterm`, `@xterm/addon-fit`, `@xyflow/react`.
 
 ## Implementation Notes
 
-**Stage runner trigger**: The orchestrator is event-driven via a Tokio `mpsc` channel (`DagChanged` signal). Signals arrive from three sources: the DAG Service (after every node/edge mutation via MCP tool call — see §6 Orchestrator Notification); the poe: ingester (on `poe:done`, `poe:yield`); and human actions (gate advances, decision resolutions). On each signal, the orchestrator queries SQLite for tasks where `status = 'pending'` and all `depends_on` tasks have `status = 'done'`, and the running count is below the concurrency limit. Eligible tasks are spawned. No explicit Tauri command triggers execution — the loop fires on DAG changes automatically.
+**Stage runner trigger**: The orchestrator is event-driven via a Tokio `mpsc` channel (`DagChanged` signal). Signals arrive from three sources: the DAG Service (after every node/edge mutation via MCP tool call — see §6 Orchestrator Notification); the poe: ingester (on `poe:done`, `poe:yield`); and human actions (gate advances, decision resolutions). On each signal, the orchestrator queries SQLite for tasks where `status = 'pending'` and all `depends_on` tasks have `status = 'complete'`, and the running count is below the concurrency limit. Eligible tasks are spawned. No explicit Tauri command triggers execution — the loop fires on DAG changes automatically.
 
 **Skill file locations**: Skill files live in the app bundle at `resources/skills/<skill-id>.md`. User-level overrides at `~/.poe/skills/<skill-id>.md`. Project-level overrides at `{project.path}/.poe/skills/<skill-id>.md`.
 

@@ -37,7 +37,7 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 
 ### SF-1: Task Dispatch
 
-*Trigger*: Orchestrator wakes (any `DagChanged` signal) and finds a task where `status = pending` and all dependency tasks have `status = done`.
+*Trigger*: Orchestrator wakes (any `DagChanged` signal) and finds a task where `status = 'pending'` and all dependency tasks have `status = 'complete'`.
 
 `DagChanged` signals arrive from four sources:
 1. **DAG Service** — an agent called a mutation tool (`create_task`, `add_edge`, `cancel_task`, etc.); see SF-7
@@ -137,8 +137,8 @@ The yield event is the handoff point — the agent process is about to exit and 
          (Prevents duplicate resume spawns when two reviewers complete near-simultaneously)
 
    Watchdog timer fires for reviewer task R:
-     → R.status = done → no action (already complete)
-     → R.status ≠ done AND R.retry_count < max_retry (default 2):
+     → R.status = 'complete' → no action (already complete)
+     → R.status ≠ 'complete' AND R.retry_count < max_retry (default 2):
          DB-arbitrated retry claim:
            UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=R.id AND status='running'
            rows_changed == 1 → this caller won; dispatch via SF-1 (re-spawn fresh), spawn new watchdog
@@ -307,7 +307,7 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
 10. skill-author emits poe:done → NodeStatusChanged sent
 
 11. run_loop fires → db_find_ready_tasks now returns previously-blocked tasks
-    (their depends_on dependency is status='done')
+    (their depends_on dependency is status='complete')
 
 12. Each unblocked task dispatched via SF-1:
       load_skill succeeds (project-local tier) → task runs normally
@@ -441,7 +441,7 @@ sequenceDiagram
     B-->>Ing: {"poe":"done"}
     Note over Ing,DB: SF-2: reviewer task marked done
 
-    Ing->>DB: UPDATE reviewer task status='done'
+    Ing->>DB: UPDATE reviewer task status='complete'
     Ing->>Orch: DagChanged signal
 
     Note over Orch: All reviewers accounted for → SF-4: Agent Continuation
@@ -721,7 +721,7 @@ sequenceDiagram
 
     Note over Orch: Wakes on DagChanged signal<br/>(any source: task done, yield, DAG edit)
 
-    Orch->>DB: SELECT nodes WHERE status='pending'<br/>AND all dep nodes have status='done'
+    Orch->>DB: SELECT nodes WHERE status='pending'<br/>AND all dep nodes have status='complete'
     DB-->>Orch: [task T1]
 
     Note over Orch: Assemble T+S+K bundle (Protocol.md §3)<br/>Check concurrency limit before spawning
@@ -770,9 +770,9 @@ sequenceDiagram
 
     A-->>Ing: {"poe":"done","summary":"..."}
     Ing->>DB: INSERT events (poe:done)
-    Ing->>DB: UPDATE nodes SET status='done'
+    Ing->>DB: UPDATE nodes SET status='complete'
     Ing->>Orch: DagChanged signal
-    Ing-->>FE: emit poe://task-update (status: done)
+    Ing-->>FE: emit poe://task-update (status: complete)
     Ing-->>FE: emit poe://event (activity feed: task complete)
 
     Note over Orch: Evaluate DAG → find newly-ready tasks<br/>Dispatch each via SF-1
@@ -788,7 +788,7 @@ The orchestrator is reactive — it wakes only on `DagChanged` signals. The sign
 
 On waking, the orchestrator queries SQLite for all tasks where:
 - `status = 'pending'`
-- All dependency nodes (via `edges` table) have `status = 'done'`
+- All dependency nodes (via `edges` table) have `status = 'complete'`
 
 This query is the heart of the scheduler. It runs every wake-up, regardless of which signal triggered the wake.
 
@@ -1248,7 +1248,7 @@ sequenceDiagram
     Note over Orch: Wakes on DagChanged (final task in phase completes)
 
     Orch->>DB: SELECT nodes WHERE phase_id=P1
-    DB-->>Orch: all nodes (all status='done' or 'cancelled')
+    DB-->>Orch: all nodes (all status='complete' or 'cancelled')
 
     Note over Orch: Phase complete check:<br/>no nodes with status IN ('pending','running','waiting')<br/>AND stage type requires a human gate (per static catalogue, Protocol.md §6)
 
@@ -1298,7 +1298,7 @@ sequenceDiagram
 
         FE->>Orch: invoke("rerun_phase", {phase_id: P1})
 
-        Orch->>DB: UPDATE nodes SET status='pending'<br/>WHERE phase_id=P1 AND status='done'
+        Orch->>DB: UPDATE nodes SET status='pending'<br/>WHERE phase_id=P1 AND status='complete'
         Orch->>DB: UPDATE phases SET status='running'
         Orch->>Orch: DagChanged signal
         Orch-->>FE: emit poe://phase-update (P1: running)
@@ -1376,9 +1376,9 @@ The Retrospective stage gate shows a diff of skill file changes produced during 
 
 2. **Auto-advance for no-gate phases**: Some stage types (e.g. intermediate reviewer tasks) do not define a human gate. These phases advance automatically when all tasks complete: the orchestrator transitions them directly from `active` → `complete` and activates the next phase.
 
-3. **`cancelled` nodes satisfy completion**: A task in `cancelled` state is treated as accounted-for in the phase completion check. A phase with all tasks either `done` or `cancelled` is complete.
+3. **`cancelled` nodes satisfy completion**: A task in `cancelled` state is treated as accounted-for in the phase completion check. A phase with all tasks either `'complete'` or `'cancelled'` is complete.
 
-4. **Revise preserves done tasks**: Revise re-runs only selected tasks. Tasks that were `done` and not selected remain `done`. Their artifacts are not regenerated unless the re-run tasks produce new versions.
+4. **Revise preserves complete tasks**: Revise re-runs only selected tasks. Tasks that were `'complete'` and not selected remain `'complete'`. Their artifacts are not regenerated unless the re-run tasks produce new versions.
 
 5. **Re-run does not delete artifacts**: Resetting a task to `pending` does not delete its previously-produced artifacts. When the task re-runs, it may produce updated versions of the same artifacts (UPSERT). The prior versions are accessible via the artifact history (same `name`, different `timestamp`).
 
@@ -1621,7 +1621,7 @@ The advisor emits `poe:done` when it has nothing more to offer or the human dism
 ```
 1. Exit handler fires (orchestrator's stdout reader detects EOF / result event)
 2. Check nodes.status for the associated node:
-   - status = 'done'     → poe:done arrived and was processed before the exit handler; no action
+   - status = 'complete' → poe:done arrived and was processed before the exit handler; no action
    - status = 'running'  → poe:done was never emitted; treat as crash
 3. DB-arbitrated retry claim:
      UPDATE nodes SET status='pending', retry_count=retry_count+1
