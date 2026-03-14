@@ -42,7 +42,7 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 `DagChanged` signals arrive from four sources:
 1. **DAG Service** — an agent called a mutation tool (`create_task`, `add_edge`, `cancel_task`, etc.); see SF-7
 2. **Event Ingester** — `poe:done` or `poe:yield` received in agent stdout
-3. **Human gate commands** — `activate_phase`, `advance_phase`, `revise_phase`, `rerun_phase`
+3. **Human gate commands** — `advance_stage`, `revise_stage`, `rerun_stage`, `activate_phase`, `advance_phase`
 4. **Decision/chat resolution** — `resolve_decision`, `respond_to_chat`, `respond_to_advisor`
 
 ```
@@ -77,9 +77,9 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 3. Ingester: signal Orchestrator (DagChanged)
 4. Ingester: emit poe://task-update to frontend
 5. Orchestrator wakes → evaluates DAG for newly-ready tasks → runs SF-1 for each
-6. After dispatching newly-ready tasks, check all active phases for completion:
-   if all nodes in a phase have status IN ('done', 'cancelled'),
-   transition phase → status='gate' and emit poe-phase-update.
+6. After dispatching newly-ready tasks, check the active stage for completion:
+   if all nodes in the active stage's phase have status IN ('complete', 'cancelled'),
+   transition stage → status='gate' and emit poe-stage-update.
    See §3.7 for gate handling.
 ```
 
@@ -124,9 +124,9 @@ The yield event is the handoff point — the agent process is about to exit and 
          Spawn per-reviewer Tokio watchdog timer (default: 5 min)
      → waiting task does NOT count against concurrency limit
 
-   Completion check (fires on reviewer status=done via SF-2, OR on watchdog cancellation):
+   Completion check (fires on reviewer status=complete via SF-2, OR on watchdog cancellation):
      → answered_ids = {nodes.review_id WHERE requesting_task_id=task.id
-                                         AND status IN ('done', 'cancelled')
+                                         AND status IN ('complete', 'cancelled')
                                          AND review_id IN expected_ids}
        ← scoped to current batch only; reviewer nodes from prior rework rounds are excluded
      → If answered_ids = expected_ids → all reviews accounted for:
@@ -543,7 +543,7 @@ Agent A receives all results simultaneously and can reason across them before pr
 
 The orchestrator tracks completion by comparing two sets:
 - **expected_ids**: review IDs from all `poe:review` events in the **current batch** — `events WHERE task_id = A.id AND event_type = 'poe:review' AND created_at > nodes.last_dispatch_at`. `last_dispatch_at` is written at SF-1 step 0; it is the durable anchor for "current round" scoping. See SF-3.
-- **answered_ids**: `review_id` values from reviewer tasks with `requesting_task_id = A.id`, `status IN ('done', 'cancelled')`, and `review_id IN expected_ids` (cancelled = watchdog exhausted)
+- **answered_ids**: `review_id` values from reviewer tasks with `requesting_task_id = A.id`, `status IN ('complete', 'cancelled')`, and `review_id IN expected_ids` (cancelled = watchdog exhausted)
 
 Scoping `answered_ids` to `expected_ids` is mandatory: without it, reviewer nodes from prior rework rounds accumulate in the query and cause `expected` to grow unboundedly, preventing the completion check from ever firing.
 
@@ -1047,9 +1047,9 @@ sequenceDiagram
         FE->>FE: Confirm modal (shows: "N agents will be stopped")
         Human->>FE: Confirms
 
-        FE->>Orch: invoke("pause_stage", {project_id, phase_id})
+        FE->>Orch: invoke("pause_stage", {project_id, stage_id})
 
-        Orch->>DB: SELECT nodes WHERE phase_id=X AND status='running'
+        Orch->>DB: SELECT nodes WHERE phase_id=active_phase_id AND status='running'
         DB-->>Orch: [T1, T3, T5]
 
         loop For each running task in stage
@@ -1057,8 +1057,8 @@ sequenceDiagram
             Orch->>DB: UPDATE nodes SET status='pending'
         end
 
-        Orch->>DB: UPDATE phases SET status='paused'
-        Orch-->>FE: emit poe://stage-update (paused)
+        Orch->>DB: UPDATE stages SET status='paused' WHERE id=stage_id
+        Orch-->>FE: emit poe-stage-update {stageId, status: 'paused'}
         Note over Orch: DagChanged NOT emitted — stage is paused,<br/>no further dispatch until human resumes
 
     else Abort project
@@ -1091,13 +1091,13 @@ The most targeted interrupt. The orchestrator:
 1. Looks up the task's current status.
 2. If `running`: sends SIGTERM to the process. The process handle must be stored by the orchestrator at spawn time (or recovered from the OS by PID, which is fragile). Reset to `pending`.
 3. If `waiting`: no live process. Must cascade to any reviewer tasks that are still `pending` or `running` — cancel them too, or they will attempt to resume a task that no longer wants results. Reset the waiting task to `pending`.
-4. If `pending` or `done`: cancel is a no-op (or confirmation is skipped).
+4. If `pending` or `complete`: cancel is a no-op (or confirmation is skipped).
 
 After cancel, the task is `pending` again. The orchestrator does NOT immediately re-dispatch (the human cancelled for a reason). Re-dispatch only happens on the next DagChanged signal — typically when the human edits the task and unblocks it.
 
 **Pause stage**
 
-SIGTERM all running agents in the current stage/phase. Reset all to `pending`. Set the phase to `paused` state. The orchestrator does NOT emit DagChanged after a pause — the scheduler must not dispatch new tasks while paused. On resume, the human calls `invoke("resume_stage")`, the orchestrator emits DagChanged, and the scheduler runs normally.
+SIGTERM all running agents in the current stage. Reset all to `pending`. Set the stage to `paused` state. The orchestrator does NOT emit DagChanged after a pause — the scheduler must not dispatch new tasks while paused. On resume, the human calls `invoke("resume_stage")`, the orchestrator emits DagChanged, and the scheduler runs normally.
 
 **Abort project**
 
@@ -1106,7 +1106,7 @@ Same as pause stage but project-scoped. All running agents across all phases are
 **On resume after interrupt**
 
 When the human resumes a paused stage or project, the orchestrator:
-1. Updates the phase/project status back to `running`
+1. Updates the stage/project status back to `running`
 2. Emits a synthetic DagChanged
 3. The scheduler finds all `pending` tasks with satisfied dependencies and dispatches them
 4. Dispatch uses SF-4 (`--resume <session_id>`) for tasks that have a stored session_id (the session may still be valid if the app was not restarted and not too much time has passed). Falls back to SF-1 (fresh spawn) if resume fails.
@@ -1228,13 +1228,13 @@ The project terminal (tmux) is a general-purpose shell. The session handover is 
 
 ---
 
-### 3.7 Phase Closure & Stage Gate
+### 3.7 Stage Closure & Gate
 
-**What it is**: Detection that all tasks in a phase are complete, presentation of the gate to the human, and handling of the three gate outcomes: Advance, Revise, or Re-run.
+**What it is**: Detection that all tasks in the active stage are complete, presentation of the gate to the human, and handling of the three gate outcomes: Advance, Revise, or Re-run.
 
-**Canonical use case**: All execution tasks in Phase 1 are `done`. The orchestrator detects the phase is complete, transitions it to a gate state, and presents the human with artifacts to review before advancing to Phase 2.
+**Canonical use case**: All tasks in the `execution` stage of Phase 1 are `'complete'`. The orchestrator detects the stage is done, transitions it to `gate`, and presents the human with artifacts to review before advancing to the next stage (or phase).
 
-**Wire format reference**: UX-Brief.md §Stage Gate UI, Architecture.md §Orchestration Engine.
+**Wire format reference**: UX-Brief.md §Stage Gate UI, Architecture.md §Stages.
 
 #### Sequence Diagram
 
@@ -1245,22 +1245,23 @@ sequenceDiagram
     participant FE as Frontend
     participant Human as Human
 
-    Note over Orch: Wakes on DagChanged (final task in phase completes)
+    Note over Orch: Wakes on DagChanged (final task in active stage completes)
 
     Orch->>DB: SELECT nodes WHERE phase_id=P1
     DB-->>Orch: all nodes (all status='complete' or 'cancelled')
 
-    Note over Orch: Phase complete check:<br/>no nodes with status IN ('pending','running','waiting')<br/>AND stage type requires a human gate (per static catalogue, Protocol.md §6)
+    Note over Orch: Stage complete check:<br/>no nodes with status IN ('pending','running','waiting')<br/>AND stage type defines a human gate (per static catalogue, Protocol.md §7)
 
-    Orch->>DB: UPDATE phases SET status='gate'
-    Orch-->>FE: emit poe://phase-update (status: gate)
+    Orch->>DB: UPDATE stages SET status='gate' WHERE id=S1
+    Orch->>DB: UPDATE projects SET active_stage_id=NULL
+    Orch-->>FE: emit poe-stage-update {stageId: S1, status: 'gate'}
 
-    Note over FE: Phase × Scope Matrix dims next phase.<br/>Project card shows gate indicator.<br/>Gate panel appears in project header.
+    Note over FE: Phase × Scope Matrix dims next stage.<br/>Gate panel appears in project header.
 
     FE->>DB: SELECT artifacts WHERE phase_id=P1
     DB-->>FE: [artifact list with metadata]
 
-    FE->>DB: SELECT decisions WHERE phase_id=P1 AND resolved_at IS NOT NULL
+    FE->>DB: SELECT decisions WHERE task_id IN (phase P1 task ids) AND resolved_at IS NOT NULL
     DB-->>FE: [resolved decisions summary]
 
     Note over FE: Gate panel shows:<br/>- Artifact list with viewer links<br/>- Plan review iteration count<br/>- Resolved decisions summary<br/>- Agent activity summary
@@ -1269,15 +1270,17 @@ sequenceDiagram
 
     alt Advance
         Human->>FE: Clicks "Advance"
-        FE->>Orch: invoke("advance_phase", {project_id, phase_id: P1})
+        FE->>Orch: invoke("advance_stage", {project_id, stage_id: S1})
 
-        Orch->>DB: UPDATE phases SET status='complete' WHERE id=P1
-        Orch->>DB: UPDATE phases SET status='running' WHERE id=P2
-        Note over Orch: If P2 has no tasks, bootstrap the default skill task<br/>for P2's stage_type (same mapping as SF-5 bootstrap)
+        Orch->>DB: UPDATE stages SET status='complete' WHERE id=S1
+        Note over Orch: Find next stage in phase (lowest number > S1 with status='pending')<br/>If found: activate via activate_stage<br/>If none: all stages complete → advance_phase
+        Orch->>DB: UPDATE stages SET status='running' WHERE id=S2
+        Orch->>DB: UPDATE projects SET active_stage_id=S2
+        Note over Orch: maybe_bootstrap_stage: if S2 has no tasks,<br/>create default task for S2.stage_type
         Orch->>Orch: DagChanged signal (synthetic)
-        Orch-->>FE: emit poe://phase-update (P1: complete, P2: running)
+        Orch-->>FE: emit poe-stage-update (S1: complete, S2: running)
 
-        Note over Orch: Normal scheduler loop:<br/>P2 tasks with no dependencies become ready<br/>Dispatch via SF-1
+        Note over Orch: Normal scheduler loop:<br/>Phase tasks with no unmet dependencies become ready<br/>Dispatch via SF-1
 
     else Revise
         Human->>FE: Clicks "Revise"
@@ -1285,24 +1288,26 @@ sequenceDiagram
 
         Human->>FE: Selects tasks to revise (or edits DAG directly)
 
-        FE->>Orch: invoke("revise_phase", {phase_id: P1, task_ids: [...]})
+        FE->>Orch: invoke("revise_stage", {project_id, stage_id: S1, task_ids: [...]})
 
         Orch->>DB: UPDATE nodes SET status='pending' WHERE id IN (...)
-        Orch->>DB: UPDATE phases SET status='running'
+        Orch->>DB: UPDATE stages SET status='running' WHERE id=S1
+        Orch->>DB: UPDATE projects SET active_stage_id=S1
         Orch->>Orch: DagChanged signal
-        Orch-->>FE: emit poe://phase-update (P1: running)
-        Note over Orch: Re-dispatch selected tasks.<br/>Other completed tasks remain 'done'.
+        Orch-->>FE: emit poe-stage-update (S1: running) + poe-node-updated per reset task
+        Note over Orch: Re-dispatch selected tasks.<br/>Other complete tasks remain 'complete'.
 
     else Re-run
-        Human->>FE: Clicks "Re-run" (reset entire phase)
+        Human->>FE: Clicks "Re-run" (reset entire stage)
 
-        FE->>Orch: invoke("rerun_phase", {phase_id: P1})
+        FE->>Orch: invoke("rerun_stage", {project_id, stage_id: S1})
 
         Orch->>DB: UPDATE nodes SET status='pending'<br/>WHERE phase_id=P1 AND status='complete'
-        Orch->>DB: UPDATE phases SET status='running'
+        Orch->>DB: UPDATE stages SET status='running' WHERE id=S1
+        Orch->>DB: UPDATE projects SET active_stage_id=S1
         Orch->>Orch: DagChanged signal
-        Orch-->>FE: emit poe://phase-update (P1: running)
-        Note over Orch: All phase tasks reset to pending.<br/>Full re-execution.
+        Orch-->>FE: emit poe-stage-update (S1: running) + poe-node-updated per reset task
+        Note over Orch: All phase tasks reset to pending.<br/>Full re-execution of this stage.
     end
 ```
 
@@ -1314,16 +1319,16 @@ sequenceDiagram
 
 Feature, epic, and other container nodes are never dispatched by the scheduler — they have no `skill_id` and no executable work. They are closed automatically by a post-completion hierarchy sweep.
 
-Whenever any node reaches a terminal state (complete or cancelled), the orchestrator walks upward via `parent_id`:
+Whenever any node reaches a terminal state (`'complete'` or `'cancelled'`), the orchestrator walks upward via `parent_id`:
 
 ```
 for node in terminal:
     parent = node.parent_id
     while parent exists:
-        if all children of parent are terminal (complete or cancelled):
+        if all children of parent are terminal ('complete' or 'cancelled'):
             UPDATE parent SET status='complete'
-            emit poe-dag-node-status for parent
-            call check_phase_completion for parent's phase
+            emit poe-node-updated for parent
+            call check_stage_completion for parent's phase
             parent = parent.parent_id   ← ascend one level
         else:
             break  ← sibling still pending/running/waiting → stop
@@ -1332,19 +1337,19 @@ for node in terminal:
 Key invariants:
 - `parent_id` is walked (organisational hierarchy). `edges` are NEVER walked here — they encode technical dependencies, not containment.
 - Empty containers (no children) do NOT auto-close.
-- `check_phase_completion` is called at each level — cheap and idempotent.
+- `check_stage_completion` is called at each level — cheap and idempotent.
 
-**Phase completion detection**
+**Stage completion detection**
 
-The orchestrator checks phase completion on every DagChanged wake-up. A phase is complete when:
-- All nodes in the phase have `status IN ('done', 'cancelled')` — no `pending`, `running`, or `waiting` nodes remain
-- The stage type requires a human gate (per the static stage type catalogue in Protocol.md §6). Stage types that auto-advance (e.g. intermediate reviewer tasks) do not define a gate.
+The orchestrator checks stage completion on every DagChanged wake-up. The active stage is complete when:
+- All nodes in the phase have `status IN ('complete', 'cancelled')` — no `pending`, `running`, or `waiting` nodes remain
+- The stage type defines a human gate (per the static stage type catalogue in Protocol.md §7). Stage types that auto-advance do not define a gate.
 
-On detection, the phase transitions to `status='gate'`. The next phase is NOT activated yet — it waits for the human.
+On detection, the stage transitions to `status='gate'`. The next stage is NOT activated yet — it waits for the human.
 
 **Gate presentation**
 
-The frontend shows the gate panel when `phase.status = 'gate'`. The panel presents:
+The frontend shows the gate panel when `stage.status = 'gate'`. The panel presents:
 - All artifacts produced during the phase (with links to the Artifact Viewer)
 - Summary of the inner loop: how many plan review iterations ran, whether any review was blocked or went to FAILED
 - All decisions raised and resolved during the phase
@@ -1354,15 +1359,15 @@ The human is expected to read the artifacts before deciding. The gate is a quali
 
 **Advance**
 
-The phase transitions to `complete`. The next phase becomes `active`. The orchestrator emits DagChanged, which causes the scheduler to find Phase 2 tasks with no dependencies (or all dependencies satisfied) and dispatch them.
+The stage transitions to `'complete'`. The orchestrator activates the next stage in the phase. If no further stages remain in the phase, the phase itself transitions to `'complete'` and the next phase is activated (`advance_phase`). The scheduler finds newly-ready tasks and dispatches them via SF-1.
 
 **Revise**
 
-The human selects specific tasks to re-run (or edits task descriptions before re-running). Selected tasks are reset to `pending`; other `done` tasks remain done. The phase returns to `active`. The orchestrator dispatches only the reset tasks.
+The human selects specific tasks to re-run (or edits task descriptions before re-running). Selected tasks are reset to `'pending'`; other `'complete'` tasks remain `'complete'`. The stage returns to `'running'`. The orchestrator dispatches only the reset tasks.
 
 **Re-run**
 
-All `done` tasks in the phase are reset to `pending`. The phase returns to `active`. Full re-execution. Use this when the phase output is fundamentally wrong rather than partially wrong.
+All `'complete'` tasks in the phase are reset to `'pending'`. The stage returns to `'running'`. Full re-execution. Use this when the stage output is fundamentally wrong rather than partially wrong.
 
 **Retrospective gate — additional affordance**
 
@@ -1372,19 +1377,19 @@ The Retrospective stage gate shows a diff of skill file changes produced during 
 
 #### Key Invariants
 
-1. **Gate blocks next phase**: A phase in `gate` state does not advance automatically. The next phase nodes remain `pending` but the orchestrator excludes them from dispatch while the gate is open (because their phase is not `active`).
+1. **Gate blocks next stage**: A stage in `'gate'` status does not advance automatically. The next stage remains `'pending'` and the orchestrator does not dispatch until the human advances.
 
-2. **Auto-advance for no-gate phases**: Some stage types (e.g. intermediate reviewer tasks) do not define a human gate. These phases advance automatically when all tasks complete: the orchestrator transitions them directly from `active` → `complete` and activates the next phase.
+2. **Auto-advance for no-gate stages**: Some stage types do not define a human gate. These stages advance automatically when all tasks complete: the orchestrator transitions them directly to `'complete'` and activates the next stage (or phase if it's the last stage).
 
-3. **`cancelled` nodes satisfy completion**: A task in `cancelled` state is treated as accounted-for in the phase completion check. A phase with all tasks either `'complete'` or `'cancelled'` is complete.
+3. **`'cancelled'` nodes satisfy completion**: A task in `'cancelled'` state is treated as accounted-for in the stage completion check. A stage with all phase tasks either `'complete'` or `'cancelled'` is complete.
 
 4. **Revise preserves complete tasks**: Revise re-runs only selected tasks. Tasks that were `'complete'` and not selected remain `'complete'`. Their artifacts are not regenerated unless the re-run tasks produce new versions.
 
-5. **Re-run does not delete artifacts**: Resetting a task to `pending` does not delete its previously-produced artifacts. When the task re-runs, it may produce updated versions of the same artifacts (UPSERT). The prior versions are accessible via the artifact history (same `name`, different `timestamp`).
+5. **Re-run does not delete artifacts**: Resetting a task to `'pending'` does not delete its previously-produced artifacts. When the task re-runs, it may produce updated versions of the same artifacts (UPSERT). Prior versions remain accessible via artifact history.
 
-6. **Phase gate is the outer PDCA loop closure**: The gate is where the human applies the Check step of the outer loop. Advance = the deliverable meets the bar. Revise = targeted Act. Re-run = full Act. The quality of this check determines whether the next phase starts on solid ground.
+6. **Stage gate is the outer PDCA loop closure**: The gate is where the human applies the Check step of the outer loop. Advance = the deliverable meets the bar. Revise = targeted Act. Re-run = full Act. The quality of this check determines whether the next stage starts on solid ground.
 
-7. **`advance_phase` bootstraps tasks**: if the next phase has no tasks when advanced to, `maybe_bootstrap_phase` creates the default task for that `stage_type`. Without this, the orchestrator finds 0 ready tasks and the phase stalls silently.
+7. **Stage bootstrap on advance**: when advancing to a new stage that has no tasks, `maybe_bootstrap_stage` creates the default task for that `stage_type`. Without this, the orchestrator finds zero ready tasks and the stage stalls silently.
 
 ---
 ### 3.8 Collaborative Artifact Building (`poe:chat`)
@@ -1726,23 +1731,23 @@ The requesting agent receives `verdict=BLOCKED` and should escalate via `poe:dec
 
 ---
 
-### 4.6 Phase Activation with No Bootstrap Skill
+### 4.6 Stage Activation with No Bootstrap Skill
 
-*Trigger*: `activate_phase` or `advance_phase` is called, the phase has no tasks, and the `stage_type → skill` bootstrap mapping has no entry for this stage type (e.g. `execution` — which intentionally has no bootstrap).
+*Trigger*: `activate_stage` or `advance_stage` is called, the stage has no tasks, and the `stage_type → skill` bootstrap mapping has no entry for this stage type (e.g. `execution` — which intentionally has no bootstrap).
 
 ```
-1. maybe_bootstrap_phase runs: stage_type = 'execution' (or any non-bootstrappable type)
+1. maybe_bootstrap_stage runs: stage_type = 'execution' (or any non-bootstrappable type)
 2. No default task is created (by design for execution stages)
-3. Orchestrator wakes on DagChanged — finds zero pending tasks in the new phase
-4. Phase remains 'running' with zero tasks
-5. No error — this is expected for execution stages (tasks were created by product-manager via DAG Service MCP tools during the preceding increment_planning phase)
+3. Orchestrator wakes on DagChanged — finds zero pending tasks in the new stage
+4. Stage remains 'running' with zero tasks
+5. No error — this is expected for execution stages (tasks were created by product-manager via DAG Service MCP tools during the preceding increment_planning stage)
 6. If this is NOT an execution stage (unexpected missing bootstrap entry):
-   → Log warning: 'Phase activated with stage_type={X} but no bootstrap skill mapping found'
-   → Emit poe-ingester-warning {error: 'Phase has no tasks and no bootstrap mapping for stage_type={X}'}
-   → Phase stalls visibly: running but 0 tasks. Human must manually add a task or edit the plan.
+   → Log warning: 'Stage activated with stage_type={X} but no bootstrap skill mapping found'
+   → Emit poe-ingester-warning {error: 'Stage has no tasks and no bootstrap mapping for stage_type={X}'}
+   → Stage stalls visibly: running but 0 tasks. Human must manually add a task or edit the plan.
 ```
 
-**Key distinction**: execution phases are intentionally taskless at activation — the product-manager already created the tasks via DAG Service MCP tools during the preceding increment_planning phase, so they exist in the DB before the execution phase is activated. All other stage types should have a bootstrap mapping; a missing entry for a non-execution stage is a configuration error, not a design choice.
+**Key distinction**: execution stages are intentionally taskless at activation — the product-manager already created the tasks via DAG Service MCP tools during the preceding increment_planning stage, so they exist in the DB before the execution stage is activated. All other stage types should have a bootstrap mapping; a missing entry for a non-execution stage is a configuration error, not a design choice.
 
 ---
 
@@ -1759,5 +1764,5 @@ The requesting agent receives `verdict=BLOCKED` and should escalate via `poe:dec
 | Phase Closure & Stage Gate | 3.7 | Draft |
 | Collaborative Artifact Building (`poe:chat`) | 3.8 | Draft |
 | Advisor Session (`poe:advisor`) | 3.9 | Draft |
-| Plan Composer → Phase Activation | SF-5 | Draft |
+| Plan Composer → Stage Activation | SF-5 | Draft |
 | Missing-Skill Self-Healing | SF-6 | Draft |

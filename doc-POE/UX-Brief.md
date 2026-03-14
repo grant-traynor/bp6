@@ -304,8 +304,6 @@ The project terminal is for code review, running commands, and manual investigat
 
 ## Plan Composer
 
-> **Gap addressed**: The CONOPS states "A project plan is a human-composed DAG of stage instances." The UX-Brief previously described the Phase × Scope Matrix for viewing an existing plan, but not how a human composes one.
-
 When a project is created (or when the human advances to plan a new phase), the Plan Composer replaces the Phase × Scope Matrix in Pane 2.
 
 ```
@@ -337,7 +335,7 @@ This is the primary entry point for all new projects. The Onboarding stage type 
 
 ## Artifact Viewer
 
-> **Gap addressed**: The CONOPS describes artifacts as "the connectors between stages" and "structured documents that define the product." The Artifact Viewer is a single context-sensitive surface — read-only by default, chat-active when a collaborative session is in progress or the human initiates one.
+The Artifact Viewer is a single context-sensitive surface — read-only by default, chat-active when a collaborative session is in progress or the human initiates one.
 
 Accessible from:
 - The Phase × Scope Matrix — artifact icon on any completed phase
@@ -396,8 +394,6 @@ Activated by either:
 
 ## Knowledge Register Panel
 
-> **Gap addressed**: Architecture.md describes the knowledge register as "surfaced in the UI as a browsable, searchable panel." This was absent from the UX-Brief.
-
 Accessible from the project toolbar (persistent icon, never in a tab for active projects).
 
 The panel shows all knowledge entries for the current project:
@@ -429,8 +425,6 @@ The human is expected to read the artifacts before advancing. The gate should no
 ---
 
 ## Agent Interrupt
-
-> **Gap addressed**: The CONOPS describes the human being able to "pull the cord if something is going wrong." The UX-Brief previously described task cancellation (for individual tasks) but no emergency stop.
 
 Three levels of interrupt, available from the project header:
 
