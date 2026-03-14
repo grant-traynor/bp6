@@ -1,7 +1,7 @@
 # POE — Protocol Specification
 
 **Status**: Draft
-**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service (MCP) added as §6; poe:task/poe:edge removed from poe: protocol; reviewers read DAG directly)
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service (MCP) added as §6; poe:task/poe:edge removed from poe: protocol; reviewers read DAG directly; Phase/Stage schema — phases are iterations, stages are process steps within a phase)
 
 **Artifact classification**: This document serves as both:
 - `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), the frontend update mechanism (§4), the DAG Service MCP tool surface (§6).
@@ -25,32 +25,52 @@ CREATE TABLE IF NOT EXISTS projects (
     id              TEXT PRIMARY KEY,
     name            TEXT NOT NULL,
     path            TEXT NOT NULL UNIQUE,
-    conops_ref      TEXT,           -- path to conops artifact, set after guardrails phase
-    active_phase_id TEXT,           -- currently active phase; NULL between gates
+    conops_ref      TEXT,           -- path to conops artifact, set after guardrails stage
+    active_phase_id TEXT,           -- currently active phase (iteration); NULL between phases
+    active_stage_id TEXT,           -- currently active stage within the active phase; NULL between stages
     status          TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'paused'. Set to 'paused' by abort_project; back to 'active' on resume. Orchestrator excludes paused projects from dispatch.
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
 
+-- Phases are scope iterations: "Initial Prototype", "Feature A", "Performance Hardening".
+-- A phase owns a WBS (epics, features, tasks). It is worked through a sequence of stages.
 CREATE TABLE IF NOT EXISTS phases (
-    id              TEXT PRIMARY KEY,
-    project_id      TEXT NOT NULL REFERENCES projects(id),
-    number          INTEGER NOT NULL,   -- 1-based ordering; advance_phase uses number+1
-    title           TEXT NOT NULL,
-    stage_type      TEXT NOT NULL DEFAULT 'execution', -- 'conops' | 'guardrails' | 'increment_planning' | 'execution' | 'plan_review' | 'rework' | 'validity_analysis' | 'retrospective' | 'onboarding'
-    status          TEXT NOT NULL DEFAULT 'pending',   -- 'pending' | 'running' | 'gate' | 'complete'
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL REFERENCES projects(id),
+    number      INTEGER NOT NULL,   -- 1-based ordering across the project
+    title       TEXT NOT NULL,      -- human-readable increment name, e.g. "Initial Prototype"
+    status      TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'running' | 'complete'
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
     UNIQUE(project_id, number)
 );
 
+-- Stages are process steps within a phase: increment_planning → execution → retrospective.
+-- They are not WBS nodes. The orchestrator advances through stages within a phase via stage gates.
+CREATE TABLE IF NOT EXISTS stages (
+    id          TEXT PRIMARY KEY,
+    phase_id    TEXT NOT NULL REFERENCES phases(id),
+    number      INTEGER NOT NULL,   -- 1-based ordering within the phase
+    stage_type  TEXT NOT NULL,      -- 'conops' | 'guardrails' | 'increment_planning' | 'execution' | 'plan_review' | 'rework' | 'validity_analysis' | 'retrospective' | 'onboarding'
+    status      TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'running' | 'gate' | 'complete' | 'paused'
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    UNIQUE(phase_id, number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stages_phase  ON stages(phase_id);
+CREATE INDEX IF NOT EXISTS idx_stages_status ON stages(phase_id, status);
+
 -- WBS nodes: tasks, reviewers, skill-author nodes, and container nodes (epic/feature).
+-- phase_id references phases(id) — the scope iteration, NOT the stage.
+-- Tasks belong to the phase regardless of which stage created or dispatches them.
 -- Reviewer nodes: phase_id=NULL, requesting_task_id set, review_id set.
 -- Skill-author nodes: phase_id=NULL, skill_id='skill-author'.
 CREATE TABLE IF NOT EXISTS nodes (
     id                  TEXT PRIMARY KEY,
     project_id          TEXT NOT NULL REFERENCES projects(id),
-    phase_id            TEXT REFERENCES phases(id),
+    phase_id            TEXT REFERENCES phases(id),   -- scope iteration; NULL for system tasks (reviewers, skill-authors)
     parent_id           TEXT REFERENCES nodes(id),
     node_type           TEXT NOT NULL,  -- 'task' | 'bug' | 'chore' | 'subtask' | 'plan_review' | 'advisor' | 'epic' | 'feature'
     title               TEXT NOT NULL,
@@ -425,7 +445,8 @@ Use this to direct high-stakes analysis skills (e.g. `operational-analyst`) at a
 ## Ancestry
 
 - Project: {project.name}
-- Phase: {phase.name} ({phase.stage_type})
+- Phase: {phase.title} (Phase {phase.number})
+- Stage: {stage.stage_type}
 {if task.parent_id}- Parent: {parent.title} ({parent.id}){end}
 
 ## Description
@@ -672,8 +693,9 @@ All events use `app_handle.emit(event_name, payload)`. Event names use hyphen no
 | `poe-advisor-responded` | `{turnId, projectId, taskId}` | Frontend scrolls, awaits next advisor turn |
 | `poe-agent-stream` | `{agentId, taskId, projectId, event}` | Raw stream-json event from agent stdout — used by DebugPanel for live output display |
 | `poe-agent-exited` | `{agentId, taskId, projectId, success}` | Agent process exited; `success=false` if poe:done was never received |
-| `poe-phase-update` | `{phaseId, status, projectId}` | Update phase lifecycle state in Phase × Scope Matrix header |
-| `poe-ingester-warning` | `{taskId, agentId, eventType, error}` | A structured poe: event (`poe:task`, `poe:edge`, `poe:decision`, `poe:skill`) failed to process; the originating agent task was unaffected. Frontend may surface in activity feed. |
+| `poe-phase-update` | `{phaseId, status, projectId}` | Update phase (iteration) status in Phase × Scope Matrix header |
+| `poe-stage-update` | `{stageId, stageType, status, phaseId, projectId}` | Update stage status within the active phase; frontend advances the stage indicator |
+| `poe-ingester-warning` | `{taskId, agentId, eventType, error}` | A structured poe: event (`poe:decision`, `poe:skill`, `poe:review-outcome`) failed to process; the originating agent task was unaffected. Frontend may surface in activity feed. |
 | `poe-project-opened` | `{projectId, isNew: bool}` | Emitted after `open_project` completes DB initialisation and recovery. `isNew=true` for first-time opens; `false` for existing projects. Frontend calls `invoke("get_project_state", {project_id})` in response to hydrate nodes, phases, edges, artifacts, and open queue items. |
 
 ### Decision resolution (Frontend → Rust)
@@ -726,69 +748,92 @@ The orchestrator wakes on `DagChanged`, identifies the waiting task with `yield_
 After composing a plan in the Plan Composer and clicking "Run":
 
 ```
-// Step 1: create all phase records (called once per stage node, in topological order)
-invoke("create_phase", {project_id, name, stage_type, number})
+// Step 1: create phase (iteration) records
+invoke("create_phase", {project_id, title, number})
 // → Returns Phase. All phases created with status='pending'.
 
-// Step 2: activate the first phase (triggers orchestrator to begin execution)
+// Step 2: create stage records within each phase
+invoke("create_stage", {phase_id, stage_type, number})
+// → Returns Stage. All stages created with status='pending'.
+
+// Step 3: activate the first phase (triggers orchestrator to activate its first stage)
 invoke("activate_phase", {project_id, phase_id: first_phase_id})
 ```
 
-> **Note**: `project_id` is required — the handler uses it to look up the phase's project for bootstrap and event emission.
+> **Note**: `project_id` is required on all handlers for bootstrap and event emission.
 
 `activate_phase` Rust handler:
-1. `UPDATE phases SET status='running' WHERE id = phase_id` (also runs `maybe_bootstrap_phase`).
-2. Signals the orchestrator (`DagChanged::DagStructureChanged`).
-3. Emits `poe-phase-update {phaseId, status: 'running', projectId}`.
+1. `UPDATE phases SET status='running' WHERE id = phase_id`
+2. `UPDATE projects SET active_phase_id = phase_id`
+3. Activates the first stage of the phase (calls `activate_stage` internally).
 
-The orchestrator wakes, finds pending tasks in the now-active phase with no unmet dependencies, and dispatches via SF-1. See Flows.md SF-5.
+`activate_stage` Rust handler:
+1. `UPDATE stages SET status='running' WHERE id = stage_id`
+2. `UPDATE projects SET active_stage_id = stage_id`
+3. Runs `maybe_bootstrap_stage` (creates default task if stage has none — see SF-5 §4b).
+4. Signals orchestrator (`DagChanged::DagStructureChanged`).
+5. Emits `poe-phase-update {phaseId, status: 'running', projectId}` and `poe-stage-update {stageId, stageType, status: 'running', projectId}`.
 
-### Phase Gate Commands (Frontend → Rust)
+The orchestrator wakes, finds pending tasks where `phase_id = active_phase_id` with no unmet dependencies, and dispatches via SF-1. See Flows.md SF-5.
 
-These three commands handle the three gate outcomes described in Flows.md §3.7. All require `project_id` so the handler can emit `poe-phase-update` events.
+### Stage and Phase Gate Commands (Frontend → Rust)
+
+Two levels of gate: advancing a **stage** within a phase, and advancing a **phase** to the next iteration. Both have revise and rerun variants. All require `project_id`.
+
+```
+invoke("advance_stage", {project_id: String, stage_id: String})
+```
+Rust handler:
+1. `UPDATE stages SET status='complete' WHERE id = stage_id`
+2. Finds the next stage in the same phase (lowest `number` > current with `status='pending'`).
+   - If found: activates it via `activate_stage`.
+   - If not found (all stages complete): marks phase complete and calls `advance_phase`.
+3. Signals orchestrator (`DagChanged::DagStructureChanged`).
+4. Emits `poe-stage-update {stageId, status: 'complete', projectId}`.
 
 ```
 invoke("advance_phase", {project_id: String, phase_id: String})
 ```
 Rust handler:
 1. `UPDATE phases SET status='complete' WHERE id = phase_id`
-2. Finds the next phase (lowest `number` > current with `status='pending'`). Updates it: `status='running'`.
-3. Runs `maybe_bootstrap_phase` on the next phase (creates default task if none exist — see SF-5 §2b).
-4. Signals orchestrator (`DagChanged::DagStructureChanged`).
-5. Emits `poe-phase-update {phaseId: phase_id, status: 'complete', projectId}` and `poe-phase-update {phaseId: next_phase_id, status: 'running', projectId}`.
+2. Finds the next phase (lowest `number` > current with `status='pending'`). Activates it via `activate_phase`.
+3. Signals orchestrator (`DagChanged::DagStructureChanged`).
+4. Emits `poe-phase-update {phaseId: phase_id, status: 'complete', projectId}`.
 
 ```
-invoke("revise_phase", {project_id: String, phase_id: String, task_ids: Vec<String>})
+invoke("revise_stage", {project_id: String, stage_id: String, task_ids: Vec<String>})
 ```
 Rust handler:
 1. `UPDATE nodes SET status='pending' WHERE id IN (task_ids)` — resets only the specified tasks.
-2. `UPDATE phases SET status='running' WHERE id = phase_id`
-3. Signals orchestrator (`DagChanged`).
-4. Emits `poe-phase-update {phaseId, status: 'running', projectId}` + `poe-node-updated` for each reset task.
+2. `UPDATE stages SET status='running' WHERE id = stage_id`
+3. `UPDATE projects SET active_stage_id = stage_id`
+4. Signals orchestrator (`DagChanged`).
+5. Emits `poe-stage-update {stageId, status: 'running', projectId}` + `poe-node-updated` for each reset task.
 
 ```
-invoke("rerun_phase", {project_id: String, phase_id: String})
+invoke("rerun_stage", {project_id: String, stage_id: String})
 ```
 Rust handler:
-1. `UPDATE nodes SET status='pending' WHERE phase_id = phase_id AND status = 'done'` — resets all done tasks.
-2. `UPDATE phases SET status='running' WHERE id = phase_id`
-3. Signals orchestrator (`DagChanged`).
-4. Emits `poe-phase-update {phaseId, status: 'running', projectId}` + `poe-node-updated` for each reset task.
+1. `UPDATE nodes SET status='pending' WHERE phase_id = (SELECT phase_id FROM stages WHERE id = stage_id) AND status = 'complete'` — resets all complete tasks in the phase.
+2. `UPDATE stages SET status='running' WHERE id = stage_id`
+3. `UPDATE projects SET active_stage_id = stage_id`
+4. Signals orchestrator (`DagChanged`).
+5. Emits `poe-stage-update {stageId, status: 'running', projectId}` + `poe-node-updated` for each reset task.
 
-**Note**: `revise_phase` and `rerun_phase` do not delete artifacts. When the reset tasks re-run they produce new artifact versions (UPSERT). Prior versions remain accessible via artifact history.
+**Note**: `revise_stage` and `rerun_stage` do not delete artifacts. When the reset tasks re-run they produce new artifact versions (UPSERT). Prior versions remain accessible via artifact history.
 
 ### Phase Pause and Abort (Frontend → Rust)
 
 ```
-invoke("pause_stage", {project_id: String, phase_id: String})
-invoke("resume_stage", {project_id: String, phase_id: String})
+invoke("pause_stage", {project_id: String, stage_id: String})
+invoke("resume_stage", {project_id: String, stage_id: String})
 invoke("abort_project", {project_id: String})
 invoke("resume_project", {project_id: String})
 ```
 
 See Flows.md §3.5 for the full sequences. `pause_stage` and `abort_project` send SIGTERM to running agents and reset their nodes to `pending`. The orchestrator does NOT emit `DagChanged` after a pause — no further dispatch until the human resumes. `pause_stage` sets `phases.status='paused'`; `abort_project` sets `projects.status='paused'`.
 
-**Schema note**: `phases.status` valid values: `'pending' | 'running' | 'gate' | 'complete' | 'paused'`. `projects.status` valid values: `'active' | 'paused'`.
+**Schema note**: `stages.status` valid values: `'pending' | 'running' | 'gate' | 'complete' | 'paused'`. `phases.status` valid values: `'pending' | 'running' | 'complete'`. `projects.status` valid values: `'active' | 'paused'`.
 
 ### User-level knowledge promotion
 
@@ -1406,12 +1451,20 @@ All Tauri commands exposed by the backend. Authoritative interface spec — not 
 
 ### Phase / Plan Composer
 
+Phases are scope iterations; stages are process steps within a phase. The Plan Composer creates both.
+
 ```
 list_phases(project_id: String) → Vec<Phase>
-create_phase(project_id: String, name: String, stage_type: String, number: i64) → Phase
+create_phase(project_id: String, title: String, number: i64) → Phase
+create_stage(phase_id: String, stage_type: String, number: i64) → Stage
+list_stages(phase_id: String) → Vec<Stage>
+activate_phase(project_id: String, phase_id: String) → ()
+activate_stage(project_id: String, stage_id: String) → ()
+advance_stage(project_id: String, stage_id: String) → ()   // marks stage complete, activates next stage in phase
+advance_phase(project_id: String, phase_id: String) → ()   // marks phase complete, activates next phase
 ```
 
-`number` maps to the existing `phases.number INTEGER` column (UNIQUE per project — serves as ordered position). Do **not** add a `position` column.
+`phase.number` is UNIQUE per project (ordered position of the iteration). `stage.number` is UNIQUE per phase (ordered position of the process step within the iteration).
 
 **Stage type catalogue** — static constant in Rust + TypeScript (not a SQLite table):
 ```
@@ -1419,8 +1472,6 @@ conops | guardrails | increment_planning | execution | plan_review
 rework | validity_analysis | retrospective | onboarding
 ```
 Each stage type has a static list of consumed and produced artifact types. The plan composer validates connections against this catalogue at the UI layer.
-
-**Schema change**: add `stage_type TEXT` column to `phases` table.
 
 ### Matrix / DAG
 

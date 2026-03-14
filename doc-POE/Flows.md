@@ -1,7 +1,7 @@
 # POE — Runtime Flows
 
 **Status**: Draft
-**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service added as actor; SF-7 DAG Service → Orchestrator notification; SF-1 trigger sources enumerated)
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service added as actor; SF-7 DAG Service → Orchestrator notification; SF-1 trigger sources enumerated; Phase/Stage model — phases are iterations, stages are process steps within a phase)
 
 **Artifact classification**: `flows.md` — the authoritative Runtime Flows document for POE v2. Specifies the dynamic execution model: what happens in what order, who is responsible at each step, and the invariants that must hold across orchestrator, ingester, agent, and frontend. Injected into every implementation task's input bundle alongside `interface-control.md` and `data-model.md`.
 
@@ -216,37 +216,57 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
 
 ---
 
-### SF-5: Plan Composer → Phase Activation
+### SF-5: Plan Composer → Phase and Stage Activation
 
 *Trigger*: Human completes plan composition in the Plan Composer and clicks "Run".
 
 ```
-1. Frontend calls invoke("create_phase", ...) for each stage node in topological order
+1. Frontend calls invoke("create_phase", ...) for each phase (iteration) in order
    → Each phase created with status='pending'
    → Returns Phase records with assigned IDs
 
-2. Frontend calls invoke("activate_phase", {phase_id: first_phase_id})
-   → Rust: UPDATE phases SET status='running' WHERE id = first_phase_id
-   → Rust: signal Orchestrator (DagChanged)
-   → Rust: emit poe://phase-update {phase_id, status: 'running'}
+2. Frontend calls invoke("create_stage", ...) for each stage within each phase
+   → Each stage created with status='pending'
+   → Stage types: conops | guardrails | increment_planning | execution | plan_review |
+                  rework | validity_analysis | retrospective | onboarding
+   → Returns Stage records with assigned IDs
 
-2b. If the activated phase has no tasks, the activate_phase handler bootstraps a default task
-    using the stage-type → skill mapping before signalling DagChanged:
+3. Frontend calls invoke("activate_phase", {project_id, phase_id: first_phase_id})
+   → Rust: UPDATE phases SET status='running' WHERE id = first_phase_id
+   → Rust: UPDATE projects SET active_phase_id = first_phase_id
+   → Rust: activate the first stage of this phase (invoke activate_stage internally)
+   → Rust: emit poe-phase-update {phase_id, status: 'running'}
+
+4. invoke("activate_stage", {project_id, stage_id: first_stage_id})
+   → Rust: UPDATE stages SET status='running' WHERE id = first_stage_id
+   → Rust: UPDATE projects SET active_stage_id = first_stage_id
+   → Rust: signal Orchestrator (DagChanged::DagStructureChanged)
+   → Rust: emit poe-stage-update {stage_id, stage_type, status: 'running'}
+
+4b. If the activated stage has no tasks (only relevant for non-execution stages),
+    the activate_stage handler bootstraps a default task using the stage-type → skill mapping:
     - conops             → operational-analyst / "Develop CONOPS"
     - guardrails         → must-not-analyst    / "Develop Guardrails"
     - increment_planning → product-manager     / "Plan Increment"
-    - execution          → (no bootstrap — tasks created by product-manager via DAG Service MCP tools during the preceding increment_planning phase)
+    - plan_review        → senior-engineer     / "Review Plan"
+    - validity_analysis  → validity-analyst    / "Validate Deliverables"
+    - retrospective      → rca-analyst         / "Run Retrospective"
+    - onboarding         → operational-analyst / "Onboard to Project"
+    - execution          → (no bootstrap — tasks were created by product-manager during
+                           the preceding increment_planning stage and belong to this phase)
 
-3. Orchestrator wakes → runs scheduler loop:
-   → finds tasks in Phase 1 with status='pending' and no unmet dependencies
+5. Orchestrator wakes → runs scheduler loop:
+   → finds tasks WHERE phase_id = active_phase_id AND status='pending'
+     AND all dependency tasks have status='complete'
    → dispatches each via SF-1
 
-4. Plan Composer UI replaced by Phase × Scope Matrix
+6. Plan Composer UI replaced by Phase × Scope Matrix
 ```
 
 **Key invariants**:
-- Only the first phase is activated by `activate_phase`. Subsequent phases remain `pending` until the orchestrator advances them after each stage gate (SF triggered by `advance_phase` — see §3.7). The human never calls `activate_phase` more than once per project.
-- **Bootstrap is skipped if the phase already has tasks.** The human can pre-populate tasks via the Plan Composer or manually; bootstrap is the fallback only.
+- Only the first phase and its first stage are activated at project start. Subsequent stages advance via `advance_stage`; subsequent phases advance via `advance_phase` after all stages in the current phase are complete. See §3.7.
+- **Tasks belong to the phase, not the stage.** The `increment_planning` stage creates tasks; the `execution` stage dispatches them. Both reference the same `phase_id`.
+- **Bootstrap is skipped if the stage already has tasks.** The human can pre-populate tasks via the Plan Composer; bootstrap is the fallback only. For `execution` stages, bootstrap is always skipped.
 
 ---
 
@@ -352,11 +372,11 @@ This sub-flow covers the path from an agent's MCP tool call to the orchestrator 
 
 
 **Invariants**:
-1. **Failing task stays `pending`**: `load_skill` failure never transitions a task to a terminal state. The task is left pending until the dependency is satisfied.
-2. **Single skill-author per missing skill**: The dedup guard prevents creating duplicate synthesisers for the same `skill_id`, regardless of how many tasks are blocked.
-3. **skill-author uses no missing skill itself**: `skill-author` is a built-in skill present in the app bundle tier. It will never trigger SF-6 recursively.
-4. **`DagStructureChanged` is the correct signal**: Adding new nodes and edges is a structural change, not just a status change. The `DagStructureChanged` variant ensures the scheduler re-evaluates the full DAG.
-5. **Unblocked tasks go through SF-1 normally**: Once the dependency is satisfied, the previously-blocked tasks are found by `db_find_ready_tasks` and dispatched exactly as any other ready task. No special-case resume path is needed.
+1. **Agent does not wait for orchestrator**: Steps 6 and 7 are independent. The agent receives its tool result (step 6) before the orchestrator wakes (step 7). The agent continues executing tool calls immediately.
+2. **Multiple rapid mutations queue notifications**: Concurrent `DagChanged` notifications from the same or different agents are processed serially by the orchestrator. Each scheduling pass is idempotent — finding the same ready task twice is safe due to the atomic claim at SF-1 step 0.
+3. **Read-only tools are free**: `get_task`, `get_phase_wbs`, `query_tasks`, `query_knowledge`, `get_artifact`, `run_tests`, and `git_status` skip steps 3–7 entirely. No DB write, no notification, no Tauri event.
+4. **DB_ERROR is surfaced to the agent**: If the SQLite write at step 3 fails, `poe-dag-mcp` returns an MCP error. The agent should emit `poe:decision` to surface the failure rather than silently continuing.
+5. **Multiple concurrent `poe-dag-mcp` instances are expected**: Each agent spawn causes Claude to fork a new `poe-dag-mcp` subprocess. All instances share the same `dag.db` (safe under WAL) and the same `dag.sock`. The orchestrator's socket listener handles concurrent connections.
 
 ---
 
@@ -739,11 +759,12 @@ sequenceDiagram
             Ing-->>FE: emit poe://event
         end
 
-        opt DAG mutation
-            A-->>Ing: {"poe":"task",...} or {"poe":"edge",...}
-            Ing->>DB: INSERT/UPDATE nodes, edges
-            Ing->>Orch: DagChanged signal
-            Ing-->>FE: emit poe://task-update (new/updated node)
+        opt DAG mutation (create_task, add_edge, update_task, etc.)
+            Note over A,DB: Agent calls DAG Service MCP tool directly<br/>(not a poe: event — see SF-7)
+            A->>DAG: MCP tool call (e.g. create_task, add_edge)
+            DAG->>DB: INSERT/UPDATE nodes or edges (WAL mode)
+            DAG->>Orch: DagChanged via dag.sock
+            DAG-->>FE: poe-task-created / poe-edge-created Tauri event
         end
     end
 

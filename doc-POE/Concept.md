@@ -2,7 +2,7 @@
 
 
 **Status**: Draft
-**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service replaces poe:task/poe:edge; reviewers read DAG directly)
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service replaces poe:task/poe:edge; reviewers read DAG directly; Phase/Stage model clarified — phases are iterations, stages are process steps within a phase)
 
 ---
 
@@ -10,25 +10,32 @@
 
 ```mermaid
 graph TB
-    Human["Human"] -->|"composes"| Plan
+    Human["Human"] -->|"defines scope"| Plan
 
-    subgraph Plan["Project Plan (human-composed DAG of stages)"]
+    subgraph Plan["Project Plan — a sequence of Phases"]
         direction LR
-        SA["Stage A"] --> SB["Stage B"]
-        SB --> SC["Stage C"]
-        SB --> SD["Stage D"]
-        SC & SD --> SE["Stage E"]
+        PA["Phase 1\n(Initial Prototype)"] --> PB["Phase 2\n(Feature A)"]
+        PB --> PC["Phase 3\n(Feature B)"]
     end
 
-    subgraph Stage["Inside Every Stage"]
+    subgraph Phase["Inside Every Phase"]
         direction TB
-        Planner["Planning Specialist\n(reads context, creates task list)"]
-        Planner --> T1["Task — Skill A"]
-        Planner --> T2["Task — Skill B"]
-        T1 & T2 --> Art["Artifacts\n(docs, code, data)"]
+        subgraph Stages["Stages (process steps)"]
+            direction LR
+            S1["Increment\nPlanning"] --> S2["Execution"] --> S3["Retrospective"]
+        end
+        subgraph WBS["Phase Scope (DAG)"]
+            direction TB
+            Planner["Product Manager\n(creates task DAG via DAG Service)"]
+            Planner --> T1["Task — Skill A"]
+            Planner --> T2["Task — Skill B"]
+            T1 & T2 --> Art["Artifacts\n(docs, code, data)"]
+        end
+        S1 -->|"builds"| WBS
+        S2 -->|"executes"| WBS
     end
 
-    Art -->|"injected as context"| NextStage["Next Stage"]
+    Art -->|"injected as context"| NextPhase["Next Phase"]
 
     subgraph Oversight["Human Oversight"]
         Feed["Activity Feed\n(glass box)"]
@@ -59,25 +66,32 @@ The goal is to make autonomous execution succeed by setting it up well, not to s
 
 ## The Plan Model
 
-A project plan is a **human-composed DAG of stage instances**. Stages can be arranged linearly (the common case) or in any valid dependency structure. The human controls the shape.
+A project plan is a **sequence of phases** — each phase a meaningful increment of the total scope. Within each phase, the orchestrator progresses through a series of **stages**: planning the work, executing it, validating it, and learning from it.
 
 Key properties:
 
-- **Non-linear by design.** The lifecycle is not a fixed pipeline. You can start at any stage, skip stages, repeat stages, or pick up a project mid-flight by inserting an onboarding stage at the front.
-- **Stages as Lego bricks.** Each stage type has defined input connectors (what artifacts it needs) and output connectors (what artifacts it produces). Valid plans are those where dependencies are satisfiable.
-- **One plan per project, iterating over time.** The plan grows as the project progresses. Completing a stage may inform the shape of the next.
+- **Phases are scope increments.** "Initial Prototype", "Feature A", "Performance Hardening" are phases. A phase defines a chunk of the product to build. Its scope is expressed as a WBS: epics → features → tasks.
+- **Stages are process steps.** Within each phase, the team moves through stages: `increment_planning` to decompose the scope into a task DAG, `execution` to build it, `retrospective` to learn from it. Stage types have defined input connectors (artifacts they need) and output connectors (artifacts they produce).
+- **Non-linear by design.** The stage sequence within a phase is not fixed. You can skip stages, repeat them, or compose them in any valid dependency structure. An `onboarding` stage can be inserted at the front of any phase to orient a new agent team.
+- **One plan per project, growing over time.** The plan grows as the project progresses. Completing a phase informs the scope of the next.
 
 ---
 
 ## Core Primitives
 
+### Phase
+
+A phase is a meaningful increment of the total project scope. "Initial Prototype", "Feature A", "Performance Hardening" are phases. A phase owns a work breakdown structure (WBS): its epics, features, and tasks. The phase's scope is decomposed during planning and executed during execution.
+
+Phases progress through stages. A phase is complete when all its stages have been worked through and any final human gate resolved.
+
 ### Stage
 
-A stage is the atomic unit of a plan. It is self-contained: it knows what it needs, what it does, and what it produces. Stages compose multiple specialists working in sequence.
+A stage is a process step within a phase. It is self-contained: it knows what it needs, what it does, and what it produces. Stages compose multiple specialists working in sequence.
 
 Every stage follows the same internal pattern:
 
-1. **Planning specialist** reads the stage definition and all available input artifacts, then produces a task list with specialist assignments.
+1. **Planning specialist** reads the stage definition and all available input artifacts, then produces a task list with specialist assignments (for execution stages, this task list is the phase WBS built via the DAG Service).
 2. **Specialist agents** execute the tasks, possibly in parallel where dependencies allow.
 3. **Artifacts** are produced as tasks complete.
 4. **Human gate** (if the stage defines one): human reviews outputs and decides to advance, revise, or re-run.
@@ -100,7 +114,7 @@ A task is a discrete unit of work within a stage, assigned to a single specialis
 - **Dependency-aware** — tasks within a stage can have dependencies; independent tasks run in parallel.
 - **Artifact-producing** — every task has a declared output (a document, a code change, a review).
 
-Tasks are created by the planning specialist at the start of each stage, not predefined. The plan knows what stages to run; the planning specialist decides how to decompose each stage into tasks given the current context.
+Tasks are created by the planning specialist during the `increment_planning` stage, not predefined. The plan knows what phases and stages to run; the planning specialist decides how to decompose each phase's scope into tasks given the current context. Tasks belong to the phase, not the stage — they persist across stage transitions and are dispatched during the `execution` stage.
 
 ### Skill
 
@@ -137,7 +151,7 @@ The queue should be sparse. A busy queue is a signal that the stage's preconditi
 
 ## Built-in Stage Types
 
-The following stage types form the initial library. Most projects will use a subset in roughly this order, but there is no enforced sequence.
+The following stage types form the initial library. They are the process steps available within any phase. Most phases will use a subset in roughly the order shown, but there is no enforced sequence.
 
 Each phase runs two nested PDCA loops. Stage types map to these loops as follows — see Architecture.md for the full model.
 

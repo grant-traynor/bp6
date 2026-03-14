@@ -1,7 +1,7 @@
 # POE — Pairti Orchestration Engine: Architect
 
 **Status**: Draft
-**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service replaces poe:task/poe:edge; reviewers read DAG directly; MCP elevated to primary write mechanism)
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service replaces poe:task/poe:edge; reviewers read DAG directly; MCP elevated to primary write mechanism; Phase/Stage model — phases are scope iterations, stages are process steps within a phase)
 
 ---
 
@@ -12,16 +12,17 @@ graph TB
     subgraph Project["Project (defined by CONOPS)"]
         KR["Knowledge Register\n(persistent, cross-cutting)"]
 
-        subgraph Phase["Phase (unit of iteration)"]
-            subgraph WBS["Work Breakdown"]
+        subgraph Phase["Phase (scope increment — e.g. 'Initial Prototype')"]
+            subgraph WBS["Phase Scope — Work Breakdown Structure"]
                 Epic --> Feature
                 Feature --> Task["Task / Bug / Chore"]
                 Task -.->|"depends on"| Task2["Task / Bug / Chore"]
                 Task --> Subtask["Subtask (rare)"]
             end
 
-            subgraph Lifecycle["Phase Lifecycle"]
-                Planning --> Execution --> Retrospective
+            subgraph Stages["Stages (process steps through the phase)"]
+                direction LR
+                Planning["Increment\nPlanning"] -->|"builds WBS"| Execution -->|"produces"| Retrospective
             end
         end
 
@@ -32,8 +33,8 @@ graph TB
         end
     end
 
-    KR -.->|"context for all agents"| Lifecycle
-    Artifacts -.->|"injected as context"| Lifecycle
+    KR -.->|"context for all agents"| Stages
+    Artifacts -.->|"injected as context"| Stages
     Execution -->|"produces"| Artifacts
     Retrospective -->|"writes"| KR
 ```
@@ -83,7 +84,7 @@ graph TB
    | **Checks** | Plan quality — is the work correctly decomposed? | Deliverable quality — was the right thing built? |
    | **Acts on** | Task structure, dependencies, skill assignments | Skills, knowledge register, guardrails |
    | **Corrects** | **T** (task quality) + **H** (human investment upfront) | **S** (skills) + **K** (knowledge) |
-   | **Stage types** | Plan Review → Plan Revision → [Execute] | Validity Analysis → Retrospective |
+   | **Stage types** | `plan_review` → `plan_revision` → `execution` | `validity_analysis` → `retrospective` |
    | **Failure signal** | Busy decision queue during execution | Gap between C' and C! at validity check |
 
    A defect that the inner loop catches is a planning failure. A defect that only the outer loop catches is a skill or knowledge failure. This distinction drives where the correction goes — and makes the Retrospective's output (updated skills and knowledge) meaningful rather than generic "lessons learned."
@@ -147,22 +148,24 @@ The orchestrator (which assembles inputs and schedules work) and the orchestrate
 
 ## Work Breakdown Structure
 
-The WBS is the vertical decomposition axis. Every node in the hierarchy knows its parent, giving agents (and humans) the full "why" chain at any level of zoom.
+The WBS is the scope axis. It defines **what is being built**. Every node in the hierarchy knows its parent, giving agents (and humans) the full "why" chain at any level of zoom.
 
 ```
 Project
-  Phase
+  Phase                      ← scope increment ("Initial Prototype", "Feature A")
     Epic
       Feature
         Task | Bug | Chore
           Subtask             (rare — only for genuinely complex tasks)
 ```
 
+Phases define the scope. Stages define the process for working through it. See §Stages below.
+
 ### Definitions
 
 **Project** — the top-level container. Defined by the CONOPS. A project has one artifact corpus, one knowledge register, and a sequence of phases.
 
-**Phase** — a meaningful increment toward the CONOPS. The unit of iteration. Each phase gets a full lifecycle pass (Planning → Execution → Retrospective). Phases are planned at a high level upfront and refined as the project matures.
+**Phase** — a meaningful scope increment toward the CONOPS. Examples: "Initial Prototype", "Feature A", "Performance Hardening". Each phase owns a WBS (its epics, features, and tasks) and is worked through a sequence of stages. Phases are defined upfront at a high level and refined as the project matures.
 
 **Epic** — a major body of work within a phase. Groups related features that together deliver a significant capability. An epic is too large to execute directly; it exists to provide grouping and context.
 
@@ -174,6 +177,44 @@ Project
 - **Chore**: maintenance, refactoring, or housekeeping that has no direct user-facing output
 
 **Subtask** — a subdivision of a task used only when a task is genuinely too complex to assign to a single agent invocation. Subtasks are the exception, not the rule.
+
+---
+
+## Stages
+
+Stages are the **process axis**. They define how a phase is worked through — not what is being built, but how the building happens. The WBS and the stages are orthogonal: the WBS defines scope, stages define workflow.
+
+```
+              | increment_planning | execution | retrospective |
+Phase 1       | PM builds DAG      | Tasks run | RCA runs      |
+Phase 2       | PM builds DAG      | Tasks run | RCA runs      |
+```
+
+### Stage Gate Model
+
+Each stage transition is a gate. The human reviews what the stage produced and decides to advance, revise, or re-run. Stages within a phase do not auto-advance — the human holds the gate between them.
+
+A phase is complete when all its stages are complete and the final gate is cleared.
+
+### Stage Types
+
+| Stage Type | PDCA | Purpose |
+|---|---|---|
+| `conops` | — | Define the product concept, users, and operational context |
+| `guardrails` | — | Define architecture, interfaces, data model, design system, must-nots |
+| `increment_planning` | Plan | Decompose the phase scope into epics, features, and tasks via the DAG Service |
+| `plan_review` | Check | Specialists review the WBS from the DAG before execution begins |
+| `execution` | Do | Dispatch and run the approved task set |
+| `rework` | Act (targeted) | Address specific deficiencies found in validity analysis |
+| `validity_analysis` | Check | Validate what was built against the CONOPS |
+| `retrospective` | Act (systemic) | RCA on quality gaps; update skills and knowledge register |
+| `onboarding` | — | Orient a new agent team to an existing project |
+
+The `increment_planning` stage is the only stage that mutates the phase WBS. All other stages read the WBS (via DAG Service read tools) or operate on artifacts. The `execution` stage dispatches whatever tasks the planning stage created.
+
+### Stage Types and the Data Model
+
+Stages are stored in the `stages` table (see Protocol.md §1). Each stage row belongs to a phase and has a `stage_type`, an ordering `number` within the phase, and a `status`. The `nodes` table's `phase_id` references the **phase** (iteration), not the stage — tasks belong to the phase regardless of which stage created or executes them.
 
 ---
 
@@ -267,20 +308,21 @@ Knowledge register entries live in the project database alongside the WBS graph.
 
 ## Data Model
 
-All project state is local-first, stored in `{project}/.poe/poe.db` (SQLite, WAL mode).
+All project state is local-first, stored in `{project}/.poe/dag.db` (SQLite, WAL mode).
 
 See `doc-POE/Protocol.md §1` for the complete CREATE TABLE schema. Key tables:
 
-- `nodes` — WBS nodes (title, description, type, skill, status, parent\_id, phase\_id, session\_id, verdict)
+- `phases` — scope iterations ("Initial Prototype", "Feature A"); each belongs to a project
+- `stages` — process steps within a phase (`increment_planning`, `execution`, `retrospective`, etc.); each belongs to a phase
+- `nodes` — WBS nodes (title, description, type, skill, status, parent\_id, phase\_id, session\_id, verdict); `phase_id` references `phases.id` (the iteration, not the stage)
 - `edges` — directed dependency edges (from\_id, to\_id)
 - `events` — append-only structured agent event log (never updated or deleted)
 - `queue_items` — human decision queue items (question, options, resolution)
 - `artifacts` — artifact index (name, type, path, producing\_task\_id)
 - `knowledge` — knowledge register entries (key, value, supersedes\_id)
-- `phases` — phase definitions, stage type, PDCA state
-- `projects` — project metadata
+- `projects` — project metadata; tracks `active_phase_id` and `active_stage_id`
 
-Every `nodes` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_id`. Queue items reference the task that raised the question. The events table is the audit trail — every poe: event lands here in full.
+Every `nodes` row has a `parent_id` (full WBS hierarchy traversal) and a `phase_id` pointing to the phase iteration. Tasks belong to the phase regardless of which stage created or dispatches them. Queue items reference the task that raised the question. The events table is the audit trail — every poe: event lands here in full.
 
 **Agent stream transcripts** are written outside the DB, to `{project}/.poe/agent_stream/{agent_id}.jsonl` — one file per agent session, one raw stream-json line per entry. These are durable transcripts for post-session inspection and are not read by the orchestrator at runtime.
 
@@ -538,9 +580,9 @@ All code that touches the SQLite connection must obey this ordering invariant to
 
 The critical rule is that Tauri event emission must happen **after** the connection lock is released, never inside it. Holding the lock during async emission blocks other threads from accessing the database for the duration of the emit call, serialising what should be concurrent operations. Collect events into a `Vec` inside the closure; iterate and emit after the closure returns.
 
-### Phase Bootstrap
+### Stage Bootstrap
 
-When a phase is activated via `activate_phase` or `advance_phase` and the phase has no tasks, the orchestrator auto-creates a default task using a static stage-type → skill mapping.
+When a stage is activated and has no tasks, the orchestrator auto-creates a default task using a static stage-type → skill mapping. For `execution` stages, no bootstrap occurs — the tasks are created by the product-manager during the preceding `increment_planning` stage and already exist in the phase WBS.
 
 **Stage-type → bootstrap skill mapping:**
 
@@ -550,15 +592,15 @@ When a phase is activated via `activate_phase` or `advance_phase` and the phase 
 | `guardrails` | `must-not-analyst` | "Develop Guardrails" |
 | `increment_planning` | `product-manager` | "Plan Increment" |
 | `plan_review` | `senior-engineer` | "Review Plan" |
-| `execution` | — (no bootstrap) | Tasks created by product-manager via DAG Service MCP tools during the preceding increment_planning phase |
+| `execution` | — (no bootstrap) | Tasks created by product-manager via DAG Service MCP tools during the preceding `increment_planning` stage; they already exist in the phase WBS |
 | `rework` | `product-manager` | "Plan Rework" |
 | `validity_analysis` | `validity-analyst` | "Validate Deliverables" |
 | `retrospective` | `rca-analyst` | "Run Retrospective" |
 | `onboarding` | `operational-analyst` | "Onboard to Project" |
 
-**Bootstrap is skipped** if the phase already has tasks (human-added or previously bootstrapped). The check runs before the `DagChanged` signal is sent, so the orchestrator always sees at least one ready task when the phase activates.
+**Bootstrap is skipped** if the stage already has tasks (human-added or previously bootstrapped). The check runs before the `DagChanged` signal is sent, so the orchestrator always sees at least one ready task when a stage activates.
 
-**Purpose**: ensures every bootstrappable phase has at least one task to dispatch immediately after activation, preventing the "zero ready tasks" stall where the orchestrator wakes but has nothing to schedule.
+**Purpose**: ensures every bootstrappable stage has at least one task to dispatch immediately after activation, preventing the "zero ready tasks" stall where the orchestrator wakes but has nothing to schedule.
 
 ---
 
@@ -575,16 +617,18 @@ The DAG Service is an MCP server embedded in POE and injected into every agent's
 
 ### Architecture
 
-The DAG Service runs inside the POE process. Agents connect to it as an MCP server. After every mutation, the DAG Service notifies the orchestrator directly via an internal channel — no event parsing required.
+The DAG Service runs as a short-lived subprocess (`poe-dag-mcp`) spawned by Claude per agent invocation via the MCP stdio model. Each agent spawn causes Claude to fork a new `poe-dag-mcp` process using the `command` entry in `mcp-config.json`. Multiple concurrent agents therefore run multiple concurrent `poe-dag-mcp` instances, all sharing the same `dag.db` (safe under SQLite WAL mode) and all connecting to the same `dag.sock` for back-channel notification to the orchestrator.
 
 ```
-Agent
+Agent (claude --mcp-config .poe/mcp-config.json)
   └── MCP tool call (e.g. create_task)
-        └── DAG Service
-              ├── Commits to SQLite (dag.db)
-              ├── Notifies Orchestrator (internal channel → DagChanged)
-              └── Emits Tauri event to Frontend
+        └── poe-dag-mcp subprocess (spawned by Claude, one per agent)
+              ├── Commits to SQLite (dag.db, WAL mode — concurrent writes safe)
+              ├── Notifies Orchestrator (dag.sock → DagChanged signal)
+              └── Relays Tauri event to Frontend (via main process over dag.sock)
 ```
+
+POE writes `mcp-config.json` and listens on `dag.sock` before any agent is dispatched. The `poe-dag-mcp` binary must be present in the app bundle resource directory. See Protocol.md §6 for the full config format and tool surface.
 
 This eliminates the previous design problem where agents described DAG mutations in text (as `poe:step` detail or review content) rather than materialising them as protocol events. If the agent hasn't called `create_task`, there are no tasks — the reviewer calling `get_phase_wbs` will find nothing to review.
 
