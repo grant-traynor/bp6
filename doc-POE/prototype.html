@@ -148,10 +148,11 @@
     .dep-active-self .task-label { background:var(--bg3) !important; border-left:2px solid var(--border2) !important; }
     .dep-dimmed { opacity:.25; }
 
-    /* Timeline slot area */
-    .task-slots { flex:1; display:flex; }
-    .task-slot { flex:1; position:relative; border-right:1px solid var(--border0); min-height:28px; }
-    .task-slot:last-child { border-right:none; }
+    /* Timeline slot area — each slot is a fixed-width column; spacer fills remainder */
+    .task-slots { flex:1; display:flex; overflow:hidden; }
+    .task-slot { width:88px; flex-shrink:0; position:relative; border-right:1px solid var(--border0); min-height:28px; }
+    .task-slot-spacer { flex:1; min-height:28px; }
+    /* no border on spacer so the right edge stays clean */
     .task-slot.slot-done { background:rgba(16,185,129,.03); }
     .task-slot.slot-here { background:rgba(14,165,233,.02); }
 
@@ -991,6 +992,10 @@ function togglePhase(id) {
         }
         slotsEl.appendChild(cell);
       }
+      // spacer fills remaining width so the row isn't left-truncated
+      const sp = document.createElement('div');
+      sp.className = 'task-slot-spacer';
+      slotsEl.appendChild(sp);
     });
 
     // Render epic rows: span from min to max child depth
@@ -1026,6 +1031,9 @@ function togglePhase(id) {
         }
         slotsEl.appendChild(cell);
       }
+      const sp = document.createElement('div');
+      sp.className = 'task-slot-spacer';
+      slotsEl.appendChild(sp);
     });
   };
 })();
