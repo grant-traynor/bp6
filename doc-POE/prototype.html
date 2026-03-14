@@ -173,6 +173,9 @@
     .slot-step { font-size:10px; font-family:var(--font); font-style:italic; color:var(--text2);
                  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-left:8px; flex:1; }
     .slot-step.live { color:var(--cyan); }
+    /* Inline variant — absolute, overflows into empty columns to the right */
+    .slot-step-inline { position:absolute; left:6px; top:50%; transform:translateY(-50%);
+                        padding-left:0; pointer-events:none; z-index:1; }
 
 
     /* Phase section header — full-width divider with inline lifecycle strip */
@@ -987,26 +990,30 @@ function togglePhase(id) {
       const upCount   = (upstream[id]   || []).length;
       const downCount = (downstream[id] || []).length;
 
-      // Only render slots 0..depth — spacer starts immediately after the bar
-      // so step text sits adjacent to the bar, not pushed to the far right.
-      for (let i = 0; i <= depth; i++) {
+      // Render ALL colCount slots so grid lines extend to the right edge.
+      // Step text is placed in slot depth+1 as an overflowing label (floats
+      // over empty cells). Falls back to spacer when bar is the last column.
+      const stepEl = row.querySelector('.task-current-step');
+      const stepText  = stepEl ? stepEl.textContent.trim() : '';
+      const stepLive  = stepEl ? stepEl.classList.contains('live') : false;
+      const stepOrigId = stepEl ? (stepEl.dataset.origId || stepEl.id || '') : '';
+      if (stepEl && stepEl.id) { stepEl.dataset.origId = stepEl.id; stepEl.removeAttribute('id'); }
+
+      for (let i = 0; i < colCount; i++) {
         const cell = document.createElement('div');
         cell.className = 'task-slot';
         if (i < depth) cell.classList.add('slot-done');
         if (i === depth) {
           cell.classList.add('slot-here');
-          // a — inbound blocker count
           if (upCount > 0) {
             const u = document.createElement('span');
             u.className = 'slot-count slot-count-left';
             u.textContent = upCount;
             cell.appendChild(u);
           }
-          // bar
           const bar = document.createElement('div');
           bar.className = `slot-bar ${barClass}`;
           cell.appendChild(bar);
-          // b — downstream unblock count
           if (downCount > 0) {
             const d = document.createElement('span');
             d.className = 'slot-count slot-count-right';
@@ -1014,22 +1021,26 @@ function togglePhase(id) {
             cell.appendChild(d);
           }
         }
+        // Step text: place in slot depth+1 as overflowing absolute label
+        if (i === depth + 1 && stepText) {
+          cell.style.overflow = 'visible';
+          const span = document.createElement('span');
+          span.className = 'slot-step slot-step-inline' + (stepLive ? ' live' : '');
+          span.textContent = stepText;
+          if (stepOrigId) span.id = stepOrigId;
+          cell.appendChild(span);
+        }
         slotsEl.appendChild(cell);
       }
 
-      // Spacer — holds current step text
+      // Spacer always present; carries step text only when bar is the last column
       const spacer = document.createElement('div');
       spacer.className = 'task-slot-spacer';
-      // Find the step element in the label; preserve its ID for live updates
-      const stepEl = row.querySelector('.task-current-step');
-      if (stepEl && stepEl.textContent.trim()) {
+      if (depth >= colCount - 1 && stepText) {
         const span = document.createElement('span');
-        span.className = 'slot-step' + (stepEl.classList.contains('live') ? ' live' : '');
-        span.textContent = stepEl.textContent.trim();
-        // Transfer ID so setInterval live-cycling still works
-        const origId = stepEl.dataset.origId || stepEl.id;
-        if (stepEl.id) { stepEl.dataset.origId = stepEl.id; stepEl.removeAttribute('id'); }
-        if (origId) span.id = origId;
+        span.className = 'slot-step' + (stepLive ? ' live' : '');
+        span.textContent = stepText;
+        if (stepOrigId) span.id = stepOrigId;
         spacer.appendChild(span);
       }
       slotsEl.appendChild(spacer);
