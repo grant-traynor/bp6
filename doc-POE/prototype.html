@@ -75,12 +75,11 @@
     #content-area { flex:1; display:flex; flex-direction:row; overflow:hidden; }
     #content-left { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; position:relative; }
 
-    /* ─── Column resizer — visual line only, bounds set by JS to match #phase-matrix ─── */
+    /* ─── Column resizer — visual line only, all position/bounds set by JS ─── */
     #col-resizer {
       position:fixed; pointer-events:none;
-      left:calc(200px + var(--label-col));
       width:1px; background:var(--border2);
-      transition:background .1s, width .1s, margin-left .1s;
+      transition:background .1s;
       z-index:500;
     }
     body.col-resizing #col-resizer,
@@ -1434,41 +1433,49 @@ function addLive(){
 setTimeout(addLive,4000);
 
 // ─── Column resizer ────────────────────────────────────────────────────
-// Visual line is clipped to #phase-matrix bounds.
-// Hover/drag activation also requires cursor to be within that Y range.
+// Measures the real rendered boundary from the DOM — no hardcoded sidebar width.
 (function() {
   const root = document.documentElement;
   const resizerEl = document.getElementById('col-resizer');
-  const matrix = document.getElementById('phase-matrix');
-  const SIDEBAR_W = 200;
-  const HIT = 8; // px either side of boundary
-  let dragging = false, startX = 0, startW = 0;
+  const matrix   = document.getElementById('phase-matrix');
+  const HIT = 10; // px either side of boundary
+  let dragging = false, startX = 0, startW = 0, startBoundary = 0;
 
   function labelColW() {
     return parseInt(getComputedStyle(root).getPropertyValue('--label-col')) || 380;
   }
-  function boundary() { return SIDEBAR_W + labelColW(); }
+
+  // Read the actual rendered right-edge of the first label cell in the DOM.
+  function boundary() {
+    const el = matrix.querySelector('.phase-header-id, .task-label');
+    if (el) return el.getBoundingClientRect().right;
+    // fallback: approximate from CSS variable
+    const matRect = matrix.getBoundingClientRect();
+    return matRect.left + labelColW();
+  }
 
   function updateResizerBounds() {
     const r = matrix.getBoundingClientRect();
+    if (r.height === 0) return; // not painted yet — skip
     resizerEl.style.top    = r.top + 'px';
     resizerEl.style.bottom = (window.innerHeight - r.bottom) + 'px';
+    // keep line x in sync with the CSS variable
+    resizerEl.style.left = boundary() + 'px';
   }
 
-  function nearBoundary(x) {
-    return Math.abs(x - boundary()) <= HIT;
-  }
-
-  updateResizerBounds();
+  // Defer until after first paint so getBoundingClientRect is valid.
+  requestAnimationFrame(updateResizerBounds);
   window.addEventListener('resize', updateResizerBounds);
 
   document.addEventListener('mousemove', e => {
     if (dragging) {
-      const newW = Math.max(180, Math.min(620, startW + (e.clientX - startX)));
+      const delta = e.clientX - startX;
+      const newW = Math.max(180, Math.min(720, startW + delta));
       root.style.setProperty('--label-col', newW + 'px');
+      updateResizerBounds();
       return;
     }
-    if (nearBoundary(e.clientX)) {
+    if (Math.abs(e.clientX - boundary()) <= HIT) {
       document.body.classList.add('col-resize-hover');
       document.body.style.cursor = 'col-resize';
     } else {
@@ -1478,10 +1485,11 @@ setTimeout(addLive,4000);
   });
 
   document.addEventListener('mousedown', e => {
-    if (!nearBoundary(e.clientX)) return;
+    if (Math.abs(e.clientX - boundary()) > HIT) return;
     dragging = true;
     startX = e.clientX;
     startW = labelColW();
+    startBoundary = boundary();
     document.body.classList.add('col-resizing');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
@@ -1491,7 +1499,7 @@ setTimeout(addLive,4000);
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
-    document.body.classList.remove('col-resizing');
+    document.body.classList.remove('col-resizing', 'col-resize-hover');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
     updateResizerBounds();
