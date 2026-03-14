@@ -1,15 +1,15 @@
 # POE — Protocol Specification
 
 **Status**: Draft
-**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service (MCP) added as §6; poe:task/poe:edge removed from poe: protocol; reviewers read DAG directly)
 
 **Artifact classification**: This document serves as both:
-- `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), and the frontend update mechanism (§4).
+- `interface-control.md` — the authoritative Interface Control Document for POE v2. Defines all external interface contracts: the poe: event wire format (§2), the agent stdin bundle format (§3), the frontend update mechanism (§4), the DAG Service MCP tool surface (§6).
 - `data-model.md` — the authoritative Database Design Document. Defines the SQLite schema for all internal data structures (§1).
 
-These are standard artifact types in the POE corpus (see Architecture.md §Artifact Corpus). They are injected into every implementation task's input bundle. When in doubt about a wire format, field name, or schema question — this document is the answer.
+These are standard artifact types in the POE corpus (see Architecture.md §Artifact Corpus). They are injected into every implementation task's input bundle. When in doubt about a wire format, field name, schema question, or MCP tool signature — this document is the answer.
 
-This document specifies the four I/O contracts that Phase 2 is built around. Everything else in the system is implementation detail; divergence here causes cross-component rework.
+This document specifies the five I/O contracts that Phase 2 is built around. Everything else in the system is implementation detail; divergence here causes cross-component rework.
 
 ---
 
@@ -205,31 +205,7 @@ One event per line. No multi-line JSON.
 
 ### Event catalogue
 
-#### DAG mutations
-
-```jsonc
-// Create a task node
-{"poe": "task", "id": "<uuid>", "title": "...", "description": "...", "skill": "<skill-id>",
- "type": "task",  // "task" | "bug" | "chore" | "subtask"
- "parent_id": "<task-id>",  // optional — for subtask hierarchy
- "depends_on": ["<task-id>", "..."]}  // optional — creates edges; best-effort (missing dep nodes are skipped with a warning, not fatal)
-
-// Update an existing task
-{"poe": "task:update", "id": "<task-id>",
- "title": "...",        // optional
- "description": "...",  // optional
- "skill": "..."}        // optional
-
-// Cancel a task (preserved in history, status → cancelled)
-{"poe": "task:cancel", "id": "<task-id>", "reason": "..."}  // reason optional
-
-// Add a finish-to-start dependency edge: "from" must finish before "to" can start.
-// Example: {"poe":"edge","from":"A","to":"B"} — A must complete before B is dispatched.
-{"poe": "edge", "from": "<task-id>", "to": "<task-id>"}
-
-// Remove a dependency edge
-{"poe": "edge:remove", "from": "<task-id>", "to": "<task-id>"}
-```
+> **DAG mutations are not poe: events.** Creating tasks, adding edges, updating or cancelling nodes, and removing edges are all performed via DAG Service MCP tool calls (see §6). The `poe:` protocol is control flow and observability only.
 
 #### Artifacts and knowledge
 
@@ -310,12 +286,15 @@ One event per line. No multi-line JSON.
 // injects result via stdin when complete, unblocks this agent.
 // id is required when emitting multiple poe:review events — omit only
 // when emitting a single review (single-reviewer path).
-{"poe": "review", "reviewer_skill": "senior-engineer", "content": "...", "id": "r-eng"}
+// content is a REVIEW DIRECTIVE — task IDs to review and focus area.
+// It is NOT a plan transcription. The reviewer reads actual tasks from
+// the DAG via DAG Service tools (get_phase_wbs, get_task). See §6.
+{"poe": "review", "reviewer_skill": "senior-engineer", "content": "Review tasks t-01..t-27 in the current phase. Focus: skill assignments and task sizing.", "id": "r-eng"}
 
 // Multi-specialist plan review — product-manager emits one per domain:
-// {"poe": "review", "reviewer_skill": "senior-engineer",      "id": "r-eng",  "content": "..."}
-// {"poe": "review", "reviewer_skill": "architecture-analyst", "id": "r-arch", "content": "..."}
-// {"poe": "review", "reviewer_skill": "interface-analyst",    "id": "r-icd",  "content": "..."}
+// {"poe": "review", "reviewer_skill": "senior-engineer",      "id": "r-eng",  "content": "Review all tasks in phase. Focus: completeness, sizing, Must-Not coverage."}
+// {"poe": "review", "reviewer_skill": "architecture-analyst", "id": "r-arch", "content": "Review tasks t-05, t-13 in phase. Focus: IIFE encapsulation pattern and animation guard lifecycle. Use get_phase_wbs to read tasks."}
+// {"poe": "review", "reviewer_skill": "interface-analyst",    "id": "r-icd",  "content": "Review tasks introducing new API contracts. Use query_tasks to find tasks with artifactType=api."}
 // Orchestrator spawns all reviewers in parallel. Each result delivered via stdin:
 // ---
 // ReviewResult id=r-eng skill=senior-engineer verdict=APPROVED|APPROVED_WITH_CONDITIONS|BLOCKED|FAILED
@@ -335,13 +314,10 @@ One event per line. No multi-line JSON.
 
 ### Ingester responsibilities per event type
 
-| Event | DAG write | events | Tauri emit |
+DAG mutations (nodes, edges) are handled by the DAG Service, not the ingester. The ingester processes control-flow and observability events only.
+
+| Event | DB write | events | Tauri emit |
 |---|---|---|---|
-| `poe:task` | INSERT nodes + edges | yes | `poe-task-created` |
-| `poe:task:update` | UPDATE nodes | yes | `poe-node-updated` |
-| `poe:task:cancel` | UPDATE nodes.status | yes | `poe-node-updated` |
-| `poe:edge` | INSERT edges | yes | `poe-edge-created` |
-| `poe:edge:remove` | DELETE edges | yes | `poe-edge-removed` |
 | `poe:artifact` | UPSERT artifacts (file already on disk — agent wrote it) | yes | `poe-artifact-created` |
 | `poe:knowledge` | INSERT knowledge | yes | `poe-knowledge-created` |
 | `poe:skill` | write `{project}/.poe/skills/{name}.md` | yes | `poe-event` |
@@ -521,8 +497,11 @@ When the orchestrator spawns a reviewer agent in response to a `poe:review` even
 
 **Requested by**: {requesting-task-id} ({requesting-task-title})
 **Review ID**: {id from poe:review event}
+**Project ID**: {project.id}
 
-{content from poe:review event — the plan summary or artifact under review}
+{content from poe:review event — the review directive: which task IDs to review and what to focus on}
+
+> **Read the DAG directly.** Do not rely on the directive for the task content — it is a pointer, not a transcription. Use DAG Service tools (`get_phase_wbs`, `get_task`, `query_tasks`) to read the actual tasks and edges before forming your verdict. See §6 for the full tool surface.
 
 > **Naming convention**: The reviewer MUST write its findings to `docs/review-{review_id}.md` (using its own file-writing tools) and then emit `{"poe":"artifact","name":"review-{review_id}.md","artifact_type":"plan-review"}` where `{review_id}` is the Review ID above. This makes the artifact path deterministic — the orchestrator derives `docs/review-{review_id}.md` directly without an artifacts table query.
 
@@ -840,15 +819,19 @@ This section is the authoritative reference for how Claude agents are spawned. E
 Every orchestrated agent runs via:
 
 ```
-claude --output-format stream-json --verbose -p --dangerously-skip-permissions
+claude --output-format stream-json --verbose -p --dangerously-skip-permissions \
+       --mcp-config {project.path}/.poe/mcp-config.json
 ```
+
+The `--mcp-config` flag injects the DAG Service MCP server into the agent's tool set. The config file is written by the orchestrator to `{project.path}/.poe/mcp-config.json` before the first agent is spawned. See §6 for the config file format and DAG Service tool surface.
 
 `--verbose` causes Claude to emit additional stream-json metadata objects (token usage, stop reasons, timing). The ingester ignores these extra fields — they do not affect event processing. The flag is included because it enables monitoring and cost tracking without any code change; the overhead is negligible.
 
 Stdin receives the T+S+K input bundle; stdin is closed (EOF) immediately after writing. Claude processes the bundle, emits a stream of JSON objects to stdout, and exits cleanly.
 
 ```
-spawn: claude --output-format stream-json --verbose -p --dangerously-skip-permissions
+spawn: claude --output-format stream-json --verbose -p --dangerously-skip-permissions \
+              --mcp-config {project.path}/.poe/mcp-config.json
   → write T+S+K bundle to stdin, then close stdin (EOF)
   → read stdout: newline-delimited JSON objects
   → extract session_id from {"type":"system","subtype":"init","session_id":"..."}
@@ -988,7 +971,436 @@ See §3 for the **mode protocol injection** pattern, which allows skills to be i
 
 ---
 
-## 6. Tauri Command Surface (Full Catalogue)
+## 6. DAG Service (MCP)
+
+The DAG Service is an MCP server embedded in POE and injected into every agent's tool set via `--mcp-config` at spawn time. It is the primary interface for all reads and writes to the project's task graph, knowledge register, and artifact index. The `poe:` protocol handles control flow and observability only — it carries no data.
+
+### Architecture
+
+```
+Agent process (claude --mcp-config .poe/mcp-config.json)
+  └── MCP tool call  (e.g. create_task)
+        └── DAG Service process  (poe-dag-mcp, spawned by POE)
+              ├── Commits to SQLite (dag.db, WAL mode)
+              ├── Notifies Orchestrator  (Unix socket → DagChanged signal)
+              └── Emits Tauri event to Frontend  (via main process relay)
+```
+
+**Deployment**: The DAG Service runs as a child process (`poe-dag-mcp`) spawned by the POE orchestrator before the first agent is dispatched on each project. It communicates with the orchestrator over a project-scoped Unix socket at `{project.path}/.poe/dag.sock`. The agent-facing transport is MCP stdio (the `poe-dag-mcp` binary is the server process; Claude connects to it via the `command` entry in `mcp-config.json`).
+
+**Why a separate process**: The DAG Service must be reachable by Claude agents, which use MCP's stdio transport (subprocess model). Running it as a separate process is the natural fit — POE spawns it, wires its stdin/stdout for MCP, and communicates with it over the local socket for orchestrator notifications and Tauri event relay.
+
+### mcp-config.json
+
+The orchestrator writes this file to `{project.path}/.poe/mcp-config.json` before the first agent spawn on a project. Every agent on the project uses the same config file.
+
+```json
+{
+  "mcpServers": {
+    "poe": {
+      "command": "{app.resource_dir}/poe-dag-mcp",
+      "args": [
+        "--project-id", "{project.id}",
+        "--db",         "{project.path}/.poe/dag.db",
+        "--socket",     "{project.path}/.poe/dag.sock"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
+Field notes:
+- `{app.resource_dir}` — the Tauri resource directory where `poe-dag-mcp` is bundled. The orchestrator resolves this at config-write time using `tauri::AppHandle::path().resource_dir()`.
+- `--project-id` — scopes all DB writes to the correct project row. The DAG Service rejects tool calls that reference nodes belonging to a different project.
+- `--socket` — the Unix socket path for back-channel notification to the orchestrator.
+- The `env` block is empty by default; reserved for future use (e.g. injecting API tokens for test-runner integrations).
+
+Claude creates a new `poe-dag-mcp` subprocess per agent spawn (MCP stdio model). Each subprocess connects to the shared `dag.sock` on startup. The DB is WAL-mode SQLite — concurrent reads and serialised writes are safe across multiple short-lived subprocess clients.
+
+### Tool Surface
+
+Agents call tools using the server name prefix `poe__<tool_name>` (double-underscore, MCP naming convention). Tool names below are shown without the prefix for readability.
+
+---
+
+#### Task CRUD
+
+**`create_task`** — Create a new node in the WBS.
+
+```jsonc
+// Request
+{
+  "title":       "string",         // required
+  "type":        "epic|feature|task|bug|chore|subtask",  // required
+  "skill":       "string",         // skill_id; optional (omit for container nodes)
+  "parent_id":   "string",         // nodes.id of parent epic or feature; optional
+  "description": "string",         // optional
+  "sort_order":  42                // optional; controls ordering within parent
+}
+
+// Response
+{
+  "id":          "string",         // generated node ID (e.g. "t-abc123")
+  "title":       "string",
+  "type":        "string",
+  "skill":       "string|null",
+  "parent_id":   "string|null",
+  "status":      "pending",
+  "phase_id":    "string",         // current active phase, set automatically
+  "project_id":  "string",
+  "created_at":  "ISO 8601"
+}
+```
+
+Notes:
+- `phase_id` is set by the DAG Service to the currently active phase for the project. Agents do not specify it.
+- `project_id` is derived from the `--project-id` arg at startup. Agents do not specify it.
+- `type = "epic"` or `"feature"` creates a container node with no `skill`. Tasks, bugs, chores, and subtasks have a `skill`.
+
+---
+
+**`get_task`** — Read a single node with full WBS ancestry.
+
+```jsonc
+// Request
+{ "id": "string" }
+
+// Response
+{
+  "id":           "string",
+  "title":        "string",
+  "type":         "string",
+  "skill":        "string|null",
+  "status":       "string",
+  "description":  "string|null",
+  "parent_id":    "string|null",
+  "phase_id":     "string",
+  "project_id":   "string",
+  "sort_order":   "integer|null",
+  "ancestry": [   // parent chain from root to direct parent, inclusive
+    { "id": "string", "title": "string", "type": "string" }
+  ],
+  "created_at":   "ISO 8601",
+  "updated_at":   "ISO 8601"
+}
+```
+
+---
+
+**`get_phase_wbs`** — Read the complete task graph for a phase.
+
+```jsonc
+// Request
+{ "phase_id": "string" }  // pass the phase ID from the Task bundle
+
+// Response
+{
+  "phase_id":  "string",
+  "nodes": [
+    {
+      "id":          "string",
+      "title":       "string",
+      "type":        "string",
+      "skill":       "string|null",
+      "status":      "string",
+      "parent_id":   "string|null",
+      "sort_order":  "integer|null",
+      "description": "string|null"
+    }
+  ],
+  "edges": [
+    { "from_id": "string", "to_id": "string", "edge_type": "depends_on" }
+  ]
+}
+```
+
+Notes:
+- Returns all non-cancelled nodes for the phase, in topological order (epics → features → tasks).
+- `edges` contains all finish-to-start dependency edges between nodes in this phase.
+- Reviewers call this tool first to read the full WBS before forming a verdict.
+
+---
+
+**`query_tasks`** — Filtered query over nodes.
+
+```jsonc
+// Request (all fields optional — omit to return all phase nodes)
+{
+  "phase_id":  "string",
+  "parent_id": "string",
+  "skill":     "string",
+  "status":    "pending|running|waiting|complete|cancelled",
+  "type":      "epic|feature|task|bug|chore|subtask"
+}
+
+// Response
+{
+  "nodes": [ /* same shape as get_phase_wbs nodes */ ]
+}
+```
+
+---
+
+**`update_task`** — Update mutable fields on an existing node.
+
+```jsonc
+// Request
+{
+  "id":          "string",         // required
+  "title":       "string",         // optional
+  "skill":       "string",         // optional
+  "description": "string",         // optional
+  "sort_order":  42                // optional
+}
+
+// Response
+{ /* updated node — same shape as get_task response */ }
+```
+
+Notes:
+- `status` is NOT writable via this tool. Status transitions are managed by the orchestrator.
+- `type` and `phase_id` are immutable after creation.
+- Emits `poe-node-updated` Tauri event after commit.
+
+---
+
+**`cancel_task`** — Mark a node as cancelled. Preserved in history; never hard-deleted.
+
+```jsonc
+// Request
+{
+  "id":     "string",   // required
+  "reason": "string"    // optional; stored in description field
+}
+
+// Response
+{ "id": "string", "status": "cancelled" }
+```
+
+Notes:
+- Cascades to dependent nodes: any node with `depends_on` edges pointing to this node is also cancelled, recursively.
+- Emits `poe-node-updated` Tauri event for each cancelled node.
+
+---
+
+#### Dependency Edges
+
+**`add_edge`** — Add a finish-to-start dependency. `to_id` cannot start until `from_id` is complete.
+
+```jsonc
+// Request
+{
+  "from_id":   "string",        // the prerequisite node
+  "to_id":     "string",        // the node that depends on from_id
+  "edge_type": "depends_on"     // currently the only supported type; optional, defaults to "depends_on"
+}
+
+// Response
+{ "id": "string", "from_id": "string", "to_id": "string", "edge_type": "depends_on" }
+```
+
+Notes:
+- Rejects cycles: if adding this edge would create a cycle, returns an error.
+- Emits `poe-edge-created` Tauri event after commit.
+
+---
+
+**`remove_edge`** — Remove a dependency edge.
+
+```jsonc
+// Request
+{ "from_id": "string", "to_id": "string" }
+
+// Response
+{ "removed": true }
+```
+
+Emits `poe-edge-removed` Tauri event after commit.
+
+---
+
+#### Knowledge and Artifacts
+
+**`write_knowledge`** — Write an entry to the project knowledge register.
+
+```jsonc
+// Request
+{
+  "key":          "string",      // unique per project; used as lookup key
+  "value":        "string",      // the knowledge content
+  "source":       "string",      // free-text provenance (task ID, agent name, or 'human'); optional
+  "supersedes_id": "string"      // ID of a prior entry this one replaces; optional
+}
+
+// Response
+{ "id": "string", "key": "string", "created_at": "ISO 8601" }
+```
+
+Notes:
+- Equivalent to emitting `poe:knowledge` — both write to the same `knowledge` table. Agents should use whichever fits their pattern; the DAG Service tool is preferred for programmatic writes within a task, while `poe:knowledge` is acceptable for end-of-task summaries.
+- Emits `poe-knowledge-created` Tauri event after commit.
+
+---
+
+**`query_knowledge`** — Read knowledge entries.
+
+```jsonc
+// Request
+{ "key": "string" }    // optional; omit to return all project entries
+
+// Response
+{
+  "entries": [
+    { "id": "string", "key": "string", "value": "string", "source": "string|null", "created_at": "ISO 8601" }
+  ]
+}
+```
+
+---
+
+**`register_artifact`** — Index an artifact that the agent has already written to disk.
+
+```jsonc
+// Request
+{
+  "filename":      "string",   // relative to {project.path}/docs/  e.g. "conops.md"
+  "artifact_type": "string"    // e.g. "conops", "must-nots", "phase-plan", "plan-review"
+}
+
+// Response
+{ "id": "string", "filename": "string", "artifact_type": "string", "created_at": "ISO 8601" }
+```
+
+Notes:
+- Equivalent to emitting `poe:artifact`. Both write to the same `artifacts` table. Agents may use either; `poe:artifact` is idiomatic for file-writing tasks.
+- The file must already exist at `{project.path}/docs/{filename}` before this call. The DAG Service does NOT write the file.
+- Emits `poe-artifact-created` Tauri event after indexing.
+
+---
+
+**`get_artifact`** — Look up an artifact's path and metadata.
+
+```jsonc
+// Request
+{
+  "artifact_type": "string",   // optional; returns most-recent artifact of this type
+  "filename":      "string"    // optional; exact filename match. One of artifact_type or filename required.
+}
+
+// Response
+{
+  "id":            "string",
+  "filename":      "string",
+  "artifact_type": "string",
+  "path":          "string",   // absolute path: {project.path}/docs/{filename}
+  "created_at":    "ISO 8601",
+  "updated_at":    "ISO 8601"
+}
+```
+
+---
+
+#### Execution Support
+
+**`run_tests`** — Run the project's test suite and return structured results.
+
+```jsonc
+// Request
+{}   // no parameters
+
+// Response
+{
+  "passed":  42,
+  "failed":  3,
+  "skipped": 1,
+  "output":  "string"   // raw test output, truncated to 8 KB
+}
+```
+
+Notes:
+- Runs the test command configured for the project (default: `cargo test`; overrideable via project knowledge entry `test-command`).
+- Returns immediately with results; does not stream.
+
+---
+
+**`git_status`** — Read current git state.
+
+```jsonc
+// Request
+{}   // no parameters
+
+// Response
+{
+  "branch":           "string",
+  "staged":           ["filename", ...],
+  "unstaged":         ["filename", ...],
+  "untracked":        ["filename", ...],
+  "recent_commits":   [
+    { "hash": "string", "message": "string", "author": "string", "date": "ISO 8601" }
+  ]   // most recent 5 commits
+}
+```
+
+---
+
+### Orchestrator Notification
+
+After every successful mutation (create, update, cancel, add_edge, remove_edge, write_knowledge, register_artifact), the DAG Service sends a notification to the orchestrator via the Unix socket at `{project.path}/.poe/dag.sock`. The message is a single JSON line:
+
+```json
+{ "type": "DagChanged", "project_id": "string", "node_id": "string|null" }
+```
+
+The orchestrator reads from `dag.sock` on a background Tokio task. On receipt of `DagChanged`, it runs the scheduling loop for the project: queries for pending tasks with all dependencies complete, and dispatches up to the concurrency limit. This is the same loop triggered by `poe:done` and human gate advances.
+
+`node_id` is populated for node mutations (create, update, cancel) and null for edge and knowledge writes. The orchestrator uses it to emit the appropriate Tauri event (see below) before running the scheduling loop.
+
+### Tauri Events Emitted by DAG Service
+
+These events are emitted by the main POE process on behalf of the DAG Service (relayed from the socket notification). They are listed here separately from §4 because their source is agent tool calls, not the poe: ingester.
+
+| Tool call | Tauri event | Payload |
+|---|---|---|
+| `create_task` | `poe-task-created` | `{id, title, type, skill, status, phase_id, project_id, parent_id, sort_order}` |
+| `update_task` | `poe-node-updated` | `{id, title?, skill?, description?, sort_order?, updated_at}` |
+| `cancel_task` | `poe-node-updated` | `{id, status: "cancelled"}` (one event per affected node) |
+| `add_edge` | `poe-edge-created` | `{fromId, toId, edgeType}` |
+| `remove_edge` | `poe-edge-removed` | `{fromId, toId}` |
+| `write_knowledge` | `poe-knowledge-created` | `{id, key, value, projectId}` |
+| `register_artifact` | `poe-artifact-created` | `{id, filename, artifactType, projectId}` |
+
+Read-only tool calls (`get_task`, `get_phase_wbs`, `query_tasks`, `query_knowledge`, `get_artifact`, `run_tests`, `git_status`) do not emit Tauri events.
+
+### Error Handling
+
+All tool calls return a structured error on failure. The MCP error response body:
+
+```json
+{
+  "error": {
+    "code":    "string",   // machine-readable error code (see below)
+    "message": "string"    // human-readable description
+  }
+}
+```
+
+Standard error codes:
+
+| Code | Meaning |
+|---|---|
+| `NOT_FOUND` | The requested node, edge, or artifact does not exist |
+| `WRONG_PROJECT` | The referenced ID belongs to a different project |
+| `CYCLE_DETECTED` | `add_edge` would create a dependency cycle |
+| `IMMUTABLE_FIELD` | Attempt to modify `type`, `phase_id`, or `project_id` via `update_task` |
+| `DB_ERROR` | SQLite write failed (disk full, locked, etc.) |
+| `NOT_READY` | The DAG Service subprocess has not yet connected to `dag.sock` |
+
+On `DB_ERROR` or `NOT_READY`, the agent should emit `poe:decision` to surface the failure rather than silently continuing.
+
+---
+
+## 7. Tauri Command Surface (Full Catalogue)
 
 All Tauri commands exposed by the backend. Authoritative interface spec — not phase-specific planning notes. All implementations live in `poe2/src-tauri/src/`.
 
@@ -1086,7 +1498,7 @@ Add to `package.json`: `@xterm/xterm`, `@xterm/addon-fit`, `@xyflow/react`.
 
 ## Implementation Notes
 
-**Stage runner trigger**: The orchestrator is event-driven via a Tokio `mpsc` channel (`DagChanged` signal). The event ingester sends a signal on every event that mutates DAG structure or task status (`poe:task`, `poe:task:update`, `poe:task:cancel`, `poe:edge`, `poe:edge:remove`, `poe:done`, plus human gate advances and decision resolutions). On each signal, the orchestrator queries SQLite for tasks where `status = 'pending'` and all `depends_on` tasks have `status = 'done'`, and the running count is below the concurrency limit. Eligible tasks are spawned. No explicit Tauri command triggers execution — the loop fires on DAG changes automatically.
+**Stage runner trigger**: The orchestrator is event-driven via a Tokio `mpsc` channel (`DagChanged` signal). Signals arrive from three sources: the DAG Service (after every node/edge mutation via MCP tool call — see §6 Orchestrator Notification); the poe: ingester (on `poe:done`, `poe:yield`); and human actions (gate advances, decision resolutions). On each signal, the orchestrator queries SQLite for tasks where `status = 'pending'` and all `depends_on` tasks have `status = 'done'`, and the running count is below the concurrency limit. Eligible tasks are spawned. No explicit Tauri command triggers execution — the loop fires on DAG changes automatically.
 
 **Skill file locations**: Skill files live in the app bundle at `resources/skills/<skill-id>.md`. User-level overrides at `~/.poe/skills/<skill-id>.md`. Project-level overrides at `{project.path}/.poe/skills/<skill-id>.md`.
 

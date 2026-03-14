@@ -224,7 +224,7 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
     - conops             → operational-analyst / "Develop CONOPS"
     - guardrails         → must-not-analyst    / "Develop Guardrails"
     - increment_planning → product-manager     / "Plan Increment"
-    - execution          → (no bootstrap — tasks come from product-manager poe:task events)
+    - execution          → (no bootstrap — tasks created by product-manager via DAG Service MCP tools during the preceding increment_planning phase)
 
 3. Orchestrator wakes → runs scheduler loop:
    → finds tasks in Phase 1 with status='pending' and no unmet dependencies
@@ -301,7 +301,7 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
 
 **What it is**: A running agent requests specialist peer review of its work-in-progress — a plan, an artifact, a design decision. The orchestrator routes the review automatically. The requesting agent receives the result via `--resume` and continues. No human relay required.
 
-**Canonical use case**: The product-manager agent has drafted the phase task DAG and wants a senior-engineer to validate it for technical correctness before emitting `poe:task` events to populate the WBS.
+**Canonical use case**: The product-manager agent has built the phase task DAG via DAG Service MCP tools (`create_task`, `add_edge`) and wants a senior-engineer to validate it for technical correctness. The reviewer reads the live WBS directly from the DAG via `get_phase_wbs` — the plan is already in the database before the review is requested.
 
 **Wire format reference**: Protocol.md §2 (`poe:review`, `poe:yield`, `poe:artifact`, `poe:done`). Reviewer stdin bundle: Protocol.md §3 "Reviewer stdin bundle".
 
@@ -372,8 +372,9 @@ sequenceDiagram
 
     Note over A: Agent A continues with full review in context
 
-    A-->>Ing: poe: events (poe:task, poe:edge, poe:artifact, poe:step, ...)
+    A-->>Ing: poe: events (poe:artifact, poe:step, poe:knowledge, ...)
     Note over Ing,DB: Each event processed per Protocol.md §2 ingester table
+    Note over A,DB: DAG mutations (create_task, add_edge etc.) go via DAG Service MCP tools — not poe: events
 
     A-->>Ing: {"poe":"done","summary":"..."}
     Note over Ing,DB: SF-2: Agent A task marked done
@@ -423,7 +424,7 @@ The `poe:review-outcome` event stores the reviewer's explicit verdict on `nodes.
 
 **If `poe:review-outcome` is missing** (reviewer emitted `poe:done` without it), the orchestrator defaults to `BLOCKED` and emits a `poe-ingester-warning` Tauri event to alert the operator. This is a reviewer skill bug, not a protocol error.
 
-The reviewer does not emit `poe:task` or `poe:edge` events — it is not planning work, it is reviewing it.
+The reviewer does not call DAG Service mutation tools (`create_task`, `add_edge`, etc.) — it reads the WBS via `get_phase_wbs` and `get_task`, then writes its verdict to a review artifact. It is not planning work, it is reviewing it.
 
 **Phase 4 — Result delivery**
 
@@ -729,9 +730,9 @@ The agent emits a stream of `poe:` events as it works:
 - `poe:step` — named progress milestones
 - `poe:artifact` — documents or code produced (written to `docs/`, indexed in DB)
 - `poe:knowledge` — captured patterns or facts for the knowledge register
-- `poe:task` / `poe:edge` — DAG mutations (new tasks discovered, new dependencies identified)
+DAG mutations (creating tasks, adding edges, updating or cancelling nodes) are performed by the agent via DAG Service MCP tool calls (`create_task`, `add_edge`, `update_task`, etc.) — not via `poe:` events. The DAG Service commits each write to SQLite, emits the corresponding Tauri event to the frontend, and notifies the orchestrator via `DagChanged` directly. See Protocol.md §6 for the full tool surface.
 
-Each event is processed by the ingester, written to SQLite, and emitted to the frontend. DAG mutations additionally signal the orchestrator (DagChanged) in case the new task is immediately dispatchable.
+Each `poe:` event is processed by the ingester, written to SQLite, and emitted to the frontend.
 
 **Phase 5 — Completion**
 
@@ -1594,7 +1595,7 @@ The advisor emits `poe:done` when it has nothing more to offer or the human dism
 
 **Non-critical events** (`poe:step`, `poe:brief`, `poe:knowledge`, `poe:artifact`): a single failed write is logged and skipped. The agent session continues. The activity feed may be missing one entry; this is acceptable.
 
-**Critical events** (`poe:done`, `poe:yield`, `poe:task`, `poe:edge`): these mutate the DAG. Failure here is treated as a crash (§4.1), because the orchestrator's state is now inconsistent with what the agent believes it wrote.
+**Critical events** (`poe:done`, `poe:yield`): these trigger status transitions. Failure here is treated as a crash (§4.1), because the orchestrator's state is now inconsistent with what the agent believes it wrote. DAG mutations (`create_task`, `add_edge`, etc.) are handled by the DAG Service with its own error path (see Protocol.md §6 Error Handling) — they do not go through the ingester.
 
 ---
 
@@ -1648,14 +1649,14 @@ The requesting agent receives `verdict=BLOCKED` and should escalate via `poe:dec
 2. No default task is created (by design for execution stages)
 3. Orchestrator wakes on DagChanged — finds zero pending tasks in the new phase
 4. Phase remains 'running' with zero tasks
-5. No error — this is expected for execution stages (tasks come from prior product-manager poe:task events)
+5. No error — this is expected for execution stages (tasks were created by product-manager via DAG Service MCP tools during the preceding increment_planning phase)
 6. If this is NOT an execution stage (unexpected missing bootstrap entry):
    → Log warning: 'Phase activated with stage_type={X} but no bootstrap skill mapping found'
    → Emit poe-ingester-warning {error: 'Phase has no tasks and no bootstrap mapping for stage_type={X}'}
    → Phase stalls visibly: running but 0 tasks. Human must manually add a task or edit the plan.
 ```
 
-**Key distinction**: execution phases are intentionally taskless at activation (tasks arrive later via poe:task events from the planning phase). All other stage types should have a bootstrap mapping; a missing entry for a non-execution stage is a configuration error, not a design choice.
+**Key distinction**: execution phases are intentionally taskless at activation — the product-manager already created the tasks via DAG Service MCP tools during the preceding increment_planning phase, so they exist in the DB before the execution phase is activated. All other stage types should have a bootstrap mapping; a missing entry for a non-execution stage is a configuration error, not a design choice.
 
 ---
 
