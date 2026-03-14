@@ -166,14 +166,10 @@
     .slot-bar.span-end { left:0; right:4px; border-radius:0 2px 2px 0; }
     @keyframes slot-pulse { 0%,100%{opacity:.65} 50%{opacity:.3} }
 
-    /* Current step — shown in spacer next to bar, hidden inside label */
-    .task-current-step { display:none; }
+    /* Current step + dep annotations move to Gantt — slot-step shown in spacer */
     .slot-step { font-size:10px; font-family:var(--font); font-style:italic; color:var(--text2);
                  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-left:8px; flex:1; }
     .slot-step.live { color:var(--cyan); }
-    /* Also hide dep chips and downstream count from label — now on bar */
-    .task-dep-chips { display:none; }
-    .task-blocks-badge { display:none; }
 
 
     /* Phase section header — full-width divider with inline lifecycle strip */
@@ -224,12 +220,9 @@
     .dep-chip.met { color:var(--green-dim); border-color:rgba(16,185,129,.15); background:transparent; }  /* met dep — subtle */
     .dep-chip.unmet { color:var(--amber); border-color:var(--amber-border); background:var(--amber-bg); } /* unmet dep — prominent */
 
-    /* Downstream badge */
-    .task-blocks-badge { font-size:9px; padding:1px 5px; border-radius:2px; border:1px solid var(--border1); color:var(--text3); white-space:nowrap; flex-shrink:0; }
-    .task-row:hover .task-blocks-badge { color:var(--text2); border-color:var(--border2); }
-
-    .task-current-step { font-size:9px; color:var(--text2); font-style:italic; max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .task-current-step.live { color:var(--cyan); }
+    .task-current-step { display:none; } /* moved to Gantt spacer as .slot-step */
+    .task-dep-chips    { display:none; } /* moved to Gantt bar left count */
+    .task-blocks-badge { display:none; } /* moved to Gantt bar right count */
     .task-node-type { font-size:9px; color:var(--text3); letter-spacing:.06em; text-transform:uppercase; }
 
     /* ─── Activity feed ─── */
