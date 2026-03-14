@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>POE — Pairti Orchestration Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg0: #070A12; --bg1: #0C1020; --bg2: #111526; --bg3: #161B2E; --bg4: #1C2238;
+      --border0: #1A1F30; --border1: #222840; --border2: #2C3450;
+      --text0: #E4E8F4; --text1: #8892B0; --text2: #4A5270; --text3: #2C3050;
+      --cyan: #0EA5E9; --cyan-dim: #0369A1; --cyan-bg: rgba(14,165,233,.08); --cyan-border: rgba(14,165,233,.25);
+      --amber: #F59E0B; --amber-dim: #92400E; --amber-bg: rgba(245,158,11,.08); --amber-border: rgba(245,158,11,.25);
+      --green: #10B981; --green-dim: #065F46; --green-bg: rgba(16,185,129,.07); --green-border: rgba(16,185,129,.2);
+      --red: #EF4444; --red-bg: rgba(239,68,68,.07); --red-border: rgba(239,68,68,.2);
+      --purple: #8B5CF6; --purple-bg: rgba(139,92,246,.07); --purple-border: rgba(139,92,246,.2);
+      --teal: #14B8A6; --teal-bg: rgba(20,184,166,.07);
+      --font: 'IBM Plex Mono', monospace; --font-sans: 'IBM Plex Sans', sans-serif;
+    }
+    html, body { height: 100%; overflow: hidden; }
+    body { background: var(--bg0); color: var(--text0); font-family: var(--font); font-size: 12px; line-height: 1.5; }
+    body::before {
+      content: ''; position: fixed; inset: 0;
+      background-image: linear-gradient(var(--border0) 1px, transparent 1px), linear-gradient(90deg, var(--border0) 1px, transparent 1px);
+      background-size: 32px 32px; opacity: .35; pointer-events: none; z-index: 0;
+    }
+    #root { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100vh; }
+
+    /* ─── Topbar ─── */
+    #topbar { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:0 16px; height:40px; background:var(--bg1); border-bottom:1px solid var(--border1); }
+    .topbar-brand { display:flex; align-items:center; gap:10px; }
+    .topbar-logo { font-family:var(--font-sans); font-weight:700; font-size:13px; letter-spacing:.2em; color:var(--text0); text-transform:uppercase; }
+    .topbar-logo span { color:var(--cyan); }
+    .topbar-sep { width:1px; height:14px; background:var(--border2); }
+    .topbar-sub { font-size:10px; color:var(--text2); letter-spacing:.08em; }
+    .topbar-stats { display:flex; align-items:center; gap:20px; }
+    .stat-pill { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--text1); }
+    .stat-pill .dot { width:6px; height:6px; border-radius:50%; background:var(--text2); }
+    .stat-pill.live .dot { background:var(--cyan); animation:pulse-dot 2s ease-in-out infinite; }
+    .stat-pill.warn .dot { background:var(--amber); animation:pulse-dot 1.5s ease-in-out infinite; }
+    .stat-pill.live .val { color:var(--cyan); }
+    .stat-pill.warn .val { color:var(--amber); }
+    @keyframes pulse-dot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.7)} }
+
+    /* ─── Body ─── */
+    #body { flex:1; display:flex; overflow:hidden; }
+
+    /* ─── Sidebar left ─── */
+    #sidebar-left { width:200px; flex-shrink:0; border-right:1px solid var(--border1); display:flex; flex-direction:column; background:var(--bg1); }
+    .sidebar-header { padding:10px 12px 8px; border-bottom:1px solid var(--border0); font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--text2); }
+    .project-list { flex:1; overflow-y:auto; padding:6px; }
+    .project-card { padding:8px 10px; border-radius:4px; cursor:pointer; border:1px solid transparent; margin-bottom:3px; transition:all .15s; }
+    .project-card:hover { background:var(--bg3); }
+    .project-card.active { background:var(--bg3); border-color:var(--border2); }
+    .project-card-name { font-size:11px; color:var(--text0); font-weight:500; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .project-card-meta { display:flex; align-items:center; gap:8px; font-size:10px; color:var(--text2); }
+    .project-card-meta .running { color:var(--cyan); display:flex; align-items:center; gap:4px; }
+    .project-card-meta .running::before { content:''; width:5px; height:5px; border-radius:50%; background:var(--cyan); animation:pulse-dot 2s ease-in-out infinite; display:inline-block; }
+    .project-card-meta .queued { color:var(--amber); }
+    .sidebar-open-btn { margin:6px; padding:7px 10px; border-radius:3px; border:1px dashed var(--border2); background:transparent; color:var(--text2); font-family:var(--font); font-size:11px; cursor:pointer; text-align:left; transition:all .15s; }
+    .sidebar-open-btn:hover { background:var(--bg3); color:var(--text1); }
+    .concurrency-meter { margin:6px; padding:8px 10px; border-radius:3px; background:var(--bg2); border:1px solid var(--border0); }
+    .concurrency-meter-label { font-size:9px; color:var(--text2); letter-spacing:.1em; text-transform:uppercase; margin-bottom:5px; }
+    .concurrency-bar { height:3px; background:var(--border1); border-radius:2px; overflow:hidden; }
+    .concurrency-bar-fill { height:100%; background:linear-gradient(90deg,var(--cyan),#38BDF8); border-radius:2px; transition:width .5s; }
+    .concurrency-numbers { display:flex; justify-content:space-between; margin-top:4px; font-size:10px; color:var(--text2); }
+    .concurrency-numbers span:first-child { color:var(--cyan); }
+
+    /* ─── Main ─── */
+    #main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+    #content-area { flex:1; display:flex; flex-direction:row; overflow:hidden; }
+    #content-left { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; }
+
+    #project-header { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:0 14px; height:36px; border-bottom:1px solid var(--border0); background:var(--bg1); }
+    .phase-info { display:flex; align-items:center; gap:8px; font-size:11px; }
+    .phase-name { color:var(--text0); font-weight:500; }
+    .phase-sep { color:var(--text3); }
+    .phase-stage-badge { font-size:10px; padding:1px 7px; border-radius:2px; border:1px solid; letter-spacing:.06em; text-transform:uppercase; }
+    .phase-stage-badge.execution { color:var(--cyan); border-color:var(--cyan-border); background:var(--cyan-bg); }
+    .header-actions { display:flex; gap:8px; align-items:center; }
+    .btn-sm { padding:3px 10px; border-radius:3px; border:1px solid var(--border2); background:transparent; color:var(--text1); font-family:var(--font); font-size:10px; cursor:pointer; transition:all .15s; letter-spacing:.04em; }
+    .btn-sm:hover { background:var(--bg4); color:var(--text0); }
+
+    /* Lifecycle flow */
+    #lifecycle-flow { flex-shrink:0; padding:7px 14px; border-bottom:1px solid var(--border0); display:flex; align-items:center; gap:0; overflow-x:auto; }
+    .lf-step { display:flex; align-items:center; font-size:9px; letter-spacing:.07em; text-transform:uppercase; color:var(--text3); white-space:nowrap; }
+    .lf-step .lf-label { padding:3px 8px; border-radius:2px; color:var(--text2); }
+    .lf-step.done .lf-label { color:var(--green); }
+    .lf-step.active .lf-label { color:var(--cyan); background:var(--cyan-bg); border:1px solid var(--cyan-border); }
+    .lf-arrow { color:var(--text3); padding:0 2px; font-size:8px; }
+
+    /* ─── Phase matrix ─── */
+    #phase-matrix { flex-shrink:0; max-height:48%; overflow-y:auto; border-bottom:1px solid var(--border0); }
+    .matrix-header { position:sticky; top:0; z-index:2; display:flex; align-items:center; justify-content:space-between; padding:6px 14px; background:var(--bg1); border-bottom:1px solid var(--border0); }
+    .matrix-header-label { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--text2); }
+    .matrix-stats { display:flex; gap:12px; font-size:10px; }
+    .matrix-stats .run { color:var(--cyan); }
+    .matrix-stats .wait { color:var(--amber); }
+    .matrix-stats .done { color:var(--text2); }
+    .matrix-stats .pend { color:var(--text3); }
+
+    /* Dep legend */
+    .dep-legend { display:flex; align-items:center; gap:10px; font-size:9px; color:var(--text3); padding:5px 14px; border-bottom:1px solid var(--border0); background:var(--bg1); }
+    .dep-legend-item { display:flex; align-items:center; gap:4px; }
+    .dep-swatch { width:10px; height:2px; border-radius:1px; }
+    .dep-swatch.up { background:var(--cyan); }
+    .dep-swatch.down { background:var(--amber); }
+
+    .phase-section { border-bottom:1px solid var(--border0); }
+    .phase-section-header { display:flex; align-items:center; gap:8px; padding:6px 14px 5px; background:var(--bg1); position:sticky; top:31px; z-index:1; }
+    .phase-num { font-size:9px; color:var(--text2); letter-spacing:.06em; }
+    .phase-title-text { font-size:11px; font-weight:500; color:var(--text1); }
+    .phase-lifecycle-badge { font-size:9px; padding:1px 6px; border-radius:2px; border:1px solid; letter-spacing:.06em; text-transform:uppercase; }
+    .phase-lifecycle-badge.execution { color:var(--cyan); border-color:var(--cyan-border); background:var(--cyan-bg); }
+    .phase-lifecycle-badge.complete { color:var(--green); border-color:var(--green-border); background:var(--green-bg); }
+    .phase-lifecycle-badge.pending { color:var(--text2); border-color:var(--border1); background:transparent; }
+    .phase-progress { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:10px; color:var(--text2); }
+    .phase-progress-bar { width:60px; height:2px; background:var(--border1); border-radius:2px; overflow:hidden; }
+    .phase-progress-fill { height:100%; background:var(--green); border-radius:2px; }
+
+    .task-grid { padding:4px 14px 8px; display:flex; flex-direction:column; gap:1px; }
+
+    /* ─── Task row ─── */
+    .task-row {
+      display:flex; align-items:center; gap:8px;
+      padding:5px 8px; border-radius:3px; border:1px solid transparent;
+      cursor:pointer; transition:background .1s, border-color .1s, opacity .15s;
+      position:relative;
+    }
+    .task-row:hover { background:var(--bg3); border-color:var(--border1); }
+    .task-row.indent-1 { padding-left:24px; }
+    .task-row.indent-2 { padding-left:40px; }
+
+    /* Dep highlight states */
+    .dep-active-upstream { background:rgba(14,165,233,.06) !important; border-color:var(--cyan-border) !important; border-left:2px solid var(--cyan) !important; }
+    .dep-active-downstream { background:rgba(245,158,11,.06) !important; border-color:var(--amber-border) !important; border-left:2px solid var(--amber) !important; }
+    .dep-active-self { background:var(--bg3) !important; border-color:var(--border2) !important; }
+    .dep-dimmed { opacity:.3; }
+
+    /* Status cell */
+    .task-status-cell { width:16px; height:16px; border-radius:2px; display:flex; align-items:center; justify-content:center; font-size:9px; flex-shrink:0; border:1px solid; }
+    .task-status-cell.running { background:var(--cyan-bg); border-color:var(--cyan-border); color:var(--cyan); animation:cell-pulse 2s ease-in-out infinite; }
+    .task-status-cell.waiting { background:var(--amber-bg); border-color:var(--amber-border); color:var(--amber); }
+    .task-status-cell.complete { background:var(--green-bg); border-color:var(--green-border); color:var(--green); }
+    .task-status-cell.pending-ready { background:transparent; border-color:var(--border2); color:var(--text2); }
+    .task-status-cell.pending-blocked { background:var(--bg3); border-color:var(--border1); color:var(--text3); }
+    @keyframes cell-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(14,165,233,0)} 50%{box-shadow:0 0 0 3px rgba(14,165,233,.15)} }
+
+    .task-title { font-size:11px; color:var(--text1); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .task-row.running .task-title { color:var(--text0); }
+    .task-row.complete .task-title { color:var(--text2); }
+    .task-row.dep-blocked .task-title { color:var(--text2); }
+
+    .task-skill-badge { font-size:9px; padding:1px 6px; border-radius:2px; background:var(--purple-bg); border:1px solid var(--purple-border); color:var(--purple); flex-shrink:0; white-space:nowrap; }
+
+    /* Dep chips — shown in the row */
+    .task-dep-chips { display:flex; align-items:center; gap:3px; flex-shrink:0; }
+    .dep-chip { font-size:9px; padding:1px 5px; border-radius:2px; border:1px solid; white-space:nowrap; }
+    .dep-chip.met { color:var(--green-dim); border-color:rgba(16,185,129,.15); background:transparent; }  /* met dep — subtle */
+    .dep-chip.unmet { color:var(--amber); border-color:var(--amber-border); background:var(--amber-bg); } /* unmet dep — prominent */
+
+    /* Downstream badge */
+    .task-blocks-badge { font-size:9px; padding:1px 5px; border-radius:2px; border:1px solid var(--border1); color:var(--text3); white-space:nowrap; flex-shrink:0; }
+    .task-row:hover .task-blocks-badge { color:var(--text2); border-color:var(--border2); }
+
+    .task-current-step { font-size:9px; color:var(--text2); font-style:italic; max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .task-current-step.live { color:var(--cyan); }
+    .task-node-type { font-size:9px; color:var(--text3); letter-spacing:.06em; text-transform:uppercase; }
+
+    /* ─── Activity feed ─── */
+    #activity-feed { flex:1; display:flex; flex-direction:column; overflow:hidden; }
+    .feed-header { flex-shrink:0; padding:6px 14px; border-bottom:1px solid var(--border0); display:flex; align-items:center; justify-content:space-between; }
+    .feed-header-label { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--text2); }
+    .feed-filter { display:flex; gap:4px; }
+    .filter-chip { font-size:9px; padding:1px 6px; border-radius:2px; border:1px solid var(--border1); color:var(--text2); cursor:pointer; transition:all .1s; }
+    .filter-chip.active { border-color:var(--cyan-border); color:var(--cyan); background:var(--cyan-bg); }
+    #feed-scroll { flex:1; overflow-y:auto; padding:4px 0; }
+    .feed-item { display:flex; align-items:flex-start; gap:8px; padding:5px 14px; border-left:2px solid transparent; transition:background .1s; }
+    .feed-item:hover { background:var(--bg2); }
+    .feed-item.brief { border-left-color:#2563EB; }
+    .feed-item.step { border-left-color:var(--border2); }
+    .feed-item.artifact { border-left-color:var(--green); }
+    .feed-item.knowledge { border-left-color:var(--teal); }
+    .feed-item.decision { border-left-color:var(--amber); }
+    .feed-item.agent-start { border-left-color:var(--purple); }
+    .feed-item.done { border-left-color:var(--green); }
+    .feed-item.new { animation:slide-in .3s ease-out; }
+    @keyframes slide-in { from{opacity:0;transform:translateX(8px)} to{opacity:1;transform:translateX(0)} }
+    .feed-ts { font-size:10px; color:var(--text3); flex-shrink:0; min-width:46px; padding-top:1px; }
+    .feed-badge { font-size:9px; padding:1px 6px; border-radius:2px; border:1px solid; flex-shrink:0; min-width:84px; text-align:center; letter-spacing:.03em; }
+    .feed-badge.brief { color:#60A5FA; border-color:rgba(96,165,250,.3); background:rgba(96,165,250,.07); }
+    .feed-badge.step { color:var(--text2); border-color:var(--border1); }
+    .feed-badge.artifact { color:var(--green); border-color:var(--green-border); background:var(--green-bg); }
+    .feed-badge.knowledge { color:var(--teal); border-color:rgba(20,184,166,.25); background:var(--teal-bg); }
+    .feed-badge.decision { color:var(--amber); border-color:var(--amber-border); background:var(--amber-bg); }
+    .feed-badge.agent-start { color:var(--purple); border-color:var(--purple-border); background:var(--purple-bg); }
+    .feed-badge.done { color:var(--green); border-color:var(--green-border); background:var(--green-bg); }
+    .feed-skill { font-size:9px; padding:1px 6px; border-radius:2px; background:var(--bg3); border:1px solid var(--border1); color:var(--text2); flex-shrink:0; }
+    .feed-content { flex:1; font-size:11px; color:var(--text1); min-width:0; }
+    .feed-content .task-ref { color:var(--text2); font-size:10px; margin-left:6px; }
+
+    /* ─── Right sidebar ─── */
+    #sidebar-right { width:320px; flex-shrink:0; border-left:1px solid var(--border1); display:flex; flex-direction:column; background:var(--bg1); overflow:hidden; position:relative; z-index:20; }
+    .queue-header { flex-shrink:0; padding:10px 14px 8px; border-bottom:1px solid var(--border1); display:flex; align-items:center; justify-content:space-between; }
+    .queue-header-label { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--text2); }
+    .queue-count-badge { font-size:10px; padding:1px 7px; border-radius:10px; background:var(--amber-bg); border:1px solid var(--amber-border); color:var(--amber); animation:badge-pulse 2s ease-in-out infinite; }
+    .queue-count-badge.clear { animation:none; background:transparent; border-color:var(--border1); color:var(--text2); }
+    @keyframes badge-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0)} 50%{box-shadow:0 0 0 4px rgba(245,158,11,.12)} }
+    #queue-scroll { flex:1; overflow-y:auto; }
+    .queue-item-card { margin:8px; border-radius:4px; border:1px solid; overflow:hidden; }
+    .queue-item-card.pending { border-color:var(--amber-border); background:var(--bg2); }
+    .queue-item-card.resolved { border-color:var(--border1); background:transparent; opacity:.6; }
+    .queue-item-top { padding:10px 12px 8px; border-bottom:1px solid; }
+    .queue-item-card.pending .queue-item-top { border-bottom-color:var(--amber-border); }
+    .queue-item-card.resolved .queue-item-top { border-bottom-color:var(--border0); }
+    .queue-item-meta { display:flex; align-items:center; gap:6px; margin-bottom:7px; font-size:9px; color:var(--text2); }
+    .queue-item-meta .skill { color:var(--purple); }
+    .queue-item-meta .task-name { color:var(--text1); }
+    .queue-item-meta .sep { color:var(--text3); }
+    .queue-item-meta .ts { color:var(--text3); margin-left:auto; }
+    .queue-item-question { font-size:11px; color:var(--text0); line-height:1.6; }
+    .queue-item-options { padding:8px 12px; display:flex; flex-direction:column; gap:4px; }
+    .option-btn { display:flex; align-items:flex-start; gap:8px; padding:7px 10px; border-radius:3px; border:1px solid var(--border2); background:transparent; color:var(--text1); font-family:var(--font); font-size:10px; cursor:pointer; text-align:left; transition:all .15s; line-height:1.5; }
+    .option-btn:hover { background:var(--bg4); border-color:var(--cyan-border); color:var(--text0); }
+    .option-btn.selected { background:var(--cyan-bg); border-color:var(--cyan-border); color:var(--cyan); }
+    .option-letter { font-weight:600; color:var(--cyan); flex-shrink:0; min-width:14px; }
+    .queue-item-resolve { padding:8px 12px 10px; display:flex; gap:6px; align-items:center; }
+    .resolve-input { flex:1; background:var(--bg3); border:1px solid var(--border2); border-radius:3px; padding:5px 8px; font-family:var(--font); font-size:10px; color:var(--text0); outline:none; }
+    .resolve-input:focus { border-color:var(--cyan-dim); }
+    .resolve-input::placeholder { color:var(--text3); }
+    .btn-resolve { padding:5px 12px; border-radius:3px; border:1px solid var(--amber-border); background:var(--amber-bg); color:var(--amber); font-family:var(--font); font-size:10px; cursor:pointer; font-weight:500; white-space:nowrap; transition:all .15s; }
+    .btn-resolve:hover { background:rgba(245,158,11,.15); border-color:var(--amber); }
+    .btn-resolve:disabled { opacity:.4; cursor:not-allowed; }
+    .queue-item-resolved-stamp { padding:8px 12px; font-size:10px; color:var(--green); display:flex; align-items:center; gap:5px; }
+
+    /* Queue advisor */
+    .advisor-section { border-top:1px solid var(--border1); flex-shrink:0; }
+    .advisor-header { padding:8px 14px 6px; border-bottom:1px solid var(--border0); display:flex; align-items:center; justify-content:space-between; }
+    .advisor-header-label { font-size:9px; letter-spacing:.14em; text-transform:uppercase; color:var(--text2); }
+    .advisor-hint { font-size:9px; color:var(--text3); font-style:italic; }
+    .advisor-input-row { display:flex; gap:6px; padding:8px 10px; }
+    .advisor-input { flex:1; background:var(--bg3); border:1px solid var(--border2); border-radius:3px; padding:5px 8px; font-family:var(--font); font-size:10px; color:var(--text0); outline:none; }
+    .advisor-input:focus { border-color:var(--teal); }
+    .advisor-input::placeholder { color:var(--text3); }
+    .btn-advisor-ask { padding:5px 10px; border-radius:3px; border:1px solid rgba(20,184,166,.3); background:var(--teal-bg); color:var(--teal); font-family:var(--font); font-size:10px; cursor:pointer; transition:all .15s; }
+    .btn-advisor-ask:hover { border-color:var(--teal); }
+
+    /* ─── Task detail panel ─── */
+    #task-detail { width:0; flex-shrink:0; overflow:hidden; background:var(--bg2); border-left:0px solid var(--border2); display:flex; flex-direction:column; transition:width .2s ease; }
+    #task-detail.open { width:380px; border-left-width:1px; }
+    .detail-header { flex-shrink:0; padding:12px 14px 10px; border-bottom:1px solid var(--border1); display:flex; align-items:flex-start; justify-content:space-between; min-width:380px; }
+    .detail-title { font-size:12px; font-weight:500; color:var(--text0); margin-bottom:5px; }
+    .detail-meta { display:flex; gap:6px; align-items:center; }
+    .detail-close { background:transparent; border:1px solid var(--border2); border-radius:2px; color:var(--text2); font-size:11px; padding:2px 7px; cursor:pointer; font-family:var(--font); transition:all .1s; }
+    .detail-close:hover { background:var(--bg4); color:var(--text0); }
+    .detail-body { flex:1; overflow-y:auto; padding:12px 14px; min-width:380px; }
+    .detail-section { margin-bottom:16px; }
+    .detail-section-label { font-size:9px; letter-spacing:.12em; text-transform:uppercase; color:var(--text2); margin-bottom:6px; }
+    .detail-desc { font-size:11px; color:var(--text1); line-height:1.6; }
+    .detail-prop-row { display:flex; gap:8px; margin-bottom:4px; font-size:10px; }
+    .detail-prop-key { color:var(--text2); min-width:70px; flex-shrink:0; }
+    .detail-prop-val { color:var(--text1); }
+    .step-log { display:flex; flex-direction:column; gap:3px; }
+    .step-log-item { font-size:10px; color:var(--text1); display:flex; gap:6px; align-items:flex-start; }
+    .step-log-item .ts { color:var(--text3); flex-shrink:0; }
+    .step-log-item.live { color:var(--cyan); }
+    .step-log-item.live .ts { color:var(--cyan-dim); }
+    /* Dep lists in detail */
+    .dep-list { display:flex; flex-direction:column; gap:3px; }
+    .dep-list-item { display:flex; align-items:center; gap:7px; font-size:10px; padding:4px 8px; border-radius:3px; border:1px solid var(--border1); background:var(--bg3); }
+    .dep-list-item .dep-status { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+    .dep-list-item .dep-name { color:var(--text1); flex:1; }
+    .dep-list-item .dep-state { font-size:9px; color:var(--text2); }
+    .dep-list-item.unmet .dep-status { background:var(--amber); }
+    .dep-list-item.met .dep-status { background:var(--green); }
+    .dep-list-item.running-dep .dep-status { background:var(--cyan); animation:pulse-dot 2s ease-in-out infinite; }
+    .dep-list-item.blocking .dep-status { background:var(--text2); }
+
+    /* ─── Artifacts modal ─── */
+    #artifacts-modal { position:fixed; inset:0; background:rgba(7,10,18,.8); z-index:50; display:none; align-items:flex-start; justify-content:flex-end; padding-top:40px; padding-right:320px; }
+    #artifacts-modal.open { display:flex; }
+    .artifacts-panel { width:440px; height:100%; background:var(--bg2); border-left:1px solid var(--border2); display:flex; flex-direction:column; overflow:hidden; }
+    .ap-header { padding:14px 16px 10px; border-bottom:1px solid var(--border1); display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+    .ap-title { font-size:12px; font-weight:500; color:var(--text0); }
+    .ap-subtitle { font-size:10px; color:var(--text2); margin-top:2px; }
+    .ap-tabs { display:flex; padding:0 16px; border-bottom:1px solid var(--border0); flex-shrink:0; }
+    .ap-tab { padding:7px 12px; font-size:10px; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; letter-spacing:.04em; }
+    .ap-tab.active { color:var(--text0); border-bottom-color:var(--cyan); }
+    .ap-tab:hover:not(.active) { color:var(--text1); }
+    .ap-body { flex:1; overflow-y:auto; padding:12px 16px; }
+    .artifact-card { padding:10px 12px; border-radius:4px; border:1px solid var(--border1); background:var(--bg3); margin-bottom:6px; cursor:pointer; transition:all .15s; }
+    .artifact-card:hover { border-color:var(--border2); background:var(--bg4); }
+    .artifact-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:5px; }
+    .artifact-filename { font-size:11px; font-weight:500; color:var(--text0); }
+    .artifact-type-badge { font-size:9px; padding:1px 6px; border-radius:2px; border:1px solid var(--green-border); background:var(--green-bg); color:var(--green); }
+    .artifact-meta { font-size:10px; color:var(--text2); display:flex; gap:10px; }
+    .artifact-preview-btn { margin-top:6px; font-size:9px; color:var(--cyan); cursor:pointer; display:none; }
+    .artifact-card:hover .artifact-preview-btn { display:block; }
+
+    /* Artifact file preview */
+    .artifact-preview { margin-top:4px; padding:8px 10px; background:var(--bg1); border-radius:3px; border:1px solid var(--border1); font-size:10px; color:var(--text1); line-height:1.6; max-height:160px; overflow:hidden; position:relative; }
+    .artifact-preview::after { content:''; position:absolute; bottom:0; left:0; right:0; height:30px; background:linear-gradient(transparent, var(--bg3)); pointer-events:none; }
+    .artifact-preview code { color:var(--cyan); }
+
+    /* ─── Knowledge modal ─── */
+    #knowledge-modal { position:fixed; inset:0; background:rgba(7,10,18,.8); z-index:50; display:none; align-items:center; justify-content:center; }
+    #knowledge-modal.open { display:flex; }
+    .knowledge-panel { width:560px; max-height:80vh; background:var(--bg2); border:1px solid var(--border2); border-radius:6px; display:flex; flex-direction:column; overflow:hidden; }
+    .kp-header { padding:14px 16px 10px; border-bottom:1px solid var(--border1); display:flex; align-items:center; justify-content:space-between; }
+    .kp-title { font-size:12px; font-weight:500; color:var(--text0); }
+    .kp-search { display:flex; gap:8px; padding:10px 16px; border-bottom:1px solid var(--border0); }
+    .kp-search-input { flex:1; background:var(--bg3); border:1px solid var(--border2); border-radius:3px; padding:5px 8px; font-family:var(--font); font-size:11px; color:var(--text0); outline:none; }
+    .kp-search-input:focus { border-color:var(--teal); }
+    .kp-entries { flex:1; overflow-y:auto; padding:8px 16px; }
+    .kp-entry { padding:8px 0; border-bottom:1px solid var(--border0); }
+    .kp-entry-key { font-size:10px; font-weight:500; color:var(--teal); margin-bottom:3px; }
+    .kp-entry-value { font-size:11px; color:var(--text1); line-height:1.6; }
+    .kp-entry-meta { font-size:9px; color:var(--text3); margin-top:3px; }
+
+    /* ─── Scrollbars ─── */
+    ::-webkit-scrollbar { width:4px; height:4px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+  </style>
+</head>
+<body>
+<div id="root">
+
+  <!-- ─── Topbar ─────────────────────────────────────────────────────── -->
+  <header id="topbar">
+    <div class="topbar-brand">
+      <div class="topbar-logo">PO<span>E</span></div>
+      <div class="topbar-sep"></div>
+      <div class="topbar-sub">Pairti Orchestration Engine</div>
+    </div>
+    <div class="topbar-stats">
+      <div class="stat-pill live">
+        <div class="dot"></div>
+        <span class="val">3</span><span>agents running</span>
+      </div>
+      <div class="stat-pill warn">
+        <div class="dot"></div>
+        <span class="val" id="queue-count">1</span><span>decision pending</span>
+      </div>
+      <div class="stat-pill">
+        <div class="dot"></div>
+        <span>2 projects open</span>
+      </div>
+    </div>
+  </header>
+
+  <div id="body">
+
+    <!-- ─── Left sidebar ──────────────────────────────────────────────── -->
+    <aside id="sidebar-left">
+      <div class="sidebar-header">Projects</div>
+      <div class="project-list">
+        <div class="project-card active">
+          <div class="project-card-name">POE v2</div>
+          <div class="project-card-meta">
+            <span class="running">3 running</span>
+            <span class="queued">1 queued</span>
+          </div>
+        </div>
+        <div class="project-card">
+          <div class="project-card-name">auth-service</div>
+          <div class="project-card-meta"><span>Phase 2</span><span>complete</span></div>
+        </div>
+      </div>
+      <button class="sidebar-open-btn">+ Open Project…</button>
+      <div class="concurrency-meter">
+        <div class="concurrency-meter-label">Global concurrency</div>
+        <div class="concurrency-bar"><div class="concurrency-bar-fill" style="width:20%"></div></div>
+        <div class="concurrency-numbers"><span>3 running</span><span>/ 15</span></div>
+      </div>
+    </aside>
+
+    <!-- ─── Main ─────────────────────────────────────────────────────── -->
+    <main id="main">
+
+      <div id="project-header">
+        <div class="phase-info">
+          <span class="phase-name">Phase 2 — Orchestration Core</span>
+          <span class="phase-sep">·</span>
+          <span class="phase-stage-badge execution">Execution</span>
+          <span class="phase-sep">·</span>
+          <span style="font-size:10px;color:var(--text2)">inner loop ✓ closed</span>
+        </div>
+        <div class="header-actions">
+          <button class="btn-sm" onclick="openArtifacts()">Artifacts (4)</button>
+          <button class="btn-sm" onclick="document.getElementById('knowledge-modal').classList.toggle('open')">Knowledge Register</button>
+          <button class="btn-sm" style="color:var(--red);border-color:var(--red-border)">Interrupt All</button>
+        </div>
+      </div>
+
+      <!-- Lifecycle flow -->
+      <div id="lifecycle-flow">
+        <div class="lf-step done"><div class="lf-label">Increment Planning</div></div>
+        <div class="lf-arrow">→</div>
+        <div class="lf-step done"><div class="lf-label">Plan Review</div></div>
+        <div class="lf-arrow">→</div>
+        <div class="lf-step done"><div class="lf-label">Plan Revision</div></div>
+        <div class="lf-arrow">→</div>
+        <div class="lf-step active"><div class="lf-label">▶ Execution</div></div>
+        <div class="lf-arrow">→</div>
+        <div class="lf-step"><div class="lf-label">Validity Analysis</div></div>
+        <div class="lf-arrow">→</div>
+        <div class="lf-step"><div class="lf-label">Retrospective</div></div>
+      </div>
+
+      <!-- Content area: WBS/feed on left, task detail on right -->
+      <div id="content-area">
+      <div id="content-left">
+
+      <!-- Phase matrix -->
+      <div id="phase-matrix">
+        <div class="matrix-header">
+          <span class="matrix-header-label">Work Breakdown</span>
+          <div class="matrix-stats">
+            <span class="run">3 running</span>
+            <span class="wait">2 waiting</span>
+            <span class="done">4 done</span>
+            <span class="pend">3 blocked</span>
+          </div>
+        </div>
+
+        <!-- Dep legend -->
+        <div class="dep-legend">
+          <span>Hover a task to trace dependencies:</span>
+          <div class="dep-legend-item"><div class="dep-swatch up"></div><span>upstream (must finish first)</span></div>
+          <div class="dep-legend-item"><div class="dep-swatch down"></div><span>downstream (unblocked by this)</span></div>
+        </div>
+
+        <!-- Phase 1 complete — collapsed -->
+        <div class="phase-section">
+          <div class="phase-section-header">
+            <span class="phase-num">Phase 1</span>
+            <span class="phase-title-text">Foundation</span>
+            <span class="phase-lifecycle-badge complete">Complete</span>
+            <div class="phase-progress">
+              <div class="phase-progress-bar"><div class="phase-progress-fill" style="width:100%"></div></div>
+              <span>6 / 6</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 2 active -->
+        <div class="phase-section">
+          <div class="phase-section-header">
+            <span class="phase-num">Phase 2</span>
+            <span class="phase-title-text">Orchestration Core</span>
+            <span class="phase-lifecycle-badge execution">Execution</span>
+            <div class="phase-progress">
+              <div class="phase-progress-bar"><div class="phase-progress-fill" style="width:43%"></div></div>
+              <span>6 / 14</span>
+            </div>
+          </div>
+          <div class="task-grid" id="task-grid">
+
+            <!-- Epic -->
+            <div class="task-row" data-id="ep1" data-blocks="ep2">
+              <div class="task-status-cell complete">✓</div>
+              <span class="task-node-type">epic</span>
+              <span class="task-title">Event Protocol Layer</span>
+              <span class="task-blocks-badge">→ unblocks Orchestration epic</span>
+            </div>
+
+            <div class="task-row complete indent-1" data-id="t-schema" data-blocks="t-types,t-dag-store">
+              <div class="task-status-cell complete">✓</div>
+              <span class="task-title">SQLite schema &amp; migrations</span>
+              <span class="task-skill-badge">implementor</span>
+              <span class="task-blocks-badge">→ 2</span>
+            </div>
+
+            <div class="task-row complete indent-1" data-id="t-types" data-deps="t-schema" data-blocks="t-ingester,t-task-handler,t-artifact">
+              <div class="task-status-cell complete">✓</div>
+              <span class="task-title">Rust event types &amp; serde models</span>
+              <span class="task-skill-badge">implementor</span>
+              <span class="task-blocks-badge">→ 3</span>
+            </div>
+
+            <div class="task-row complete indent-1" data-id="t-task-handler" data-deps="t-types" data-blocks="t-ingester">
+              <div class="task-status-cell complete">✓</div>
+              <span class="task-title">poe:task / poe:edge handler</span>
+              <span class="task-skill-badge">implementor</span>
+              <span class="task-blocks-badge">→ 1</span>
+            </div>
+
+            <div class="task-row complete indent-1" data-id="t-artifact" data-deps="t-types" data-blocks="t-ingester">
+              <div class="task-status-cell complete">✓</div>
+              <span class="task-title">poe:artifact &amp; poe:knowledge handler</span>
+              <span class="task-skill-badge">implementor</span>
+              <span class="task-blocks-badge">→ 1</span>
+            </div>
+
+            <!-- Epic 2 -->
+            <div class="task-row" data-id="ep2" data-deps="ep1">
+              <div class="task-status-cell running">●</div>
+              <span class="task-node-type">epic</span>
+              <span class="task-title">Orchestrator Core</span>
+            </div>
+
+            <!-- Running task with downstream deps -->
+            <div class="task-row running indent-1" data-id="t-ingester" data-deps="t-types,t-task-handler,t-artifact" data-blocks="t-spawn">
+              <div class="task-status-cell running">●</div>
+              <span class="task-title">Event ingester — stream-json parsing</span>
+              <span class="task-skill-badge">tauri-engineer</span>
+              <span class="task-current-step live" id="ingester-step">Handling poe:done events</span>
+              <span class="task-blocks-badge">→ 1</span>
+            </div>
+
+            <!-- Waiting on decision — no dep blocker -->
+            <div class="task-row indent-1" data-id="t-concurrency" data-deps="t-schema">
+              <div class="task-status-cell waiting">⏸</div>
+              <span class="task-title">Concurrency limiter</span>
+              <span class="task-skill-badge">implementor</span>
+              <span class="task-current-step" style="color:var(--amber)">decision pending</span>
+            </div>
+
+            <!-- Waiting on review -->
+            <div class="task-row indent-1" data-id="t-plan-review">
+              <div class="task-status-cell waiting" title="Awaiting peer review">⏸</div>
+              <span class="task-title">Plan Review — architecture validation</span>
+              <span class="task-skill-badge" style="background:var(--amber-bg);border-color:var(--amber-border);color:var(--amber)">senior-engineer</span>
+              <span class="task-current-step">reviewing</span>
+            </div>
+
+            <!-- Running -->
+            <div class="task-row running indent-1" data-id="t-dag-store" data-deps="t-schema,t-types" data-blocks="t-spawn,t-tauri-cmds">
+              <div class="task-status-cell running">●</div>
+              <span class="task-title">DAG store &amp; orchestrator loop</span>
+              <span class="task-skill-badge">implementor</span>
+              <span class="task-current-step live" id="dag-step">Writing db_find_ready_tasks</span>
+              <span class="task-blocks-badge">→ 2</span>
+            </div>
+
+            <!-- Dependency-blocked: waiting on t-ingester AND t-dag-store -->
+            <div class="task-row dep-blocked indent-1" data-id="t-spawn" data-deps="t-ingester,t-dag-store" data-blocks="t-recovery,t-tauri-cmds">
+              <div class="task-status-cell pending-blocked">○</div>
+              <span class="task-title">Agent spawn &amp; watchdog</span>
+              <span class="task-skill-badge">implementor</span>
+              <div class="task-dep-chips">
+                <span class="dep-chip unmet">⊣ ingester</span>
+                <span class="dep-chip unmet">⊣ dag-store</span>
+              </div>
+              <span class="task-blocks-badge">→ 2</span>
+            </div>
+
+            <div class="task-row dep-blocked indent-1" data-id="t-recovery" data-deps="t-spawn">
+              <div class="task-status-cell pending-blocked">○</div>
+              <span class="task-title">Recovery on app restart</span>
+              <span class="task-skill-badge">implementor</span>
+              <div class="task-dep-chips">
+                <span class="dep-chip unmet">⊣ spawn</span>
+              </div>
+            </div>
+
+            <div class="task-row dep-blocked indent-1" data-id="t-tauri-cmds" data-deps="t-dag-store,t-spawn">
+              <div class="task-status-cell pending-blocked">○</div>
+              <span class="task-title">Tauri commands — advance_phase, revise_phase</span>
+              <span class="task-skill-badge">tauri-engineer</span>
+              <div class="task-dep-chips">
+                <span class="dep-chip unmet">⊣ dag-store</span>
+                <span class="dep-chip unmet">⊣ spawn</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Phase 3 pending -->
+        <div class="phase-section">
+          <div class="phase-section-header">
+            <span class="phase-num">Phase 3</span>
+            <span class="phase-title-text">Human Oversight Layer</span>
+            <span class="phase-lifecycle-badge pending">Pending</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Activity feed -->
+      <div id="activity-feed">
+        <div class="feed-header">
+          <span class="feed-header-label">Activity Feed</span>
+          <div class="feed-filter">
+            <span class="filter-chip active">all</span>
+            <span class="filter-chip">steps</span>
+            <span class="filter-chip">artifacts</span>
+            <span class="filter-chip">decisions</span>
+          </div>
+        </div>
+        <div id="feed-scroll"></div>
+      </div>
+
+      </div><!-- end #content-left -->
+
+      <!-- Task detail panel — flex sibling, expands alongside WBS/feed -->
+      <div id="task-detail">
+        <div class="detail-header">
+          <div>
+            <div class="detail-title" id="detail-title"></div>
+            <div class="detail-meta" id="detail-meta"></div>
+          </div>
+          <button class="detail-close" onclick="closeTaskDetail()">✕</button>
+        </div>
+        <div class="detail-body" id="detail-body"></div>
+      </div>
+
+      </div><!-- end #content-area -->
+    </main>
+
+    <!-- ─── Right sidebar: Queue ──────────────────────────────────────── -->
+    <aside id="sidebar-right">
+      <div class="queue-header">
+        <span class="queue-header-label">Decision Queue</span>
+        <span class="queue-count-badge" id="queue-badge">1 pending</span>
+      </div>
+      <div id="queue-scroll">
+
+        <div class="queue-item-card pending" id="decision-1">
+          <div class="queue-item-top">
+            <div class="queue-item-meta">
+              <span class="skill">implementor</span>
+              <span class="sep">·</span>
+              <span class="task-name">concurrency-limiter</span>
+              <span class="ts">14:33</span>
+            </div>
+            <div class="queue-item-question">
+              I've implemented the concurrency counter. I found that <code style="color:var(--amber);background:var(--amber-bg);padding:1px 4px;border-radius:2px">waiting</code> tasks have no live process — the agent exits after emitting <code style="color:var(--amber);background:var(--amber-bg);padding:1px 4px;border-radius:2px">poe:yield</code>. Should waiting tasks count against the concurrency limit?
+            </div>
+          </div>
+          <div class="queue-item-options" id="options-1">
+            <button class="option-btn" onclick="selectOption(this,'A','Option A — exclude waiting tasks, agent process has exited')">
+              <span class="option-letter">A</span>
+              <span>Exclude waiting tasks — process has exited, no resource held. Maximises parallelism.</span>
+            </button>
+            <button class="option-btn" onclick="selectOption(this,'B','Option B — include waiting tasks conservatively')">
+              <span class="option-letter">B</span>
+              <span>Include conservatively until process lifecycle is confirmed in production.</span>
+            </button>
+            <button class="option-btn" onclick="selectOption(this,'C','Option C — config flag, default exclude')">
+              <span class="option-letter">C</span>
+              <span>Add a config flag — operator decides. Default exclude.</span>
+            </button>
+          </div>
+          <div class="queue-item-resolve">
+            <input class="resolve-input" id="resolve-input-1" placeholder="Select option or type resolution…" />
+            <button class="btn-resolve" onclick="resolveDecision()" id="btn-resolve-1" disabled>Resolve →</button>
+          </div>
+        </div>
+
+        <div class="queue-item-card resolved">
+          <div class="queue-item-top">
+            <div class="queue-item-meta">
+              <span class="skill">tauri-engineer</span><span class="sep">·</span>
+              <span class="task-name">event-ingester</span><span class="ts">13:55</span>
+            </div>
+            <div class="queue-item-question" style="color:var(--text1)">
+              poe:review-outcome ordering relative to poe:done — spec is silent.
+            </div>
+          </div>
+          <div class="queue-item-resolved-stamp">
+            <span>✓</span><span>Allow any order — post-done verdict sweep on nodes.verdict</span>
+          </div>
+        </div>
+
+        <div class="queue-item-card resolved">
+          <div class="queue-item-top">
+            <div class="queue-item-meta">
+              <span class="skill">implementor</span><span class="sep">·</span>
+              <span class="task-name">sqlite-schema</span><span class="ts">09:14</span>
+            </div>
+            <div class="queue-item-question" style="color:var(--text1)">
+              RFC 3339 or Unix timestamps for datetime columns?
+            </div>
+          </div>
+          <div class="queue-item-resolved-stamp">
+            <span>✓</span><span>RFC 3339 strings — readable in raw SQL queries during dev</span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Queue Advisor -->
+      <div class="advisor-section">
+        <div class="advisor-header">
+          <span class="advisor-header-label">Queue Advisor</span>
+          <span class="advisor-hint">H-quality tool — researches; you decide</span>
+        </div>
+        <div style="padding:6px 14px 4px;font-size:9px;color:var(--text3);line-height:1.5">
+          Scoped to this decision. Ask it to check prior decisions, search knowledge, or spawn a quick research task.
+        </div>
+        <div class="advisor-input-row">
+          <input class="advisor-input" placeholder="What does the architecture say about process limits?" />
+          <button class="btn-advisor-ask">Ask →</button>
+        </div>
+      </div>
+
+    </aside>
+
+  </div>
+</div>
+
+<!-- ─── Artifacts panel ───────────────────────────────────────────────── -->
+<div id="artifacts-modal" onclick="if(event.target===this)closeArtifacts()">
+  <div class="artifacts-panel">
+    <div class="ap-header">
+      <div>
+        <div class="ap-title">Artifact Corpus</div>
+        <div class="ap-subtitle">POE v2 · Phase 2 — Orchestration Core</div>
+      </div>
+      <button class="detail-close" onclick="closeArtifacts()">✕</button>
+    </div>
+    <div class="ap-tabs">
+      <div class="ap-tab active" onclick="switchArtTab(this,'project')">Project-level (2)</div>
+      <div class="ap-tab" onclick="switchArtTab(this,'phase')">Phase 2 (2)</div>
+      <div class="ap-tab" onclick="switchArtTab(this,'in-progress')">In Progress (1)</div>
+    </div>
+    <div class="ap-body" id="ap-body"></div>
+  </div>
+</div>
+
+<!-- ─── Knowledge modal ───────────────────────────────────────────────── -->
+<div id="knowledge-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="knowledge-panel">
+    <div class="kp-header">
+      <span class="kp-title">Knowledge Register — POE v2</span>
+      <button class="detail-close" onclick="document.getElementById('knowledge-modal').classList.remove('open')">✕</button>
+    </div>
+    <div class="kp-search"><input class="kp-search-input" placeholder="Search entries…" /></div>
+    <div class="kp-entries">
+      <div class="kp-entry">
+        <div class="kp-entry-key">concurrency.waiting-tasks</div>
+        <div class="kp-entry-value">Waiting tasks (poe:yield emitted) do not count against the concurrency limit. The agent process exits after yield; no resource is held.</div>
+        <div class="kp-entry-meta">implementor · concurrency-limiter · 14:35</div>
+      </div>
+      <div class="kp-entry">
+        <div class="kp-entry-key">datetime.format</div>
+        <div class="kp-entry-value">All datetime columns in SQLite use RFC 3339 strings. Do not use Unix timestamps. Rationale: easier to read in raw SQL during development.</div>
+        <div class="kp-entry-meta">implementor · sqlite-schema · 09:17</div>
+      </div>
+      <div class="kp-entry">
+        <div class="kp-entry-key">poe:review-outcome.ordering</div>
+        <div class="kp-entry-value">poe:review-outcome may arrive before or after poe:done. Do not enforce ordering. Use a post-done sweep on nodes.verdict. Missing verdict defaults to BLOCKED.</div>
+        <div class="kp-entry-meta">tauri-engineer · event-ingester · 13:58</div>
+      </div>
+      <div class="kp-entry">
+        <div class="kp-entry-key">sqlite.lock-ordering</div>
+        <div class="kp-entry-value">Never emit Tauri events while holding the SQLite connection lock. Collect into a Vec inside the closure; emit after it returns.</div>
+        <div class="kp-entry-meta">tauri-engineer · event-ingester · 14:12</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Dependency graph data ─────────────────────────────────────────────
+// dep edges: fromId → toId means "from" must finish before "to" can run
+const DEP_EDGES = [
+  ['t-schema', 't-types'],
+  ['t-schema', 't-dag-store'],
+  ['t-types', 't-ingester'],
+  ['t-types', 't-task-handler'],
+  ['t-types', 't-artifact'],
+  ['t-task-handler', 't-ingester'],
+  ['t-artifact', 't-ingester'],
+  ['t-ingester', 't-spawn'],
+  ['t-dag-store', 't-spawn'],
+  ['t-dag-store', 't-tauri-cmds'],
+  ['t-spawn', 't-recovery'],
+  ['t-spawn', 't-tauri-cmds'],
+];
+
+// Build lookup maps
+const upstream = {};   // id → [ids that must complete first]
+const downstream = {}; // id → [ids unblocked by this]
+DEP_EDGES.forEach(([from, to]) => {
+  if (!upstream[to]) upstream[to] = [];
+  if (!downstream[from]) downstream[from] = [];
+  upstream[to].push(from);
+  downstream[from].push(to);
+});
+
+// Transitive upstream/downstream for full chain highlighting
+function allUpstream(id, visited = new Set()) {
+  if (visited.has(id)) return visited;
+  visited.add(id);
+  (upstream[id] || []).forEach(u => allUpstream(u, visited));
+  return visited;
+}
+function allDownstream(id, visited = new Set()) {
+  if (visited.has(id)) return visited;
+  visited.add(id);
+  (downstream[id] || []).forEach(d => allDownstream(d, visited));
+  return visited;
+}
+
+// ─── Dep hover highlighting ────────────────────────────────────────────
+const grid = document.getElementById('task-grid');
+
+grid.addEventListener('mouseenter', e => {
+  const row = e.target.closest('.task-row[data-id]');
+  if (!row) return;
+  const id = row.dataset.id;
+  const up = allUpstream(id);   up.delete(id);
+  const dn = allDownstream(id); dn.delete(id);
+  grid.querySelectorAll('.task-row[data-id]').forEach(r => {
+    const rid = r.dataset.id;
+    r.classList.remove('dep-active-self','dep-active-upstream','dep-active-downstream','dep-dimmed');
+    if (rid === id) r.classList.add('dep-active-self');
+    else if (up.has(rid)) r.classList.add('dep-active-upstream');
+    else if (dn.has(rid)) r.classList.add('dep-active-downstream');
+    else r.classList.add('dep-dimmed');
+  });
+}, true);
+
+grid.addEventListener('mouseleave', e => {
+  if (!e.relatedTarget || !grid.contains(e.relatedTarget)) {
+    grid.querySelectorAll('.task-row').forEach(r => {
+      r.classList.remove('dep-active-self','dep-active-upstream','dep-active-downstream','dep-dimmed');
+    });
+  }
+}, true);
+
+// Click → task detail
+grid.querySelectorAll('.task-row[data-id]').forEach(row => {
+  row.addEventListener('click', () => openTaskDetail(row.dataset.id));
+});
+
+// ─── Task detail data ──────────────────────────────────────────────────
+const TASK_DATA = {
+  't-ingester': {
+    title:'Event ingester — stream-json parsing', skill:'tauri-engineer', status:'running', type:'task',
+    description:'Implement the EventIngester: reads --output-format stream-json stdout, extracts poe: events, writes to SQLite, triggers DagChanged, emits Tauri events to frontend.',
+    steps:[
+      {ts:'14:01',msg:'Designing EventIngester struct'},
+      {ts:'14:10',msg:'Writing stream-json line accumulator'},
+      {ts:'14:15',msg:'Parsing poe: event types'},
+      {ts:'14:25',msg:'Handling poe:task events'},
+      {ts:'14:34',msg:'Handling poe:done events',live:true},
+    ],
+  },
+  't-spawn': {
+    title:'Agent spawn & watchdog', skill:'implementor', status:'pending-blocked', type:'task',
+    description:'Implement agent spawning via tokio::process::Command with --output-format stream-json -p --dangerously-skip-permissions. Attach stdout reader, write agent row, wire watchdog timer for reviewer tasks.',
+    steps:[],
+  },
+  't-recovery': {
+    title:'Recovery on app restart', skill:'implementor', status:'pending-blocked', type:'task',
+    description:'On app restart: ghost-agent sweep, reset running→pending nodes, re-dispatch waiting nodes by yield_reason. Each project recovers in parallel via tokio::spawn.',
+    steps:[],
+  },
+  't-dag-store': {
+    title:'DAG store & orchestrator loop', skill:'implementor', status:'running', type:'task',
+    description:'db_find_ready_tasks, db_claim_node (atomic UPDATE), DagChanged mpsc channel, and the core orchestrator wake loop.',
+    steps:[
+      {ts:'14:22',msg:'Writing db_find_ready_tasks SQL'},
+      {ts:'14:30',msg:'Writing db_claim_node_resuming'},
+      {ts:'14:35',msg:'Testing atomic claim atomicity',live:true},
+    ],
+  },
+  't-tauri-cmds': {
+    title:'Tauri commands — advance_phase, revise_phase, rerun_phase', skill:'tauri-engineer', status:'pending-blocked', type:'task',
+    description:'Expose the three stage-gate commands as #[tauri::command]. Each command transitions phase lifecycle state and signals DagChanged.',
+    steps:[],
+  },
+  't-schema': {
+    title:'SQLite schema & migrations', skill:'implementor', status:'complete', type:'task',
+    description:'CREATE TABLE for nodes, edges, events, artifacts, knowledge, phases, projects, agents, queue_items. WAL mode. Migration runner.',
+    steps:[{ts:'13:52',msg:'Writing CREATE TABLE nodes'},{ts:'13:54',msg:'Writing migrations'},{ts:'13:58',msg:'Schema committed'}],
+  },
+};
+
+const STATUS_COLORS = {
+  running:'var(--cyan)', waiting:'var(--amber)', complete:'var(--green)',
+  'pending-blocked':'var(--text2)', pending:'var(--text2)',
+};
+
+function openTaskDetail(id) {
+  const data = TASK_DATA[id];
+  if (!data) return;
+  document.getElementById('detail-title').textContent = data.title;
+  document.getElementById('detail-meta').innerHTML = `
+    <span class="task-skill-badge">${data.skill}</span>
+    <span style="font-size:10px;color:${STATUS_COLORS[data.status]||'var(--text2)'};margin-left:4px">${data.status.replace('-',' ')}</span>
+    <span style="font-size:9px;color:var(--text3);margin-left:4px;text-transform:uppercase;letter-spacing:.08em">${data.type}</span>
+  `;
+
+  const up = (upstream[id]||[]).map(uid => {
+    const el = document.querySelector(`.task-row[data-id="${uid}"]`);
+    const title = el ? el.querySelector('.task-title').textContent.trim() : uid;
+    const statusEl = el ? el.querySelector('.task-status-cell') : null;
+    const isDone = statusEl && statusEl.classList.contains('complete');
+    const isRunning = statusEl && statusEl.classList.contains('running');
+    return {uid, title, isDone, isRunning};
+  });
+  const dn = (downstream[id]||[]).map(did => {
+    const el = document.querySelector(`.task-row[data-id="${did}"]`);
+    const title = el ? el.querySelector('.task-title').textContent.trim() : did;
+    return {did, title};
+  });
+
+  const upHtml = up.length ? up.map(u =>
+    `<div class="dep-list-item ${u.isDone?'met':u.isRunning?'running-dep':'unmet'}">
+      <div class="dep-status"></div>
+      <span class="dep-name">${u.title}</span>
+      <span class="dep-state">${u.isDone?'✓ done':u.isRunning?'● running':'pending'}</span>
+    </div>`).join('') : '<div style="font-size:10px;color:var(--text3)">No dependencies — can run immediately when concurrency allows.</div>';
+
+  const dnHtml = dn.length ? dn.map(d =>
+    `<div class="dep-list-item blocking">
+      <div class="dep-status"></div>
+      <span class="dep-name">${d.title}</span>
+      <span class="dep-state">waiting on this</span>
+    </div>`).join('') : '<div style="font-size:10px;color:var(--text3)">Nothing depends on this task.</div>';
+
+  const stepsHtml = data.steps.length
+    ? data.steps.map(s => `<div class="step-log-item${s.live?' live':''}"><span class="ts">${s.ts}</span><span class="msg">${s.msg}</span></div>`).join('')
+    : '<div style="font-size:10px;color:var(--text3)">Not yet started.</div>';
+
+  document.getElementById('detail-body').innerHTML = `
+    <div class="detail-section">
+      <div class="detail-section-label">Description</div>
+      <div class="detail-desc">${data.description}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Properties</div>
+      <div class="detail-prop-row"><span class="detail-prop-key">skill</span><span class="detail-prop-val">${data.skill}</span></div>
+      <div class="detail-prop-row"><span class="detail-prop-key">status</span><span class="detail-prop-val" style="color:${STATUS_COLORS[data.status]||'var(--text2)'}">${data.status.replace('-',' ')}</span></div>
+      <div class="detail-prop-row"><span class="detail-prop-key">phase</span><span class="detail-prop-val">Phase 2 — Orchestration Core</span></div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Depends on (upstream)</div>
+      <div class="dep-list">${upHtml}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Unblocks (downstream)</div>
+      <div class="dep-list">${dnHtml}</div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Step Log</div>
+      <div class="step-log">${stepsHtml}</div>
+    </div>
+  `;
+
+  document.getElementById('task-detail').classList.add('open');
+}
+
+function closeTaskDetail() {
+  document.getElementById('task-detail').classList.remove('open');
+}
+
+// ─── Artifacts panel ───────────────────────────────────────────────────
+const ARTIFACTS = {
+  project: [
+    {
+      name:'schema.sql', type:'schema', phase:'Phase 2', producer:'implementor · sqlite-schema', ts:'13:58',
+      preview:`CREATE TABLE nodes (\n  id TEXT PRIMARY KEY,\n  project_id TEXT NOT NULL,\n  phase_id TEXT,\n  parent_id TEXT,\n  node_type TEXT NOT NULL,  -- 'task'|'epic'|'feature'...\n  title TEXT NOT NULL,\n  status TEXT NOT NULL DEFAULT 'pending',\n  skill_id TEXT,\n  ...`
+    },
+    {
+      name:'rust-event-types.rs', type:'code', phase:'Phase 2', producer:'implementor · rust-event-types', ts:'14:15',
+      preview:`#[derive(Debug, Clone, Serialize, Deserialize)]\n#[serde(rename_all = "camelCase")]\npub enum PoeEvent {\n  Task(TaskEvent),\n  Edge(EdgeEvent),\n  Artifact(ArtifactEvent),\n  Knowledge(KnowledgeEvent),\n  Done(DoneEvent),\n  ...`
+    },
+  ],
+  phase: [
+    {
+      name:'phase-2-plan.md', type:'plan', phase:'Phase 2', producer:'product-manager', ts:'09:05',
+      preview:`# Phase 2 Plan — Orchestration Core\n\n## Epics\n\n### EP-1: Event Protocol Layer\nTasks:\n- SQLite schema & migrations (implementor)\n- Rust event types & serde models (implementor)\n- poe:task / poe:edge handler (implementor)\n...`
+    },
+    {
+      name:'phase-2-plan-review.md', type:'review', phase:'Phase 2', producer:'senior-engineer', ts:'11:42',
+      preview:`# Phase 2 Plan Review\n\n## Verdict: APPROVED_WITH_CONDITIONS\n\n### Findings\n1. ⚠ Missing: advance_phase, revise_phase, rerun_phase commands\n   → Added as t-tauri-cmds with dep on t-spawn\n2. ⚠ Schema: nodes.last_dispatch_at column referenced in\n   recovery logic but not in CREATE TABLE\n   → Added to migration 002\n...`
+    },
+  ],
+  'in-progress': [
+    {
+      name:'event-ingester.rs', type:'code', phase:'Phase 2', producer:'tauri-engineer · event-ingester', ts:'in progress',
+      preview:`pub struct EventIngester {\n  db: Arc<Mutex<Connection>>,\n  orchestrator_tx: mpsc::Sender<DagChanged>,\n  app_handle: AppHandle,\n}\n\nimpl EventIngester {\n  pub fn ingest_line(&self, line: &str) -> Result<()> {\n    let val: Value = serde_json::from_str(line)?;\n    ...`
+    },
+  ],
+};
+
+let currentArtTab = 'project';
+
+function renderArtifacts(tab) {
+  const items = ARTIFACTS[tab] || [];
+  const html = items.map(a => `
+    <div class="artifact-card" onclick="this.querySelector('.artifact-preview').style.display = this.querySelector('.artifact-preview').style.display==='block'?'none':'block'">
+      <div class="artifact-card-header">
+        <span class="artifact-filename">${a.name}</span>
+        <span class="artifact-type-badge">${a.type}</span>
+      </div>
+      <div class="artifact-meta">
+        <span>${a.phase}</span>
+        <span>·</span>
+        <span>${a.producer}</span>
+        <span>·</span>
+        <span style="color:${a.ts==='in progress'?'var(--cyan)':'var(--text3)'}">${a.ts}</span>
+      </div>
+      <div class="artifact-preview" style="display:none"><pre>${a.preview}</pre></div>
+    </div>
+  `).join('');
+  document.getElementById('ap-body').innerHTML = html || '<div style="padding:16px;font-size:10px;color:var(--text3)">No artifacts in this category yet.</div>';
+}
+
+function openArtifacts() {
+  renderArtifacts(currentArtTab);
+  document.getElementById('artifacts-modal').classList.add('open');
+}
+
+function closeArtifacts() {
+  document.getElementById('artifacts-modal').classList.remove('open');
+}
+
+function switchArtTab(el, tab) {
+  document.querySelectorAll('.ap-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  currentArtTab = tab;
+  renderArtifacts(tab);
+}
+
+// ─── Decision resolution ───────────────────────────────────────────────
+document.getElementById('resolve-input-1').addEventListener('input', function() {
+  document.getElementById('btn-resolve-1').disabled = this.value.trim().length === 0;
+});
+
+function selectOption(btn, letter, text) {
+  document.querySelectorAll('#options-1 .option-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('resolve-input-1').value = text;
+  document.getElementById('btn-resolve-1').disabled = false;
+}
+
+function resolveDecision() {
+  const resolution = document.getElementById('resolve-input-1').value.trim();
+  if (!resolution) return;
+  const card = document.getElementById('decision-1');
+  document.getElementById('options-1').remove();
+  card.querySelector('.queue-item-resolve').remove();
+  const stamp = document.createElement('div');
+  stamp.className = 'queue-item-resolved-stamp';
+  stamp.innerHTML = `<span>✓</span><span>${resolution}</span>`;
+  card.querySelector('.queue-item-top').after(stamp);
+  card.classList.replace('pending','resolved');
+  const badge = document.getElementById('queue-badge');
+  badge.textContent = '0 pending'; badge.classList.add('clear');
+  document.getElementById('queue-count').textContent = '0';
+  document.querySelector('.stat-pill.warn').classList.remove('warn');
+  // Unblock concurrency task visually
+  setTimeout(() => {
+    const cRow = document.querySelector('[data-id="t-concurrency"]');
+    if (cRow) {
+      cRow.querySelector('.task-status-cell').className = 'task-status-cell running';
+      cRow.querySelector('.task-status-cell').textContent = '●';
+      cRow.querySelector('.task-current-step').textContent = 'Implementing exclude logic';
+      cRow.querySelector('.task-current-step').className = 'task-current-step live';
+    }
+  }, 800);
+}
+
+// ─── Activity feed ─────────────────────────────────────────────────────
+const FEED = [
+  {ts:'13:52',type:'agent-start',badge:'agent-start',skill:'implementor',msg:'Started agent for <strong>SQLite schema &amp; migrations</strong>'},
+  {ts:'13:54',type:'step',badge:'poe:step',skill:'implementor',msg:'Writing CREATE TABLE nodes',task:'sqlite-schema'},
+  {ts:'13:56',type:'step',badge:'poe:step',skill:'implementor',msg:'Writing migrations for all tables',task:'sqlite-schema'},
+  {ts:'13:58',type:'artifact',badge:'poe:artifact',skill:'implementor',msg:'Produced <strong>schema.sql</strong>',task:'sqlite-schema'},
+  {ts:'13:58',type:'done',badge:'poe:done',skill:'implementor',msg:'Task complete: SQLite schema &amp; migrations'},
+  {ts:'14:01',type:'agent-start',badge:'agent-start',skill:'tauri-engineer',msg:'Started agent for <strong>Event ingester — stream-json parsing</strong>'},
+  {ts:'14:01',type:'brief',badge:'poe:brief',skill:'tauri-engineer',msg:'I\'ll build the event ingester that reads stream-json stdout, extracts poe: events, writes to SQLite, and emits Tauri events…'},
+  {ts:'14:05',type:'knowledge',badge:'poe:knowledge',skill:'tauri-engineer',msg:'Wrote: <strong>sqlite.lock-ordering</strong> — never emit Tauri events inside SQLite lock',task:'event-ingester'},
+  {ts:'14:07',type:'agent-start',badge:'agent-start',skill:'implementor',msg:'Started agent for <strong>Concurrency limiter</strong>'},
+  {ts:'14:09',type:'step',badge:'poe:step',skill:'implementor',msg:'Writing db_count_running_agents',task:'concurrency-limiter'},
+  {ts:'14:12',type:'knowledge',badge:'poe:knowledge',skill:'tauri-engineer',msg:'Wrote: <strong>poe:review-outcome.ordering</strong>',task:'event-ingester'},
+  {ts:'14:22',type:'agent-start',badge:'agent-start',skill:'implementor',msg:'Started agent for <strong>DAG store &amp; orchestrator loop</strong>'},
+  {ts:'14:25',type:'step',badge:'poe:step',skill:'tauri-engineer',msg:'Handling poe:task events',task:'event-ingester'},
+  {ts:'14:28',type:'step',badge:'poe:step',skill:'implementor',msg:'Wiring global concurrency limit',task:'concurrency-limiter'},
+  {ts:'14:30',type:'step',badge:'poe:step',skill:'implementor',msg:'Writing db_find_ready_tasks query',task:'dag-store'},
+  {ts:'14:33',type:'decision',badge:'poe:decision',skill:'implementor',msg:'<strong>Decision needed:</strong> should waiting tasks count against concurrency limit?',task:'concurrency-limiter'},
+  {ts:'14:34',type:'step',badge:'poe:step',skill:'tauri-engineer',msg:'Handling poe:done events',task:'event-ingester'},
+  {ts:'14:35',type:'step',badge:'poe:step',skill:'implementor',msg:'Writing db_claim_node_resuming',task:'dag-store'},
+];
+
+const feedEl = document.getElementById('feed-scroll');
+FEED.forEach(item => feedEl.appendChild(mkFeedItem(item)));
+feedEl.scrollTop = feedEl.scrollHeight;
+
+function mkFeedItem(item, isNew=false) {
+  const d = document.createElement('div');
+  d.className = `feed-item ${item.type}${isNew?' new':''}`;
+  d.innerHTML = `<span class="feed-ts">${item.ts}</span><span class="feed-badge ${item.type}">${item.badge}</span>${item.skill?`<span class="feed-skill">${item.skill}</span>`:''}<span class="feed-content">${item.msg}${item.task?`<span class="task-ref">· ${item.task}</span>`:''}</span>`;
+  return d;
+}
+
+const LIVE = [
+  {ts:'14:36',type:'step',badge:'poe:step',skill:'tauri-engineer',msg:'Writing integration test',task:'event-ingester'},
+  {ts:'14:37',type:'step',badge:'poe:step',skill:'implementor',msg:'Testing db_claim_node atomicity',task:'dag-store'},
+];
+let li=0;
+function addLive(){
+  if(li>=LIVE.length) return;
+  feedEl.appendChild(mkFeedItem(LIVE[li++],true));
+  feedEl.scrollTop=feedEl.scrollHeight;
+  if(li<LIVE.length) setTimeout(addLive,5000+Math.random()*3000);
+}
+setTimeout(addLive,4000);
+
+// Live step cycling
+const ingesterSteps=['Handling poe:done events','Writing Tauri emit logic','Writing integration test','Handling poe:artifact events'];
+const dagSteps=['Writing db_claim_node_resuming','Testing atomic claim','Writing orchestrator wake loop','Wiring DagChanged channel'];
+let si=0,di=0;
+setInterval(()=>{ si=(si+1)%ingesterSteps.length; const e=document.getElementById('ingester-step'); if(e)e.textContent=ingesterSteps[si]; },5000);
+setInterval(()=>{ di=(di+1)%dagSteps.length; const e=document.getElementById('dag-step'); if(e)e.textContent=dagSteps[di]; },4500);
+</script>
+</body>
+</html>
