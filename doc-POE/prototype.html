@@ -75,9 +75,9 @@
     #content-area { flex:1; display:flex; flex-direction:row; overflow:hidden; }
     #content-left { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; position:relative; }
 
-    /* ─── Column resizer — visual line only, interaction is on document ─── */
+    /* ─── Column resizer — visual line only, bounds set by JS to match #phase-matrix ─── */
     #col-resizer {
-      position:fixed; top:40px; bottom:0; pointer-events:none;
+      position:fixed; pointer-events:none;
       left:calc(200px + var(--label-col));
       width:1px; background:var(--border2);
       transition:background .1s, width .1s, margin-left .1s;
@@ -1434,10 +1434,12 @@ function addLive(){
 setTimeout(addLive,4000);
 
 // ─── Column resizer ────────────────────────────────────────────────────
-// Listens on document so no element z-index can block it.
-// Proximity to the column boundary (±8px) activates drag mode.
+// Visual line is clipped to #phase-matrix bounds.
+// Hover/drag activation also requires cursor to be within that Y range.
 (function() {
   const root = document.documentElement;
+  const resizerEl = document.getElementById('col-resizer');
+  const matrix = document.getElementById('phase-matrix');
   const SIDEBAR_W = 200;
   const HIT = 8; // px either side of boundary
   let dragging = false, startX = 0, startW = 0;
@@ -1446,7 +1448,20 @@ setTimeout(addLive,4000);
     return parseInt(getComputedStyle(root).getPropertyValue('--label-col')) || 380;
   }
   function boundary() { return SIDEBAR_W + labelColW(); }
-  function nearBoundary(x) { return Math.abs(x - boundary()) <= HIT; }
+
+  function updateResizerBounds() {
+    const r = matrix.getBoundingClientRect();
+    resizerEl.style.top    = r.top + 'px';
+    resizerEl.style.bottom = (window.innerHeight - r.bottom) + 'px';
+  }
+
+  function nearBoundary(x, y) {
+    const r = matrix.getBoundingClientRect();
+    return Math.abs(x - boundary()) <= HIT && y >= r.top && y <= r.bottom;
+  }
+
+  updateResizerBounds();
+  window.addEventListener('resize', updateResizerBounds);
 
   document.addEventListener('mousemove', e => {
     if (dragging) {
@@ -1454,7 +1469,7 @@ setTimeout(addLive,4000);
       root.style.setProperty('--label-col', newW + 'px');
       return;
     }
-    if (nearBoundary(e.clientX)) {
+    if (nearBoundary(e.clientX, e.clientY)) {
       document.body.classList.add('col-resize-hover');
       document.body.style.cursor = 'col-resize';
     } else {
@@ -1464,7 +1479,7 @@ setTimeout(addLive,4000);
   });
 
   document.addEventListener('mousedown', e => {
-    if (!nearBoundary(e.clientX)) return;
+    if (!nearBoundary(e.clientX, e.clientY)) return;
     dragging = true;
     startX = e.clientX;
     startW = labelColW();
@@ -1480,6 +1495,7 @@ setTimeout(addLive,4000);
     document.body.classList.remove('col-resizing');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
+    updateResizerBounds();
     window._buildGantt();
   });
 })();
