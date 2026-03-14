@@ -984,7 +984,9 @@ function togglePhase(id) {
       const upCount   = (upstream[id]   || []).length;
       const downCount = (downstream[id] || []).length;
 
-      for (let i = 0; i < colCount; i++) {
+      // Only render slots 0..depth — spacer starts immediately after the bar
+      // so step text sits adjacent to the bar, not pushed to the far right.
+      for (let i = 0; i <= depth; i++) {
         const cell = document.createElement('div');
         cell.className = 'task-slot';
         if (i < depth) cell.classList.add('slot-done');
