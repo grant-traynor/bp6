@@ -176,12 +176,13 @@
     .phase-section.collapsed .task-grid { display:none; }
     .phase-header-progress { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--text2); flex-shrink:0; padding-left:12px; border-left:1px solid var(--border1); margin-left:auto; }
 
-    /* Add phase row */
-    .add-phase-row { display:flex; align-items:stretch; border-top:1px solid var(--border0); cursor:pointer; }
-    .add-phase-row:hover .add-phase-label { background:var(--bg2); }
-    .add-phase-label { width:var(--label-col); flex-shrink:0; display:flex; align-items:center; gap:8px; padding:5px 14px; border-right:1px solid var(--border0); box-sizing:border-box; color:var(--text2); transition:background .15s, color .15s; }
-    .add-phase-row:hover .add-phase-label { color:var(--cyan); border-right-color:var(--border1); }
-    .add-phase-icon { font-size:13px; color:var(--text3); line-height:1; transition:color .15s; }
+    /* Add phase row — mirrors .phase-section-header / .phase-header-label layout */
+    .add-phase-row { display:flex; align-items:stretch; cursor:pointer; }
+    .add-phase-inner { flex:1; display:flex; align-items:center; gap:0; padding:0; background:var(--bg1); border-bottom:1px solid var(--border0); border-top:1px solid var(--border0); min-height:30px; transition:background .15s; }
+    .add-phase-row:hover .add-phase-inner { background:var(--bg2); }
+    .add-phase-label { width:var(--label-col); flex-shrink:0; display:flex; align-items:center; gap:8px; padding:5px 14px; border-right:1px solid var(--border1); box-sizing:border-box; color:var(--text2); transition:color .15s; }
+    .add-phase-row:hover .add-phase-label { color:var(--cyan); }
+    .add-phase-icon { font-size:11px; color:var(--text3); line-height:1; transition:color .15s; }
     .add-phase-row:hover .add-phase-icon { color:var(--cyan); }
 
     /* Lifecycle strip inside phase header */
@@ -745,9 +746,11 @@
 
         <!-- Add phase row -->
         <div class="add-phase-row" onclick="alert('Opens Scope session for Phase 4')">
-          <div class="add-phase-label">
-            <span class="add-phase-icon">+</span>
-            <span class="phase-num" style="color:var(--text2)">Add Phase</span>
+          <div class="add-phase-inner">
+            <div class="add-phase-label">
+              <span class="add-phase-icon">+</span>
+              <span class="phase-num">Add Phase</span>
+            </div>
           </div>
         </div>
 
