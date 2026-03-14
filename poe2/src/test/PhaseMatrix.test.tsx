@@ -19,7 +19,7 @@ describe('PhaseMatrix', () => {
 
   it('renders phase name headers', () => {
     const phase1 = makePhase({ id: 'phase-1', title: 'ConOps Phase' });
-    const phase2 = makePhase({ id: 'phase-2', title: 'Execution Phase', lifecycleStage: 'execution' });
+    const phase2 = makePhase({ id: 'phase-2', title: 'Execution Phase', status: 'execution' });
 
     render(
       <PhaseMatrix

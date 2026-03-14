@@ -21,7 +21,7 @@ describe('ProjectCard', () => {
   });
 
   it('renders phase count — shows active phase title when present', () => {
-    const phase = makePhase({ title: 'Alpha Phase', lifecycleStage: 'planning' });
+    const phase = makePhase({ title: 'Alpha Phase', status: 'planning' });
     render(<ProjectCard {...baseProps} phases={[phase]} />);
     expect(screen.getByText(/Alpha Phase/)).toBeInTheDocument();
   });

@@ -73,7 +73,6 @@ export interface Phase {
   number: number;
   title: string;
   status: string;
-  gateHeld: boolean;
   createdAt: string;
   updatedAt: string;
 }

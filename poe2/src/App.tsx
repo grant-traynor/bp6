@@ -104,8 +104,8 @@ export default function App() {
   // Derived state
   // Prioritise: gated phase first (needs human action), then any non-complete
   const activePhase =
-    phases.find(p => p.gateHeld) ??
-    phases.find(p => p.lifecycleStage !== 'complete') ??
+    phases.find(p => p.status === 'gate' || p.status === 'paused') ??
+    phases.find(p => p.status !== 'complete') ??
     null;
   const runningAgentCount = nodes.filter(n => n.status === 'running').length;
   const pendingQueueCount = queueItems.filter(q => q.resolvedAt === null).length;
@@ -190,7 +190,7 @@ export default function App() {
                     <>
                       <span className="text-neutral-400 font-semibold truncate">{activePhase.title}</span>
                       <span className="text-neutral-700">·</span>
-                      <span className="text-neutral-600">{activePhase.lifecycleStage}</span>
+                      <span className="text-neutral-600">{activePhase.status}</span>
                     </>
                   ) : (
                     <span className="text-neutral-700">No active phase</span>
@@ -212,7 +212,7 @@ export default function App() {
               </div>
 
               {/* Stage gate banner — shown when phase gate is held */}
-              {activePhase?.gateHeld && (
+              {(activePhase?.status === 'gate' || activePhase?.status === 'paused') && (
                 <div className="px-3 py-2 border-b border-amber-900/40 shrink-0">
                   <StageGate
                     phase={activePhase}

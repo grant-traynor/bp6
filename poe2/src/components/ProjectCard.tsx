@@ -15,9 +15,8 @@ export default function ProjectCard({ project, nodes, phases, queueCount, select
   const waiting = nodes.filter(n => n.status === 'waiting').length;
   const pending = nodes.filter(n => n.status === 'pending').length;
 
-  // Active phase = first phase with lifecycle_stage != 'complete'
-  const activePhase = phases.find(p => p.lifecycleStage !== 'complete');
-  const gateHeld = activePhase?.gateHeld ?? false;
+  const activePhase = phases.find(p => p.status !== 'complete');
+  const gateHeld = activePhase?.status === 'gate' || activePhase?.status === 'paused';
 
   return (
     <div

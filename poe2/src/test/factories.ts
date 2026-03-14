@@ -37,7 +37,6 @@ export function makePhase(overrides: Partial<Phase> = {}): Phase {
     number: 1,
     title: 'Test Phase',
     status: 'planning',
-    gateHeld: false,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...overrides,

@@ -28,16 +28,18 @@ function statusBadge(node: Node): { label: string; cls: string } {
   }
 }
 
-function lifecycleStageBadge(stage: Phase['lifecycleStage']): { label: string; cls: string } {
-  switch (stage) {
-    case 'planning':
-      return { label: 'Plan', cls: 'text-sky-500 border-sky-900' };
-    case 'execution':
-      return { label: 'Do', cls: 'text-emerald-500 border-emerald-900' };
-    case 'retrospective':
-      return { label: 'Check', cls: 'text-violet-500 border-violet-900' };
+function phaseStageBadge(status: string): { label: string; cls: string } {
+  switch (status) {
+    case 'running':
+      return { label: 'Run', cls: 'text-emerald-500 border-emerald-900' };
+    case 'gate':
+      return { label: 'Gate', cls: 'text-amber-500 border-amber-900' };
+    case 'paused':
+      return { label: 'Paused', cls: 'text-orange-500 border-orange-900' };
     case 'complete':
       return { label: 'Done', cls: 'text-neutral-600 border-neutral-800' };
+    default:
+      return { label: 'Plan', cls: 'text-sky-500 border-sky-900' };
   }
 }
 
@@ -131,12 +133,12 @@ export default function PhaseMatrix({ phases, nodes, edges, onTaskClick }: Props
               Scope
             </th>
             {phases.map(phase => {
-              const { label: stageLabel, cls: stageCls } = lifecycleStageBadge(phase.lifecycleStage);
+              const { label: stageLabel, cls: stageCls } = phaseStageBadge(phase.status);
               return (
                 <th
                   key={phase.id}
                   className={`px-2 py-1.5 border-b border-r border-neutral-800 text-center min-w-[140px] bg-neutral-950 ${
-                    phase.gateHeld ? 'bg-amber-950/20' : ''
+                    phase.status === 'gate' || phase.status === 'paused' ? 'bg-amber-950/20' : ''
                   }`}
                 >
                   <div className="flex flex-col items-center gap-0.5">
@@ -145,7 +147,7 @@ export default function PhaseMatrix({ phases, nodes, edges, onTaskClick }: Props
                       <span className={`text-[9px] px-1 py-0 border rounded-sm ${stageCls}`}>
                         {stageLabel}
                       </span>
-                      {phase.gateHeld && (
+                      {(phase.status === 'gate' || phase.status === 'paused') && (
                         <span className="text-[9px] text-amber-500" title="Gate held — review required">
                           🔒
                         </span>
@@ -222,7 +224,7 @@ export default function PhaseMatrix({ phases, nodes, edges, onTaskClick }: Props
                       <td
                         key={phase.id}
                         className={`px-1.5 py-0.5 border-b border-r border-neutral-800/60 text-center ${
-                          phase.gateHeld && phase.lifecycleStage !== 'complete'
+                          phase.status === 'gate' || phase.status === 'paused'
                             ? 'opacity-50'
                             : ''
                         }`}
