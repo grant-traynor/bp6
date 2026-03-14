@@ -75,26 +75,17 @@
     #content-area { flex:1; display:flex; flex-direction:row; overflow:hidden; }
     #content-left { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:0; position:relative; }
 
-    /* ─── Column resizer ─── */
+    /* ─── Column resizer — visual line only, interaction is on document ─── */
     #col-resizer {
-      position:fixed; top:40px; bottom:0;
-      /* auto-tracks the column edge via CSS variable — no JS needed for position */
+      position:fixed; top:40px; bottom:0; pointer-events:none;
       left:calc(200px + var(--label-col));
-      transform:translateX(-50%);
-      width:18px; cursor:col-resize; z-index:500;
+      width:1px; background:var(--border2);
+      transition:background .1s, width .1s, margin-left .1s;
+      z-index:500;
     }
-    #col-resizer::after {
-      content:''; position:absolute; top:0; bottom:0; left:50%; margin-left:-1px; width:1px;
-      background:var(--border2); transition:background .15s, width .15s, margin-left .15s;
-    }
-    #col-resizer:hover::after, #col-resizer.dragging::after {
-      background:var(--cyan); width:3px; margin-left:-1px;
-    }
-    /* Full-height drag line during active resize */
-    #col-drag-line {
-      position:fixed; top:0; bottom:0; width:1px;
-      background:var(--cyan); opacity:.6; z-index:1000;
-      pointer-events:none; display:none;
+    body.col-resizing #col-resizer,
+    body.col-resize-hover #col-resizer {
+      background:var(--cyan); width:2px; margin-left:-1px;
     }
 
     #project-header { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; padding:0 14px; height:36px; border-bottom:1px solid var(--border0); background:var(--bg1); }
@@ -1402,38 +1393,50 @@ function addLive(){
 setTimeout(addLive,4000);
 
 // ─── Column resizer ────────────────────────────────────────────────────
-// The handle's left position is driven purely by CSS: left:calc(200px + var(--label-col))
-// JS only needs to update --label-col during drag.
+// Listens on document so no element z-index can block it.
+// Proximity to the column boundary (±8px) activates drag mode.
 (function() {
-  const resizer = document.getElementById('col-resizer');
-  const dragLine = document.getElementById('col-drag-line');
   const root = document.documentElement;
+  const SIDEBAR_W = 200;
+  const HIT = 8; // px either side of boundary
   let dragging = false, startX = 0, startW = 0;
 
-  resizer.addEventListener('mousedown', e => {
+  function labelColW() {
+    return parseInt(getComputedStyle(root).getPropertyValue('--label-col')) || 380;
+  }
+  function boundary() { return SIDEBAR_W + labelColW(); }
+  function nearBoundary(x) { return Math.abs(x - boundary()) <= HIT; }
+
+  document.addEventListener('mousemove', e => {
+    if (dragging) {
+      const newW = Math.max(180, Math.min(620, startW + (e.clientX - startX)));
+      root.style.setProperty('--label-col', newW + 'px');
+      return;
+    }
+    if (nearBoundary(e.clientX)) {
+      document.body.classList.add('col-resize-hover');
+      document.body.style.cursor = 'col-resize';
+    } else {
+      document.body.classList.remove('col-resize-hover');
+      document.body.style.cursor = '';
+    }
+  });
+
+  document.addEventListener('mousedown', e => {
+    if (!nearBoundary(e.clientX)) return;
     dragging = true;
     startX = e.clientX;
-    startW = parseInt(getComputedStyle(root).getPropertyValue('--label-col')) || 380;
-    resizer.classList.add('dragging');
-    dragLine.style.display = 'block';
-    dragLine.style.left = e.clientX + 'px';
+    startW = labelColW();
+    document.body.classList.add('col-resizing');
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
     e.preventDefault();
   });
 
-  document.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    const newW = Math.max(180, Math.min(620, startW + (e.clientX - startX)));
-    dragLine.style.left = e.clientX + 'px';
-    root.style.setProperty('--label-col', newW + 'px');
-  });
-
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
-    resizer.classList.remove('dragging');
-    dragLine.style.display = 'none';
+    document.body.classList.remove('col-resizing');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
     window._buildGantt();
@@ -1447,7 +1450,6 @@ let si=0,di=0;
 setInterval(()=>{ si=(si+1)%ingesterSteps.length; const e=document.getElementById('ingester-step'); if(e)e.textContent=ingesterSteps[si]; },5000);
 setInterval(()=>{ di=(di+1)%dagSteps.length; const e=document.getElementById('dag-step'); if(e)e.textContent=dagSteps[di]; },4500);
 </script>
-<div id="col-drag-line"></div>
 <div id="col-resizer"></div>
 </body>
 </html>
