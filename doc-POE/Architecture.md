@@ -1,7 +1,7 @@
 # POE — Pairti Orchestration Engine: Architect
 
 **Status**: Draft
-**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service replaces poe:task/poe:edge; reviewers read DAG directly; MCP elevated to primary write mechanism)
 
 ---
 
@@ -44,8 +44,6 @@ graph TB
 
 1. **Each phase runs two nested PDCA loops.** The outer loop checks and corrects what was built; the inner loop checks and corrects how it was planned and executed. Both loops must close. A system with only an outer loop learns slowly and wastes effort on rework that better planning would have prevented. A system with only an inner loop improves execution efficiency but never asks whether it is building the right thing.
 
-   > **Design note**: The PDCA frame arrived late in the design session as an intuition, not as a starting point. It immediately validated the existing stage structure and became the primary conceptual anchor for the whole phase model. The two-loop refinement arrived even later — as a nagging intuition that a single loop felt incomplete. Once named, it resolved the ambiguity between Rework (inner Act) and Retrospective (outer Act), which had previously felt like overlapping concerns. They are not: they operate on different objects at different cadences.
-
    ### The Inner Loop — Plan Quality (pre-execution)
 
    Closes *before execution begins*. Checks and corrects the plan: whether work is well-decomposed, dependencies are correct, tasks are right-sized, and the right specialists are assigned. A plan that survives this loop produces much better execution output — because T is closer to T!.
@@ -63,8 +61,6 @@ graph TB
    **The loop may iterate.** A single review pass is the common case, but a plan with significant issues may require multiple cycles: Review → Revise → Review again. This is expected and correct — iteration is cheaper pre-execution than post. The planning specialist tracks unresolved findings and drives subsequent iterations autonomously via `poe:review`.
 
    **Escalation to human.** If the loop cannot converge — reviewers keep finding blockers, or reviewers disagree on a fundamental design question — the planning specialist escalates via `poe:decision`. The human takes the call, breaks the deadlock, and the loop resumes. This is the correct escalation point: a human decision that is structural, not incidental. The queue should be sparse; if plan reviews frequently escalate, it is a signal that the CONOPS or Guardrails stage produced insufficient clarity.
-
-   > **Living proof**: the design session that produced these documents ran this exact loop. Docs and beads were drafted (Plan), an implementation engineer agent reviewed them and identified 4 blocking gaps (Check), the docs were revised and Protocol.md was written (Act). Execution proceeded on a much stronger foundation. The copy-paste between agent sessions that this required is what `poe:review` eliminates — the orchestrator routes the review automatically; the human watches in the activity feed.
 
    ### The Outer Loop — Deliverable and Process Quality (post-execution)
 
@@ -95,7 +91,7 @@ graph TB
 2. **Plan broadly, implement narrowly, replan aggressively.** The CONOPS and Phase plan define the shape. Execution is focused and bounded. The Retrospective updates the plan before the next Phase begins.
 3. **Local-first.** All project state lives in `{project}/.poe/` — portable, no central store.
 4. **Implementation directory is `poe2/`**. `poe/` is the v1 app (Restate-based, retired). All POE v2 code — Rust backend, React frontend, skills — lives in `poe2/`. Do not modify `poe/`.
-4. **Event-driven.** No polling. Agents emit structured events; the backend ingests them into SQLite and pushes deltas to the frontend via Tauri events.
+4. **Event-driven.** No polling. Agents read and write project state via the DAG Service (MCP tools); the DAG Service notifies the orchestrator directly after each commit. Agents emit control-flow events via the `poe:` protocol; the backend ingests these to drive the activity feed and decision queue, and pushes deltas to the frontend via Tauri events.
 6. **Agents run autonomously.** Human oversight is observational by default, not supervisory. The human invests effort before execution (planning, guardrails) so that execution can succeed without intervention.
 7. **The knowledge register is institutional memory.** It accumulates across phases and is always current. Agents read it before acting; they write to it when they learn something worth preserving.
 
@@ -104,8 +100,6 @@ graph TB
 ## The Unit of Work
 
 The orchestrator's fundamental job is to assemble and dispatch units of work. Understanding what a unit of work *is* defines both what the orchestrator schedules and what the Retrospective corrects.
-
-> **Design note**: This model was not designed top-down. It emerged during the design session when asking what the agent's CRUD protocol was actually operating on. The question "what is the orchestrator scheduling?" revealed the unit of work as the fundamental abstraction, and the imperfect-inputs framing followed naturally. This is the kind of insight that arrives late and clarifies everything — worth preserving as a reminder to hold design sessions open rather than closing on structure too early.
 
 A unit of work is a function over imperfect inputs:
 
@@ -301,12 +295,10 @@ Agents communicate with POE via structured JSON events embedded in the `--output
 | `poe:brief` | Agent's interpretation of its task, written before execution begins. Drives the glass-box interpretation view. |
 | `poe:step` | Named progress milestone during execution. |
 | `poe:artifact` | Declare a file the agent has already written to `docs/` using its own tools. Orchestrator indexes the path; downstream agents read the file directly. No content is embedded in the event. |
-| `poe:task` | Create a WBS node (used by planning specialist to populate the task graph). |
-| `poe:edge` | Create a dependency edge between two nodes. |
 | `poe:knowledge` | Write an entry to the knowledge register. |
 | `poe:skill` | Write a reusable pattern to `{project}/.poe/skills/<name>.md`. Closes the self-improvement loop: any agent that discovers a project-specific pattern can persist it as a local skill override without manual authoring. |
 | `poe:decision` | Raise a question for the human decision queue. Agent emits `poe:yield` immediately after; orchestrator resumes via `--resume` with the human's resolution. |
-| `poe:review` | Request a peer review from another specialist agent. Agent emits `poe:yield` after all review requests; orchestrator spawns reviewer(s), then resumes requesting agent via `--resume` with results. |
+| `poe:review` | Request a peer review from another specialist agent. The `content` field is a review *directive* — task IDs and focus area, not a plan transcription. The reviewer reads the live WBS directly from the DAG via DAG Service tools. Agent emits `poe:yield` after all review requests; orchestrator spawns reviewer(s), then resumes requesting agent via `--resume` with results. |
 | `poe:review-outcome` | Emitted by reviewer agents BEFORE `poe:done` to record their explicit verdict. Stored on `nodes.verdict`. Orchestrator reads `nodes.verdict` when building the ReviewResult bundle. Missing `poe:review-outcome` defaults to BLOCKED with a `poe-ingester-warning` to the frontend. |
 | `poe:yield` | Yield control while awaiting an asynchronous response (review or decision). task status → waiting. See Flows.md §SF-3. |
 | `poe:done` | Signal task completion. Task status → done. |
@@ -322,7 +314,7 @@ See `doc-POE/Flows.md §3.1` for the complete runtime sequence — reviewer disp
 **poe:review payload:**
 
 ```json
-{"poe": "review", "reviewer_skill": "tauri-engineer", "content": "Are these 4 features ready for implementation? Flag any gaps."}
+{"poe": "review", "reviewer_skill": "architecture-analyst", "id": "r-arch", "content": "Review tasks ep-01, ft-01..ft-05, t-01..t-15 in the current phase WBS. Focus: IIFE encapsulation pattern (t-05), animation guard lifecycle (t-13). Read tasks from the DAG using get_phase_wbs."}
 ```
 
 See `doc-POE/Protocol.md §2` for the full wire format for all events.
@@ -392,8 +384,6 @@ The advisor is well-positioned to help because it has direct access to the input
 
 The advisor researches; the human decides. The boundary is explicit: the advisor does not resolve queue items — it improves the quality of human input (H) before the human commits.
 
-> **Design note**: The Queue Advisor's location evolved during design. The initial question was whether the *orchestrator* needed AI support for scheduling decisions. The answer was no — orchestration is deterministic given a well-formed DAG. The real judgment gap is in the human's decisions, not the engine's. Placing the advisor at the queue level rather than the task level keeps AI support where it actually reduces friction.
-
 In terms of the formal model, the Queue Advisor is an **H-quality tool** — it exists to make human decisions better-informed before they enter the execution loop.
 
 #### Evolution Path
@@ -419,8 +409,7 @@ The orchestrator is reactive — it wakes on events, not on a timer. **One contr
 
 - `poe:done` received — a task completed, dependents may now be ready
 - `poe:yield` received — a task yielded; orchestrator dispatches reviewers (reason=review) or waits for human (reason=decision)
-- `poe:task` / `poe:task:cancel` — DAG structure changed
-- `poe:edge` / `poe:edge:remove` — dependency graph changed
+- DAG Service write — an agent created, updated, or cancelled a node or edge via MCP tool call; the DAG Service notifies the orchestrator directly after committing to SQLite
 - Human resolves a queue item — a blocked agent can continue
 - Human advances a stage gate — next stage becomes active
 - App start — recover and resume from prior state
@@ -511,7 +500,7 @@ On app restart:
 
 Agent session IDs are written when the init event arrives (`nodes.session_id`), overwriting the prior value on each SF-4 continuation.
 
-**Concurrent recovery** (bp6-17k.8): Recovery is not performed serially. Each project's recovery work is spawned as an independent `tokio::spawn` task — the orchestrator does not `await` one project's recovery before beginning the next. On completion, each recovery task re-signals the orchestrator with `DagChanged::DagStructureChanged` so that normal task scheduling resumes for that project. The main orchestrator loop is never blocked by recovery; all projects recover in parallel.
+**Concurrent recovery**: Recovery is not performed serially. Each project's recovery work is spawned as an independent `tokio::spawn` task — the orchestrator does not `await` one project's recovery before beginning the next. On completion, each recovery task re-signals the orchestrator with `DagChanged::DagStructureChanged` so that normal task scheduling resumes for that project. The main orchestrator loop is never blocked by recovery; all projects recover in parallel.
 
 ### Concurrency
 
@@ -535,7 +524,7 @@ The UI displays a concurrency indicator — running count / limit — for each p
 
 The two-layer approach (open-time + periodic) ensures that `db_count_running_agents` reflects the true number of running processes, not stale DB rows from previous crashes.
 
-### SQLite Lock Ordering (bp6-17k.13)
+### SQLite Lock Ordering
 
 All code that touches the SQLite connection must obey this ordering invariant to prevent the connection lock from being held across async Tauri event emission, which would stall other DB operations:
 
@@ -561,7 +550,7 @@ When a phase is activated via `activate_phase` or `advance_phase` and the phase 
 | `guardrails` | `must-not-analyst` | "Develop Guardrails" |
 | `increment_planning` | `product-manager` | "Plan Increment" |
 | `plan_review` | `senior-engineer` | "Review Plan" |
-| `execution` | — (no bootstrap) | Tasks come from product-manager `poe:task` events in the preceding increment_planning phase |
+| `execution` | — (no bootstrap) | Tasks created by product-manager via DAG Service MCP tools during the preceding increment_planning phase |
 | `rework` | `product-manager` | "Plan Rework" |
 | `validity_analysis` | `validity-analyst` | "Validate Deliverables" |
 | `retrospective` | `rca-analyst` | "Run Retrospective" |
@@ -575,38 +564,71 @@ When a phase is activated via `activate_phase` or `advance_phase` and the phase 
 
 ## Agent Tooling (MCP)
 
-The `poe:` event protocol is one-way — agent writes, POE ingests. MCP (Model Context Protocol) makes the interface bidirectional, adding the Read side to the CRUD model and exposing project-specific tooling to agents.
+The DAG Service is an MCP server embedded in POE and injected into every agent's tool set via `--mcp-config` at spawn time. It is the primary interface for all project state reads and writes. The `poe:` protocol handles control flow and observability only; it does not carry data.
 
-### Complementary Roles
+### Separation of Concerns
 
-| Protocol | Direction | Purpose |
+| Channel | Direction | Purpose |
 |---|---|---|
-| `poe:` events | Agent → POE | Writes — DAG mutations, artifacts, progress, decisions |
-| MCP tools | Agent ↔ POE | Reads + structured operations — queries, tooling, project utilities |
+| DAG Service (MCP) | Agent ↔ POE | All reads and writes — DAG mutations, knowledge, artifact registration, queries |
+| `poe:` events | Agent → POE | Control flow and observability — progress, decisions, reviews, completion |
 
-### Why This Matters
+### Architecture
 
-The input bundle assembled at task start is a snapshot. As execution progresses an agent may need information that wasn't knowable at start — especially in a living DAG where other agents are writing concurrently. MCP gives agents a structured way to query mid-task without relying on what was injected into the prompt upfront.
+The DAG Service runs inside the POE process. Agents connect to it as an MCP server. After every mutation, the DAG Service notifies the orchestrator directly via an internal channel — no event parsing required.
 
-### Planned MCP Tool Categories
+```
+Agent
+  └── MCP tool call (e.g. create_task)
+        └── DAG Service
+              ├── Commits to SQLite (dag.db)
+              ├── Notifies Orchestrator (internal channel → DagChanged)
+              └── Emits Tauri event to Frontend
+```
 
-**DAG & Knowledge Queries**
-- Query current task status and dependency state
-- Search the knowledge register by keyword or topic
-- Retrieve specific artifacts by name or type
+This eliminates the previous design problem where agents described DAG mutations in text (as `poe:step` detail or review content) rather than materialising them as protocol events. If the agent hasn't called `create_task`, there are no tasks — the reviewer calling `get_phase_wbs` will find nothing to review.
+
+### DAG Service Tool Surface
+
+**Task CRUD**
+
+| Tool | Operation | Notes |
+|---|---|---|
+| `create_task(title, skill, type, parent_id, description)` | Create | Returns `task_id`. Type: `epic`, `feature`, `task`, `bug`, `chore`, `subtask` |
+| `get_task(id)` | Read | Full node record including WBS ancestry |
+| `get_phase_wbs(phase_id)` | Read | Full task graph for a phase — epics, features, tasks, edges |
+| `query_tasks(filters)` | Read | Filter by phase, skill, status, type, parent |
+| `update_task(id, fields)` | Update | Refine scope, description, or skill assignment |
+| `cancel_task(id, reason)` | Cancel | Marks as cancelled; preserved in history. Never hard-deleted. |
+
+**Edge CRUD**
+
+| Tool | Operation | Notes |
+|---|---|---|
+| `add_edge(from_id, to_id)` | Create | Finish-to-start dependency |
+| `remove_edge(from_id, to_id)` | Delete | Remove dependency that no longer applies |
+
+**Knowledge & Artifacts**
+
+| Tool | Operation | Notes |
+|---|---|---|
+| `write_knowledge(key, value)` | Create / Supersede | Adds or supersedes a knowledge register entry |
+| `query_knowledge(query)` | Read | Full-text search of the knowledge register |
+| `register_artifact(name, type, path)` | Create | Declares an artifact file already written to `docs/` |
+| `get_artifact(name)` | Read | Returns artifact metadata and path |
 
 **Project Tooling**
-- Run the test suite and return structured results
-- Check git status, diff, and recent history
-- Execute project-specific build or validation commands
 
-**Write Operations** (structured alternative to `poe:` events for complex mutations)
-- Create or update WBS nodes with validation
-- Resolve ambiguities against the knowledge register before raising a `poe:decision`
+| Tool | Operation | Notes |
+|---|---|---|
+| `run_tests()` | Execute | Runs the test suite; returns structured results |
+| `git_status()` | Read | Current git status and recent history |
 
-### Status
+### Why MCP Over poe: Events for Writes
 
-MCP tooling is a planned capability. The `poe:` event protocol is sufficient for the initial implementation. MCP is introduced once the core orchestration loop is stable, prioritising the tools that most reduce `poe:decision` queue volume.
+The previous design routed DAG writes through `poe:task` and `poe:edge` events in the agent's stdout stream. This created a failure mode: agents could describe intended mutations in `poe:step` detail fields or review content without emitting the actual protocol events — the plan existed only in narrative, not in the database. Reviewers had no way to verify the plan was real.
+
+With the DAG Service, the write is the proof. A reviewer calling `get_phase_wbs` either receives the tasks or receives an empty graph — there is no middle ground where the plan exists as text but not as data.
 
 ---
 
@@ -638,22 +660,9 @@ Informational fields (`tags`, `applies_to`, `protocol_version`) are not parsed b
 
 After each phase, the Retrospective stage may update project-local skill files to capture lessons learned. The human can promote project-local improvements to the user level if they apply broadly. Skills improve across phases; the agent team becomes better at working on this specific project over time.
 
-### Bootstrap Strategy — Existing Skills
+### Skills to Author
 
-POE v2 does not start from a blank skill library. Two skills from POE v1 (`poe/src-tauri/skills/`) are near-ready for direct port:
-
-| Skill | Readiness | Notes |
-|---|---|---|
-| `operational-analyst` | 90% | Already emits `poe:artifact`. Needs event payload field rename (`type` → `event`) and removal of old lifecycle step references. Maps to the CONOPS stage. |
-| `product-manager` | 85% | Already emits `poe:node` / `poe:edge` (rename to `poe:task` / `poe:edge`). Readiness check, phase decomposition, quality checklist, and `poe:decision` for scope choices are all correct. Maps to the Increment Planning stage. |
-
-The `project-advisor` skill is a solid foundation for the Queue Advisor but needs extension — it is currently read-only and passive; the Queue Advisor needs search, research, and sub-task capability.
-
-The bp6 persona template (`bp6/templates/personas/_TEMPLATE_EIAMOE.md`) defines the E-I-A-M-O-E framework (Entry / Inputs / Activities / Measurements / Outputs / Exit). The framework structure and mode selection concepts remain valid for authoring POE v2 skills. The beads-specific tooling (`bd` commands, C-E-P via `bd show`) is replaced by the `poe:` event protocol and orchestrator-injected input bundles — but the structural framework is worth keeping as an authoring guide.
-
-**Recommended approach**: once `bp6-e1n.6` (Skill System) lands, run a skill authoring task that ports `operational-analyst` and `product-manager` to POE v2 format and writes the missing specialists from scratch using the updated EIAMOE framework as a guide. This is well-scoped work for a specialist agent.
-
-Missing specialists to author for v2:
+Missing specialists for the initial skill library:
 
 | Skill | Stage | Role |
 |---|---|---|
@@ -689,10 +698,12 @@ When skill-author completes, it emits `poe:skill` → the orchestrator writes th
 
 ```
 Tauri App (Rust + React)
-  ├── SQLite (poe.db)          — WBS graph, artifacts index, knowledge register, event log
+  ├── SQLite (dag.db)          — WBS graph, artifacts index, knowledge register, event log
+  ├── DAGService (MCP server)  — exposes full CRUD tool surface to agents; notifies Orchestrator on write
+  ├── Orchestrator             — reactive scheduler; wakes on DagChanged from DAGService or poe: events
   ├── AgentState               — active agent processes (stream-json), watchdog, stdout readers
   ├── ProjectState             — open projects, active project
-  ├── EventIngester            — reads stream-json stdout, extracts poe: events, writes to SQLite, emits Tauri events
+  ├── EventIngester            — reads stream-json stdout, extracts poe: control-flow events, writes to SQLite, emits Tauri events
   └── Frontend (React)
         ├── ActivityFeed       — live agent event stream
         ├── DecisionQueue      — human decision queue
@@ -701,13 +712,14 @@ Tauri App (Rust + React)
         ├── KnowledgeView      — knowledge register browser
         └── AgentHandover      — xterm.js PTY panel (--resume, human-in-the-loop)
 
-Autonomous Agent (claude --output-format stream-json -p)
+Autonomous Agent (claude --output-format stream-json -p --mcp-config poe-dag-service)
   — reads stdin bundle (T + S + K — see Protocol.md §3)
-  — emits poe: events embedded in assistant text ({"poe": "<type>", ...})
+  — calls DAG Service MCP tools to read and write project state
+  — emits poe: control-flow events embedded in assistant text ({"poe": "<type>", ...})
   — process exits after {"type":"result",...}
   — session_id stored at spawn from {"type":"system","subtype":"init",...}
   — terminated via nix::sys::signal::kill(pid, Signal::SIGTERM) when interrupted
-    (bp6-17k.10: uses nix crate directly — no kill subprocess spawned)
+    (uses nix crate directly — no kill subprocess spawned)
     SIGTERM gives the agent opportunity to clean up before exiting
 
 Interactive Agent (claude --resume <session_id>, PTY)
@@ -749,7 +761,7 @@ Rust struct: `PoeAgentActivity` in `src-tauri/src/event_ingester/mod.rs`, annota
 
 ---
 
-## Orchestrator Concurrency Patterns (u7s)
+## Orchestrator Concurrency Patterns
 
 ### DB-Arbitrated Single-Dispatch Claim
 
@@ -764,12 +776,12 @@ Two claims are used in the orchestrator:
 
 | Function | SQL | Use case |
 |---|---|---|
-| `db_claim_node_resuming` | `UPDATE nodes SET status='resuming' WHERE id=? AND status='waiting'` | u7s.1 — resume race prevention |
-| `db_claim_node_retry` | `UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=? AND status='running'` | u7s.2 — retry race prevention |
+| `db_claim_node_resuming` | `UPDATE nodes SET status='resuming' WHERE id=? AND status='waiting'` | Resume race prevention |
+| `db_claim_node_retry` | `UPDATE nodes SET status='pending', retry_count=retry_count+1 WHERE id=? AND status='running'` | Retry race prevention |
 
 ### `NodeStatus::Resuming`
 
-`Resuming` is a transient lock status introduced for u7s.1. When `check_review_completion` confirms all reviewers are done, it atomically claims the requesting task node via `db_claim_node_resuming` (waiting → resuming) before spawning the resume agent. Any concurrent caller that loses the claim sees `rows_changed == 0` and aborts.
+`Resuming` is a transient lock status. When `check_review_completion` confirms all reviewers are done, it atomically claims the requesting task node via `db_claim_node_resuming` (`waiting → resuming`) before spawning the resume agent. Any concurrent caller that loses the claim sees `rows_changed == 0` and aborts.
 
 On app restart, `recover_interrupted` resets all nodes in `resuming` status back to `waiting` (ghost-claim recovery). This handles the case where the app crashed after the claim was made but before `spawn_agent` completed. The node then re-enters the normal review-completion path on the next reviewer signal.
 

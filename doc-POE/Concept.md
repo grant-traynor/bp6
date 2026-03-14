@@ -2,9 +2,7 @@
 
 
 **Status**: Draft
-**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
-
-> **Proof of concept**: The design session that produced this document and its companions (Architecture.md, UX-Brief.md) ran the exact lifecycle POE is designed to orchestrate — as a conversation. Concept → Guardrails → Architecture → UX Brief, collaboratively, with a human seeding the idea and an AI asking the questions. The output is the brief for the implementation. If POE can produce output of equal or better quality when it orchestrates this process through specialist agents, the concept is proven.
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service replaces poe:task/poe:edge; reviewers read DAG directly)
 
 ---
 
@@ -155,9 +153,9 @@ Each phase runs two nested PDCA loops. Stage types map to these loops as follows
 
 | Stage Type | PDCA | Purpose | Key Specialists | Primary Output |
 |---|---|---|---|---|
-| Increment Planning | Plan | Select a meaningful next increment; decompose into epics, features, tasks; assign skills | Product Manager | `phase-N-plan.md` |
-| Plan Review | Check | Specialists review the plan *before execution*: flag gaps, wrong skill assignments, missing dependencies, ambiguous tasks. Runs via `poe:review` — no human relay required. | Architect, Engineer, PM (per plan type) | `phase-N-plan-review.md` |
-| Plan Revision | Act | Planning specialist updates the DAG based on review findings. | Product Manager | Updated `phase-N-plan.md` |
+| Increment Planning | Plan | Select a meaningful next increment; decompose into epics, features, tasks, and dependency edges via the DAG Service | Product Manager | WBS: populated task graph in `dag.db` |
+| Plan Review | Check | Specialists review the WBS *directly from the DAG* before execution: flag gaps, wrong skill assignments, missing dependencies, ambiguous tasks. Directed by the planning specialist via `poe:review` (specifying task IDs and focus area); reviewer reads the live task graph via DAG Service tools. Runs autonomously — no human relay required. | Architect, Engineer, PM (per plan type) | `phase-N-plan-review.md` |
+| Plan Revision | Act | Planning specialist updates the DAG via DAG Service tools based on review findings. | Product Manager | Updated task graph in `dag.db` |
 
 The inner loop may iterate — Review → Revise → Review again — until the plan is clean. If the loop cannot converge (reviewers disagree on a structural question, or blockers persist after N cycles) the planning specialist escalates via `poe:decision` and the human breaks the deadlock. Once approved, execution begins.
 
@@ -179,19 +177,13 @@ The inner loop may iterate — Review → Revise → Review again — until the 
 
 ## Agent Protocol
 
-Agents communicate with POE via structured JSON events embedded in the `--output-format stream-json` transport. Agents are invoked with `claude --output-format stream-json -p --dangerously-skip-permissions`; the T+S+K bundle is written to stdin (then closed), and the orchestrator reads poe: events from the JSON output stream. This structured layer drives the activity feed, artifact tracking, task management, and the decision queue. See `doc-POE/Protocol.md §2` and `§5` for the full wire format and spawn model.
+Agents interact with POE through two complementary channels:
 
-The protocol is fundamentally **CRUD against the project database**. The DAG is not a static plan — it evolves as execution reveals new information, scope is refined, and dependencies are discovered or invalidated. Agents have full mutation rights over the graph.
+- **DAG Service** — an MCP server embedded in POE and injected into every agent's tool set. Agents call DAG Service tools to create tasks, add edges, query the WBS, update nodes, and cancel work. The DAG Service commits changes to SQLite and notifies the orchestrator directly. This is the primary read/write interface for all project state. See Architecture.md §Agent Tooling (MCP) for the full tool surface.
 
-### DAG Mutations
+- **`poe:` protocol** — structured JSON events embedded in the `--output-format stream-json` transport. The `poe:` protocol is **control flow and observability only**: progress milestones, decisions, reviews, and completion signals. It does not carry data. Agents are invoked with `claude --output-format stream-json -p --dangerously-skip-permissions`; the T+S+K bundle is written to stdin (then closed), and the orchestrator reads poe: events from the JSON output stream. See `doc-POE/Protocol.md §2` and `§5` for the full wire format and spawn model.
 
-| Event | Operation | Purpose |
-|---|---|---|
-| `poe:task` | Create | Add a new node to the WBS (task, bug, chore, subtask) |
-| `poe:task:update` | Update | Refine scope, description, or skill assignment on an existing node |
-| `poe:task:cancel` | Cancel | Mark a node as no longer needed (preserved in history) |
-| `poe:edge` | Create | Add a dependency between two nodes |
-| `poe:edge:remove` | Remove | Remove a dependency that no longer applies |
+The DAG is not a static plan — it evolves as execution reveals new information, scope is refined, and dependencies are discovered or invalidated. Agents have full mutation rights over the graph via DAG Service tools.
 
 ### Artifacts & Knowledge
 
@@ -210,6 +202,7 @@ The protocol is fundamentally **CRUD against the project database**. The DAG is 
 | `poe:decision` | Raise a question for the human queue, with candidate options if available. For autonomous agents only — routes to the Decision Queue. |
 | `poe:chat` | Collaborative turn in a co-authoring session. For interactive agents only — routes to the Artifact Viewer chat panel, not the Decision Queue. The agent drives the conversation to build an artifact together with the human. See Architecture.md §Two Human Interaction Models. |
 | `poe:advisor` | Advisor turn in a Queue Advisor session. Routes to Pane 3 advisor panel. Structurally identical to poe:chat but for a different surface and purpose (decision research, not artifact co-authoring). |
+| `poe:review` | Request a peer review. The `content` field is a review *directive* — task IDs and focus area, not a plan transcription. The reviewer reads the live WBS directly from the DAG via DAG Service tools. Agent emits `poe:yield` after all review requests. |
 | `poe:review-outcome` | Reviewer signals its verdict before yielding: APPROVED, APPROVED_WITH_CONDITIONS, BLOCKED, or FAILED. Orchestrator uses this to build the ReviewResult bundle for the resumed task. Missing verdict defaults to BLOCKED. |
 | `poe:yield` | Yield control while awaiting a review, decision, chat, or advisor response. Task status → waiting. |
 | `poe:done` | Signal task completion (all work done). |
