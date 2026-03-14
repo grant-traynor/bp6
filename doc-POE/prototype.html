@@ -144,21 +144,36 @@
     /* Timeline slot area — each slot is a fixed-width column; spacer fills remainder */
     .task-slots { flex:1; display:flex; overflow:hidden; }
     .task-slot { width:88px; flex-shrink:0; position:relative; border-right:1px solid var(--border0); min-height:28px; }
-    .task-slot-spacer { flex:1; min-height:28px; }
-    /* no border on spacer so the right edge stays clean */
+    .task-slot-spacer { flex:1; min-height:28px; display:flex; align-items:center; overflow:hidden; }
     .task-slot.slot-done { background:rgba(16,185,129,.03); }
-    .task-slot.slot-here { background:rgba(14,165,233,.02); }
 
-    /* Gantt bars */
+    /* slot-here: flex row — [upstream] [bar] [downstream] */
+    .task-slot.slot-here { background:rgba(14,165,233,.02); display:flex; align-items:center; padding:0 5px; gap:3px; }
+    .slot-count { font-size:9px; font-family:var(--font); flex-shrink:0; min-width:10px; text-align:center; line-height:1; opacity:.8; }
+    .slot-count-left  { color:var(--amber); }
+    .slot-count-right { color:var(--green-dim); filter:brightness(2); }
+
+    /* Gantt bars — default absolute (epic span); override to flex inside slot-here */
     .slot-bar { position:absolute; top:50%; transform:translateY(-50%); left:4px; right:4px; height:6px; border-radius:2px; }
+    .task-slot.slot-here .slot-bar { position:static; transform:none; left:auto; right:auto; flex:1; min-width:6px; }
     .slot-bar.complete { background:var(--green); opacity:.45; }
     .slot-bar.running { background:var(--cyan); opacity:.65; animation:slot-pulse 2s ease-in-out infinite; }
     .slot-bar.waiting { background:var(--amber); opacity:.4; height:4px; }
     .slot-bar.blocked { background:var(--border2); opacity:.55; height:4px; }
+    /* Epic span bars keep absolute layout */
     .slot-bar.span-start { left:4px; right:0; border-radius:2px 0 0 2px; }
     .slot-bar.span-mid { left:0; right:0; border-radius:0; }
     .slot-bar.span-end { left:0; right:4px; border-radius:0 2px 2px 0; }
     @keyframes slot-pulse { 0%,100%{opacity:.65} 50%{opacity:.3} }
+
+    /* Current step — shown in spacer next to bar, hidden inside label */
+    .task-current-step { display:none; }
+    .slot-step { font-size:10px; font-family:var(--font); font-style:italic; color:var(--text2);
+                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-left:8px; flex:1; }
+    .slot-step.live { color:var(--cyan); }
+    /* Also hide dep chips and downstream count from label — now on bar */
+    .task-dep-chips { display:none; }
+    .task-blocks-badge { display:none; }
 
 
     /* Phase section header — full-width divider with inline lifecycle strip */
@@ -973,22 +988,53 @@ function togglePhase(id) {
         else if (sc.classList.contains('waiting')) barClass = 'waiting';
       }
 
+      const upCount   = (upstream[id]   || []).length;
+      const downCount = (downstream[id] || []).length;
+
       for (let i = 0; i < colCount; i++) {
         const cell = document.createElement('div');
         cell.className = 'task-slot';
-        if (i < depth)  cell.classList.add('slot-done');
+        if (i < depth) cell.classList.add('slot-done');
         if (i === depth) {
           cell.classList.add('slot-here');
+          // a — inbound blocker count
+          if (upCount > 0) {
+            const u = document.createElement('span');
+            u.className = 'slot-count slot-count-left';
+            u.textContent = upCount;
+            cell.appendChild(u);
+          }
+          // bar
           const bar = document.createElement('div');
           bar.className = `slot-bar ${barClass}`;
           cell.appendChild(bar);
+          // b — downstream unblock count
+          if (downCount > 0) {
+            const d = document.createElement('span');
+            d.className = 'slot-count slot-count-right';
+            d.textContent = downCount;
+            cell.appendChild(d);
+          }
         }
         slotsEl.appendChild(cell);
       }
-      // spacer fills remaining width so the row isn't left-truncated
-      const sp = document.createElement('div');
-      sp.className = 'task-slot-spacer';
-      slotsEl.appendChild(sp);
+
+      // Spacer — holds current step text
+      const spacer = document.createElement('div');
+      spacer.className = 'task-slot-spacer';
+      // Find the step element in the label; preserve its ID for live updates
+      const stepEl = row.querySelector('.task-current-step');
+      if (stepEl && stepEl.textContent.trim()) {
+        const span = document.createElement('span');
+        span.className = 'slot-step' + (stepEl.classList.contains('live') ? ' live' : '');
+        span.textContent = stepEl.textContent.trim();
+        // Transfer ID so setInterval live-cycling still works
+        const origId = stepEl.dataset.origId || stepEl.id;
+        if (stepEl.id) { stepEl.dataset.origId = stepEl.id; stepEl.removeAttribute('id'); }
+        if (origId) span.id = origId;
+        spacer.appendChild(span);
+      }
+      slotsEl.appendChild(spacer);
     });
 
     // Render epic rows: span from min to max child depth
