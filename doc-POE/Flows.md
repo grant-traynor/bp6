@@ -1,7 +1,7 @@
 # POE — Runtime Flows
 
 **Status**: Draft
-**Last updated**: 2026-03-13 (rev 2026-03-13: spec corrections from architecture review)
+**Last updated**: 2026-03-15 (rev 2026-03-15: DAG Service added as actor; SF-7 DAG Service → Orchestrator notification; SF-1 trigger sources enumerated)
 
 **Artifact classification**: `flows.md` — the authoritative Runtime Flows document for POE v2. Specifies the dynamic execution model: what happens in what order, who is responsible at each step, and the invariants that must hold across orchestrator, ingester, agent, and frontend. Injected into every implementation task's input bundle alongside `interface-control.md` and `data-model.md`.
 
@@ -13,16 +13,21 @@
 
 ## 1. Overview
 
-The runtime is built from four cooperating components. Understanding their roles is the prerequisite for reading any flow.
+The runtime is built from five cooperating components. Understanding their roles is the prerequisite for reading any flow.
 
 | Actor | Role |
 |---|---|
-| **Orchestrator** | Reactive scheduler. Wakes on DAG-change signals. Finds ready tasks, assembles input bundles, spawns agents. See Architecture.md §Orchestration Engine. |
+| **Orchestrator** | Reactive scheduler. Wakes on `DagChanged` signals from any source. Finds ready tasks, assembles input bundles, spawns agents. See Architecture.md §Orchestration Engine. |
 | **Event Ingester** | Bridge between agent stdout and the rest of the system. Reads stream-json output, extracts `poe:` events, writes to SQLite, signals the orchestrator, emits Tauri events to the frontend. See Protocol.md §5. |
-| **SQLite** | Sole source of durable state. All orchestrator decisions are made by querying it. All agent outputs land here first. |
-| **Frontend** | Receives Tauri events from the ingester. Never polls. Updates the activity feed, queue panel, and task matrix in response to events. |
+| **DAG Service** | MCP server (`poe-dag-mcp`) injected into every agent via `--mcp-config`. Handles all reads and writes to the task graph, knowledge register, and artifact index. After each mutation: commits to SQLite, notifies the orchestrator via `dag.sock`, emits a Tauri event to the frontend. See Protocol.md §6. |
+| **SQLite** | Sole source of durable state. All orchestrator decisions are made by querying it. All agent and DAG Service writes land here first. |
+| **Frontend** | Receives Tauri events from the ingester and DAG Service. Never polls. Updates the activity feed, queue panel, and task matrix in response to events. |
 
-Agents are not actors in the orchestration sense — they are processes spawned and monitored by the orchestrator. Their only output channel is stdout (stream-json); their only input channel is stdin (the T+S+K bundle at spawn, or a `--resume` continuation).
+Agents are not actors in the orchestration sense — they are processes spawned and monitored by the orchestrator. Agents have two channels to the rest of the system:
+- **stdout** (stream-json) → Event Ingester → control-flow events (`poe:brief`, `poe:step`, `poe:decision`, `poe:review`, `poe:done`, etc.)
+- **MCP tool calls** → DAG Service → all data reads and writes (tasks, edges, knowledge, artifacts)
+
+Their only input channel is stdin (the T+S+K bundle at spawn, or a `--resume` continuation).
 
 ---
 
@@ -33,6 +38,12 @@ These sub-flows appear inside multiple primary flows. They are defined once here
 ### SF-1: Task Dispatch
 
 *Trigger*: Orchestrator wakes (any `DagChanged` signal) and finds a task where `status = pending` and all dependency tasks have `status = done`.
+
+`DagChanged` signals arrive from four sources:
+1. **DAG Service** — an agent called a mutation tool (`create_task`, `add_edge`, `cancel_task`, etc.); see SF-7
+2. **Event Ingester** — `poe:done` or `poe:yield` received in agent stdout
+3. **Human gate commands** — `activate_phase`, `advance_phase`, `revise_phase`, `rerun_phase`
+4. **Decision/chat resolution** — `resolve_decision`, `respond_to_chat`, `respond_to_advisor`
 
 ```
 0. Atomic claim:
@@ -285,6 +296,60 @@ Distinct from SF-1: the agent process has exited but the Claude session is still
 **Dedup rationale**: Multiple tasks may require the same missing skill simultaneously. Steps 3–6 ensure exactly one skill-author node is created per missing skill. Subsequent tasks that also fail `load_skill` for the same skill hit the dedup guard (step 3) and simply add a `depends_on` edge to the already-existing skill-author node.
 
 **phase_id = NULL**: The skill-author node is a system-generated supporting task (like reviewer tasks in SF-3). It does not belong to any user-visible phase and does not appear in the Phase × Scope Matrix. It appears in the activity feed because it emits `poe:` events.
+
+---
+
+### SF-7: DAG Service Write → Orchestrator Notification
+
+*Trigger*: A running agent calls a DAG Service mutation tool (`create_task`, `update_task`, `cancel_task`, `add_edge`, `remove_edge`, `write_knowledge`, `register_artifact`) via MCP.
+
+This sub-flow covers the path from an agent's MCP tool call to the orchestrator scheduling loop. It is a supporting flow — it fires inside any primary flow where an agent mutates the DAG (product-manager planning, rework, retrospective, execution agents discovering scope changes).
+
+```
+1. Agent calls MCP tool (e.g. create_task {title, skill, type, parent_id})
+   — via poe-dag-mcp subprocess connected to the agent via MCP stdio
+
+2. poe-dag-mcp validates the request:
+   - project_id scoping (reject cross-project references)
+   - cycle check (for add_edge)
+   - immutability check (for update_task: type, phase_id not writable)
+   - On validation failure: return MCP error response to agent (no DB write, no notification)
+
+3. poe-dag-mcp commits to SQLite (dag.db, WAL mode):
+   - INSERT / UPDATE / DELETE as appropriate
+   - Writes are serialised by SQLite WAL — concurrent reads safe
+
+4. poe-dag-mcp sends DagChanged notification to orchestrator:
+   - Writes {"type":"DagChanged","project_id":"...","node_id":"..."|null} to dag.sock
+   - node_id populated for node mutations; null for edge/knowledge/artifact writes
+
+5. poe-dag-mcp relays Tauri event to frontend (via main process relay over dag.sock):
+   - create_task    → poe-task-created    {id, title, type, skill, status, phase_id, ...}
+   - update_task    → poe-node-updated    {id, title?, skill?, description?, ...}
+   - cancel_task    → poe-node-updated    {id, status: "cancelled"} (one per affected node)
+   - add_edge       → poe-edge-created    {fromId, toId, edgeType}
+   - remove_edge    → poe-edge-removed    {fromId, toId}
+   - write_knowledge→ poe-knowledge-created {id, key, value, projectId}
+   - register_artifact → poe-artifact-created {id, filename, artifactType, projectId}
+
+6. poe-dag-mcp returns success response to agent (MCP tool result)
+   — agent continues execution; it does not wait for the orchestrator to wake
+
+7. Orchestrator reads DagChanged from dag.sock listener (background Tokio task):
+   → Runs scheduling loop for the affected project
+   → Finds any pending tasks that are now unblocked
+   → Dispatches each via SF-1
+
+8. Frontend receives Tauri event (step 5):
+   → Updates task matrix, DAG view, or knowledge/artifact panels as appropriate
+```
+
+**Concurrency**: Steps 6 and 7 are independent. The agent receives its tool result (step 6) before the orchestrator wakes (step 7). Multiple rapid tool calls from the same agent will queue `DagChanged` notifications; the orchestrator processes them serially and each scheduling pass is idempotent.
+
+**Read-only tools** (`get_task`, `get_phase_wbs`, `query_tasks`, `query_knowledge`, `get_artifact`, `run_tests`, `git_status`) skip steps 3–7 entirely: no DB write, no notification, no Tauri event. The tool result is returned to the agent directly.
+
+**Error path**: If the SQLite write at step 3 fails (disk full, lock timeout), poe-dag-mcp returns an MCP error response with code `DB_ERROR`. No notification is sent. The agent should emit `poe:decision` to surface the failure rather than silently continuing.
+
 
 **Invariants**:
 1. **Failing task stays `pending`**: `load_skill` failure never transitions a task to a terminal state. The task is left pending until the dependency is satisfied.
