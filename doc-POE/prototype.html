@@ -1455,9 +1455,8 @@ setTimeout(addLive,4000);
     resizerEl.style.bottom = (window.innerHeight - r.bottom) + 'px';
   }
 
-  function nearBoundary(x, y) {
-    const r = matrix.getBoundingClientRect();
-    return Math.abs(x - boundary()) <= HIT && y >= r.top && y <= r.bottom;
+  function nearBoundary(x) {
+    return Math.abs(x - boundary()) <= HIT;
   }
 
   updateResizerBounds();
@@ -1469,7 +1468,7 @@ setTimeout(addLive,4000);
       root.style.setProperty('--label-col', newW + 'px');
       return;
     }
-    if (nearBoundary(e.clientX, e.clientY)) {
+    if (nearBoundary(e.clientX)) {
       document.body.classList.add('col-resize-hover');
       document.body.style.cursor = 'col-resize';
     } else {
@@ -1479,7 +1478,7 @@ setTimeout(addLive,4000);
   });
 
   document.addEventListener('mousedown', e => {
-    if (!nearBoundary(e.clientX, e.clientY)) return;
+    if (!nearBoundary(e.clientX)) return;
     dragging = true;
     startX = e.clientX;
     startW = labelColW();
