@@ -13,9 +13,12 @@ interface GanttConnectorsProps {
   zoom: number;
   totalWidth: number;
   totalHeight: number;
+  chainIds?: Set<string>;
 }
 
-export function GanttConnectors({ connectors, zoom, totalWidth, totalHeight }: GanttConnectorsProps) {
+export function GanttConnectors({ connectors, zoom, totalWidth, totalHeight, chainIds }: GanttConnectorsProps) {
+  const hasChain = chainIds && chainIds.size > 0;
+
   return (
     <svg
       className="absolute inset-0 pointer-events-none"
@@ -24,20 +27,26 @@ export function GanttConnectors({ connectors, zoom, totalWidth, totalHeight }: G
       height={totalHeight}
     >
       {connectors.map((conn, idx) => {
-        // Keep vertical segment in connector channel (first 20px of each cell)
-        // Place it 10px into the channel immediately after the blocker
         const channelOffset = 10 * zoom;
         const verticalX = conn.fromX + channelOffset;
-
         const path = `M ${conn.fromX} ${conn.fromY} L ${verticalX} ${conn.fromY} L ${verticalX} ${conn.toY} L ${conn.toX} ${conn.toY}`;
+
+        const isChain = hasChain && chainIds!.has(conn.fromId) && chainIds!.has(conn.toId);
+
         return (
           <path
             key={`${conn.fromId}-${conn.toId}-${idx}`}
             d={path}
-            stroke={conn.isCritical ? "var(--gantt-connector-critical)" : "var(--gantt-connector)"}
-            strokeWidth="3"
+            stroke={
+              isChain
+                ? "#f97316"
+                : conn.isCritical
+                ? "var(--gantt-connector-critical)"
+                : "var(--gantt-connector)"
+            }
+            strokeWidth={isChain ? 4 : 3}
             fill="none"
-            opacity="0.9"
+            opacity={hasChain && !isChain ? 0.2 : 0.9}
             strokeLinecap="round"
             strokeLinejoin="round"
           />

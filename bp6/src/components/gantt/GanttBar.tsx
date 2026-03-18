@@ -7,9 +7,10 @@ interface GanttBarProps {
   item: GanttItem;
   onClick: (bead: BeadNode) => void;
   isSelected?: boolean;
+  isInChain?: boolean;
 }
 
-export const GanttBar = memo(function GanttBar({ item, onClick, isSelected }: GanttBarProps) {
+export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isInChain }: GanttBarProps) {
   const { bead, isCritical, isBlocked, x, width } = item;
   const isSummary = bead.issueType === 'epic' || bead.issueType === 'feature';
   const isMilestone = bead.estimate === 0 && !isSummary;
@@ -42,7 +43,9 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected }: Ga
         {isSummary ? (
           <div className={cn(
             "w-full h-2 relative rounded-sm border-b-2 transition-all",
-            isSelected ? "shadow-[0_0_15px_rgba(59,163,255,0.45)] ring-2 ring-[rgba(59,163,255,0.35)]" : "group-hover:shadow-md",
+            isSelected ? "shadow-[0_0_15px_rgba(59,163,255,0.45)] ring-2 ring-[rgba(59,163,255,0.35)]"
+              : isInChain ? "ring-2 ring-[rgba(249,115,22,0.5)] shadow-[0_0_10px_rgba(249,115,22,0.3)]"
+              : "group-hover:shadow-md",
             getSummaryColor()
           )}>
              <div className={cn("absolute left-0 -bottom-1 top-0 w-1.5 rounded-sm", getSummaryColor())} />
@@ -52,12 +55,16 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected }: Ga
           <div className={cn(
             "w-3.5 h-3.5 border-2 shadow-md transition-all group-hover:scale-125 rotate-45",
             milestoneBase,
-            isSelected ? "shadow-[0_0_15px_rgba(59,163,255,0.5)] ring-4 ring-[rgba(59,163,255,0.35)] scale-125" : "group-hover:border-[var(--accent-primary)]"
+            isSelected ? "shadow-[0_0_15px_rgba(59,163,255,0.5)] ring-4 ring-[rgba(59,163,255,0.35)] scale-125"
+              : isInChain ? "ring-4 ring-[rgba(249,115,22,0.45)] shadow-[0_0_12px_rgba(249,115,22,0.4)]"
+              : "group-hover:border-[var(--accent-primary)]"
           )} />
         ) : (
           <div className={cn(
             "h-6 rounded-sm border-2 shadow-md transition-all w-full relative overflow-hidden",
-            isSelected ? "ring-4 ring-[rgba(59,163,255,0.35)] border-[var(--accent-primary)] shadow-[var(--shadow-lg)] scale-[1.02]" : "group-hover:shadow-[var(--shadow-md)] group-hover:border-[var(--accent-primary)] group-hover:translate-y-[-1px]",
+            isSelected ? "ring-4 ring-[rgba(59,163,255,0.35)] border-[var(--accent-primary)] shadow-[var(--shadow-lg)] scale-[1.02]"
+              : isInChain ? "ring-4 ring-[rgba(249,115,22,0.45)] shadow-[0_0_14px_rgba(249,115,22,0.35)]"
+              : "group-hover:shadow-[var(--shadow-md)] group-hover:border-[var(--accent-primary)] group-hover:translate-y-[-1px]",
             getStatusColor()
           )}>
             {isInProgress && (

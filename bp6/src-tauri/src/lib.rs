@@ -339,7 +339,8 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
     let mut tree = build_wbs_tree(&filtered);
 
     // 5. Sort siblings (by dependencies or explicit sort)
-    tree = sort_wbs_tree_siblings(tree, &graph, &params.sort_by, &params.sort_order);
+    let depth_map = compute_execution_depth_map(&graph);
+    tree = sort_wbs_tree_siblings(tree, &graph, &params.sort_by, &params.sort_order, &depth_map, 0);
 
     eprintln!("⏱️  Tree building: {:.2}ms", tree_start.elapsed().as_secs_f64() * 1000.0);
     let layout_start = std::time::Instant::now();
@@ -378,12 +379,32 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
         }
     }
 
-    // 7. Calculate earliest start times (X positions)
-    let x_map = calculate_earliest_start_times(&filtered, &blocks_map);
-
-    // 8. Calculate node ranges (position and width)
+    // 7. Calculate earliest start times and node ranges via CPM fixed-point loop.
+    // Parent nodes may span multiple grid cells (their width = span of children).
+    // Downstream tasks blocked by a parent must start after the parent ENDS, not
+    // just after it starts.  We iterate until x positions stabilise (≤ 5 passes).
+    let parent_floors = build_parent_floors_map(&tree);
+    let mut node_durations: HashMap<String, usize> =
+        filtered.iter().map(|b| (b.id.clone(), 1usize)).collect();
+    let mut x_map = HashMap::new();
     let mut range_cache: HashMap<String, NodeRange> = HashMap::new();
-    calculate_node_ranges(&tree, &x_map, &mut range_cache);
+    for _ in 0..5 {
+        let new_x = calculate_earliest_start_times(&filtered, &blocks_map, &parent_floors, &node_durations);
+        let mut new_cache: HashMap<String, NodeRange> = HashMap::new();
+        calculate_node_ranges(&tree, &new_x, &mut new_cache);
+        // Extract cell-count durations from computed ranges.
+        let new_durations: HashMap<String, usize> = new_cache
+            .iter()
+            .map(|(id, r)| (id.clone(), (r.width / 10.0).ceil() as usize))
+            .collect();
+        let converged = new_durations == node_durations;
+        x_map = new_x;
+        range_cache = new_cache;
+        node_durations = new_durations;
+        if converged {
+            break;
+        }
+    }
 
     // 9. Find critical path
     let critical_path = find_critical_path(&filtered, &successors_map);
@@ -750,7 +771,8 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
     let mut tree = build_wbs_tree(&filtered);
 
     // 5. Sort siblings (by dependencies or explicit sort)
-    tree = sort_wbs_tree_siblings(tree, &graph, &params.sort_by, &params.sort_order);
+    let depth_map = compute_execution_depth_map(&graph);
+    tree = sort_wbs_tree_siblings(tree, &graph, &params.sort_by, &params.sort_order, &depth_map, 0);
 
     // Apply collapsed state
     fn apply_collapsed_state(nodes: &mut [WBSNode], collapsed_ids: &[String]) {
@@ -788,17 +810,32 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
         }
     }
 
-    // 7. Calculate earliest start times (logical units, not pixels)
-    let x_map = calculate_earliest_start_times(&filtered, &blocks_map);
-    eprintln!("⏱️  x_map has {} entries", x_map.len());
-    if !x_map.is_empty() {
-        let first_entry = x_map.iter().next().unwrap();
-        eprintln!("⏱️  First x_map entry: {} -> {}", first_entry.0, first_entry.1);
-    }
-
-    // 8. Calculate node ranges
+    // 7. Calculate earliest start times and node ranges via CPM fixed-point loop.
+    // Parent nodes may span multiple grid cells (their width = span of children).
+    // Downstream tasks blocked by a parent must start after the parent ENDS, not
+    // just after it starts.  We iterate until x positions stabilise (≤ 5 passes).
+    let parent_floors = build_parent_floors_map(&tree);
+    let mut node_durations: HashMap<String, usize> =
+        filtered.iter().map(|b| (b.id.clone(), 1usize)).collect();
+    let mut x_map = HashMap::new();
     let mut range_cache: HashMap<String, NodeRange> = HashMap::new();
-    calculate_node_ranges(&tree, &x_map, &mut range_cache);
+    for _ in 0..5 {
+        let new_x = calculate_earliest_start_times(&filtered, &blocks_map, &parent_floors, &node_durations);
+        let mut new_cache: HashMap<String, NodeRange> = HashMap::new();
+        calculate_node_ranges(&tree, &new_x, &mut new_cache);
+        let new_durations: HashMap<String, usize> = new_cache
+            .iter()
+            .map(|(id, r)| (id.clone(), (r.width / 10.0).ceil() as usize))
+            .collect();
+        let converged = new_durations == node_durations;
+        x_map = new_x;
+        range_cache = new_cache;
+        node_durations = new_durations;
+        if converged {
+            break;
+        }
+    }
+    eprintln!("⏱️  x_map has {} entries", x_map.len());
     eprintln!("⏱️  range_cache has {} entries", range_cache.len());
 
     // 9. Find critical path
@@ -1152,99 +1189,46 @@ fn build_dependency_graph(beads: &[Bead]) -> DependencyGraph {
     graph
 }
 
-/// Topologically sort nodes using Kahn's Algorithm.
+/// Compute the execution depth for every bead reachable in the dependency graph.
 ///
-/// This handles circular dependencies by appending remaining nodes at the end.
-/// Secondary sort by priority for deterministic ordering.
+/// Depth 0 = no predecessors (can start immediately).
+/// Depth n = longest predecessor chain has length n.
 ///
-/// # Arguments
-/// * `nodes` - The WBSNodes to sort (typically siblings at the same tree level)
-/// * `bead_ids` - Set of bead IDs that are part of this sibling group
-/// * `graph` - The dependency graph for all beads
-///
-/// # Returns
-/// A topologically sorted vector of WBSNodes.
-fn topological_sort(
-    nodes: Vec<WBSNode>,
-    bead_ids: &HashSet<String>,
-    graph: &DependencyGraph,
-) -> Vec<WBSNode> {
-    if nodes.len() <= 1 {
-        return nodes;
+/// This is the same algorithm as calculate_earliest_start_times but operates
+/// directly on the DependencyGraph so it can be called before the Gantt
+/// layout step (i.e. at sort time).
+fn compute_execution_depth_map(graph: &DependencyGraph) -> HashMap<String, usize> {
+    fn depth(
+        id: &str,
+        blocked_by: &HashMap<String, Vec<String>>,
+        cache: &mut HashMap<String, usize>,
+        visiting: &mut HashSet<String>,
+    ) -> usize {
+        if let Some(&d) = cache.get(id) { return d; }
+        if visiting.contains(id) { return 0; } // cycle guard
+        visiting.insert(id.to_string());
+        let preds = blocked_by.get(id).cloned().unwrap_or_default();
+        let d = preds
+            .iter()
+            .map(|p| depth(p, blocked_by, cache, &mut visiting.clone()) + 1)
+            .max()
+            .unwrap_or(0);
+        cache.insert(id.to_string(), d);
+        d
     }
 
-    // Build a map for quick lookup
-    let node_map: HashMap<String, WBSNode> =
-        nodes.into_iter().map(|n| (n.bead.id.clone(), n)).collect();
-
-    // Calculate in-degree for nodes in this sibling group
-    let mut in_degree: HashMap<String, usize> = HashMap::new();
-
-    for id in bead_ids {
-        // Count how many blockers from THIS sibling group block this node
-        let empty_vec = Vec::new();
-        let blockers = graph.blocked_by.get(id).unwrap_or(&empty_vec);
-        let count = blockers.iter().filter(|b| bead_ids.contains(*b)).count();
-        in_degree.insert(id.clone(), count);
-    }
-
-    // Initialize queue with nodes that have in-degree 0
-    let mut initial_nodes: Vec<&WBSNode> = node_map
-        .values()
-        .filter(|n| *in_degree.get(&n.bead.id).unwrap_or(&0) == 0)
+    let all_ids: HashSet<String> = graph.blocked_by.keys().cloned()
+        .chain(graph.blocks.keys().cloned())
         .collect();
 
-    // Sort by priority for deterministic ordering (ascending: P0 < P1 < P2)
-    // Secondary sort by ID for stability
-    initial_nodes.sort_by(|a, b| {
-        let ord = a.bead.priority.cmp(&b.bead.priority);
-        if ord == std::cmp::Ordering::Equal {
-            a.bead.id.cmp(&b.bead.id)
-        } else {
-            ord
-        }
-    });
-
-    let mut queue: Vec<String> = initial_nodes.iter().map(|n| n.bead.id.clone()).collect();
-    let mut result: Vec<WBSNode> = Vec::new();
-
-    // Kahn's algorithm
-    while let Some(u) = queue.pop() {
-        if let Some(node) = node_map.get(&u) {
-            result.push(node.clone());
-        }
-
-        // Process neighbors (nodes that u blocks)
-        if let Some(neighbors) = graph.blocks.get(&u) {
-            for v in neighbors {
-                // Only process if v is in this sibling group
-                if bead_ids.contains(v) {
-                    if let Some(degree) = in_degree.get_mut(v) {
-                        *degree = degree.saturating_sub(1);
-                        if *degree == 0 {
-                            queue.push(v.clone());
-                        }
-                    }
-                }
-            }
-        }
+    let mut cache: HashMap<String, usize> = HashMap::new();
+    for id in &all_ids {
+        let mut visiting = HashSet::new();
+        depth(id, &graph.blocked_by, &mut cache, &mut visiting);
     }
-
-    // Handle circular dependencies: append remaining nodes sorted by priority
-    if result.len() != node_map.len() {
-        let added_ids: HashSet<String> = result.iter().map(|n| n.bead.id.clone()).collect();
-        let mut remaining: Vec<WBSNode> = node_map
-            .into_iter()
-            .filter(|(id, _)| !added_ids.contains(id))
-            .map(|(_, node)| node)
-            .collect();
-
-        remaining.sort_by_key(|n| n.bead.priority);
-        result.extend(remaining);
-    }
-
-    result
+    cache
 }
+
 
 // ============================================================================
 // Filtering and State Distribution (bp6-07y.4)
@@ -1582,57 +1566,88 @@ fn build_wbs_tree(beads: &[Bead]) -> Vec<WBSNode> {
 // Gantt Layout Calculation - Earliest Start Times (bp6-07y.3.1)
 // ============================================================================
 
-/// Calculate earliest start time (X position) for each bead based on blocking dependencies.
-/// Uses memoization to avoid recomputation.
+/// Build a floors map from the WBS tree: maps each child_id to its direct parent_id.
+///
+/// Used by calculate_earliest_start_times so that parent-child scheduling
+/// constraints (child x >= parent x) are resolved in the same DAG pass as
+/// blocking dependencies.  This avoids the "collapse" bug where a second-pass
+/// floor application overwrites sequential sibling dependencies.
+fn build_parent_floors_map(tree: &[WBSNode]) -> HashMap<String, String> {
+    let mut map: HashMap<String, String> = HashMap::new();
+    fn walk(nodes: &[WBSNode], map: &mut HashMap<String, String>) {
+        for node in nodes {
+            for child in &node.children {
+                map.insert(child.bead.id.clone(), node.bead.id.clone());
+            }
+            // Recurse AFTER mapping all direct children so grandchildren are handled
+            walk(&node.children, map);
+        }
+    }
+    walk(tree, &mut map);
+    map
+}
+
+/// Calculate earliest start time (X position) for each bead.
+///
+/// Two types of edges are handled in a single DAG pass:
+///   - blocking dep (A blocks B):  x[B] >= x[A] + 1
+///   - parent-child floor  (P is parent of C):  x[C] >= x[P]  (weight 0)
+///
+/// Resolving both constraints together prevents the "collapse" bug: when a
+/// parent is delayed by external dependencies, children's sequential sibling
+/// dependencies are preserved and not all flattened to the parent's floor.
 fn calculate_earliest_start_times(
     beads: &[Bead],
     blocks_map: &HashMap<String, Vec<String>>,
+    parent_floors: &HashMap<String, String>,
+    node_durations: &HashMap<String, usize>,
 ) -> HashMap<String, usize> {
     let mut x_map: HashMap<String, usize> = HashMap::new();
 
     fn get_x(
         id: &str,
         blocks_map: &HashMap<String, Vec<String>>,
+        parent_floors: &HashMap<String, String>,
+        node_durations: &HashMap<String, usize>,
         x_map: &mut HashMap<String, usize>,
         visited: &mut HashSet<String>,
     ) -> usize {
-        // Return memoized result if available
         if let Some(&x) = x_map.get(id) {
             return x;
         }
-
-        // Detect circular dependencies
         if visited.contains(id) {
-            return 0;
+            return 0; // cycle guard
         }
-
         visited.insert(id.to_string());
 
-        // Get predecessors (beads that block this one)
+        // Blocking predecessors: child starts after predecessor finishes.
+        // Edge weight = predecessor's cell-count duration so that parents (which
+        // may span multiple cells) push their dependants past their full extent.
         let preds = blocks_map.get(id).cloned().unwrap_or_default();
-
-        if preds.is_empty() {
-            // No blockers, start at x=0
-            x_map.insert(id.to_string(), 0);
-            return 0;
-        }
-
-        // Calculate x as max(predecessor x values) + 1
-        let max_pred_x = preds
+        let pred_x = preds
             .iter()
-            .map(|p| get_x(p, blocks_map, x_map, &mut visited.clone()))
+            .map(|p| {
+                let p_x = get_x(p, blocks_map, parent_floors, node_durations, x_map, &mut visited.clone());
+                let p_dur = node_durations.get(p).copied().unwrap_or(1);
+                p_x + p_dur
+            })
             .max()
             .unwrap_or(0);
 
-        let x = max_pred_x + 1;
+        // Parent floor: child must start no earlier than parent (weight 0).
+        let floor_x = parent_floors
+            .get(id)
+            .map(|p| get_x(p, blocks_map, parent_floors, node_durations, x_map, &mut visited.clone()))
+            .unwrap_or(0);
+
+        let x = pred_x.max(floor_x);
         x_map.insert(id.to_string(), x);
         x
     }
 
-    // Calculate x position for all beads
     for bead in beads {
         let mut visited = HashSet::new();
-        get_x(&bead.id, blocks_map, &mut x_map, &mut visited);
+        get_x(&bead.id, blocks_map, parent_floors, node_durations, &mut x_map, &mut visited);
     }
 
     x_map
@@ -1721,6 +1736,8 @@ fn sort_wbs_tree_siblings(
     graph: &DependencyGraph,
     sort_by: &SortBy,
     sort_order: &SortOrder,
+    depth_map: &HashMap<String, usize>,
+    parent_floor: usize,
 ) -> Vec<WBSNode> {
     // If explicit sort is requested, use it
     if *sort_by != SortBy::None && *sort_order != SortOrder::None {
@@ -1747,23 +1764,30 @@ fn sort_wbs_tree_siblings(
             }
         });
     } else {
-        // Fallback to topological sort based on dependencies
-        let sibling_ids: HashSet<String> = tree.iter().map(|n| n.bead.id.clone()).collect();
-
-        // If only one node, no sorting needed
-        if tree.len() > 1 {
-            tree = topological_sort(tree, &sibling_ids, graph);
-        }
+        // Default: execution order — unblocked siblings first, then by dependency
+        // depth, inheriting a floor from the parent so that children of a delayed
+        // parent are never sorted before that parent's wave.
+        tree.sort_by(|a, b| {
+            let a_depth = depth_map.get(&a.bead.id).copied().unwrap_or(0).max(parent_floor);
+            let b_depth = depth_map.get(&b.bead.id).copied().unwrap_or(0).max(parent_floor);
+            a_depth.cmp(&b_depth)
+                .then(a.bead.priority.cmp(&b.bead.priority))
+                .then(a.bead.id.cmp(&b.bead.id))
+        });
     }
 
-    // Recursively sort children
+    // Recursively sort children, propagating this node's effective depth as
+    // the floor so children respect their parent's scheduling wave.
     for node in &mut tree {
         if !node.children.is_empty() {
+            let node_floor = depth_map.get(&node.bead.id).copied().unwrap_or(0).max(parent_floor);
             node.children = sort_wbs_tree_siblings(
                 node.children.clone(),
                 graph,
                 sort_by,
                 sort_order,
+                depth_map,
+                node_floor,
             );
         }
     }
@@ -1831,16 +1855,18 @@ fn calculate_node_ranges(
                 let earliest_start = x_map.get(&node.bead.id).copied().unwrap_or(0) as f64;
                 NodeRange { x: earliest_start, width: 10.0 }
             } else {
-                // Start at earliest child's start, end at latest child's end
+                // r.x is in cell-index units; r.width is in time units (10 per cell).
+                // Convert to a common unit (cells) before computing the span, then
+                // convert the resulting width back to time units for consistency.
                 let min_x = child_ranges.iter().map(|r| r.x).fold(f64::INFINITY, f64::min);
-                let max_x = child_ranges
+                let max_end_cell = child_ranges
                     .iter()
-                    .map(|r| r.x + r.width)
+                    .map(|r| r.x + (r.width / 10.0).ceil())
                     .fold(f64::NEG_INFINITY, f64::max);
 
                 NodeRange {
                     x: min_x,
-                    width: max_x - min_x,
+                    width: (max_end_cell - min_x) * 10.0,
                 }
             }
         };
@@ -2331,6 +2357,17 @@ pub fn run() {
             // beads.db if one is available from the launch directory.
             let mut beads_watcher = BeadsWatcher::new(handle.clone())
                 .expect("Failed to create beads watcher");
+
+            // Seed current_dir from the most recently opened project so that
+            // find_repo_root() works correctly regardless of where the app binary
+            // was launched from (bundled .app, dev mode, etc.).
+            if let Ok(mut projects) = get_projects() {
+                projects.sort_by(|a, b| b.last_opened.cmp(&a.last_opened));
+                if let Some(project) = projects.first() {
+                    let _ = std::env::set_current_dir(&project.path);
+                    eprintln!("🚀 Startup: set current_dir to most recently opened project: {}", project.path);
+                }
+            }
 
             // Seed dump file and start watching on startup
             if let Some(repo_path) = bd::find_repo_root() {

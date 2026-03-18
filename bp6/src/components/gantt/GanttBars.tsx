@@ -9,9 +9,12 @@ interface GanttBarsProps {
   onBeadClick: (bead: BeadNode) => void;
   onOpenChat: (persona: string, task?: string, beadId?: string, role?: string) => void;
   sessionsByBead: Record<string, string[]>;
+  chainIds?: Set<string>;
 }
 
-export function GanttBars({ items, selectedBead, onBeadClick }: GanttBarsProps) {
+export function GanttBars({ items, selectedBead, onBeadClick, chainIds }: GanttBarsProps) {
+  const hasChain = chainIds && chainIds.size > 0;
+
   return (
     <>
       {items.map((item) => (
@@ -22,13 +25,16 @@ export function GanttBars({ items, selectedBead, onBeadClick }: GanttBarsProps) 
             top: item.row * ROW_HEIGHT,
             height: ROW_HEIGHT,
             left: 0,
-            right: 0
+            right: 0,
+            opacity: hasChain && !chainIds!.has(item.bead.id) ? 0.3 : 1,
+            transition: 'opacity 0.15s ease',
           }}
         >
           <GanttBar
             item={item}
             onClick={onBeadClick}
             isSelected={selectedBead?.id === item.bead.id}
+            isInChain={hasChain ? chainIds!.has(item.bead.id) : false}
           />
         </div>
       ))}
