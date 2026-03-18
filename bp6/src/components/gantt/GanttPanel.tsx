@@ -6,6 +6,67 @@ import { GanttConnectors } from "./GanttConnectors";
 import { GanttBars } from "./GanttBars";
 import { GanttSkeleton } from "../shared/Skeleton";
 
+// Distinct palette for dependency threads. Each root node (no predecessors
+// in the connector graph) gets a color; that color propagates along every
+// edge reachable from that root so you can follow each strand visually.
+const THREAD_COLORS = [
+  '#f97316', // orange
+  '#3b82f6', // blue
+  '#22c55e', // green
+  '#a855f7', // purple
+  '#14b8a6', // teal
+  '#ef4444', // red
+  '#f59e0b', // amber
+  '#06b6d4', // cyan
+  '#ec4899', // pink
+  '#84cc16', // lime
+];
+
+// For each connector edge (fromId → toId), return the list of thread colors
+// that flow through it. A "thread" originates at every source node (no
+// predecessors) and propagates via DFS to all reachable successors.
+function computeEdgeThreads(connectors: Connector[]): Map<string, string[]> {
+  if (connectors.length === 0) return new Map();
+
+  const succs = new Map<string, string[]>();
+  const hasPred = new Set<string>();
+  const allNodes = new Set<string>();
+
+  for (const conn of connectors) {
+    allNodes.add(conn.fromId);
+    allNodes.add(conn.toId);
+    if (!succs.has(conn.fromId)) succs.set(conn.fromId, []);
+    succs.get(conn.fromId)!.push(conn.toId);
+    hasPred.add(conn.toId);
+  }
+
+  // Source nodes: appear in the connector graph but have no predecessors.
+  const sources = [...allNodes].filter(id => !hasPred.has(id));
+
+  const edgeThreads = new Map<string, string[]>();
+
+  sources.forEach((src, i) => {
+    const color = THREAD_COLORS[i % THREAD_COLORS.length];
+    const stack = [src];
+    const visited = new Set<string>();
+
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      if (visited.has(node)) continue;
+      visited.add(node);
+      for (const succ of succs.get(node) ?? []) {
+        const key = `${node}-${succ}`;
+        if (!edgeThreads.has(key)) edgeThreads.set(key, []);
+        const colors = edgeThreads.get(key)!;
+        if (!colors.includes(color)) colors.push(color);
+        stack.push(succ);
+      }
+    }
+  });
+
+  return edgeThreads;
+}
+
 interface GanttPanelProps {
   items: GanttItem[];
   rowCount: number;
@@ -41,8 +102,12 @@ export function GanttPanel({
 }: GanttPanelProps) {
   const totalHeight = Math.max(600, rowCount * ROW_HEIGHT);
 
-  // Compute the transitive dependency chain from the selected bead.
-  // Walks backwards (predecessors) and forwards (successors) through connectors.
+  // Thread colors: one color per source node in the connector graph, propagated
+  // along every reachable edge. Recompute only when connectors change.
+  const edgeThreads = useMemo(() => computeEdgeThreads(connectors), [connectors]);
+
+  // Transitive dependency chain from the selected bead (predecessors + successors).
+  // Used to dim bars and connectors that aren't part of the selected chain.
   const chainIds = useMemo(() => {
     if (!selectedBead) return new Set<string>();
 
@@ -88,6 +153,7 @@ export function GanttPanel({
           totalWidth={totalWidth}
           totalHeight={totalHeight}
           chainIds={chainIds}
+          edgeThreads={edgeThreads}
         />
         <GanttBars
           items={items}
