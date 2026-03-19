@@ -4,8 +4,8 @@ export interface ThreadInfo {
   index: number;
 }
 
-const LANE_DX = 3; // px — horizontal separation between thread vertical channels
-const LANE_DY = 3; // px — vertical separation between thread horizontal runs
+const LANE_DX = 1.5; // px — horizontal separation between thread vertical channels
+const LANE_DY = 1.5; // px — vertical separation between thread horizontal runs
 
 interface Connector {
   fromId: string;

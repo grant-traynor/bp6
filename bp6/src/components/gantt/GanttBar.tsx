@@ -58,7 +58,7 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isIn
           // Feature group: square outlined container bar — visually distinct from
           // the epic rollup and from plain task bars (no rounding, border-only fill).
           <div className={cn(
-            "w-full h-5 relative rounded-none border-2 transition-all",
+            "w-full h-4 relative rounded-none border-2 transition-all",
             bead.status === 'closed' ? "opacity-50" : "",
             isSelected
               ? "shadow-[0_0_15px_rgba(59,163,255,0.45)] ring-2 ring-[rgba(59,163,255,0.35)] border-[var(--accent-primary)]"
@@ -77,7 +77,7 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isIn
           )} />
         ) : (
           <div className={cn(
-            "h-6 rounded-sm border-2 shadow-md transition-all w-full relative overflow-hidden",
+            "h-4 rounded-sm border-2 shadow-md transition-all w-full relative overflow-hidden",
             isSelected ? "ring-4 ring-[rgba(59,163,255,0.35)] border-[var(--accent-primary)] shadow-[var(--shadow-lg)] scale-[1.02]"
               : isInChain ? "ring-4 ring-[rgba(249,115,22,0.45)] shadow-[0_0_14px_rgba(249,115,22,0.35)]"
               : "group-hover:shadow-[var(--shadow-md)] group-hover:border-[var(--accent-primary)] group-hover:translate-y-[-1px]",
