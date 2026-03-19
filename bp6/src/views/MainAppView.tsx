@@ -1,6 +1,6 @@
-import React from "react";
+import React, { useState, useRef, useCallback } from "react";
 import { cn } from "../utils";
-import { Info } from "lucide-react";
+import { Info, Maximize2, Minimize2 } from "lucide-react";
 import type { BeadNode, SessionInfo } from "../api";
 import { createSessionWindow, terminateSession } from "../api";
 import { Navigation } from "../components/layout/Navigation";
@@ -213,6 +213,42 @@ export function MainAppView({
   handleMouseEnter,
   favoriteBeads,
 }: MainAppViewProps) {
+  // ── Bottom terminal panel ──────────────────────────────────────────────────
+  const defaultTerminalHeight = Math.floor(window.innerHeight * 0.30);
+  const [terminalHeight, setTerminalHeight] = useState(defaultTerminalHeight);
+  const lastManualHeightRef = useRef(defaultTerminalHeight);
+  const [terminalExpanded, setTerminalExpanded] = useState(false);
+
+  const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = terminalHeight;
+    const onMove = (ev: MouseEvent) => {
+      const delta = startY - ev.clientY; // drag up = taller
+      const newH = Math.max(60, Math.min(window.innerHeight - 120, startHeight + delta));
+      setTerminalHeight(newH);
+      lastManualHeightRef.current = newH;
+      setTerminalExpanded(false);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [terminalHeight]);
+
+  const toggleTerminalExpand = useCallback(() => {
+    if (terminalExpanded) {
+      setTerminalHeight(lastManualHeightRef.current);
+      setTerminalExpanded(false);
+    } else {
+      setTerminalHeight(window.innerHeight - 80); // fill minus header
+      setTerminalExpanded(true);
+    }
+  }, [terminalExpanded]);
+  // ──────────────────────────────────────────────────────────────────────────
+
   // Distributions from viewModel metadata
   const distributions: BucketDistribution[] = viewModel?.metadata?.distributions ?? [];
   // Shared width for gantt header and body — must match for scroll sync to work
@@ -481,7 +517,7 @@ export function MainAppView({
         onOpenPalettePreview={() => setShowPalettePreview(true)}
         selectedBeadId={selectedBead?.id}
       />
-      <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative">
+      <main className="flex-1 flex flex-col min-w-0 bg-[var(--background-primary)] relative overflow-hidden">
         <Header
           isDark={isDark}
           setIsDark={setIsDark}
@@ -499,7 +535,52 @@ export function MainAppView({
           currentCli={currentCli}
           setCurrentCli={setCurrentCli}
         />
-        {renderMainContent()}
+        {/* Content + bottom terminal panel */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {renderMainContent()}
+          </div>
+
+          {/* ── Bottom terminal panel ── */}
+          {hasProject && (
+            <div
+              className="flex-shrink-0 flex flex-col border-t-2 border-[var(--border-primary)] bg-[var(--background-primary)]"
+              style={{ height: terminalHeight }}
+            >
+              {/* Drag handle + toolbar */}
+              <div
+                className="flex-shrink-0 flex items-center justify-between px-3 h-7 bg-[var(--background-secondary)] border-b border-[var(--border-primary)]/50 cursor-ns-resize select-none"
+                onMouseDown={handleTerminalResizeStart}
+              >
+                <div className="flex items-center gap-1.5 pointer-events-none">
+                  <div className="w-6 h-0.5 rounded-full bg-[var(--border-primary)]" />
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)]">
+                    Shell
+                  </span>
+                </div>
+                <button
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={toggleTerminalExpand}
+                  className="pointer-events-auto p-1 rounded hover:bg-[var(--background-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                  title={terminalExpanded ? "Restore" : "Expand"}
+                >
+                  {terminalExpanded
+                    ? <Minimize2 size={13} strokeWidth={2.5} />
+                    : <Maximize2 size={13} strokeWidth={2.5} />}
+                </button>
+              </div>
+
+              {/* Terminal body */}
+              <div className="flex-1 min-h-0">
+                <Terminal
+                  key={`${currentProjectPath}-${projectShellKey}`}
+                  sessionId={PROJECT_SHELL_ID}
+                  projectPath={currentProjectPath}
+                />
+              </div>
+            </div>
+          )}
+        </div>
       </main>
 
       {showPalettePreview && (
