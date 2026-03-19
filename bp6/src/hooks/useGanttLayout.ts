@@ -70,11 +70,12 @@ export function useGanttLayout(
     // Traverse tree and build visible items with row numbers
     const traverse = (nodes: BeadNode[], depth: number = 0) => {
       nodes.forEach(node => {
-        // Convert cell offset/count to pixels
-        // Cell size: 100px at zoom=1
+        // Convert cell offset/count to pixels.
+        // Bars fill 72% of their cell span so connector lines have a clear
+        // right-side channel to route through without crowding the bar.
         const cellSize = 100 * zoom;
         const x = node.cellOffset * cellSize;
-        const width = node.cellCount * cellSize;
+        const width = node.cellCount * cellSize * 0.72;
 
         const item: GanttItem = {
           bead: node,
