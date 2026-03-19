@@ -77,7 +77,7 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isIn
           )} />
         ) : (
           <div className={cn(
-            "h-6 rounded-sm border-2 shadow-md transition-all w-full relative overflow-hidden",
+            "h-5 rounded-sm border-2 shadow-md transition-all w-full relative overflow-hidden",
             isSelected ? "ring-4 ring-[rgba(59,163,255,0.35)] border-[var(--accent-primary)] shadow-[var(--shadow-lg)] scale-[1.02]"
               : isInChain ? "ring-4 ring-[rgba(249,115,22,0.45)] shadow-[0_0_14px_rgba(249,115,22,0.35)]"
               : "group-hover:shadow-[var(--shadow-md)] group-hover:border-[var(--accent-primary)] group-hover:translate-y-[-1px]",
@@ -94,11 +94,11 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isIn
           isSelected ? "opacity-100 scale-105 origin-left" : "opacity-80 group-hover:opacity-100 group-hover:translate-x-1"
         )}>
           <span className={cn(
-            "text-base font-black tracking-tight transition-colors",
-            isSelected ? "text-[var(--accent-primary)] drop-shadow-md" : 
+            "text-[13px] font-black tracking-tight transition-colors",
+            isSelected ? "text-[var(--accent-primary)] drop-shadow-md" :
             bead.status === 'closed' ? "text-[var(--text-muted)] italic font-bold" : "text-[var(--text-primary)] drop-shadow-sm"
           )}>{bead.title}</span>
-          {isCritical && !isMilestone && <Flame size={14} className={cn("fill-current", isSelected ? "text-[var(--accent-primary)]" : "text-rose-500 dark:text-rose-400")} />}
+          {isCritical && !isMilestone && <Flame size={11} className={cn("fill-current", isSelected ? "text-[var(--accent-primary)]" : "text-rose-500 dark:text-rose-400")} />}
         </div>
       </div>
     </div>
