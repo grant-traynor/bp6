@@ -58,14 +58,64 @@ impl SettingsState {
 struct BeadsWatcher {
     watcher: notify::RecommendedWatcher,
     current_path: Option<PathBuf>,
-    #[allow(dead_code)] // Used in watcher closure
-    last_emit: Arc<Mutex<Instant>>,
+    // Sender side of the trailing-debounce channel.
+    // Each relevant fs event sends the repo PathBuf here; the background
+    // task drains for 300ms of quiet then runs bd export + emits.
+    #[allow(dead_code)]
+    event_tx: std::sync::mpsc::Sender<PathBuf>,
 }
 
 impl BeadsWatcher {
     fn new(handle: AppHandle) -> Result<Self, String> {
-        let last_emit = Arc::new(Mutex::new(Instant::now()));
-        let emit_clone = Arc::clone(&last_emit);
+        // Unbounded channel: watcher thread sends, debounce task receives.
+        let (event_tx, event_rx) = std::sync::mpsc::channel::<PathBuf>();
+        let tx_clone = event_tx.clone();
+
+        // Background thread: trailing debounce — fires 300ms after the last event.
+        let handle_clone = handle.clone();
+        std::thread::spawn(move || {
+            const SETTLE: Duration = Duration::from_millis(300);
+            loop {
+                // Block until the first event arrives.
+                let repo_path = match event_rx.recv() {
+                    Ok(p) => p,
+                    Err(_) => break, // channel closed
+                };
+                // Drain any additional events that arrive within SETTLE window,
+                // keeping the most-recent repo path.
+                let mut latest = repo_path;
+                loop {
+                    match event_rx.recv_timeout(SETTLE) {
+                        Ok(p) => { latest = p; } // more events — reset the window
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break, // settled
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+                // Events have settled — run bd export then notify the frontend.
+                let dump_path = latest.join(".bp6").join("issue_dump.jsonl");
+                if let Some(bp6_dir) = dump_path.parent() {
+                    let _ = std::fs::create_dir_all(bp6_dir);
+                }
+                eprintln!("👁️  Watcher: running bd export → {}", dump_path.display());
+                if let Some(bd_path) = bd::resolve_cli_path("bd") {
+                    match std::process::Command::new(bd_path)
+                        .arg("export")
+                        .arg("-o")
+                        .arg(&dump_path)
+                        .current_dir(&latest)
+                        .output()
+                    {
+                        Ok(out) if out.status.success() => eprintln!("👁️  Watcher: bd export OK"),
+                        Ok(out) => eprintln!("👁️  Watcher: bd export failed: {}", String::from_utf8_lossy(&out.stderr)),
+                        Err(e) => eprintln!("👁️  Watcher: bd export error: {e}"),
+                    }
+                } else {
+                    eprintln!("👁️  Watcher: bd not found");
+                }
+                eprintln!("👁️  Watcher: emitting beads-updated");
+                let _ = handle_clone.emit("beads-updated", ());
+            }
+        });
 
         let watcher = notify::RecommendedWatcher::new(
             move |res: std::result::Result<notify::Event, notify::Error>| {
@@ -73,75 +123,24 @@ impl BeadsWatcher {
                     Ok(event) => {
                         // Trigger on last-touched — updated by the daemon on every
                         // mutation, regardless of whether beads uses SQLite or Dolt.
-                        let is_last_touched = event.paths.iter().any(|p| {
+                        let last_touched_path = event.paths.iter().find(|p| {
                             p.file_name()
                                 .and_then(|n| n.to_str())
                                 .map(|n| n == "last-touched")
                                 .unwrap_or(false)
                         });
-
-                        if !is_last_touched {
-                            return;
-                        }
+                        let Some(lt_path) = last_touched_path else { return };
 
                         // Accept any event kind — notify 8.x on macOS FSEvents can emit
-                        // EventKind::Any for writes/touches that beads makes to last-touched,
-                        // and silently dropping those would prevent the UI from refreshing.
-                        // The is_last_touched guard above is specific enough.
-                        eprintln!("👁️  Watcher: last-touched event kind={:?} paths={:?}", event.kind, event.paths);
+                        // EventKind::Any for writes that beads makes to last-touched.
+                        eprintln!("👁️  Watcher: last-touched event kind={:?}", event.kind);
+                        if matches!(event.kind, notify::EventKind::Remove(_)) { return; }
 
-                        // Skip Remove events — only care about the file being written/touched.
-                        if matches!(event.kind, notify::EventKind::Remove(_)) {
-                            return;
+                        // Derive repo root (.beads/last-touched → repo) and send to debouncer.
+                        if let Some(repo) = lt_path.parent().and_then(|d| d.parent()) {
+                            let _ = tx_clone.send(repo.to_path_buf());
                         }
-
-                        let mut last = emit_clone.lock().unwrap();
-                        let now = Instant::now();
-                        let elapsed = now.duration_since(*last);
-                        eprintln!("👁️  Watcher: elapsed={:.0}ms (debounce=250ms)", elapsed.as_secs_f64() * 1000.0);
-                        if elapsed >= Duration::from_millis(250) {
-                            *last = now;
-
-                            // Derive repo root from the event path (.beads/last-touched -> repo)
-                            if let Some(last_touched_path) = event.paths.iter().find(|p| {
-                                p.file_name().and_then(|n| n.to_str()).map(|n| n == "last-touched").unwrap_or(false)
-                            }) {
-                                if let Some(beads_dir) = last_touched_path.parent() {
-                                    if let Some(repo_path) = beads_dir.parent() {
-                                        let dump_path = repo_path.join(".bp6").join("issue_dump.jsonl");
-                                        if let Some(bp6_dir) = dump_path.parent() {
-                                            let _ = std::fs::create_dir_all(bp6_dir);
-                                        }
-                                        eprintln!("👁️  Watcher: running bd export → {}", dump_path.display());
-                                        if let Some(bd_path) = bd::resolve_cli_path("bd") {
-                                            match std::process::Command::new(bd_path)
-                                                .arg("export")
-                                                .arg("-o")
-                                                .arg(&dump_path)
-                                                .current_dir(repo_path)
-                                                .output()
-                                            {
-                                                Ok(out) if out.status.success() => {
-                                                    eprintln!("👁️  Watcher: bd export OK");
-                                                }
-                                                Ok(out) => {
-                                                    eprintln!("👁️  Watcher: bd export failed: {}", String::from_utf8_lossy(&out.stderr));
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("👁️  Watcher: bd export error: {}", e);
-                                                }
-                                            }
-                                        } else {
-                                            eprintln!("👁️  Watcher: bd not found");
-                                        }
-                                    }
-                                }
-                            }
-
-                            eprintln!("👁️  Watcher: emitting beads-updated");
-                            let _ = handle.emit("beads-updated", ());
-                        }
-                    },
+                    }
                     Err(e) => eprintln!("Watch error: {:?}", e),
                 }
             },
@@ -151,7 +150,7 @@ impl BeadsWatcher {
         Ok(BeadsWatcher {
             watcher,
             current_path: None,
-            last_emit,
+            event_tx,
         })
     }
 
@@ -2295,6 +2294,22 @@ fn get_projects_path() -> Result<PathBuf, String> {
     Ok(projects_path)
 }
 
+/// Returns the mtime of `.beads/last-touched` as milliseconds since Unix epoch,
+/// or 0 if the file does not exist. The frontend polls this to detect changes
+/// that the file-watcher may have missed (e.g. when the app is backgrounded).
+#[tauri::command]
+fn get_beads_fingerprint(project_path: String) -> u64 {
+    let path = std::path::Path::new(&project_path)
+        .join(".beads")
+        .join("last-touched");
+    path.metadata()
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 #[tauri::command]
 fn get_projects() -> Result<Vec<Project>, String> {
     let path = get_projects_path()?;
@@ -2425,6 +2440,7 @@ pub fn run() {
         .plugin(tauri_plugin_pty::init())
         .invoke_handler(tauri::generate_handler![
             bd::get_beads, bd::sync_project, get_processed_data, get_project_view_model, bd::update_bead, bd::create_bead, bd::close_bead, bd::reopen_bead, bd::claim_bead,
+            get_beads_fingerprint,
             get_projects, add_project, remove_project, open_project, toggle_favorite,
             get_current_dir,
             agent::session::start_agent_session,

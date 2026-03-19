@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, startTransition } from "react";
 import {
   fetchProjectViewModel,
+  getBeadsFingerprint,
   saveStartupState,
   type ProjectViewModel,
 } from "../api";
@@ -196,6 +197,33 @@ export function useFilterState(input: UseFilterStateInput): UseFilterStateReturn
   const incrementRefetchTrigger = useCallback(() => {
     setRefetchTrigger((prev) => prev + 1);
   }, []);
+
+  // Fingerprint polling — fallback for changes the file-watcher misses.
+  // Polls every 30s; triggers a refresh only when the mtime has changed.
+  const lastFingerprintRef = useRef<number>(0);
+  useEffect(() => {
+    if (!hasProject || !currentProjectPath) return;
+
+    const poll = async () => {
+      try {
+        const fp = await getBeadsFingerprint(currentProjectPath);
+        if (fp !== 0 && fp !== lastFingerprintRef.current) {
+          if (lastFingerprintRef.current !== 0) {
+            // Only refresh if we had a previous value — avoids spurious load on mount.
+            incrementRefetchTrigger();
+          }
+          lastFingerprintRef.current = fp;
+        }
+      } catch {
+        // Non-fatal — polling is best-effort
+      }
+    };
+
+    // Seed the initial fingerprint without triggering a refresh.
+    poll();
+    const interval = setInterval(poll, 30_000);
+    return () => clearInterval(interval);
+  }, [hasProject, currentProjectPath, incrementRefetchTrigger]);
 
   return {
     filterText,

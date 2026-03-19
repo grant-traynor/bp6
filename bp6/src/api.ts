@@ -277,6 +277,11 @@ export async function startAgentSession(
  * @returns The current CLI backend ('gemini', 'claude', or 'claude-code')
  * @throws Error if unable to read CLI preference from storage
  */
+/** Returns the mtime of .beads/last-touched in ms since epoch, or 0 if absent. */
+export async function getBeadsFingerprint(projectPath: string): Promise<number> {
+  return await invoke<number>("get_beads_fingerprint", { projectPath });
+}
+
 export async function getCliPreference(): Promise<string> {
   try {
     return await invoke<string>("get_cli_preference");
