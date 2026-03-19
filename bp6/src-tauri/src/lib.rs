@@ -1765,13 +1765,14 @@ impl Default for SortBy {
 // WBS Tree Building - Sort Siblings by Dependencies (bp6-07y.2.4)
 // ============================================================================
 
-/// Compare two bead IDs numerically on their suffix segments.
-/// IDs like "bp6-2" and "bp6-14" are split on '-' and each segment is
-/// compared as a number when both sides parse, otherwise as a string.
-/// This gives natural ordering: bp6-2 < bp6-10 < bp6-14.
+/// Compare two bead IDs with natural (numeric) ordering.
+/// IDs may use '-' and '.' as separators (e.g. "bp6-36e.2" vs "bp6-36e.10").
+/// Each segment is compared as a u64 when both sides parse as integers,
+/// otherwise as a string, giving: bp6-36e.2 < bp6-36e.10 < bp6-36e.14.
 fn cmp_id_natural(a: &str, b: &str) -> std::cmp::Ordering {
-    let parts_a: Vec<&str> = a.split('-').collect();
-    let parts_b: Vec<&str> = b.split('-').collect();
+    // Split on both '-' and '.' so sub-issue suffixes sort numerically.
+    let parts_a: Vec<&str> = a.split(['-', '.']).collect();
+    let parts_b: Vec<&str> = b.split(['-', '.']).collect();
     let len = parts_a.len().max(parts_b.len());
     for i in 0..len {
         let pa = parts_a.get(i).copied().unwrap_or("");
