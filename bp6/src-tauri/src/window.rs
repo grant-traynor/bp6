@@ -117,8 +117,9 @@ impl WindowRegistry {
 pub async fn create_session_window(
     app: AppHandle,
     sessionId: String,
+    anchorLabel: Option<String>,
 ) -> Result<String, String> {
-    eprintln!("🪟 create_session_window: session_id={}", sessionId);
+    eprintln!("🪟 create_session_window: session_id={} anchor={:?}", sessionId, anchorLabel);
 
     // Generate window label from session ID
     let window_label = format!("agent-session-{}", sessionId);
@@ -152,33 +153,24 @@ pub async fn create_session_window(
         .resizable(true)
         .always_on_top(true);
 
-    // Compute default size and center position using the monitor the main window
-    // is currently on, falling back to primary.
-    // NOTE: .center() always centers on the PRIMARY monitor — we must compute
-    // the center manually so the chat window appears on the correct screen.
+    // Determine default size from the active monitor (main window's monitor or primary).
     let active_monitor = app
         .get_webview_window("main")
         .and_then(|w| w.current_monitor().ok().flatten())
         .or_else(|| app.primary_monitor().ok().flatten());
 
-    // Extract logical size AND logical origin of the active monitor
-    let (default_w, default_h, monitor_x, monitor_y) = active_monitor
+    let (default_w, default_h) = active_monitor
+        .as_ref()
         .map(|m| {
             let scale = m.scale_factor();
             let phys = m.size();
-            let pos = m.position();
             let w = (phys.width as f64 / scale) * 0.30;
             let h = (phys.height as f64 / scale) * 0.50;
-            let mx = pos.x as f64 / scale;
-            let my = pos.y as f64 / scale;
-            let mw = phys.width as f64 / scale;
-            let mh = phys.height as f64 / scale;
-            // Center the chat window within this monitor
-            (w, h, mx + (mw - w) / 2.0, my + (mh - h) / 2.0)
+            (w, h)
         })
-        .unwrap_or((700.0, 550.0, 0.0, 0.0));
+        .unwrap_or((700.0, 550.0));
 
-    // Apply saved state if available, otherwise use screen-relative defaults
+    // Apply saved state if available, otherwise cascade from anchor window (or center).
     if let Some(state) = saved_state {
         eprintln!("📍 Restoring window state: x={}, y={}, w={}, h={}, maximized={}",
                   state.x, state.y, state.width, state.height, state.is_maximized);
@@ -189,11 +181,38 @@ pub async fn create_session_window(
 
         // Never restore maximized for chat windows — they should always open
         // at their saved size so they don't obscure the main app window.
+    } else if let Some(anchor) = anchorLabel.as_deref().and_then(|l| app.get_webview_window(l)) {
+        // Cascade 24 logical px down-right from the anchor window so the new
+        // window is clearly visible without completely hiding the old one.
+        let scale = anchor.scale_factor().unwrap_or(1.0);
+        let phys_pos = anchor.outer_position().unwrap_or_default();
+        let phys_size = anchor.outer_size().unwrap_or_default();
+        let ax = phys_pos.x as f64 / scale + 24.0;
+        let ay = phys_pos.y as f64 / scale + 24.0;
+        let aw = phys_size.width as f64 / scale;
+        let ah = phys_size.height as f64 / scale;
+        eprintln!("📍 Cascading from anchor {}: x={}, y={}, w={}, h={}", anchor.label(), ax, ay, aw, ah);
+        builder = builder
+            .inner_size(aw, ah)
+            .position(ax, ay);
     } else {
-        // Position centered on the active monitor (not .center() which uses primary)
+        // No anchor and no saved state — fall back to centering on the active monitor.
+        let (cx, cy) = active_monitor
+            .as_ref()
+            .map(|m| {
+                let scale = m.scale_factor();
+                let phys = m.size();
+                let pos = m.position();
+                let mx = pos.x as f64 / scale;
+                let my = pos.y as f64 / scale;
+                let mw = phys.width as f64 / scale;
+                let mh = phys.height as f64 / scale;
+                (mx + (mw - default_w) / 2.0, my + (mh - default_h) / 2.0)
+            })
+            .unwrap_or((0.0, 0.0));
         builder = builder
             .inner_size(default_w, default_h)
-            .position(monitor_x, monitor_y);
+            .position(cx, cy);
     }
 
     let _window = builder

@@ -350,9 +350,9 @@ export async function markSessionRead(sessionId: string): Promise<void> {
  * @param sessionId - The session ID to open in a new window
  * @returns The window label (e.g., "agent-session-{uuid}")
  */
-export async function createSessionWindow(sessionId: string): Promise<string> {
+export async function createSessionWindow(sessionId: string, anchorLabel?: string): Promise<string> {
   try {
-    return await invoke<string>('create_session_window', { sessionId });
+    return await invoke<string>('create_session_window', { sessionId, anchorLabel: anchorLabel ?? null });
   } catch (error) {
     console.error('Failed to create session window:', error);
     throw error;

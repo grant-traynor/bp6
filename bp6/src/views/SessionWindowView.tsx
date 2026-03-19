@@ -31,6 +31,15 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
     : sessionPersona;
 
   const [isRestarting, setIsRestarting] = useState(false);
+  const [launchInBackground, setLaunchInBackground] = useState(
+    () => localStorage.getItem("session-launch-in-bg") === "true"
+  );
+
+  const toggleBackground = () => {
+    const next = !launchInBackground;
+    setLaunchInBackground(next);
+    localStorage.setItem("session-launch-in-bg", String(next));
+  };
 
   const handleNewSession = async () => {
     if (isRestarting) return;
@@ -46,7 +55,9 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
         true // force_new — always a clean slate from the "+ New Session" button
       );
       await useSessionStore.getState().refreshSessions();
-      await createSessionWindow(newSessionId);
+      if (!launchInBackground) {
+        await createSessionWindow(newSessionId, getCurrentWindow().label);
+      }
       await terminateSession(sessionId);
     } catch (error) {
       console.error("Failed to create new session:", error);
@@ -142,7 +153,16 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
             <span>{sessionBackendId}</span>
           </div>
         </div>
-        <div className="flex justify-end mt-1">
+        <div className="flex items-center justify-end gap-3 mt-1">
+          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Start new sessions without opening a window — pick them up later from the WBS tree">
+            <span className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">bg</span>
+            <div
+              onClick={toggleBackground}
+              className={`relative w-7 h-4 rounded-full transition-colors cursor-pointer ${launchInBackground ? "bg-[var(--accent-primary)]" : "bg-[var(--border-primary)]"}`}
+            >
+              <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${launchInBackground ? "translate-x-3.5" : "translate-x-0.5"}`} />
+            </div>
+          </label>
           <button
             onClick={handleNewSession}
             disabled={isRestarting}
