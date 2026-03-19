@@ -153,16 +153,7 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
             <span>{sessionBackendId}</span>
           </div>
         </div>
-        <div className="flex items-center justify-end gap-3 mt-1">
-          <label className="flex items-center gap-1.5 cursor-pointer select-none" title="Start new sessions without opening a window — pick them up later from the WBS tree">
-            <span className="text-[10px] text-[var(--text-muted)] whitespace-nowrap">bg</span>
-            <div
-              onClick={toggleBackground}
-              className={`relative w-7 h-4 rounded-full transition-colors cursor-pointer ${launchInBackground ? "bg-[var(--accent-primary)]" : "bg-[var(--border-primary)]"}`}
-            >
-              <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${launchInBackground ? "translate-x-3.5" : "translate-x-0.5"}`} />
-            </div>
-          </label>
+        <div className="flex justify-end mt-1">
           <button
             onClick={handleNewSession}
             disabled={isRestarting}

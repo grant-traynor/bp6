@@ -106,6 +106,8 @@ export interface MainAppViewProps {
   // Chat sessions
   currentCli: CliBackend;
   setCurrentCli: React.Dispatch<React.SetStateAction<CliBackend>>;
+  launchInBackground: boolean;
+  toggleLaunchInBackground: () => void;
   handleOpenChat: (persona: string, task?: string, beadId?: string, role?: string) => Promise<void>;
   sessionsByBead: Record<string, SessionInfo[]>;
   sessions: SessionInfo[];
@@ -195,6 +197,8 @@ export function MainAppView({
   toggleFavorite,
   currentCli,
   setCurrentCli,
+  launchInBackground,
+  toggleLaunchInBackground,
   handleOpenChat,
   sessionsByBead,
   sessions,
@@ -336,6 +340,21 @@ export function MainAppView({
                 >
                   Reset
                 </button>
+                <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
+                <label
+                  className="flex items-center gap-2 cursor-pointer select-none px-2"
+                  title="When enabled, launching an agent starts it headlessly — no window opens. Pick it up later from the WBS tree."
+                >
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--text-muted)] whitespace-nowrap">
+                    BG Launch
+                  </span>
+                  <div
+                    onClick={toggleLaunchInBackground}
+                    className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer flex-shrink-0 ${launchInBackground ? "bg-[var(--accent-primary)]" : "bg-[var(--border-primary)]"}`}
+                  >
+                    <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${launchInBackground ? "translate-x-4" : "translate-x-0.5"}`} />
+                  </div>
+                </label>
                 <div className="w-px h-5 bg-[var(--border-primary)] mx-2" />
                 <button
                   onClick={() => setBeadDetailOpen(!beadDetailOpen)}

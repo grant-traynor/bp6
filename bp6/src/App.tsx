@@ -408,6 +408,8 @@ function App({
             // Chat
             currentCli={chatSessions.currentCli}
             setCurrentCli={chatSessions.setCurrentCli}
+            launchInBackground={chatSessions.launchInBackground}
+            toggleLaunchInBackground={chatSessions.toggleLaunchInBackground}
             handleOpenChat={(persona, task, beadId, role) =>
               chatSessions.handleOpenChat(
                 persona,

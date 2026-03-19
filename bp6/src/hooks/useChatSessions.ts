@@ -12,6 +12,8 @@ export interface UseChatSessionsReturn {
   setChatSessionMap: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   currentCli: CliBackend;
   setCurrentCli: React.Dispatch<React.SetStateAction<CliBackend>>;
+  launchInBackground: boolean;
+  toggleLaunchInBackground: () => void;
   handleOpenChat: (
     persona: string,
     task?: string,
@@ -43,6 +45,17 @@ export function useChatSessions(): UseChatSessionsReturn {
   );
 
   const [currentCli, setCurrentCli] = useState<CliBackend>("gemini");
+
+  const [launchInBackground, setLaunchInBackground] = useState(
+    () => localStorage.getItem("session-launch-in-bg") === "true"
+  );
+  const toggleLaunchInBackground = useCallback(() => {
+    setLaunchInBackground((prev) => {
+      const next = !prev;
+      localStorage.setItem("session-launch-in-bg", String(next));
+      return next;
+    });
+  }, []);
 
   // Load CLI preference on mount
   useEffect(() => {
@@ -135,13 +148,15 @@ export function useChatSessions(): UseChatSessionsReturn {
             );
           }
 
-          await createSessionWindow(targetSessionId);
+          if (!launchInBackground) {
+            await createSessionWindow(targetSessionId);
+          }
         }
       } catch (error) {
         console.error("Failed to open chat window:", error);
       }
     },
-    [chatSessionMap, sessions, currentCli]
+    [chatSessionMap, sessions, currentCli, launchInBackground]
   );
 
   return {
@@ -149,6 +164,8 @@ export function useChatSessions(): UseChatSessionsReturn {
     setChatSessionMap,
     currentCli,
     setCurrentCli,
+    launchInBackground,
+    toggleLaunchInBackground,
     handleOpenChat,
   };
 }
