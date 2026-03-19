@@ -4,9 +4,8 @@ export interface ThreadInfo {
   index: number;
 }
 
-// Gap between adjacent thread lanes (one line-width apart).
-const LANE_DX = 4; // px — horizontal offset between thread vertical channels
-const LANE_DY = 4; // px — vertical offset between thread horizontal runs
+const LANE_DX = 3; // px — horizontal separation between thread vertical channels
+const LANE_DY = 3; // px — vertical separation between thread horizontal runs
 
 interface Connector {
   fromId: string;
@@ -41,14 +40,17 @@ export function GanttConnectors({
 
   // Each source thread gets a fixed global (dx, dy) offset it holds for every
   // segment it passes through.  Threads from the same source share one lane so
-  // they merge into a single visible line.  Threads from different sources each
-  // occupy a distinct lane — LANE_DX apart horizontally (vertical channel) and
-  // LANE_DY apart vertically (horizontal runs).
+  // they merge into one visible line.  Threads from different sources each
+  // occupy a distinct lane.
+  //
+  // dx is always NON-NEGATIVE: the vertical channel is shifted right of the
+  // base channel, never left.  A negative dx would make the departure stub go
+  // right-to-left which looks broken.  dy is centred for visual balance.
   const threadOffset = (index: number): { dx: number; dy: number } => {
     const centre = (totalThreads - 1) / 2;
     return {
-      dx: (index - centre) * LANE_DX,
-      dy: (index - centre) * LANE_DY,
+      dx: index * LANE_DX,                    // 0, 3, 6, 9 … — always rightward
+      dy: (index - centre) * LANE_DY,         // centred: negative above, positive below
     };
   };
 
@@ -75,7 +77,7 @@ export function GanttConnectors({
               key={`${edgeKey}-${idx}-plain`}
               d={p}
               stroke={conn.isCritical ? "var(--gantt-connector-critical)" : "var(--gantt-connector)"}
-              strokeWidth={1}
+              strokeWidth={1.5}
               fill="none"
               opacity={opacity}
               strokeLinecap="round"
@@ -98,7 +100,7 @@ export function GanttConnectors({
               key={`${edgeKey}-${idx}-th${thread.index}`}
               d={p}
               stroke={thread.color}
-              strokeWidth={1}
+              strokeWidth={1.5}
               fill="none"
               opacity={opacity}
               strokeLinecap="round"
