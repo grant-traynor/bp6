@@ -75,6 +75,7 @@ export const WBSTreeItem = memo(function WBSTreeItem({
         onClick={() => onClick(node)}
         onContextMenu={handleContextMenu}
       >
+        {/* Chevron toggle */}
         <div
           className="w-10 shrink-0 flex items-center justify-center h-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
           onClick={(e) => { e.stopPropagation(); onToggle(node.id); }}
@@ -84,21 +85,19 @@ export const WBSTreeItem = memo(function WBSTreeItem({
           ) : null}
         </div>
 
-        <div className="w-16 shrink-0 px-2 flex items-center justify-center h-full">
+        {/* ID */}
+        <div className="w-24 shrink-0 px-2 flex items-center h-full">
           <span className={cn(
-            "shrink-0 font-mono text-xs font-black px-1.5 py-0.5 rounded border shadow-sm transition-colors",
-            isSelected ? "bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] border-[var(--accent-primary)]/40" :
-            node.priority <= 1 ? "bg-[var(--status-blocked)]/20 text-[var(--status-blocked)] border-[var(--status-blocked)]/40" :
-            node.priority === 2 ? "bg-[var(--status-active)]/20 text-[var(--status-active)] border-[var(--status-active)]/40" :
-            "bg-[var(--background-tertiary)] text-[var(--text-muted)] border-[var(--border-primary)]"
+            "font-mono text-xs font-black px-2 py-0.5 rounded-md tracking-tighter border-2 shadow-sm transition-all",
+            isSelected ? "bg-[var(--accent-primary)] text-white border-[var(--accent-secondary)] shadow-md scale-105" :
+            node.isCritical ? "bg-[var(--status-blocked)]/20 text-[var(--status-blocked)] border-[var(--status-blocked)]/40" : "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]"
           )}>
-            P{node.priority}
+            {node.id.split('-').pop()}
           </span>
         </div>
 
-        <div
-          className="flex-1 px-4 flex items-center truncate h-full gap-2"
-        >
+        {/* Name */}
+        <div className="flex-1 px-4 flex items-center truncate h-full gap-2">
           <span className={cn(
             "text-sm truncate font-black tracking-tight transition-colors",
             node.status === 'closed' && "italic font-bold opacity-60",
@@ -110,13 +109,25 @@ export const WBSTreeItem = memo(function WBSTreeItem({
           </span>
         </div>
 
-        {/* Dedicated session icons column */}
+        {/* Agent session icons */}
         <div className="w-20 shrink-0 flex items-center justify-end pr-2 h-full">
           {sessions && sessions.length > 0 && (
             <SessionIndicator sessions={sessions} onSessionClick={onSessionClick} />
           )}
         </div>
 
+        {/* Assignee */}
+        <div className="w-28 shrink-0 px-2 flex items-center h-full">
+          {node.assignee ? (
+            <span className="text-xs font-bold text-[var(--text-muted)] truncate" title={node.assignee}>
+              {node.assignee}
+            </span>
+          ) : (
+            <span className="text-xs text-[var(--text-muted)]/30">—</span>
+          )}
+        </div>
+
+        {/* Type */}
         <div className="w-20 shrink-0 px-2 flex items-center justify-center h-full">
           <span className={cn(
             "text-xs font-black px-1.5 py-0.5 rounded-md uppercase tracking-widest border border-[var(--border-primary)] shadow-sm transition-all",
@@ -126,13 +137,16 @@ export const WBSTreeItem = memo(function WBSTreeItem({
           </span>
         </div>
 
-        <div className="w-24 shrink-0 px-2 flex items-center h-full">
+        {/* Priority */}
+        <div className="w-16 shrink-0 px-2 flex items-center justify-center h-full">
           <span className={cn(
-            "font-mono text-xs font-black px-2 py-0.5 rounded-md tracking-tighter border-2 shadow-sm transition-all",
-            isSelected ? "bg-[var(--accent-primary)] text-white border-[var(--accent-secondary)] shadow-md scale-105" :
-            node.isCritical ? "bg-[var(--status-blocked)]/20 text-[var(--status-blocked)] border-[var(--status-blocked)]/40" : "bg-[var(--background-tertiary)] text-[var(--text-primary)] border-[var(--border-primary)]"
+            "shrink-0 font-mono text-xs font-black px-1.5 py-0.5 rounded border shadow-sm transition-colors",
+            isSelected ? "bg-[var(--accent-primary)]/20 text-[var(--accent-primary)] border-[var(--accent-primary)]/40" :
+            node.priority <= 1 ? "bg-[var(--status-blocked)]/20 text-[var(--status-blocked)] border-[var(--status-blocked)]/40" :
+            node.priority === 2 ? "bg-[var(--status-active)]/20 text-[var(--status-active)] border-[var(--status-active)]/40" :
+            "bg-[var(--background-tertiary)] text-[var(--text-muted)] border-[var(--border-primary)]"
           )}>
-            {node.id.split('-').pop()}
+            P{node.priority}
           </span>
         </div>
       </div>
