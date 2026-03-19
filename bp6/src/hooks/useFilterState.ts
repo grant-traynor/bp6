@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, startTransition } from "react";
+import { useState, useEffect, useRef, useCallback, startTransition } from "react";
 import {
   fetchProjectViewModel,
   saveStartupState,
@@ -203,9 +203,12 @@ export function useFilterState(input: UseFilterStateInput): UseFilterStateReturn
     }
   };
 
-  const incrementRefetchTrigger = () => {
+  // Stable across renders — setRefetchTrigger from useState never changes identity.
+  // Must be stable so useAppInitialization's useEffect dep array doesn't cause it
+  // to teardown and re-run (which drops the beads-updated listener permanently).
+  const incrementRefetchTrigger = useCallback(() => {
     setRefetchTrigger((prev) => prev + 1);
-  };
+  }, []);
 
   return {
     filterText,
