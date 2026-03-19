@@ -75,7 +75,7 @@ export function GanttConnectors({
               key={`${edgeKey}-${idx}-plain`}
               d={p}
               stroke={conn.isCritical ? "var(--gantt-connector-critical)" : "var(--gantt-connector)"}
-              strokeWidth={3}
+              strokeWidth={1}
               fill="none"
               opacity={opacity}
               strokeLinecap="round"
@@ -98,7 +98,7 @@ export function GanttConnectors({
               key={`${edgeKey}-${idx}-th${thread.index}`}
               d={p}
               stroke={thread.color}
-              strokeWidth={3}
+              strokeWidth={1}
               fill="none"
               opacity={opacity}
               strokeLinecap="round"

@@ -12,7 +12,9 @@ interface GanttBarProps {
 
 export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isInChain }: GanttBarProps) {
   const { bead, isCritical, isBlocked, x, width } = item;
-  const isSummary = bead.issueType === 'epic' || bead.issueType === 'feature';
+  const isEpic    = bead.issueType === 'epic';
+  const isFeature = bead.issueType === 'feature';
+  const isSummary = isEpic || isFeature;
   const isMilestone = bead.estimate === 0 && !isSummary;
   const isInProgress = bead.status === 'in_progress';
 
@@ -40,7 +42,8 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isIn
       onClick={() => onClick(bead)}
     >
       <div className="flex-1 flex items-center h-full relative" style={{ paddingLeft: isMilestone ? 0 : '12px' }}>
-        {isSummary ? (
+        {isEpic ? (
+          // Classic scheduling rollup bar: thin line with hanging end-caps.
           <div className={cn(
             "w-full h-2 relative rounded-sm border-b-2 transition-all",
             isSelected ? "shadow-[0_0_15px_rgba(59,163,255,0.45)] ring-2 ring-[rgba(59,163,255,0.35)]"
@@ -51,6 +54,19 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isIn
              <div className={cn("absolute left-0 -bottom-1 top-0 w-1.5 rounded-sm", getSummaryColor())} />
              <div className={cn("absolute right-0 -bottom-1 top-0 w-1.5 rounded-sm", getSummaryColor())} />
           </div>
+        ) : isFeature ? (
+          // Feature group: square outlined container bar — visually distinct from
+          // the epic rollup and from plain task bars (no rounding, border-only fill).
+          <div className={cn(
+            "w-full h-5 relative rounded-none border-2 transition-all",
+            bead.status === 'closed' ? "opacity-50" : "",
+            isSelected
+              ? "shadow-[0_0_15px_rgba(59,163,255,0.45)] ring-2 ring-[rgba(59,163,255,0.35)] border-[var(--accent-primary)]"
+              : isInChain
+              ? "ring-2 ring-[rgba(249,115,22,0.5)] shadow-[0_0_10px_rgba(249,115,22,0.3)]"
+              : "group-hover:border-[var(--accent-primary)] group-hover:shadow-md",
+            "bg-transparent border-[var(--gantt-summary)]"
+          )} />
         ) : isMilestone ? (
           <div className={cn(
             "w-3.5 h-3.5 border-2 shadow-md transition-all group-hover:scale-125 rotate-45",
