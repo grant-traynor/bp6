@@ -1765,6 +1765,28 @@ impl Default for SortBy {
 // WBS Tree Building - Sort Siblings by Dependencies (bp6-07y.2.4)
 // ============================================================================
 
+/// Compare two bead IDs numerically on their suffix segments.
+/// IDs like "bp6-2" and "bp6-14" are split on '-' and each segment is
+/// compared as a number when both sides parse, otherwise as a string.
+/// This gives natural ordering: bp6-2 < bp6-10 < bp6-14.
+fn cmp_id_natural(a: &str, b: &str) -> std::cmp::Ordering {
+    let parts_a: Vec<&str> = a.split('-').collect();
+    let parts_b: Vec<&str> = b.split('-').collect();
+    let len = parts_a.len().max(parts_b.len());
+    for i in 0..len {
+        let pa = parts_a.get(i).copied().unwrap_or("");
+        let pb = parts_b.get(i).copied().unwrap_or("");
+        let ord = match (pa.parse::<u64>(), pb.parse::<u64>()) {
+            (Ok(na), Ok(nb)) => na.cmp(&nb),
+            _ => pa.cmp(pb),
+        };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
 /// Recursively sort sibling nodes using topological sort or explicit property sort.
 fn sort_wbs_tree_siblings(
     mut tree: Vec<WBSNode>,
@@ -1781,13 +1803,13 @@ fn sort_wbs_tree_siblings(
                 SortBy::Priority => a.bead.priority.cmp(&b.bead.priority),
                 SortBy::Title => a.bead.title.to_lowercase().cmp(&b.bead.title.to_lowercase()),
                 SortBy::Type => a.bead.issue_type.cmp(&b.bead.issue_type),
-                SortBy::Id => a.bead.id.cmp(&b.bead.id),
+                SortBy::Id => cmp_id_natural(&a.bead.id, &b.bead.id),
                 SortBy::None => std::cmp::Ordering::Equal,
             };
 
             // Use ID as tie-breaker for stable sorting across runs
             let ord = if ord == std::cmp::Ordering::Equal {
-                a.bead.id.cmp(&b.bead.id)
+                cmp_id_natural(&a.bead.id, &b.bead.id)
             } else {
                 ord
             };
