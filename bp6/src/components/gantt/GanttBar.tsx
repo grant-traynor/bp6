@@ -65,7 +65,7 @@ export const GanttBar = memo(function GanttBar({ item, onClick, isSelected, isIn
               : isInChain
               ? "ring-2 ring-[rgba(249,115,22,0.5)] shadow-[0_0_10px_rgba(249,115,22,0.3)]"
               : "group-hover:border-[var(--accent-primary)] group-hover:shadow-md",
-            "bg-transparent border-[var(--gantt-summary)]"
+            "bg-[var(--gantt-summary)] border-[var(--gantt-summary)]"
           )} />
         ) : isMilestone ? (
           <div className={cn(
