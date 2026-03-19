@@ -93,6 +93,30 @@ export function useAppInitialization(
     onLoadData();
   }, [onLoadData]);
 
+  // Keep refs to the latest callbacks so event listeners don't need to re-register
+  // when callback identities change (avoids the cleanup-then-guard-early-return trap).
+  const onLoadDataRef = useRef(onLoadData);
+  const loadProjectsRef = useRef(loadProjects);
+  useEffect(() => { onLoadDataRef.current = onLoadData; }, [onLoadData]);
+  useEffect(() => { loadProjectsRef.current = loadProjects; }, [loadProjects]);
+
+  // Stable Tauri event listeners — registered exactly once for the component
+  // lifetime. Empty dep array guarantees cleanup only runs on unmount.
+  useEffect(() => {
+    const unlistenBeads = onBeadsUpdated(() => {
+      console.log("beads-updated event received");
+      onLoadDataRef.current();
+    });
+    const unlistenProjects = onProjectsUpdated(() => {
+      console.log("projects-updated event received");
+      loadProjectsRef.current();
+    });
+    return () => {
+      unlistenBeads.then((u) => u());
+      unlistenProjects.then((u) => u());
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Listen for project shell exit — remounting Terminal component restores shell at correct dimensions
   useEffect(() => {
     const unlistenPromise = onProjectShellExited((_sessionId) => {
@@ -227,28 +251,10 @@ export function useAppInitialization(
       }
     };
 
-    const unlistenPromises = [
-      onBeadsUpdated(() => {
-        console.log("beads-updated event received");
-        onLoadData();
-      }),
-      onProjectsUpdated(() => {
-        console.log("projects-updated event received");
-        loadProjects();
-      }),
-      init(),
-    ];
+    const sessionUnlistenPromise = init();
 
     return () => {
-      console.log("Cleaning up initialization event listeners");
-      unlistenPromises.forEach(async (p) => {
-        try {
-          const unlisten = await p;
-          unlisten?.();
-        } catch (err) {
-          console.error("Failed to unlisten:", err);
-        }
-      });
+      sessionUnlistenPromise.then((unlisten) => unlisten?.()).catch(() => {});
       useSessionStore.getState().cleanup();
       // Do NOT reset hasInitialized — init must run exactly once for the app lifetime.
       // Resetting it here would cause re-initialization on every dependency change.

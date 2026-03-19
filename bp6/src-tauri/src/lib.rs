@@ -80,35 +80,66 @@ impl BeadsWatcher {
                                 .unwrap_or(false)
                         });
 
-                        if is_last_touched && matches!(event.kind,
-                            notify::EventKind::Create(_) | notify::EventKind::Modify(_))
-                        {
-                            let mut last = emit_clone.lock().unwrap();
-                            let now = Instant::now();
-                            let elapsed = now.duration_since(*last);
-                            if elapsed >= Duration::from_millis(250) {
-                                *last = now;
+                        if !is_last_touched {
+                            return;
+                        }
 
-                                // Derive repo root from the event path (.beads/last-touched -> repo)
-                                if let Some(beads_dir) = event.paths.first().and_then(|p| p.parent()) {
+                        // Accept any event kind — notify 8.x on macOS FSEvents can emit
+                        // EventKind::Any for writes/touches that beads makes to last-touched,
+                        // and silently dropping those would prevent the UI from refreshing.
+                        // The is_last_touched guard above is specific enough.
+                        eprintln!("👁️  Watcher: last-touched event kind={:?} paths={:?}", event.kind, event.paths);
+
+                        // Skip Remove events — only care about the file being written/touched.
+                        if matches!(event.kind, notify::EventKind::Remove(_)) {
+                            return;
+                        }
+
+                        let mut last = emit_clone.lock().unwrap();
+                        let now = Instant::now();
+                        let elapsed = now.duration_since(*last);
+                        eprintln!("👁️  Watcher: elapsed={:.0}ms (debounce=250ms)", elapsed.as_secs_f64() * 1000.0);
+                        if elapsed >= Duration::from_millis(250) {
+                            *last = now;
+
+                            // Derive repo root from the event path (.beads/last-touched -> repo)
+                            if let Some(last_touched_path) = event.paths.iter().find(|p| {
+                                p.file_name().and_then(|n| n.to_str()).map(|n| n == "last-touched").unwrap_or(false)
+                            }) {
+                                if let Some(beads_dir) = last_touched_path.parent() {
                                     if let Some(repo_path) = beads_dir.parent() {
                                         let dump_path = repo_path.join(".bp6").join("issue_dump.jsonl");
                                         if let Some(bp6_dir) = dump_path.parent() {
                                             let _ = std::fs::create_dir_all(bp6_dir);
                                         }
+                                        eprintln!("👁️  Watcher: running bd export → {}", dump_path.display());
                                         if let Some(bd_path) = bd::resolve_cli_path("bd") {
-                                            let _ = std::process::Command::new(bd_path)
+                                            match std::process::Command::new(bd_path)
                                                 .arg("export")
                                                 .arg("-o")
                                                 .arg(&dump_path)
                                                 .current_dir(repo_path)
-                                                .output();
+                                                .output()
+                                            {
+                                                Ok(out) if out.status.success() => {
+                                                    eprintln!("👁️  Watcher: bd export OK");
+                                                }
+                                                Ok(out) => {
+                                                    eprintln!("👁️  Watcher: bd export failed: {}", String::from_utf8_lossy(&out.stderr));
+                                                }
+                                                Err(e) => {
+                                                    eprintln!("👁️  Watcher: bd export error: {}", e);
+                                                }
+                                            }
+                                        } else {
+                                            eprintln!("👁️  Watcher: bd not found");
                                         }
                                     }
                                 }
-
-                                let _ = handle.emit("beads-updated", ());
                             }
+
+                            eprintln!("👁️  Watcher: emitting beads-updated");
+                            let _ = handle.emit("beads-updated", ());
                         }
                     },
                     Err(e) => eprintln!("Watch error: {:?}", e),
