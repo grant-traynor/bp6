@@ -200,15 +200,15 @@ export function useFilterState(input: UseFilterStateInput): UseFilterStateReturn
 
   // Fingerprint polling — fallback for changes the file-watcher misses.
   // Polls every 30s; triggers a refresh only when the mtime has changed.
-  const lastFingerprintRef = useRef<number>(0);
+  const lastFingerprintRef = useRef<string>("");
   useEffect(() => {
     if (!hasProject || !currentProjectPath) return;
 
     const poll = async () => {
       try {
         const fp = await getBeadsFingerprint(currentProjectPath);
-        if (fp !== 0 && fp !== lastFingerprintRef.current) {
-          if (lastFingerprintRef.current !== 0) {
+        if (fp !== "" && fp !== lastFingerprintRef.current) {
+          if (lastFingerprintRef.current !== "") {
             // Only refresh if we had a previous value — avoids spurious load on mount.
             incrementRefetchTrigger();
           }

@@ -2294,20 +2294,35 @@ fn get_projects_path() -> Result<PathBuf, String> {
     Ok(projects_path)
 }
 
-/// Returns the mtime of `.beads/last-touched` as milliseconds since Unix epoch,
-/// or 0 if the file does not exist. The frontend polls this to detect changes
-/// that the file-watcher may have missed (e.g. when the app is backgrounded).
+/// Scans the `.beads` directory and returns a fingerprint string built from
+/// every entry's name, size, and mtime. Any mutation (new file, edit, delete)
+/// changes the fingerprint, making this a reliable poll target fully independent
+/// of the `last-touched` file the watcher already monitors.
 #[tauri::command]
-fn get_beads_fingerprint(project_path: String) -> u64 {
-    let path = std::path::Path::new(&project_path)
-        .join(".beads")
-        .join("last-touched");
-    path.metadata()
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+fn get_beads_fingerprint(project_path: String) -> String {
+    let beads_dir = std::path::Path::new(&project_path).join(".beads");
+    let Ok(entries) = std::fs::read_dir(&beads_dir) else {
+        return String::new();
+    };
+
+    let mut parts: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            let size = meta.len();
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            Some(format!("{name}:{size}:{mtime}"))
+        })
+        .collect();
+
+    parts.sort_unstable();
+    parts.join("|")
 }
 
 #[tauri::command]
