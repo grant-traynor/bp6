@@ -926,6 +926,22 @@ bd dep list {{bead_id}} --type depends-on
 bd dep list {{bead_id}} --type blocks
 ```
 
+### Bead Assignee Conventions
+
+When creating beads, set `--assignee` based on the **technology domain** of the work:
+
+| Domain | Assignee value |
+|--------|---------------|
+| Flutter / Dart / mobile UI | `flutter-specialist` |
+| Supabase DB / PostgreSQL / migrations / RLS / RPCs | `supabase-db-specials` |
+| Supabase Edge Functions / TypeScript serverless | `supabase-edge-specialist` |
+| Tauri / Rust backend | `tauri-specialist` |
+| Mixed or unknown domain | Omit `--assignee` and assign manually |
+
+**Rule**: If a task clearly belongs to one domain, set `--assignee` at creation time. If it spans domains or is unclear, omit and let the orchestrator route it.
+
+---
+
 ### Creating & Updating Beads
 ```bash
 # Create a task bead
@@ -933,6 +949,7 @@ bd create --parent={{parent_id}} \
   --type=task \
   --title="Task title" \
   --priority=2 \
+  --assignee={{assignee}} \
   --acceptance="- AC 1\n- AC 2" \
   --design="Design approach"
 

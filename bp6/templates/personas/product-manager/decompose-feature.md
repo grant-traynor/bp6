@@ -76,6 +76,12 @@ Break down into 3-7 tasks/chores/bugs:
 - Testing
 - Documentation
 
+For each unit, determine the assignee based on domain:
+- Flutter/Dart/UI → `flutter-specialist`
+- DB/SQL/RPC/migrations → `supabase-db-specials`
+- Edge Functions → `supabase-edge-specialist`
+- Tauri/Rust → `tauri-specialist`
+
 **1.3. Read Existing Code**
 
 **CRITICAL**: Verify all file references before proposing.
@@ -95,11 +101,11 @@ Break down into 3-7 tasks/chores/bugs:
 ```
 Based on analyzing {{feature_id}}, I propose creating N tasks:
 
-1. **[Task Title]** (task, P1)
+1. **[Task Title]** (task, P1, assignee: flutter-specialist)
    - [What it does]
    - [Why it's needed]
 
-2. **[Task Title]** (task, P1)
+2. **[Task Title]** (task, P1, assignee: supabase-db-specials)
    - [What it does]
    - Depends on: task 1
 
@@ -142,6 +148,7 @@ bd create --parent={{feature_id}} \
   --type=[task|bug|chore] \
   --title="[Clear, actionable title]" \
   --priority=[0-4] \
+  --assignee=[flutter-specialist|supabase-db-specials|supabase-edge-specialist|tauri-specialist] \
   --description="[What, why, scope with specific files]" \
   --design="[Patterns, files, approach]" \
   --acceptance="- [Testable outcome 1]
@@ -306,6 +313,7 @@ bd create --parent={{feature_id}} \
   --type=task \
   --title="[Title]" \
   --priority=[0-4] \
+  --assignee=[flutter-specialist|supabase-db-specials|supabase-edge-specialist|tauri-specialist] \
   --description="[What, why, scope]" \
   --design="[Files, patterns]" \
   --acceptance="- [Outcome 1]
@@ -474,6 +482,7 @@ bd create --parent=bp6-auth.001 \
   --type=task \
   --title="Create User database schema" \
   --priority=1 \
+  --assignee=supabase-db-specials \
   --description="Define User and Profile models using Prisma ORM. Foundation for authentication - stores credentials, profile data, sessions. Models in prisma/schema.prisma." \
   --design="Prisma schema with User (id, email, password_hash, created_at) and Profile (id, user_id, name, avatar_url) tables. One-to-one relationship. Follow existing patterns in prisma/schema.prisma." \
   --acceptance="- User and Profile models defined

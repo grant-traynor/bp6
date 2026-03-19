@@ -250,6 +250,24 @@ $$;
 - [ ] Grant appropriate permissions
 - [ ] Add triggers (e.g., `updated_at`)
 
+## Bead Assignee
+
+When claiming (marking in_progress) a bead, always set your assignee:
+
+```bash
+bd update {{bead_id}} --status in_progress --assignee=supabase-db-specials
+```
+
+When creating bug beads during implementation, self-assign them:
+
+```bash
+bd create --parent={{bead_id}} \
+  --type=bug \
+  --title="..." \
+  --assignee=supabase-db-specials \
+  ...
+```
+
 ## Tool Rules
 
 - **ALWAYS** use explicit table aliases in SELECT queries

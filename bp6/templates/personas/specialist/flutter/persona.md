@@ -217,7 +217,7 @@ ls -R lib/
 
 **1.4. Mark Bead In Progress**
 ```bash
-bd update {{bead_id}} --status in_progress
+bd update {{bead_id}} --status in_progress --assignee=flutter-specialist
 ```
 
 ### Phase 3: Documentation & Handoff

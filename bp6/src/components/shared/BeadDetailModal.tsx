@@ -27,6 +27,7 @@ function beadToMarkdown(bead: BeadNode): string {
   let md = `# ${bead.id} — ${bead.title}\n\n`;
   md += `**Status**: ${bead.status} | **Priority**: ${priorityLabel} | **Type**: ${bead.issueType}`;
   if (bead.owner) md += ` | **Owner**: ${bead.owner}`;
+  if (bead.assignee) md += ` | **Assignee**: ${bead.assignee}`;
   if (bead.parent) md += ` | **Parent**: ${bead.parent}`;
   md += "\n\n";
   if (bead.labels?.length) md += `**Labels**: ${bead.labels.join(", ")}\n\n`;
@@ -176,6 +177,7 @@ export const BeadDetailModal = ({
       (bead.title || "") !== (formData.title || "") ||
       (bead.description || "") !== (formData.description || "") ||
       (bead.owner || "") !== (formData.owner || "") ||
+      (bead.assignee || "") !== (formData.assignee || "") ||
       (bead.priority ?? 2) !== (formData.priority ?? 2) ||
       (bead.estimate ?? 0) !== (formData.estimate ?? 0) ||
       (bead.issueType || "") !== (formData.issueType || "") ||
@@ -332,8 +334,8 @@ export const BeadDetailModal = ({
                 value={formData.description ?? ""} onChange={e => setFormData({ ...formData, description: e.target.value })} placeholder="Description… (markdown supported)" />
             </Section>
 
-            {/* Priority + Owner + Estimate */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* Priority + Owner + Assignee + Estimate */}
+            <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
                 <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1"><Star size={10} /> Priority</span>
                 <select value={formData.priority ?? 2} onChange={e => setFormData({ ...formData, priority: Number(e.target.value) })}
@@ -342,17 +344,22 @@ export const BeadDetailModal = ({
                 </select>
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1"><User size={10} /> Owner</span>
-                <input type="text" value={formData.owner ?? ""} onChange={e => setFormData({ ...formData, owner: e.target.value })}
-                  className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl p-2 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none" placeholder="Unassigned" />
-              </div>
-              <div className="flex flex-col gap-1.5">
                 <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1"><Clock size={10} /> Estimate</span>
                 <div className="flex items-center gap-1 bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl px-2.5 py-2">
                   <input type="number" value={formData.estimate ?? ""} onChange={e => setFormData({ ...formData, estimate: parseInt(e.target.value) || 0 })}
                     className="bg-transparent border-none p-0 focus:ring-0 w-10 text-sm font-black text-[var(--text-primary)]" placeholder="0" />
                   <span className="text-[9px] font-black text-[var(--text-muted)] uppercase">min</span>
                 </div>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1"><User size={10} /> Owner</span>
+                <input type="text" value={formData.owner ?? ""} onChange={e => setFormData({ ...formData, owner: e.target.value })}
+                  className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl p-2 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none" placeholder="Unassigned" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-[var(--text-muted)] flex items-center gap-1"><User size={10} /> Assignee</span>
+                <input type="text" value={formData.assignee ?? ""} onChange={e => setFormData({ ...formData, assignee: e.target.value })}
+                  className="bg-[var(--background-secondary)] border-2 border-[var(--border-primary)] rounded-xl p-2 text-sm font-bold text-[var(--text-primary)] focus:border-indigo-500 outline-none" placeholder="Unassigned" />
               </div>
             </div>
 

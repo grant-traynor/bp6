@@ -21,6 +21,7 @@ export interface Bead {
   estimate?: number;
   dependencies: Dependency[];
   owner?: string;
+  assignee?: string;
   created_at?: string;
   created_by?: string;
   updated_at?: string;
@@ -663,6 +664,7 @@ export interface BeadNode {
 
   // Metadata
   owner?: string;
+  assignee?: string;
   createdAt?: string;
   createdBy?: string;
   updatedAt?: string;
@@ -757,6 +759,7 @@ export function beadNodeToBead(node: Partial<BeadNode>): Partial<Bead> {
     estimate: node.estimate,
     dependencies: node.dependencies,
     owner: node.owner,
+    assignee: node.assignee,
     created_at: node.createdAt,
     created_by: node.createdBy,
     updated_at: node.updatedAt,

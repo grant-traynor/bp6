@@ -198,6 +198,7 @@ pub struct Bead {
     pub dependencies: Vec<Dependency>,
     // Metadata fields to preserve
     pub owner: Option<String>,
+    pub assignee: Option<String>,
     pub created_at: Option<String>,
     pub created_by: Option<String>,
     pub updated_at: Option<String>,
@@ -493,6 +494,7 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
                     estimate: node.bead.estimate,
                     dependencies: node.bead.dependencies.clone(),
                     owner: node.bead.owner.clone(),
+                    assignee: node.bead.assignee.clone(),
                     created_at: node.bead.created_at.clone(),
                     created_by: node.bead.created_by.clone(),
                     updated_at: node.bead.updated_at.clone(),
@@ -565,6 +567,7 @@ fn bead_to_bead_node(
 
         // Metadata
         owner: bead.owner.clone(),
+        assignee: bead.assignee.clone(),
         created_at: bead.created_at.clone(),
         created_by: bead.created_by.clone(),
         updated_at: bead.updated_at.clone(),
@@ -1028,6 +1031,7 @@ pub struct BeadNode {
 
     // ===== Metadata Fields =====
     pub owner: Option<String>,
+    pub assignee: Option<String>,
     #[serde(rename = "createdAt")]
     pub created_at: Option<String>,
     #[serde(rename = "createdBy")]
