@@ -1062,6 +1062,14 @@ pub async fn start_agent_session(
                 break 'session;
             }
 
+            // Mark session Stopped and notify frontend on natural EOF.
+            if let Some(agent_state) = app_handle_clone.try_state::<AgentState>() {
+                let mut sessions = agent_state.sessions.lock().unwrap();
+                if let Some(s) = sessions.get_mut(&session_id_clone) {
+                    s.status = SessionStatus::Stopped;
+                }
+                emit_session_list_changed(&app_handle_clone, &sessions);
+            }
             eprintln!("PTY stream ended for session: {}", session_id_clone);
         });
     }
@@ -2417,6 +2425,14 @@ pub async fn resume_specific_session(
                     }
                 }
                 std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            // Mark session Stopped and notify frontend on natural EOF.
+            if let Some(agent_state) = app_handle_clone.try_state::<AgentState>() {
+                let mut sessions = agent_state.sessions.lock().unwrap();
+                if let Some(s) = sessions.get_mut(&session_id_clone) {
+                    s.status = SessionStatus::Stopped;
+                }
+                emit_session_list_changed(&app_handle_clone, &sessions);
             }
             eprintln!("PTY stream ended for resumed session: {}", session_id_clone);
         });
