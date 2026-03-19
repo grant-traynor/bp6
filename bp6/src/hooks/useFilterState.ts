@@ -89,47 +89,34 @@ export function useFilterState(input: UseFilterStateInput): UseFilterStateReturn
   useEffect(() => {
     if (!isReady) return;
 
-    const debounceTimeout = setTimeout(() => {
-      const fetchData = async () => {
-        const startTime = performance.now();
-        setProcessingData(true);
-        try {
-          startTransition(() => {
-            fetchProjectViewModel({
-              filter_text: filterText,
-              hide_closed: hideClosed,
-              closed_time_filter: closedTimeFilter,
-              include_hierarchy: includeHierarchy,
-              zoom: zoom,
-              collapsed_ids: Array.from(collapsedIds),
-              sort_by: sortBy,
-              sort_order: sortOrder,
-            })
-              .then((data) => {
-                const endTime = performance.now();
-                console.log(
-                  `Frontend: IPC call took ${(endTime - startTime).toFixed(2)}ms`
-                );
-                setViewModel(data);
-                setProcessingData(false);
-                // Refresh sessions after WBS loads so indicators show
-                useSessionStore.getState().refreshSessions();
-              })
-              .catch((error) => {
-                console.error("Failed to fetch view model:", error);
-                setProcessingData(false);
-              });
-          });
-        } catch (error) {
-          console.error("Failed to fetch view model:", error);
-          setProcessingData(false);
-        }
-      };
+    let cancelled = false;
+    const startTime = performance.now();
+    setProcessingData(true);
 
-      fetchData();
-    }, 150); // 150ms debounce
+    fetchProjectViewModel({
+      filter_text: filterText,
+      hide_closed: hideClosed,
+      closed_time_filter: closedTimeFilter,
+      include_hierarchy: includeHierarchy,
+      zoom: zoom,
+      collapsed_ids: Array.from(collapsedIds),
+      sort_by: sortBy,
+      sort_order: sortOrder,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        console.log(`Frontend: IPC call took ${(performance.now() - startTime).toFixed(2)}ms`);
+        startTransition(() => setViewModel(data));
+        setProcessingData(false);
+        useSessionStore.getState().refreshSessions();
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to fetch view model:", error);
+        setProcessingData(false);
+      });
 
-    return () => clearTimeout(debounceTimeout);
+    return () => { cancelled = true; };
   }, [
     isReady,
     filterText,
