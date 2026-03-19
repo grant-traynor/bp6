@@ -26,7 +26,7 @@ export function GanttBars({ items, selectedBead, onBeadClick, chainIds }: GanttB
             height: ROW_HEIGHT,
             left: 0,
             right: 0,
-            opacity: hasChain && !chainIds!.has(item.bead.id) ? 0.3 : 1,
+            opacity: hasChain && !chainIds!.has(item.bead.id) ? 0.55 : 1,
             transition: 'opacity 0.15s ease',
           }}
         >

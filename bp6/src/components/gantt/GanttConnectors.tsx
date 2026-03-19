@@ -65,7 +65,7 @@ export function GanttConnectors({
         const edgeKey = `${conn.fromId}-${conn.toId}`;
         const threads = edgeThreads.get(edgeKey) ?? [];
         const isChain = hasChain && chainIds!.has(conn.fromId) && chainIds!.has(conn.toId);
-        const opacity = hasChain && !isChain ? 0.12 : 0.85;
+        const opacity = hasChain && !isChain ? 0.35 : 0.85;
         const baseChannelOffset = 10 * zoom;
 
         if (threads.length === 0) {
