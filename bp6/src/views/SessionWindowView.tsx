@@ -31,15 +31,6 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
     : sessionPersona;
 
   const [isRestarting, setIsRestarting] = useState(false);
-  const [launchInBackground, setLaunchInBackground] = useState(
-    () => localStorage.getItem("session-launch-in-bg") === "true"
-  );
-
-  const toggleBackground = () => {
-    const next = !launchInBackground;
-    setLaunchInBackground(next);
-    localStorage.setItem("session-launch-in-bg", String(next));
-  };
 
   const handleNewSession = async () => {
     if (isRestarting) return;
@@ -55,9 +46,7 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
         true // force_new — always a clean slate from the "+ New Session" button
       );
       await useSessionStore.getState().refreshSessions();
-      if (!launchInBackground) {
-        await createSessionWindow(newSessionId, getCurrentWindow().label);
-      }
+      await createSessionWindow(newSessionId, getCurrentWindow().label);
       await terminateSession(sessionId);
     } catch (error) {
       console.error("Failed to create new session:", error);
