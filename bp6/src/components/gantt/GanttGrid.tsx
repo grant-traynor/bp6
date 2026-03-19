@@ -5,7 +5,7 @@ interface GanttGridProps {
   rowDepths: number[];
 }
 
-const ROW_HEIGHT = 40;
+const ROW_HEIGHT = 32;
 
 export function GanttGrid({ zoom, rowDepths }: GanttGridProps) {
   const ganttGridColumns = useMemo(() =>

@@ -1,7 +1,7 @@
 import type { BeadNode, GanttItem } from "../../api";
 import { GanttBar } from "./GanttBar";
 
-const ROW_HEIGHT = 40;
+const ROW_HEIGHT = 32;
 
 interface GanttBarsProps {
   items: GanttItem[];

@@ -22,7 +22,7 @@ export interface Connector {
   isCritical: boolean;
 }
 
-const ROW_HEIGHT = 40;
+const ROW_HEIGHT = 32;
 
 export function useGanttLayout(
   viewModel: ProjectViewModel | null,
