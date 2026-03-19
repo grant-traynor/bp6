@@ -1809,6 +1809,63 @@ fn sort_wbs_tree_siblings(
                 .then(a.bead.priority.cmp(&b.bead.priority))
                 .then(a.bead.id.cmp(&b.bead.id))
         });
+
+        // Chain-following pass: after depth sort, keep linear threads contiguous.
+        // When a node is placed, immediately emit any sibling successor that has
+        // exactly one sibling predecessor (i.e., it is a direct chain link).
+        let sibling_ids: std::collections::HashSet<String> =
+            tree.iter().map(|n| n.bead.id.clone()).collect();
+        let sorted_ids: Vec<String> = tree.iter().map(|n| n.bead.id.clone()).collect();
+        let mut node_by_id: HashMap<String, WBSNode> =
+            tree.into_iter().map(|n| (n.bead.id.clone(), n)).collect();
+        let mut placed: std::collections::HashSet<String> =
+            std::collections::HashSet::with_capacity(sorted_ids.len());
+        let mut result: Vec<WBSNode> = Vec::with_capacity(sorted_ids.len());
+
+        for id in &sorted_ids {
+            if placed.contains(id) {
+                continue;
+            }
+            let node = node_by_id.remove(id).unwrap();
+            placed.insert(id.clone());
+            result.push(node);
+
+            // Follow the chain from this node as far as it goes.
+            let mut current_id = id.clone();
+            loop {
+                let empty = Vec::new();
+                // Find the sibling successor that is a direct chain link:
+                // exactly one of its sibling predecessors is current_id.
+                let chain_next = graph
+                    .blocks
+                    .get(&current_id)
+                    .unwrap_or(&empty)
+                    .iter()
+                    .filter(|s| sibling_ids.contains(*s) && !placed.contains(*s))
+                    .find(|s| {
+                        let sibling_pred_count = graph
+                            .blocked_by
+                            .get(*s)
+                            .unwrap_or(&empty)
+                            .iter()
+                            .filter(|p| sibling_ids.contains(*p))
+                            .count();
+                        sibling_pred_count == 1
+                    })
+                    .cloned();
+
+                match chain_next {
+                    Some(next_id) => {
+                        let next_node = node_by_id.remove(&next_id).unwrap();
+                        placed.insert(next_id.clone());
+                        result.push(next_node);
+                        current_id = next_id;
+                    }
+                    None => break,
+                }
+            }
+        }
+        tree = result;
     }
 
     // Recursively sort children, propagating this node's effective depth as
