@@ -546,7 +546,7 @@ export function MainAppView({
             gridTemplateColumns: "1fr",
           }}
         >
-          <div className="overflow-hidden min-h-0">
+          <div className="flex flex-col overflow-hidden min-h-0 h-full">
             {renderMainContent()}
           </div>
 
