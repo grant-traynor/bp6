@@ -535,23 +535,25 @@ export function MainAppView({
           currentCli={currentCli}
           setCurrentCli={setCurrentCli}
         />
-        {/* Content + bottom terminal panel — use absolute positioning so the
-            terminal panel always sits at the bottom and the content area is
-            explicitly capped at (100% - terminalHeight), regardless of how
-            the WBS/Gantt internal scroll containers calculate their own height. */}
-        <div className="flex-1 relative min-h-0">
-          <div
-            className="absolute inset-0 overflow-hidden"
-            style={{ bottom: hasProject ? terminalHeight : 0 }}
-          >
+        {/* Content + bottom terminal panel.
+            CSS grid gives each row an exact pixel allocation — 1fr shrinks
+            precisely as terminalHeight grows, with no flex inference issues. */}
+        <div
+          className="flex-1 min-h-0"
+          style={{
+            display: "grid",
+            gridTemplateRows: hasProject ? `1fr ${terminalHeight}px` : "1fr",
+            gridTemplateColumns: "1fr",
+          }}
+        >
+          <div className="overflow-hidden min-h-0">
             {renderMainContent()}
           </div>
 
           {/* ── Bottom terminal panel ── */}
           {hasProject && (
             <div
-              className="absolute left-0 right-0 bottom-0 flex flex-col border-t-2 border-[var(--border-primary)] bg-[var(--background-primary)]"
-              style={{ height: terminalHeight }}
+              className="flex flex-col border-t-2 border-[var(--border-primary)] bg-[var(--background-primary)] min-h-0"
             >
               {/* Drag handle + toolbar */}
               <div
