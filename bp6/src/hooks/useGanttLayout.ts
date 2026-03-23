@@ -71,11 +71,13 @@ export function useGanttLayout(
     const traverse = (nodes: BeadNode[], depth: number = 0) => {
       nodes.forEach(node => {
         // Convert cell offset/count to pixels.
-        // Bars fill 72% of their cell span so connector lines have a clear
-        // right-side channel to route through without crowding the bar.
+        // Task bars fill 72% of their cell span so connector lines have a clear
+        // right-side channel. Rollup bars (epic/feature) span the full extent
+        // of their children so the bar aligns exactly with the child range.
         const cellSize = 100 * zoom;
         const x = node.cellOffset * cellSize;
-        const width = node.cellCount * cellSize * 0.72;
+        const isSummary = node.issueType === 'epic' || node.issueType === 'feature';
+        const width = node.cellCount * cellSize * (isSummary ? 1.0 : 0.72);
 
         const item: GanttItem = {
           bead: node,

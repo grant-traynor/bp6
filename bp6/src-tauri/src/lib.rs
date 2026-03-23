@@ -614,20 +614,39 @@ fn convert_wbs_to_bead_nodes(
     collapsed_ids: &[String],
 ) -> Vec<BeadNode> {
     nodes.iter().map(|node| {
-        // Get cell positioning
-        // x_map contains cell offsets (0, 1, 2, 3...) - these ARE the cell positions
-        // range cache contains duration in time units (10, 20, 30...)
-        let cell_offset = x_map.get(&node.bead.id).copied().unwrap_or(0);
+        // Get cell positioning.
+        // x_map[id]         = this node's own scheduling start (cell index).
+        // range_cache[id].x = min(children.x)  — for parent nodes, the earliest child start.
+        // range_cache[id].w = span in time units (10 per cell).
+        //
+        // For leaf nodes: x_map and range_cache.x agree (same cell index).
+        // For parent nodes: range_cache.x may be > x_map if children are pushed right
+        //   by external constraints beyond the parent floor.  We use x_map for cell_offset
+        //   so the bar starts where the PARENT itself is scheduled, and extend cell_count
+        //   to cover from x_map through the last child's end.
+        let own_offset = x_map.get(&node.bead.id).copied().unwrap_or(0);
 
         let node_range = range_cache.get(&node.bead.id);
-        let cell_count = if let Some(range) = node_range {
-            // Convert time units to cell count (10 time units = 1 cell)
-            (range.width / 10.0).ceil().max(1.0) as usize
+        let (cell_offset, cell_count) = if let Some(range) = node_range {
+            if node.children.is_empty() {
+                // Leaf: straightforward conversion from time units
+                let count = (range.width / 10.0).ceil().max(1.0) as usize;
+                (own_offset, count)
+            } else {
+                // Parent (rollup): start at own_offset, span to last child's end.
+                // range.x = min child x (may differ from own_offset).
+                // range.width = (max_end_child_cell - range.x) * 10 time units.
+                let range_x = range.x.round() as usize;
+                let range_span = (range.width / 10.0).ceil() as usize;
+                // Gap between own start and first child start:
+                let leading_gap = if range_x > own_offset { range_x - own_offset } else { 0 };
+                let count = (leading_gap + range_span).max(1);
+                (own_offset, count)
+            }
         } else {
-            // Fallback: 1 cell
-            1
+            // No range cache entry — fallback to 1 cell
+            (own_offset, 1)
         };
-
         // Compute properties
         let is_blocked = node.is_blocked;
         let is_critical = critical_path.contains(&node.bead.id);
