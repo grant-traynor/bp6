@@ -221,7 +221,7 @@ export function useFilterState(input: UseFilterStateInput): UseFilterStateReturn
 
     // Seed the initial fingerprint without triggering a refresh.
     poll();
-    const interval = setInterval(poll, 30_000);
+    const interval = setInterval(poll, 5_000);
     return () => clearInterval(interval);
   }, [hasProject, currentProjectPath, incrementRefetchTrigger]);
 

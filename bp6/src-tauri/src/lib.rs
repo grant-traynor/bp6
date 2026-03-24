@@ -2318,9 +2318,14 @@ fn get_projects_path() -> Result<PathBuf, String> {
 /// every entry's name, size, and mtime. Any mutation (new file, edit, delete)
 /// changes the fingerprint, making this a reliable poll target fully independent
 /// of the `last-touched` file the watcher already monitors.
+///
+/// Also reads the Dolt noms manifest (`.beads/dolt/<db>/.dolt/noms/manifest`)
+/// so that dependency changes — which commit to Dolt but don't touch `last-touched`
+/// — are also detected.
 #[tauri::command]
 fn get_beads_fingerprint(project_path: String) -> String {
-    let beads_dir = std::path::Path::new(&project_path).join(".beads");
+    let base = std::path::Path::new(&project_path);
+    let beads_dir = base.join(".beads");
     let Ok(entries) = std::fs::read_dir(&beads_dir) else {
         return String::new();
     };
@@ -2340,6 +2345,18 @@ fn get_beads_fingerprint(project_path: String) -> String {
             Some(format!("{name}:{size}:{mtime}"))
         })
         .collect();
+
+    // Include Dolt noms manifest content so dep changes (which create a new
+    // Dolt commit but don't update last-touched) also change the fingerprint.
+    if let Ok(dolt_entries) = std::fs::read_dir(beads_dir.join("dolt")) {
+        for entry in dolt_entries.filter_map(|e| e.ok()) {
+            let manifest_path = entry.path()
+                .join(".dolt").join("noms").join("manifest");
+            if let Ok(content) = std::fs::read_to_string(&manifest_path) {
+                parts.push(format!("dolt-manifest:{}", content.trim()));
+            }
+        }
+    }
 
     parts.sort_unstable();
     parts.join("|")
