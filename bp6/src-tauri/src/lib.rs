@@ -100,6 +100,7 @@ impl BeadsWatcher {
                 if let Some(bd_path) = bd::resolve_cli_path("bd") {
                     match std::process::Command::new(bd_path)
                         .arg("export")
+                        .arg("--no-memories")
                         .arg("-o")
                         .arg(&dump_path)
                         .current_dir(&latest)
@@ -2427,6 +2428,7 @@ fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
             if let Some(bd_path) = bd::resolve_cli_path("bd") {
                 let _ = std::process::Command::new(bd_path)
                     .arg("export")
+                    .arg("--no-memories")
                     .arg("-o")
                     .arg(&dump_path)
                     .current_dir(&repo_path)
@@ -2540,6 +2542,7 @@ pub fn run() {
                     if let Some(bd_path) = bd::resolve_cli_path("bd") {
                         let _ = std::process::Command::new(bd_path)
                             .arg("export")
+                            .arg("--no-memories")
                             .arg("-o")
                             .arg(&dump_path)
                             .current_dir(&repo_path)

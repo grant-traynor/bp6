@@ -181,6 +181,14 @@ pub fn get_beads() -> Result<Vec<Bead>, String> {
                     match serde_json::from_str::<Bead>(&line) {
                         Ok(bead) => beads.push(bead),
                         Err(e) => {
+                            // bd export ≥0.62 includes memories ({_type, key, value}) and
+                            // other non-issue records that have no `id` field. Skip them
+                            // silently rather than treating them as parse errors.
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                                if v.get("id").is_none() || v.get("_type").is_some() {
+                                    continue;
+                                }
+                            }
                             if i < 4 {
                                 had_parse_error = true;
                                 last_error = format!("Failed to parse bead at line {}: {}", index + 1, e);
