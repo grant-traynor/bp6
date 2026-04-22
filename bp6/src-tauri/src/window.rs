@@ -150,8 +150,7 @@ pub async fn create_session_window(
     // Build window with saved state or defaults
     let mut builder = WebviewWindowBuilder::new(&app, &window_label, url)
         .title(format!("Agent Session - {}", sessionId))
-        .resizable(true)
-        .always_on_top(true);
+        .resizable(true);
 
     // Determine default size from the active monitor (main window's monitor or primary).
     let active_monitor = app
