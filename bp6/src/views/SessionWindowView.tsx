@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
-import { saveWindowState, PERSONA_ICONS, startAgentSession, createSessionWindow, terminateSession, type CliBackend } from "../api";
+import { useEffect, useState, useCallback } from "react";
+import { saveWindowState, PERSONA_ICONS, startAgentSession, createSessionWindow, terminateSession, fetchBeads, updateBead, closeBead, reopenBead, claimBead, beadNodeToBead, type CliBackend, type Bead, type BeadNode } from "../api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useSessionStore } from "../stores/sessionStore";
+import { BeadDetailModal } from "../components/shared/BeadDetailModal";
+import { FileText } from "lucide-react";
 import { Terminal } from "../components/terminal/Terminal";
 
 interface SessionWindowViewProps {
@@ -31,6 +33,54 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
     : sessionPersona;
 
   const [isRestarting, setIsRestarting] = useState(false);
+  const [showBeadDetail, setShowBeadDetail] = useState(false);
+  const [beadNode, setBeadNode] = useState<BeadNode | null>(null);
+  const [editForm, setEditForm] = useState<Partial<BeadNode>>({});
+
+  const beadToBeadNode = useCallback((b: Bead): BeadNode => ({
+    id: b.id, title: b.title, description: b.description, status: b.status,
+    priority: b.priority, issueType: b.issue_type, estimate: b.estimate,
+    dependencies: b.dependencies, owner: b.owner, assignee: b.assignee,
+    createdAt: b.created_at, createdBy: b.created_by, updatedAt: b.updated_at,
+    labels: b.labels, acceptanceCriteria: b.acceptance_criteria,
+    closedAt: b.closed_at, closeReason: b.close_reason, isFavorite: b.is_favorite,
+    parent: b.parent, externalReference: b.external_reference,
+    design: (b as any).design, notes: (b as any).notes,
+    children: [], isBlocked: false, isCritical: false, blockingIds: [],
+    depth: 0, cellOffset: 0, cellCount: 1, isExpanded: true, isVisible: true,
+  }), []);
+
+  const refreshBead = useCallback(async () => {
+    if (!sessionBeadId) return;
+    try {
+      const all = await fetchBeads();
+      const found = all.find(b => b.id === sessionBeadId);
+      if (found) setBeadNode(beadToBeadNode(found));
+    } catch { /* non-critical */ }
+  }, [sessionBeadId, beadToBeadNode]);
+
+  useEffect(() => { refreshBead(); }, [refreshBead]);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!editForm?.id) return;
+    await updateBead(beadNodeToBead(editForm) as Parameters<typeof updateBead>[0]);
+    await refreshBead();
+  }, [editForm, refreshBead]);
+
+  const handleCloseBead = useCallback(async (id: string) => {
+    await closeBead(id);
+    await refreshBead();
+  }, [refreshBead]);
+
+  const handleReopenBead = useCallback(async (id: string) => {
+    await reopenBead(id);
+    await refreshBead();
+  }, [refreshBead]);
+
+  const handleClaimBead = useCallback(async (id: string) => {
+    await claimBead(id);
+    await refreshBead();
+  }, [refreshBead]);
 
   const handleNewSession = async () => {
     if (isRestarting) return;
@@ -162,6 +212,15 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
                 {sessionBeadTitle && (
                   <span className="text-[var(--text-secondary)] truncate">{sessionBeadTitle}</span>
                 )}
+                {sessionBeadId && (
+                  <button
+                    onClick={() => { if (!showBeadDetail) refreshBead(); setShowBeadDetail(p => !p); }}
+                    title={showBeadDetail ? "Hide bead detail" : "Show bead detail"}
+                    className={`ml-1 p-0.5 rounded transition-colors ${showBeadDetail ? "text-[var(--accent-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}
+                  >
+                    <FileText size={12} strokeWidth={2.5} />
+                  </button>
+                )}
               </div>
             )}
             {sessionBeadDescriptionPreview && (
@@ -176,6 +235,25 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
       <div className="flex-1 min-h-0">
         <Terminal sessionId={sessionId} projectPath={sessionProjectPath || undefined} />
       </div>
+
+      <BeadDetailModal
+        bead={beadNode}
+        open={showBeadDetail}
+        onClose={() => setShowBeadDetail(false)}
+        isCreating={false}
+        editForm={editForm}
+        beads={beadNode ? [beadNode] : []}
+        setIsCreating={() => {}}
+        setSelectedBead={setBeadNode}
+        setEditForm={setEditForm}
+        handleSaveEdit={handleSaveEdit}
+        handleSaveCreate={async () => {}}
+        handleCloseBead={handleCloseBead}
+        handleReopenBead={handleReopenBead}
+        handleClaimBead={handleClaimBead}
+        toggleFavorite={async () => {}}
+        onOpenChat={() => {}}
+      />
     </div>
   );
 }
