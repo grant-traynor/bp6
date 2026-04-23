@@ -95,7 +95,7 @@ export interface MainAppViewProps {
   beadDetailOpen: boolean;
   setBeadDetailOpen: React.Dispatch<React.SetStateAction<boolean>>;
   handleBeadClick: (bead: BeadNode) => void;
-  handleStartCreate: () => void;
+  handleStartCreate: (explicitParentId?: string) => void;
   handleSaveCreate: (viewModel: ProjectViewModel | null) => Promise<void>;
   handleSaveEdit: (viewModel: ProjectViewModel | null) => Promise<void>;
   handleCloseBead: (beadId: string) => Promise<void>;
@@ -612,6 +612,7 @@ export function MainAppView({
         handleClaimBead={handleClaimBead}
         toggleFavorite={toggleFavorite}
         onOpenChat={handleOpenChatForNav}
+        onNewChild={(parentId) => handleStartCreate(parentId)}
       />
     </div>
   );

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
-  X, Pencil, Eye, User, Star, Clock, Tag, Trash2, Plus, ArrowRight, Link2, CheckSquare, ChevronDown,
+  X, Pencil, Eye, User, Star, Clock, Tag, Trash2, Plus, ArrowRight, Link2, CheckSquare, ChevronDown, GitBranch,
 } from "lucide-react";
 import type { BeadNode } from "../../api";
 import { cn, unescapeBeadText } from "../../utils";
@@ -81,6 +81,7 @@ interface BeadDetailModalProps {
   handleClaimBead: (id: string) => Promise<void>;
   toggleFavorite: (b: BeadNode) => Promise<void>;
   onOpenChat: (persona: string, task?: string, beadId?: string, role?: string) => void;
+  onNewChild?: (parentId: string) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -99,6 +100,7 @@ export const BeadDetailModal = ({
   handleCloseBead,
   handleReopenBead,
   handleClaimBead,
+  onNewChild,
 }: BeadDetailModalProps) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [formData, setFormData] = useState<Partial<BeadNode>>({});
@@ -460,6 +462,12 @@ export const BeadDetailModal = ({
             <button onClick={() => handleReopenBead(bead.id)}
               className="px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all active:scale-95">
               Reopen
+            </button>
+          )}
+          {bead && !isCreating && onNewChild && (
+            <button onClick={() => onNewChild(bead.id)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-[var(--background-tertiary)] text-[var(--text-muted)] border border-[var(--border-primary)] hover:text-[var(--text-primary)] hover:bg-[var(--background-primary)] transition-all active:scale-95">
+              <GitBranch size={11} strokeWidth={2.5} /> New Child
             </button>
           )}
         </div>

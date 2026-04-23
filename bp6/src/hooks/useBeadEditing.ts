@@ -20,7 +20,7 @@ export interface UseBeadEditingReturn {
   beadDetailOpen: boolean;
   setBeadDetailOpen: React.Dispatch<React.SetStateAction<boolean>>;
   handleBeadClick: (bead: BeadNode) => void;
-  handleStartCreate: () => void;
+  handleStartCreate: (explicitParentId?: string) => void;
   handleSaveCreate: (viewModel: ProjectViewModel | null) => Promise<void>;
   handleSaveEdit: (viewModel: ProjectViewModel | null) => Promise<void>;
   handleCloseBead: (beadId: string) => Promise<void>;
@@ -67,7 +67,9 @@ export function useBeadEditing(
     setIsCreating(false);
   }, []);
 
-  const handleStartCreate = useCallback(() => {
+  const handleStartCreate = useCallback((explicitParentId?: string) => {
+    // Use explicitly-provided parent, or fall back to the currently-selected bead.
+    const parentId = explicitParentId ?? selectedBead?.id;
     setSelectedBead(null);
     setEditForm({
       id: `bp6-${Math.random().toString(36).slice(2, 5)}`,
@@ -78,10 +80,11 @@ export function useBeadEditing(
       dependencies: [],
       createdAt: new Date().toISOString(),
       acceptanceCriteria: [],
+      ...(parentId ? { parent: parentId } : {}),
     } as Partial<BeadNode>);
     setIsCreating(true);
     setBeadDetailOpen(true);
-  }, []);
+  }, [selectedBead]);
 
   const handleSaveEdit = useCallback(
     async (viewModel: ProjectViewModel | null) => {
