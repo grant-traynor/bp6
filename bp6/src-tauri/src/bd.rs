@@ -6,13 +6,6 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use crate::Bead;
 
-/// Returns the path to .beads/last-touched — updated by the daemon on every
-/// mutation, making it the most reliable trigger for external changes.
-pub fn find_last_touched() -> Option<PathBuf> {
-    let repo_root = find_repo_root()?;
-    let path = repo_root.join(".beads").join("last-touched");
-    if path.exists() { Some(path) } else { None }
-}
 
 pub fn find_repo_root() -> Option<PathBuf> {
     let curr_dir = std::env::current_dir().ok()?;
@@ -124,21 +117,19 @@ pub fn check_bd_available() -> Result<(), String> {
     Ok(())
 }
 
-/// Returns (creating if necessary) the path to our own issue dump:
-/// <repo_root>/.bp6/issue_dump.jsonl
-/// This file is written exclusively by `bd export -o <path>` and is
-/// never touched by the beads daemon — we own it.
-pub fn find_dump_file() -> Option<PathBuf> {
+/// Returns the path to `.beads/issues.jsonl` in the current repo.
+/// This file is kept current by the beads daemon (`export.auto = true`);
+/// the app reads it directly instead of maintaining a separate dump.
+pub fn find_issues_jsonl() -> Option<PathBuf> {
     let repo_root = find_repo_root()?;
-    let bp6_dir = repo_root.join(".bp6");
-    std::fs::create_dir_all(&bp6_dir).ok()?;
-    Some(bp6_dir.join("issue_dump.jsonl"))
+    let path = repo_root.join(".beads").join("issues.jsonl");
+    if path.exists() { Some(path) } else { None }
 }
 
 #[tauri::command]
 pub fn get_beads() -> Result<Vec<Bead>, String> {
-    let path = find_dump_file()
-        .ok_or_else(|| "Could not locate or create .bp6/issue_dump.jsonl".to_string())?;
+    let path = find_issues_jsonl()
+        .ok_or_else(|| "Could not locate .beads/issues.jsonl — is this a beads project?".to_string())?;
 
     // Retry opening and reading the file to handle transient locks and partial writes
     let mut last_error = String::new();
@@ -225,21 +216,6 @@ pub fn get_bead_by_id(id: &str) -> Result<Bead, String> {
         .ok_or_else(|| format!("Bead with ID {} not found", id))
 }
 
-/// Force an immediate export from the beads daemon into our own dump file,
-/// bypassing the daemon's 5s flush debounce. Call this after every mutation
-/// so the frontend reads fresh data when it re-fetches on beads-updated.
-fn flush_jsonl(repo_path: &std::path::Path) {
-    if let Some(dump_path) = find_dump_file() {
-        if let Ok(mut cmd) = bd_command() {
-            let _ = cmd
-                .arg("export")
-                .arg("-o")
-                .arg(&dump_path)
-                .current_dir(repo_path)
-                .output();
-        }
-    }
-}
 
 #[tauri::command]
 #[allow(non_snake_case)]
@@ -296,7 +272,6 @@ pub fn update_bead(updatedBead: Bead, app_handle: AppHandle) -> Result<(), Strin
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
-    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -320,7 +295,6 @@ pub fn close_bead(beadId: String, reason: Option<String>, app_handle: AppHandle)
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
-    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -340,7 +314,6 @@ pub fn reopen_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> 
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
-    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -363,7 +336,6 @@ pub fn claim_bead(beadId: String, app_handle: AppHandle) -> Result<(), String> {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
     }
 
-    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(())
 }
@@ -444,7 +416,6 @@ pub fn create_bead(newBead: Bead, app_handle: AppHandle) -> Result<String, Strin
         ));
     }
 
-    flush_jsonl(&repo_path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(new_id)
 }
@@ -466,7 +437,6 @@ pub fn sync_project(project_path: String, app_handle: tauri::AppHandle) -> Resul
         return Err(if stderr.is_empty() { stdout } else { stderr });
     }
 
-    flush_jsonl(path);
     let _ = app_handle.emit("beads-updated", ());
     Ok(stdout)
 }

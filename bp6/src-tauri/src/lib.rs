@@ -91,29 +91,9 @@ impl BeadsWatcher {
                         Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
                     }
                 }
-                // Events have settled — run bd export then notify the frontend.
-                let dump_path = latest.join(".bp6").join("issue_dump.jsonl");
-                if let Some(bp6_dir) = dump_path.parent() {
-                    let _ = std::fs::create_dir_all(bp6_dir);
-                }
-                eprintln!("👁️  Watcher: running bd export → {}", dump_path.display());
-                if let Some(bd_path) = bd::resolve_cli_path("bd") {
-                    match std::process::Command::new(bd_path)
-                        .arg("export")
-                        .arg("--no-memories")
-                        .arg("-o")
-                        .arg(&dump_path)
-                        .current_dir(&latest)
-                        .output()
-                    {
-                        Ok(out) if out.status.success() => eprintln!("👁️  Watcher: bd export OK"),
-                        Ok(out) => eprintln!("👁️  Watcher: bd export failed: {}", String::from_utf8_lossy(&out.stderr)),
-                        Err(e) => eprintln!("👁️  Watcher: bd export error: {e}"),
-                    }
-                } else {
-                    eprintln!("👁️  Watcher: bd not found");
-                }
-                eprintln!("👁️  Watcher: emitting beads-updated");
+                // Events have settled — beads already updated .beads/issues.jsonl
+                // (export.auto = true), so just notify the frontend.
+                eprintln!("👁️  Watcher: issues.jsonl changed, emitting beads-updated");
                 let _ = handle_clone.emit("beads-updated", ());
             }
         });
@@ -122,23 +102,21 @@ impl BeadsWatcher {
             move |res: std::result::Result<notify::Event, notify::Error>| {
                 match res {
                     Ok(event) => {
-                        // Trigger on last-touched — updated by the daemon on every
-                        // mutation, regardless of whether beads uses SQLite or Dolt.
-                        let last_touched_path = event.paths.iter().find(|p| {
+                        // Trigger on issues.jsonl — written by the beads daemon on
+                        // every mutation (export.auto = true, export.path = issues.jsonl).
+                        let issues_path = event.paths.iter().find(|p| {
                             p.file_name()
                                 .and_then(|n| n.to_str())
-                                .map(|n| n == "last-touched")
+                                .map(|n| n == "issues.jsonl")
                                 .unwrap_or(false)
                         });
-                        let Some(lt_path) = last_touched_path else { return };
+                        let Some(ij_path) = issues_path else { return };
 
-                        // Accept any event kind — notify 8.x on macOS FSEvents can emit
-                        // EventKind::Any for writes that beads makes to last-touched.
-                        eprintln!("👁️  Watcher: last-touched event kind={:?}", event.kind);
+                        eprintln!("👁️  Watcher: issues.jsonl event kind={:?}", event.kind);
                         if matches!(event.kind, notify::EventKind::Remove(_)) { return; }
 
-                        // Derive repo root (.beads/last-touched → repo) and send to debouncer.
-                        if let Some(repo) = lt_path.parent().and_then(|d| d.parent()) {
+                        // Derive repo root (.beads/issues.jsonl → repo) and send to debouncer.
+                        if let Some(repo) = ij_path.parent().and_then(|d| d.parent()) {
                             let _ = tx_clone.send(repo.to_path_buf());
                         }
                     }
@@ -336,9 +314,9 @@ fn get_processed_data(params: FilterParams) -> Result<ProcessedData, String> {
     let beads_path = {
         let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
         if cache.is_none() {
-            *cache = bd::find_dump_file();
+            *cache = bd::find_issues_jsonl();
         }
-        cache.clone().ok_or_else(|| "Could not locate or create .bp6/issue_dump.jsonl".to_string())?
+        cache.clone().ok_or_else(|| "Could not locate .beads/issues.jsonl — is this a beads project?".to_string())?
     };
 
     eprintln!("📖 get_processed_data: Reading from {}", beads_path.display());
@@ -794,9 +772,9 @@ fn get_project_view_model(params: FilterParams) -> Result<ProjectViewModel, Stri
     let beads_path = {
         let mut cache = BEADS_FILE_PATH_CACHE.lock().unwrap();
         if cache.is_none() {
-            *cache = bd::find_dump_file();
+            *cache = bd::find_issues_jsonl();
         }
-        cache.clone().ok_or_else(|| "Could not locate or create .bp6/issue_dump.jsonl".to_string())?
+        cache.clone().ok_or_else(|| "Could not locate .beads/issues.jsonl — is this a beads project?".to_string())?
     };
 
     eprintln!("📖 get_project_view_model: Reading from {}", beads_path.display());
@@ -2438,27 +2416,11 @@ fn open_project(path: String, app_handle: AppHandle) -> Result<(), String> {
         eprintln!("🗑️  Cleared beads DB path cache for new project");
     }
 
-    // Export fresh data for the new project before updating the watcher or
-    // notifying the frontend — ensures beads-updated reads the correct project.
-    if let Some(repo_path) = bd::find_repo_root() {
-        if let Some(dump_path) = bd::find_dump_file() {
-            if let Some(bd_path) = bd::resolve_cli_path("bd") {
-                let _ = std::process::Command::new(bd_path)
-                    .arg("export")
-                    .arg("--no-memories")
-                    .arg("-o")
-                    .arg(&dump_path)
-                    .current_dir(&repo_path)
-                    .output();
-            }
-        }
-    }
-
-    // Update watcher to monitor new project's last-touched
-    if let Some(last_touched) = bd::find_last_touched() {
+    // Update watcher to monitor the new project's issues.jsonl
+    if let Some(issues_jsonl) = bd::find_issues_jsonl() {
         let watcher_state = app_handle.state::<Arc<Mutex<BeadsWatcher>>>();
         let mut watcher = watcher_state.lock().unwrap();
-        watcher.watch_beads_file(last_touched)?;
+        watcher.watch_beads_file(issues_jsonl)?;
     }
 
     let _ = app_handle.emit("projects-updated", ());
@@ -2553,22 +2515,9 @@ pub fn run() {
                 }
             }
 
-            // Seed dump file and start watching on startup
-            if let Some(repo_path) = bd::find_repo_root() {
-                if let Some(dump_path) = bd::find_dump_file() {
-                    if let Some(bd_path) = bd::resolve_cli_path("bd") {
-                        let _ = std::process::Command::new(bd_path)
-                            .arg("export")
-                            .arg("--no-memories")
-                            .arg("-o")
-                            .arg(&dump_path)
-                            .current_dir(&repo_path)
-                            .output();
-                    }
-                }
-                if let Some(last_touched) = bd::find_last_touched() {
-                    let _ = beads_watcher.watch_beads_file(last_touched);
-                }
+            // Start watching issues.jsonl on startup (beads keeps it current)
+            if let Some(issues_jsonl) = bd::find_issues_jsonl() {
+                let _ = beads_watcher.watch_beads_file(issues_jsonl);
             }
 
             app.manage(Arc::new(Mutex::new(beads_watcher)));
