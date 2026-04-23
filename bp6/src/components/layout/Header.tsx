@@ -144,7 +144,7 @@ export const Header = ({
           {isDark ? <Sun size={18} strokeWidth={2.5} className="icon-rotate" /> : <Moon size={18} strokeWidth={2.5} className="icon-rotate" />}
         </button>
         <button 
-          onClick={handleStartCreate} 
+          onClick={() => handleStartCreate()}
           className="h-10 bg-indigo-700 hover:bg-indigo-600 text-white px-5 rounded-xl text-xs font-black flex items-center gap-2 transition-all shadow-[var(--shadow-lg)] active:scale-95 border-[var(--border-thick)] border-indigo-800/20 uppercase tracking-widest"
         >
           <Plus size={16} strokeWidth={3} /> New Bead

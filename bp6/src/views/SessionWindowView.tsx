@@ -1,10 +1,14 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { saveWindowState, PERSONA_ICONS, startAgentSession, createSessionWindow, terminateSession, fetchBeads, updateBead, closeBead, reopenBead, claimBead, beadNodeToBead, type CliBackend, type Bead, type BeadNode } from "../api";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useSessionStore } from "../stores/sessionStore";
 import { BeadDetailModal } from "../components/shared/BeadDetailModal";
 import { FileText } from "lucide-react";
 import { Terminal } from "../components/terminal/Terminal";
+
+const DEFAULT_PANEL_WIDTH = 420;
+const MIN_PANEL_WIDTH = 280;
+const MAX_PANEL_WIDTH = 800;
 
 interface SessionWindowViewProps {
   sessionId: string;
@@ -26,7 +30,6 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
     : null;
 
   const personaIcon = PERSONA_ICONS[sessionPersona] || PERSONA_ICONS[sessionMeta?.role || ""] || "🤖";
-  // For specialists, show "{role} specialist" (e.g. "flutter specialist"); otherwise show persona as-is
   const sessionRole = sessionMeta?.role || null;
   const personaLabel = sessionPersona === "specialist" && sessionRole
     ? `${sessionRole} specialist`
@@ -36,6 +39,32 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
   const [showBeadDetail, setShowBeadDetail] = useState(false);
   const [beadNode, setBeadNode] = useState<BeadNode | null>(null);
   const [editForm, setEditForm] = useState<Partial<BeadNode>>({});
+
+  // Panel width — persisted to localStorage
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem("sessionBeadPanelWidth") || "") || DEFAULT_PANEL_WIDTH; } catch { return DEFAULT_PANEL_WIDTH; }
+  });
+  const panelWidthRef = useRef(panelWidth);
+  useEffect(() => { panelWidthRef.current = panelWidth; }, [panelWidth]);
+  useEffect(() => {
+    try { localStorage.setItem("sessionBeadPanelWidth", String(panelWidth)); } catch { /* ignore */ }
+  }, [panelWidth]);
+
+  const handlePanelResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = panelWidthRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX; // drag left = wider panel
+      setPanelWidth(Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, startW + delta)));
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, []);
 
   const beadToBeadNode = useCallback((b: Bead): BeadNode => ({
     id: b.id, title: b.title, description: b.description, status: b.status,
@@ -93,7 +122,7 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
         sessionBackendId as CliBackend,
         sessionMeta?.role || undefined,
         sessionProjectPath || undefined,
-        true // force_new — always a clean slate from the "+ New Session" button
+        true
       );
       await useSessionStore.getState().refreshSessions();
       await createSessionWindow(newSessionId, getCurrentWindow().label);
@@ -104,64 +133,37 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
     }
   };
 
-  // Update window title from session metadata
   useEffect(() => {
-    const title = [
-      sessionBeadId || "Untracked",
-      personaLabel,
-      sessionTask,
-      sessionBackendId,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-    getCurrentWindow()
-      .setTitle(title)
-      .catch((err) => console.error("Failed to set window title:", err));
+    const title = [sessionBeadId || "Untracked", personaLabel, sessionTask, sessionBackendId]
+      .filter(Boolean).join(" · ");
+    getCurrentWindow().setTitle(title).catch(() => {});
   }, [sessionBeadId, sessionPersona, sessionTask, sessionBackendId]);
 
-  // Window state persistence — debounced save on resize/move
+  // Window state persistence
   useEffect(() => {
     const saveCurrentState = async () => {
       try {
         const win = getCurrentWindow();
-        // outerPosition/outerSize return physical pixels; convert to logical
-        // so they match what WebviewWindowBuilder::position/inner_size expect.
         const scaleFactor = await win.scaleFactor();
         const physPos = await win.outerPosition();
         const physSize = await win.outerSize();
         const position = physPos.toLogical(scaleFactor);
         const size = physSize.toLogical(scaleFactor);
         const isMaximized = await win.isMaximized();
-        await saveWindowState(
-          sessionId,
-          Math.round(position.x),
-          Math.round(position.y),
-          Math.round(size.width),
-          Math.round(size.height),
-          isMaximized
-        );
-      } catch (error) {
-        console.error("Failed to save window state:", error);
-      }
+        await saveWindowState(sessionId, Math.round(position.x), Math.round(position.y),
+          Math.round(size.width), Math.round(size.height), isMaximized);
+      } catch { /* ignore */ }
     };
-
     let saveTimeout: ReturnType<typeof setTimeout> | null = null;
-    const debouncedSave = () => {
-      if (saveTimeout) clearTimeout(saveTimeout);
-      saveTimeout = setTimeout(saveCurrentState, 500);
-    };
-
+    const debouncedSave = () => { if (saveTimeout) clearTimeout(saveTimeout); saveTimeout = setTimeout(saveCurrentState, 500); };
     let unlistenResize: (() => void) | null = null;
     let unlistenMove: (() => void) | null = null;
-
     const setupListeners = async () => {
       const win = getCurrentWindow();
       unlistenResize = await win.onResized(debouncedSave);
       unlistenMove = await win.onMoved(debouncedSave);
     };
-
     setupListeners();
-
     return () => {
       if (saveTimeout) clearTimeout(saveTimeout);
       if (unlistenResize) unlistenResize();
@@ -170,15 +172,15 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
     };
   }, [sessionId]);
 
+  const hasBead = !!sessionBeadId;
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-[var(--background-primary)]">
-      {/* Session context header */}
+      {/* ── Header ── */}
       <div className="flex-shrink-0 border-b border-[var(--border-primary)] bg-[var(--background-secondary)] px-3 py-2 text-xs">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-base leading-none">{personaIcon}</span>
-          <span className="font-semibold text-[var(--text-primary)] capitalize whitespace-nowrap">
-            {personaLabel}
-          </span>
+          <span className="font-semibold text-[var(--text-primary)] capitalize whitespace-nowrap">{personaLabel}</span>
           {sessionTask && (
             <>
               <span className="text-[var(--text-muted)]">·</span>
@@ -186,74 +188,99 @@ export function SessionWindowView({ sessionId }: SessionWindowViewProps) {
             </>
           )}
           <div className="ml-auto flex items-center gap-2 text-[var(--text-muted)] whitespace-nowrap">
-            {projectName && (
-              <span className="text-[var(--text-secondary)]">📁 {projectName}</span>
-            )}
+            {projectName && <span className="text-[var(--text-secondary)]">📁 {projectName}</span>}
             <span>{sessionBackendId}</span>
           </div>
         </div>
-        <div className="flex justify-end mt-1">
-          <button
-            onClick={handleNewSession}
-            disabled={isRestarting}
-            title="Close this session and start a fresh one with the same context"
-            className="px-2 py-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--background-tertiary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {isRestarting ? "↻ Starting…" : "+ New Session"}
-          </button>
-        </div>
-        {(sessionBeadId || sessionBeadTitle || sessionBeadDescriptionPreview) && (
-          <div className="mt-1 pl-6 text-[var(--text-muted)]">
-            {(sessionBeadId || sessionBeadTitle) && (
-              <div className="flex items-center gap-1.5">
-                {sessionBeadId && (
-                  <span className="font-mono text-[var(--accent-primary)] opacity-80">{sessionBeadId}</span>
-                )}
-                {sessionBeadTitle && (
-                  <span className="text-[var(--text-secondary)] truncate">{sessionBeadTitle}</span>
-                )}
-                {sessionBeadId && (
-                  <button
-                    onClick={() => { if (!showBeadDetail) refreshBead(); setShowBeadDetail(p => !p); }}
-                    title={showBeadDetail ? "Hide bead detail" : "Show bead detail"}
-                    className={`ml-1 p-0.5 rounded transition-colors ${showBeadDetail ? "text-[var(--accent-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}
-                  >
-                    <FileText size={12} strokeWidth={2.5} />
-                  </button>
-                )}
-              </div>
-            )}
-            {sessionBeadDescriptionPreview && (
-              <div className="mt-0.5 text-[10px] leading-snug text-[var(--text-muted)] opacity-70 line-clamp-2">
-                {sessionBeadDescriptionPreview}
-              </div>
-            )}
+
+        {/* Bead context row + toggle button */}
+        {hasBead && (
+          <div className="flex items-center justify-between mt-1 pl-6">
+            <button
+              onClick={() => { if (!showBeadDetail) refreshBead(); setShowBeadDetail(p => !p); }}
+              title={showBeadDetail ? "Hide bead detail" : "Show bead detail"}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border transition-all text-xs ${
+                showBeadDetail
+                  ? "bg-[var(--accent-primary)]/10 border-[var(--accent-primary)]/30 text-[var(--accent-primary)]"
+                  : "bg-[var(--background-tertiary)] border-[var(--border-primary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:border-[var(--border-primary)]"
+              }`}
+            >
+              <FileText size={11} strokeWidth={2.5} />
+              <span className="font-mono font-bold">{sessionBeadId}</span>
+              {sessionBeadTitle && <span className="text-[var(--text-secondary)] truncate max-w-[200px]">{sessionBeadTitle}</span>}
+            </button>
+            <button
+              onClick={handleNewSession}
+              disabled={isRestarting}
+              className="px-2 py-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--background-tertiary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isRestarting ? "↻ Starting…" : "+ New Session"}
+            </button>
+          </div>
+        )}
+
+        {/* No bead: just the new session button */}
+        {!hasBead && (
+          <div className="flex justify-end mt-1">
+            <button
+              onClick={handleNewSession}
+              disabled={isRestarting}
+              className="px-2 py-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--background-tertiary)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {isRestarting ? "↻ Starting…" : "+ New Session"}
+            </button>
+          </div>
+        )}
+
+        {/* Description preview (when panel closed) */}
+        {sessionBeadDescriptionPreview && !showBeadDetail && (
+          <div className="mt-0.5 pl-6 text-[10px] leading-snug text-[var(--text-muted)] opacity-70 line-clamp-2">
+            {sessionBeadDescriptionPreview}
           </div>
         )}
       </div>
 
-      <div className="flex-1 min-h-0">
-        <Terminal sessionId={sessionId} projectPath={sessionProjectPath || undefined} />
-      </div>
+      {/* ── Body: terminal + optional side panel ── */}
+      <div className="flex-1 flex flex-row min-h-0 overflow-hidden">
+        {/* Terminal */}
+        <div className="flex-1 min-w-0">
+          <Terminal sessionId={sessionId} projectPath={sessionProjectPath || undefined} />
+        </div>
 
-      <BeadDetailModal
-        bead={beadNode}
-        open={showBeadDetail}
-        onClose={() => setShowBeadDetail(false)}
-        isCreating={false}
-        editForm={editForm}
-        beads={beadNode ? [beadNode] : []}
-        setIsCreating={() => {}}
-        setSelectedBead={setBeadNode}
-        setEditForm={setEditForm}
-        handleSaveEdit={handleSaveEdit}
-        handleSaveCreate={async () => {}}
-        handleCloseBead={handleCloseBead}
-        handleReopenBead={handleReopenBead}
-        handleClaimBead={handleClaimBead}
-        toggleFavorite={async () => {}}
-        onOpenChat={() => {}}
-      />
+        {/* Drag handle + bead panel */}
+        {showBeadDetail && beadNode && (
+          <>
+            {/* Drag handle */}
+            <div
+              onMouseDown={handlePanelResizeStart}
+              className="w-1 cursor-col-resize bg-[var(--border-primary)] hover:bg-[var(--accent-primary)] transition-colors shrink-0"
+              title="Drag to resize"
+            />
+            {/* Bead detail panel */}
+            <div className="shrink-0 overflow-hidden" style={{ width: panelWidth }}>
+              <BeadDetailModal
+                panel
+                bead={beadNode}
+                open={true}
+                onClose={() => setShowBeadDetail(false)}
+                isCreating={false}
+                editForm={editForm}
+                beads={beadNode ? [beadNode] : []}
+                setIsCreating={() => {}}
+                setSelectedBead={setBeadNode}
+                setEditForm={setEditForm}
+                handleSaveEdit={handleSaveEdit}
+                handleSaveCreate={async () => {}}
+                handleCloseBead={handleCloseBead}
+                handleReopenBead={handleReopenBead}
+                handleClaimBead={handleClaimBead}
+                toggleFavorite={async () => {}}
+                onOpenChat={() => {}}
+              />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -226,6 +226,20 @@ export function MainAppView({
     try { localStorage.setItem("terminalVisible", String(terminalVisible)); } catch { /* ignore */ }
   }, [terminalVisible]);
 
+  // Auto-hide bottom shell when on the terminal view; restore when leaving
+  const terminalVisibleRef = useRef(terminalVisible);
+  useEffect(() => { terminalVisibleRef.current = terminalVisible; }, [terminalVisible]);
+  const savedTerminalVisibleRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (view === "terminal") {
+      savedTerminalVisibleRef.current = terminalVisibleRef.current;
+      setTerminalVisible(false);
+    } else if (savedTerminalVisibleRef.current !== null) {
+      setTerminalVisible(savedTerminalVisibleRef.current);
+      savedTerminalVisibleRef.current = null;
+    }
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     const startY = e.clientY;
@@ -607,8 +621,8 @@ export function MainAppView({
           )}
         </div>
 
-        {/* FAB — restore terminal when hidden */}
-        {hasProject && !terminalVisible && (
+        {/* FAB — restore terminal when hidden (not on terminal view itself) */}
+        {hasProject && !terminalVisible && view !== "terminal" && (
           <button
             onClick={() => setTerminalVisible(true)}
             className="absolute bottom-4 right-4 z-40 flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-primary)] shadow-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--background-tertiary)] transition-all active:scale-95"

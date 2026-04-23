@@ -82,6 +82,8 @@ interface BeadDetailModalProps {
   toggleFavorite: (b: BeadNode) => Promise<void>;
   onOpenChat: (persona: string, task?: string, beadId?: string, role?: string) => void;
   onNewChild?: (parentId: string) => void;
+  /** When true, renders as a full-height panel (no fixed positioning or drag) */
+  panel?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -101,6 +103,7 @@ export const BeadDetailModal = ({
   handleReopenBead,
   handleClaimBead,
   onNewChild,
+  panel = false,
 }: BeadDetailModalProps) => {
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [formData, setFormData] = useState<Partial<BeadNode>>({});
@@ -203,7 +206,18 @@ export const BeadDetailModal = ({
     pendingSaveRef.current = isCreating ? "create" : "edit";
   };
   const handleUndo = () => { if (bead) setFormData(bead); };
-  const handleCancel = () => { setIsCreating(false); if (!bead) setSelectedBead(null); setMode("view"); };
+  const handleCancel = () => {
+    setIsCreating(false);
+    if (!bead) {
+      if (editForm.parent) {
+        const parentBead = beads.find(b => b.id === editForm.parent);
+        setSelectedBead(parentBead ?? null);
+      } else {
+        setSelectedBead(null);
+      }
+    }
+    setMode("view");
+  };
 
   // ── Drag handlers ────────────────────────────────────────────────────────────
   const onDragStart = useCallback((e: React.MouseEvent) => {
@@ -231,11 +245,13 @@ export const BeadDetailModal = ({
   if (!formData || Object.keys(formData).length === 0) return null;
 
   return (
-    // Non-modal: pointer-events only on the panel itself, app remains interactive
     <div
-      ref={panelRef}
-      className="fixed z-50 flex flex-col bg-[var(--background-primary)] border-2 border-[var(--border-primary)] rounded-3xl shadow-2xl overflow-hidden"
-      style={{
+      ref={panel ? undefined : panelRef}
+      className={panel
+        ? "flex flex-col h-full w-full bg-[var(--background-primary)] border-l-2 border-[var(--border-primary)] overflow-hidden"
+        : "fixed z-50 flex flex-col bg-[var(--background-primary)] border-2 border-[var(--border-primary)] rounded-3xl shadow-2xl overflow-hidden"
+      }
+      style={panel ? undefined : {
         left: pos.x,
         top: pos.y,
         width: size.width,
@@ -246,10 +262,10 @@ export const BeadDetailModal = ({
         overflow: "hidden",
       }}
     >
-      {/* ── Header (drag handle) ─────────────────────────────────────────── */}
+      {/* ── Header ───────────────────────────────────────────────────────── */}
       <div
-        onMouseDown={onDragStart}
-        className="flex items-center gap-3 px-5 py-3 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] shrink-0 cursor-grab active:cursor-grabbing select-none"
+        onMouseDown={panel ? undefined : onDragStart}
+        className={`flex items-center gap-3 px-5 py-3 border-b-2 border-[var(--border-primary)] bg-[var(--background-secondary)] shrink-0 select-none ${panel ? "" : "cursor-grab active:cursor-grabbing"}`}
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -494,9 +510,11 @@ export const BeadDetailModal = ({
         </div>
       </div>
 
-      {/* Resize hint indicator in bottom-right */}
-      <div className="absolute bottom-1 right-1 w-3 h-3 pointer-events-none opacity-30"
-        style={{ borderRight: "2px solid var(--text-muted)", borderBottom: "2px solid var(--text-muted)", borderRadius: "0 0 4px 0" }} />
+      {/* Resize hint indicator (floating mode only) */}
+      {!panel && (
+        <div className="absolute bottom-1 right-1 w-3 h-3 pointer-events-none opacity-30"
+          style={{ borderRight: "2px solid var(--text-muted)", borderBottom: "2px solid var(--text-muted)", borderRadius: "0 0 4px 0" }} />
+      )}
     </div>
   );
 };
