@@ -1,6 +1,6 @@
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useRef, useCallback, useEffect } from "react";
 import { cn } from "../utils";
-import { Info, Maximize2, Minimize2 } from "lucide-react";
+import { Info, Maximize2, Minimize2, ChevronsDown, Terminal as TerminalIcon } from "lucide-react";
 import type { BeadNode, SessionInfo } from "../api";
 import { createSessionWindow, terminateSession } from "../api";
 import { Navigation } from "../components/layout/Navigation";
@@ -218,6 +218,13 @@ export function MainAppView({
   const [terminalHeight, setTerminalHeight] = useState(defaultTerminalHeight);
   const lastManualHeightRef = useRef(defaultTerminalHeight);
   const [terminalExpanded, setTerminalExpanded] = useState(false);
+  const [terminalVisible, setTerminalVisible] = useState<boolean>(() => {
+    try { return localStorage.getItem("terminalVisible") !== "false"; } catch { return true; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem("terminalVisible", String(terminalVisible)); } catch { /* ignore */ }
+  }, [terminalVisible]);
 
   const handleTerminalResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -542,7 +549,7 @@ export function MainAppView({
           className="flex-1 min-h-0"
           style={{
             display: "grid",
-            gridTemplateRows: hasProject ? `1fr ${terminalHeight}px` : "1fr",
+            gridTemplateRows: hasProject && terminalVisible ? `1fr ${terminalHeight}px` : "1fr",
             gridTemplateColumns: "1fr",
           }}
         >
@@ -551,7 +558,7 @@ export function MainAppView({
           </div>
 
           {/* ── Bottom terminal panel ── */}
-          {hasProject && (
+          {hasProject && terminalVisible && (
             <div
               className="flex flex-col border-t-2 border-[var(--border-primary)] bg-[var(--background-primary)] min-h-0"
             >
@@ -566,16 +573,26 @@ export function MainAppView({
                     Shell
                   </span>
                 </div>
-                <button
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={toggleTerminalExpand}
-                  className="pointer-events-auto p-1 rounded hover:bg-[var(--background-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                  title={terminalExpanded ? "Restore" : "Expand"}
-                >
-                  {terminalExpanded
-                    ? <Minimize2 size={13} strokeWidth={2.5} />
-                    : <Maximize2 size={13} strokeWidth={2.5} />}
-                </button>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={toggleTerminalExpand}
+                    className="pointer-events-auto p-1 rounded hover:bg-[var(--background-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                    title={terminalExpanded ? "Restore" : "Expand"}
+                  >
+                    {terminalExpanded
+                      ? <Minimize2 size={13} strokeWidth={2.5} />
+                      : <Maximize2 size={13} strokeWidth={2.5} />}
+                  </button>
+                  <button
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={() => { setTerminalVisible(false); setTerminalExpanded(false); }}
+                    className="pointer-events-auto p-1 rounded hover:bg-[var(--background-tertiary)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                    title="Hide terminal"
+                  >
+                    <ChevronsDown size={13} strokeWidth={2.5} />
+                  </button>
+                </div>
               </div>
 
               {/* Terminal body */}
@@ -589,6 +606,18 @@ export function MainAppView({
             </div>
           )}
         </div>
+
+        {/* FAB — restore terminal when hidden */}
+        {hasProject && !terminalVisible && (
+          <button
+            onClick={() => setTerminalVisible(true)}
+            className="absolute bottom-4 right-4 z-40 flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--background-secondary)] border border-[var(--border-primary)] shadow-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--background-tertiary)] transition-all active:scale-95"
+            title="Show terminal"
+          >
+            <TerminalIcon size={13} strokeWidth={2.5} />
+            <span className="text-[10px] font-black uppercase tracking-widest">Shell</span>
+          </button>
+        )}
       </main>
 
       {showPalettePreview && (
