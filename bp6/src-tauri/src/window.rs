@@ -136,7 +136,10 @@ pub async fn create_session_window(
         if let Some(window) = app.get_webview_window(&existing_label) {
             let _ = window.unminimize();
             let _ = window.show();
-            let _ = window.set_focus();
+            // NOTE: intentionally NOT calling set_focus() here — on macOS that
+            // calls makeKeyAndOrderFront which switches the user to whatever
+            // Space the window is on.  show()/unminimize() is enough to make
+            // it visible without teleporting the user.
             return Ok(existing_label);
         }
     }
@@ -150,7 +153,8 @@ pub async fn create_session_window(
     // Build window with saved state or defaults
     let mut builder = WebviewWindowBuilder::new(&app, &window_label, url)
         .title(format!("Agent Session - {}", sessionId))
-        .resizable(true);
+        .resizable(true)
+        .always_on_top(true);
 
     // Determine default size from the active monitor (main window's monitor or primary).
     let active_monitor = app
